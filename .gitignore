@@ -1,2 +1,3 @@
 # Structurizr Lite staging (built by `make c4-render`)
 .structurizr/
+.claude/settings.local.json
