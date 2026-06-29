@@ -1,0 +1,61 @@
+name: codegen-consistency
+
+# Enforces the operating-model rule "specs/*.yaml are the source of truth; everything else is
+# generated". On every push/PR we validate the DSL, regenerate every artifact, and fail if the result
+# differs from what was committed — i.e. someone changed the specs (or an emitter) without running
+# `npm run generate`. This guarantees the committed generated artifacts never drift from the specs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/codegen/package-lock.json
+
+      - name: Install codegen dependencies
+        working-directory: tools/codegen
+        run: npm ci
+
+      - name: Typecheck the generator
+        working-directory: tools/codegen
+        run: npm run typecheck
+
+      - name: Validate the specs (the single blocking gate)
+        working-directory: tools/codegen
+        run: npm run validate
+
+      - name: Regenerate every artifact from the specs
+        working-directory: tools/codegen
+        run: npm run generate
+
+      - name: Fail if generated artifacts are out of date
+        run: |
+          # EOL-tolerant: the repo is authored on Windows (CRLF) while CI runs on Linux (LF), and the
+          # generator's output inherits its line endings from the source. Only genuine content drift
+          # should fail the build, never a CRLF-vs-LF difference — hence --ignore-cr-at-eol.
+          if ! git diff --quiet --ignore-cr-at-eol; then
+            echo "::error::Generated artifacts are stale — run 'npm run generate' in tools/codegen and commit the result so the repo matches specs/."
+            git --no-pager diff --ignore-cr-at-eol --stat
+            git --no-pager diff --ignore-cr-at-eol
+            exit 1
+          fi
+          # Catch brand-new generated files that were never committed.
+          untracked="$(git ls-files --others --exclude-standard)"
+          if [ -n "$untracked" ]; then
+            echo "::error::New generated files are not committed — run 'npm run generate' and commit:"
+            echo "$untracked"
+            exit 1
+          fi
+          echo "✓ generated artifacts match the specs"

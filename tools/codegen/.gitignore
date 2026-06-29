@@ -1,3 +1,7 @@
 node_modules/
 dist/
-out/
+# Generated artifacts ARE committed so CI can verify they still match the specs
+# (the `*.generated.*` files produced by `npm run generate`). Everything else under
+# out/ — e.g. the Structurizr `.mmd` exports from `make c4-export` — stays ignored.
+out/*
+!out/*.generated.*
