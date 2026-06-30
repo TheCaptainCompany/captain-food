@@ -76,7 +76,7 @@ restaurants: [...] @public @reads(views: ["View_Restaurant"])
 derived from what the spec *states*, not from what the tool *assumes*. `UserType` is declared in
 `scalars.yaml`; the emitted SDL mirrors it.
 
-The SDL is now PURE OUTPUT — generated to `out/schema.generated.graphql` from `api.yaml`
+The SDL is now PURE OUTPUT — generated to `specs/generated/schema.generated.graphql` from `api.yaml`
 (+ scalars/entities/commands/views). The hand-written `schema.graphql` has been removed.
 
 ### `api.yaml` — the API surface (source of truth)
@@ -97,7 +97,7 @@ GraphQL-specific:
 
 Navigation between read models is declared in **`views.yaml` as foreign keys** (`fk: "View_X.col"`), not by
 adding GraphQL fields to entities — entities stay pure domain shapes. The old SDL regex parser is retired;
-the hand-written `schema.graphql` has been removed — the SDL is generated to `out/schema.generated.graphql`.
+the hand-written `schema.graphql` has been removed — the SDL is generated to `specs/generated/schema.generated.graphql`.
 
 ### `stories.yaml` — the story map (validated source)
 
@@ -112,10 +112,10 @@ from the API or its ACL. It emits a **persona → activity → operation** matri
 
 1. ✅ Loader + validator + `documentation.generated.md` — persona → mutation → command → handler → emits,
    now sourced from `api.yaml`.
-2. ✅ `views.yaml` → `database.md` §2 + `out/views.generated.sql`, with FK navigation.
+2. ✅ `views.yaml` → `database.md` §2 + `specs/generated/views.generated.sql`, with FK navigation.
 3. ✅ `api.yaml` is the API source; validated against the domain (command→handled, reads→views,
    roles→UserType, return types, payload/arg types). SDL parser retired.
-4. ✅ Generate the full SDL from `api.yaml` (+ scalars/entities/commands/views) → `out/schema.generated.graphql`:
+4. ✅ Generate the full SDL from `api.yaml` (+ scalars/entities/commands/views) → `specs/generated/schema.generated.graphql`:
    scalars, enums, directives, output types **with FK-derived navigation**, input types, payloads
    (always `correlationId`), `Query`/`Mutation` with `@auth`/`@command`/`@reads`. This is now the only
    SDL — the hand-written `schema.graphql` has been removed.
@@ -125,5 +125,5 @@ from the API or its ACL. It emits a **persona → activity → operation** matri
      + created on a returning phone; `PlaceOrderPayload` = Stripe paymentIntentId + clientSecret).
    - **Input curation**: server-derived fields are marked `readOnly: true` in entities.yaml (e.g.
      `Stock.status`) and the input emitter skips them — so input types stay intent-only.
-5. ✅ Hand-written `schema.graphql` removed — `out/schema.generated.graphql` is the single SDL.
+5. ✅ Hand-written `schema.graphql` removed — `specs/generated/schema.generated.graphql` is the single SDL.
 6. ⬜ `packages/types` TypeScript types; then aggregate / process-manager handler scaffolds from `actors.yaml`.

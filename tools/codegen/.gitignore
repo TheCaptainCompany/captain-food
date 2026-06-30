@@ -1,7 +1,5 @@
 node_modules/
 dist/
-# Generated artifacts ARE committed so CI can verify they still match the specs
-# (the `*.generated.*` files produced by `npm run generate`). Everything else under
-# out/ — e.g. the Structurizr `.mmd` exports from `make c4-export` — stays ignored.
-out/*
-!out/*.generated.*
+# Ephemeral build scratch only (Structurizr .mmd exports, local experiments). The committed,
+# canonical generated artifacts now live in specs/generated/ (tracked; CI verifies they match the specs).
+out/

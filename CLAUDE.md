@@ -19,13 +19,13 @@ Read the relevant file before implementing or changing anything:
 - [specs/errors.yaml](specs/errors.yaml) — **anticipated errors** (the old command invariants): each with typed `context` and default `messages.en`/`messages.fr`. Mapped per command in actors.yaml `throws`.
 - [specs/actors.yaml](specs/actors.yaml) — **actor-model catalog** (codegen source): aggregates & process managers, each with its inbox of `{ message → emits, throws }`, where every message/event/error is a `$ref` into commands.yaml/events.yaml/errors.yaml (checkable; the ref path encodes kind). Personas/authz live elsewhere (GraphQL `@auth`, story map).
 - [specs/story-map.md](specs/story-map.md) — Jeff Patton story map: backbone, actor×story×steps table, V0 walking skeleton, use cases → commands, open gaps.
-- [specs/api.yaml](specs/api.yaml) — the **GraphQL API surface** (source of truth): output-type registry, queries, mutations, and the ACL (`roles` → `@auth`/`@public`). The SDL is GENERATED from it to `tools/codegen/out/schema.generated.graphql` (the hand-written `schema.graphql` has been removed). **Role = path**: one master schema served per-role under `/{role}/graphql`, filtered by the `@auth`/`@public` ACL (roles: PUBLIC, CUSTOMER, RESTAURANT_ACCOUNT, RESTAURANT, RIDER, ADMIN, EXTERNAL).
+- [specs/api.yaml](specs/api.yaml) — the **GraphQL API surface** (source of truth): output-type registry, queries, mutations, and the ACL (`roles` → `@auth`/`@public`). The SDL is GENERATED from it to `specs/generated/schema.generated.graphql` (the hand-written `schema.graphql` has been removed). **Role = path**: one master schema served per-role under `/{role}/graphql`, filtered by the `@auth`/`@public` ACL (roles: PUBLIC, CUSTOMER, RESTAURANT_ACCOUNT, RESTAURANT, RIDER, ADMIN, EXTERNAL).
 - [specs/traceability.md](specs/traceability.md) — completeness matrix: persona→mutation→actor, persona→query→`View_*`, external→process-manager→actor, + coverage checklist. Derived from the other specs.
 - [specs/integrations/hubrise.md](specs/integrations/hubrise.md) — HubRise integration: exposed data, mapping → domain, ACL, gaps, import path.
 
 For a single **navigable, fully detailed view of the whole product** (stories → api → actors → views →
 commands → events → entities → scalars → errors, each with its description and cross-links), run the
-generator and read [tools/codegen/out/documentation.generated.md](tools/codegen/out/documentation.generated.md)
+generator and read [specs/generated/documentation.generated.md](specs/generated/documentation.generated.md)
 — it is GENERATED from the specs above (do not hand-edit), so it never drifts from the source of truth.
 
 ## CQRS methodology — commands
@@ -105,7 +105,7 @@ must be **0 errors** (only the known view design-holes warn).
 - If a **behaviour test** fails, fix the generator/runtime — not the test. If an **observability test**
   fails, fix instrumentation/middleware — not the domain model.
 - Review and validation gates are executable and **blocking**; never hand-edit generated output
-  (`tools/codegen/out/**`, the `database.md` GENERATED region) — change the spec/emitter and regenerate.
+  (`specs/generated/**`, the `database.md` GENERATED region) — change the spec/emitter and regenerate.
 - Every recurring agent/loop failure becomes a new rule, test, or ADR.
 - Autonomous loops/routines run under the **weekly time budget** (`make budgeted-loop` or the routine
   guard) — Claude Code has no native cap; see [docs/claude/loops.md](docs/claude/loops.md) / ADR-0014.

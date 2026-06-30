@@ -3,7 +3,7 @@ description: >
   Captain.Food API surface (GraphQL ports) — SOURCE OF TRUTH for operations, payloads and the ACL.
   Reuses scalars.yaml (scalars/enums), entities.yaml (output-type shapes), commands.yaml (mutation
   inputs, derived from the dispatched command) and views.yaml (read models + FK navigation).
-  The GraphQL SDL is GENERATED from this file to tools/codegen/out/schema.generated.graphql
+  The GraphQL SDL is GENERATED from this file to specs/generated/schema.generated.graphql
   (the hand-written schema.graphql has been removed) — do not hand-edit the SDL.
 
   Conventions:

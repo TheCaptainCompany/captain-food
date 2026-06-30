@@ -23,7 +23,9 @@ function parseArgs(argv: string[]): Args {
   const args: Args = {
     check: argv.includes('--check'),
     specsDir: join(REPO_ROOT, 'specs'),
-    outDir: join(HERE, '..', 'out'),
+    // Committed, canonical generated artifacts live next to the specs that produce them.
+    // (tools/codegen/out is now only ephemeral build scratch, e.g. Structurizr .mmd exports.)
+    outDir: join(REPO_ROOT, 'specs', 'generated'),
   };
   const get = (flag: string) => {
     const i = argv.indexOf(flag);

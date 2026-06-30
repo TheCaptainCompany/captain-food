@@ -14,7 +14,7 @@ You are the **Generator** for Captain.Food.
 
 ## You may write
 - `tools/codegen/**` — generator/emitter/validator logic.
-- `tools/codegen/out/**` — generated artifacts (via `npm run generate`; do not hand-edit).
+- `specs/generated/**` — generated artifacts (via `npm run generate`; do not hand-edit).
 - `docs/adr/*.md` drafts (status `Proposed`).
 
 ## You must NEVER write

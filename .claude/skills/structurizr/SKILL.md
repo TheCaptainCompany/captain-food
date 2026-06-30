@@ -14,15 +14,15 @@ Architecture is **source-managed DSL** under `specs/architecture/` and validated
 
 | Output | File | Renderer | Use |
 |---|---|---|---|
-| Structurizr DSL | `tools/codegen/out/c4.generated.dsl` | Structurizr Lite / `structurizr-cli` | proper C4 auto-layout, export to PNG/SVG/PlantUML/Mermaid |
-| Mermaid | `tools/codegen/out/c4.generated.md` | GitHub / VS Code / mermaid.live | quick inline diagrams |
-| Interactive SVG | `tools/codegen/out/documentation.generated.html` §13 | any browser (zero-dependency) | drill-down System → container → context → aggregate flow |
+| Structurizr DSL | `specs/generated/c4.generated.dsl` | Structurizr Lite / `structurizr-cli` | proper C4 auto-layout, export to PNG/SVG/PlantUML/Mermaid |
+| Mermaid | `specs/generated/c4.generated.md` | GitHub / VS Code / mermaid.live | quick inline diagrams |
+| Interactive SVG | `specs/generated/documentation.generated.html` §13 | any browser (zero-dependency) | drill-down System → container → context → aggregate flow |
 
 ## Generate
 
 ```bash
 cd tools/codegen && npm run validate && npm run generate
-# → out/c4.generated.dsl, out/c4.generated.md (+ the HTML doc's interactive map)
+# → specs/generated/c4.generated.dsl, specs/generated/c4.generated.md (+ the HTML doc's interactive map)
 ```
 
 `validate` enforces C4 consistency: every aggregate/process-manager is mapped to a bounded context
@@ -35,7 +35,7 @@ Two make targets do this for you (both gracefully skip if the tooling is absent)
 
 - **`make c4-render`** — opens **Structurizr Lite** at http://localhost:8080 (SystemContext, Containers,
   ApiComponents views) with the **ADRs and docs embedded** (it stages a docs-enriched workspace under
-  `.structurizr/`, leaving the portable `out/c4.generated.dsl` clean). Needs Docker.
+  `.structurizr/`, leaving the portable `specs/generated/c4.generated.dsl` clean). Needs Docker.
 - **`make c4-export`** — parse-**validates** the DSL with the real Structurizr toolchain (structurizr-cli
   if installed, else the maintained `structurizr/structurizr` Docker image — NOT the deprecated
   `structurizr/cli`, which is now a no-op stub) and exports Mermaid into `out/`. Use this as the C4 gate —
@@ -44,10 +44,10 @@ Two make targets do this for you (both gracefully skip if the tooling is absent)
 Manual equivalents:
 ```bash
 # Lite
-mkdir -p .structurizr && cp tools/codegen/out/c4.generated.dsl .structurizr/workspace.dsl
+mkdir -p .structurizr && cp specs/generated/c4.generated.dsl .structurizr/workspace.dsl
 docker run --rm -p 8080:8080 -v "$PWD/.structurizr:/usr/local/structurizr" structurizr/lite
 # CLI export
-structurizr-cli export -workspace tools/codegen/out/c4.generated.dsl -format plantuml
+structurizr-cli export -workspace specs/generated/c4.generated.dsl -format plantuml
 ```
 
 ### Validate WITHOUT Docker (no admin required)
@@ -62,12 +62,12 @@ Expand-Archive "$env:TEMP\structurizr-cli.zip" "$env:TEMP\structurizr-cli" -Forc
 # run with a JDK 17 (any will do)
 & "<path-to-jdk17>\bin\java.exe" -cp "$env:TEMP\structurizr-cli\lib\*" `
   com.structurizr.cli.StructurizrCliApplication export `
-  -workspace tools\codegen\out\c4.generated.dsl -format mermaid -output "$env:TEMP\c4out"
+  -workspace specs\generated\c4.generated.dsl -format mermaid -output "$env:TEMP\c4out"
 ```
 
 ## Render the Mermaid
 
-`out/c4.generated.md` has two ```mermaid blocks (L2 containers; domain bounded-contexts → aggregates →
+`specs/generated/c4.generated.md` has two ```mermaid blocks (L2 containers; domain bounded-contexts → aggregates →
 read models). It renders on GitHub, in VS Code (Mermaid extension), or at https://mermaid.live.
 
 ## What the model contains

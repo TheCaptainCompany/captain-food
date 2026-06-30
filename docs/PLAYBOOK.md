@@ -22,7 +22,7 @@ afterthought. It is mounted as project guidance (see `CLAUDE.md` and `docs/claud
 | `observability/*.yaml` | `specs/observability.yaml` (contracts, `$ref`-bound to the model) | ✅ |
 | `c4-l2.yaml` / `c4-l3.yaml` | `specs/architecture/c4-l2.yaml` / `c4-l3.yaml` (validated DSL) | ✅ |
 | `/schemas/*.schema.json` | **codegen referential validation** (`tools/codegen/src/validate.ts`) instead of JSON Schema (see ADR-0002) | ✅ |
-| `/generated/**` | `tools/codegen/out/**` (+ injected `specs/database.md` §2) | ✅ |
+| `/generated/**` | `specs/generated/**` (+ injected `specs/database.md` §2) | ✅ |
 | generator / reviewer / observability agents | `.claude/agents/*.md` | ✅ |
 | Stop / PostToolUse hooks | `.claude/hooks/*.sh` + `.claude/settings.json` | ✅ |
 | `Makefile`, `docs/adr/`, `docs/claude/` | same | ✅ |
@@ -70,12 +70,13 @@ specs/                         # the DSL — source of truth
   actors.yaml views.yaml api.yaml stories.yaml tests.yaml
   observability.yaml           # workflow observability contracts
   story-map.md database.md     # narrative + (generated) schema section
+  generated/                   # GENERATED (committed; CI verifies vs the specs): docs, views.sql, schema.graphql, c4
   architecture/
     c4-l2.yaml c4-l3.yaml       # C4 as source-managed DSL
 
 tools/codegen/                 # the generator + validator (TypeScript, tsx)
   src/{load,validate,refs,model}.ts  src/emit/*
-  out/                         # GENERATED (gitignored): docs, views.sql, schema.graphql
+  out/                         # ephemeral build scratch (gitignored): Structurizr .mmd exports, etc.
 
 docs/
   PLAYBOOK.md                  # this file
@@ -99,7 +100,8 @@ files carry conventions for DSL, codegen, observability, C4, and ADRs.
 ## Recommended agent topology ✅
 
 - **Generator** (`.claude/agents/generator.md`): reads approved DSL, generates artifacts into
-  `tools/codegen/out`; never writes `specs/**`.
+  `specs/generated/` (and the `specs/database.md` GENERATED region); never edits the hand-written DSL
+  (`specs/*.yaml`, `specs/architecture/*.yaml`).
 - **Reviewer** (`.claude/agents/reviewer.md`): validates generated output against the model, behaviour
   tests, observability contracts, and C4; pass/fail with evidence; never rewrites sources.
 - **Observability agent** (`.claude/agents/observability-agent.md`): analyzes runs (traces/logs/
@@ -148,8 +150,8 @@ checks (ADR-0002), which refuses to generate on a broken model. Schema/DSL versi
 ## C4 strategy ✅
 
 - L2 (`boundedContexts` + `containers`) and L3 (`components`) are source-managed YAML under
-  `specs/architecture/`. The codegen emits **Structurizr DSL** (`out/c4.generated.dsl`) and **Mermaid**
-  (`out/c4.generated.md`); the HTML doc also has a zero-dependency **interactive drill-down map** (§13).
+  `specs/architecture/`. The codegen emits **Structurizr DSL** (`specs/generated/c4.generated.dsl`) and **Mermaid**
+  (`specs/generated/c4.generated.md`); the HTML doc also has a zero-dependency **interactive drill-down map** (§13).
   See ADR-0013 and the `structurizr` skill.
 - L4 is manual or tightly supervised; runtime loops must not invent L4.
 - **Consistency checks (codegen):** every aggregate is mapped to a bounded context; every container

@@ -58,16 +58,19 @@ budgeted-loop:
 	fi
 
 docs: generate
-	@echo "open $(CODEGEN)/out/documentation.generated.html"
+	@echo "open specs/generated/documentation.generated.html"
 
-DSL = $(CODEGEN)/out/c4.generated.dsl
+# Canonical generated artifacts live in specs/generated/ (committed). $(CODEGEN)/out is scratch.
+DSL = specs/generated/c4.generated.dsl
 
 # Parse-VALIDATE + export the generated Structurizr DSL with the real Structurizr toolchain (catches any
 # emitter syntax drift our brace check can't). Uses structurizr-cli if installed, else the Docker image.
+# The .mmd exports go to the scratch $(CODEGEN)/out (never into specs/generated, which must stay clean).
 # Gracefully skips when neither is available — the portable DSL still lives at $(DSL).
 c4-export: generate
+	@mkdir -p $(CODEGEN)/out && cp $(DSL) $(CODEGEN)/out/c4.generated.dsl
 	@if command -v structurizr-cli >/dev/null 2>&1; then \
-		structurizr-cli export -workspace $(DSL) -format mermaid -output $(CODEGEN)/out; \
+		structurizr-cli export -workspace $(CODEGEN)/out/c4.generated.dsl -format mermaid -output $(CODEGEN)/out; \
 	elif command -v docker >/dev/null 2>&1; then \
 		MSYS_NO_PATHCONV=1 docker run --rm -v "$$(pwd -W 2>/dev/null || pwd)/$(CODEGEN)/out:/work" structurizr/structurizr export -workspace /work/c4.generated.dsl -format mermaid -output /work; \
 	else \

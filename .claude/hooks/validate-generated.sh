@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Captain.Food file-write guard (Claude Code PostToolUse hook on Write|Edit).
-# - Refuses hand-edits to GENERATED output (tools/codegen/out/** and the database.md GENERATED region).
+# - Refuses hand-edits to GENERATED output (specs/generated/** and the database.md GENERATED region).
 # - After a spec change (specs/**), re-runs validation and returns contextual feedback.
 # Exit 0 = ok; exit 2 = block with feedback (stderr is fed back to the model).
 set -uo pipefail
@@ -12,7 +12,7 @@ path="$(printf '%s' "$payload" | grep -oE '"file_path"[[:space:]]*:[[:space:]]*"
 [ -z "$path" ] && exit 0
 
 case "$path" in
-  */tools/codegen/out/*)
+  */specs/generated/*)
     echo "Refusing: '$path' is GENERATED output. Change the spec or emitter and run 'npm run generate' instead." >&2
     exit 2 ;;
 esac

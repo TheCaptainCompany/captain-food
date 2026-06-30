@@ -105,7 +105,7 @@ intrinsic to the read model: its **source aggregate + events** ([events.yaml](ev
 — which GraphQL query reads it — is declared in [api.yaml](api.yaml) via `@reads` and
 surfaced in [traceability.md](traceability.md) §2. Money is stored as integer minor units (`*_cents`
 + `currency`), matching `Money`; `JSONB` is used where a whole sub-tree is fetched at once. The SQL
-DDL for these tables is generated to `tools/codegen/out/views.generated.sql`.
+DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 <!-- GENERATED:views START — source: specs/views.yaml; run `npm run generate`. Do not edit between the markers. -->
 

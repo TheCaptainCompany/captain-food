@@ -21,11 +21,12 @@ deterministic.
 
 ## Output policy
 
-- Generated artifacts go to `tools/codegen/out/**` (gitignored) and the marker-injected
-  `specs/database.md` §2 (between `<!-- GENERATED:views START/END -->`).
-- Generated files carry a "GENERATED — do not edit by hand" banner. **Never hand-edit `out/**`** or
-  injected regions; change the spec or the emitter and regenerate.
-- `out/documentation.generated.{md,html}` is the navigable product doc; `views.generated.sql` the DDL;
+- Generated artifacts go to `specs/generated/**` (committed; CI verifies they match the specs) and the
+  marker-injected `specs/database.md` §2 (between `<!-- GENERATED:views START/END -->`).
+  `tools/codegen/out/` is only ephemeral build scratch (gitignored), e.g. Structurizr `.mmd` exports.
+- Generated files carry a "GENERATED — do not edit by hand" banner. **Never hand-edit `specs/generated/**`**
+  or injected regions; change the spec or the emitter and regenerate.
+- `specs/generated/documentation.generated.{md,html}` is the navigable product doc; `views.generated.sql` the DDL;
   `schema.generated.graphql` the SDL (the hand-written `schema.graphql` was removed);
   `c4.generated.dsl`/`c4.generated.md` the Structurizr/Mermaid views.
 
