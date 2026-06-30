@@ -120,6 +120,18 @@ GooglePlaceId:
   maxLength: 255
   description: "Google Maps Place id identifying the establishment (enrichment / Business Profile)."
 
+Latitude:
+  type: number
+  minimum: -90
+  maximum: 90
+  description: "WGS84 latitude in decimal degrees."
+
+Longitude:
+  type: number
+  minimum: -180
+  maximum: 180
+  description: "WGS84 longitude in decimal degrees."
+
 GoogleRating:
   type: number
   minimum: 0

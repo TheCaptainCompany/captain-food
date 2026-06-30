@@ -78,7 +78,7 @@ fixtures:
     data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris", createdBy: "user-1" }
   restaurantSeeded:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }], createdBy: "sync-1" }
+    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }], createdBy: "sync-1" }
   restaurantUpdated:
     type: { $ref: 'events.yaml#/RestaurantUpdated' }
     data: { restaurantId: "resto-1", displayName: "Chez Marco — Centre", updatedBy: "user-1" }
@@ -452,7 +452,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/RegisterRestaurant' }
-      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
+      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
     then:
       - { $ref: '#/fixtures/restaurantSeeded' }
   TestRestaurantGoogleBusinessProfileUpdated:

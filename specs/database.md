@@ -145,6 +145,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `gbp_order_url` | `WebUrl` | `TEXT` | nullable |  |
 | `gbp_link_status` | `GbpLinkStatus` | `TEXT` | nullable |  |
 | `address` | `jsonb` | `JSONB` | — |  |
+| `location` | `jsonb` | `JSONB` | nullable | Geo coordinates {latitude, longitude}; typically from the Google Maps sync. |
 | `opening_hours` | `jsonb` | `JSONB` | — |  |
 | `status` | `RestaurantStatus` | `TEXT` | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure. |
 | `order_acceptance` | `OrderAcceptanceMode` | `TEXT` | — |  |

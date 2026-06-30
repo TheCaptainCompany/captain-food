@@ -26,6 +26,7 @@ CREATE TABLE View_Restaurant (
   gbp_order_url TEXT,
   gbp_link_status TEXT,
   address JSONB NOT NULL,
+  location JSONB,
   opening_hours JSONB NOT NULL,
   status TEXT NOT NULL,
   order_acceptance TEXT NOT NULL,

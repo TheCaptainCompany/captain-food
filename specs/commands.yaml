@@ -146,6 +146,10 @@ RegisterRestaurant:
         $ref: 'scalars.yaml#/Tag'
     address:
       $ref: 'entities.yaml#/Address'
+    location:
+      $ref: 'entities.yaml#/GeoPoint'
+      nullable: true
+      description: "Geo coordinates (typically from the Google Maps sync)."
     timezone:
       $ref: 'scalars.yaml#/TimeZone'
       nullable: true
@@ -206,6 +210,9 @@ UpdateRestaurant:
       nullable: true
     address:
       $ref: 'entities.yaml#/Address'
+      nullable: true
+    location:
+      $ref: 'entities.yaml#/GeoPoint'
       nullable: true
     timezone:
       $ref: 'scalars.yaml#/TimeZone'

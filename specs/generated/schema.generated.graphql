@@ -30,6 +30,8 @@ scalar ImageId
 scalar ExternalReference
 scalar ExternalIdentifierKey
 scalar GooglePlaceId
+scalar Latitude
+scalar Longitude
 scalar GoogleRating
 scalar WebUrl
 scalar Slug
@@ -226,6 +228,11 @@ type RestaurantContact {
   phone: PhoneNumber
 }
 
+type GeoPoint {
+  latitude: Latitude!
+  longitude: Longitude!
+}
+
 type ExternalIdentifier {
   key: ExternalIdentifierKey!
   value: String!
@@ -290,6 +297,7 @@ type Restaurant {
   gbpOrderUrl: WebUrl
   gbpLinkStatus: GbpLinkStatus
   address: Address!
+  location: GeoPoint
   openingHours: [OpeningHoursSlot!]!
   status: RestaurantStatus!
   orderAcceptance: OrderAcceptanceMode!
@@ -483,6 +491,7 @@ input RegisterRestaurantInput {
   website: WebUrl
   tags: [Tag!]
   address: AddressInput!
+  location: GeoPointInput
   timezone: TimeZone
   preparationTimeMinutes: Int
   openingHours: [OpeningHoursSlotInput!]
@@ -502,6 +511,7 @@ input UpdateRestaurantInput {
   website: WebUrl
   tags: [Tag!]
   address: AddressInput
+  location: GeoPointInput
   timezone: TimeZone
   preparationTimeMinutes: Int
   openingHours: [OpeningHoursSlotInput!]
@@ -894,6 +904,11 @@ input AddressInput {
   postalCode: PostalCode!
   city: CityName!
   country: CountryCode!
+}
+
+input GeoPointInput {
+  latitude: Latitude!
+  longitude: Longitude!
 }
 
 input OpeningHoursSlotInput {

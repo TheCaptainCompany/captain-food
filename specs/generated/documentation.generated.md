@@ -306,6 +306,7 @@ A restaurant (public discovery + single-restaurant header). Navigates to its cat
 | <a id="type-restaurant--gbporderurl"></a>`gbpOrderUrl` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |
 | <a id="type-restaurant--gbplinkstatus"></a>`gbpLinkStatus` | [🔤 `GbpLinkStatus`](#scalar-gbplinkstatus) | ⬜ |
 | <a id="type-restaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |
+| <a id="type-restaurant--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ |
 | <a id="type-restaurant--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ✅ |
 | <a id="type-restaurant--status"></a>`status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | ✅ |
 | <a id="type-restaurant--orderacceptance"></a>`orderAcceptance` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) | ✅ |
@@ -390,6 +391,7 @@ _🧩 aggregate_ — A single restaurant location: profile, operational status (
 | `gbp_order_url` | [🔤 `WebUrl`](#scalar-weburl) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`.`gbpOrderUrl`](#event-restaurantgooglebusinessprofileorderlinkconfigured--gbporderurl) | nullable |  |
 | `gbp_link_status` | [🔤 `GbpLinkStatus`](#scalar-gbplinkstatus) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`.`status`](#event-restaurantgooglebusinessprofileorderlinkverified--status) | nullable |  |
 | `address` | `jsonb` _(derived)_ | [⚡ `RestaurantRegistered`.`address`](#event-restaurantregistered--address), [⚡ `RestaurantUpdated`.`address`](#event-restaurantupdated--address) | — |  |
+| `location` | `jsonb` _(derived)_ | [⚡ `RestaurantRegistered`.`location`](#event-restaurantregistered--location), [⚡ `RestaurantUpdated`.`location`](#event-restaurantupdated--location) | nullable | Geo coordinates {latitude, longitude}; typically from the Google Maps sync. |
 | `opening_hours` | `jsonb` _(derived)_ | [⚡ `RestaurantRegistered`.`openingHours`](#event-restaurantregistered--openinghours), [⚡ `RestaurantUpdated`.`openingHours`](#event-restaurantupdated--openinghours) | — |  |
 | `status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantRemoved`](#event-restaurantremoved), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed) | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure. |
 | `order_acceptance` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) _(derived)_ | [⚡ `RestaurantAcceptanceModeChanged`.`mode`](#event-restaurantacceptancemodechanged--mode) | — |  |
@@ -470,6 +472,7 @@ The single, generic way to register a restaurant LOCATION. Used by an owner/admi
 | <a id="command-registerrestaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="command-registerrestaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 | <a id="command-registerrestaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
+| <a id="command-registerrestaurant--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ | Geo coordinates (typically from the Google Maps sync). |
 | <a id="command-registerrestaurant--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ | Location timezone; falls back to the account timezone when absent. |
 | <a id="command-registerrestaurant--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
 | <a id="command-registerrestaurant--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
@@ -507,6 +510,7 @@ Admin edits one or more mutable LOCATION fields (full replace of provided fields
 | <a id="command-updaterestaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="command-updaterestaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 | <a id="command-updaterestaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ⬜ |  |
+| <a id="command-updaterestaurant--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ |  |
 | <a id="command-updaterestaurant--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="command-updaterestaurant--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
 | <a id="command-updaterestaurant--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
@@ -732,6 +736,7 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 | <a id="event-restaurantregistered--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="event-restaurantregistered--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 | <a id="event-restaurantregistered--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
+| <a id="event-restaurantregistered--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ |  |
 | <a id="event-restaurantregistered--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="event-restaurantregistered--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
 | <a id="event-restaurantregistered--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
@@ -754,6 +759,7 @@ One or more editable LOCATION fields of a restaurant have changed.
 | <a id="event-restaurantupdated--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="event-restaurantupdated--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 | <a id="event-restaurantupdated--address"></a>`address` | [📦 `Address`](#entity-address) | ⬜ |  |
+| <a id="event-restaurantupdated--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ |  |
 | <a id="event-restaurantupdated--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="event-restaurantupdated--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
 | <a id="event-restaurantupdated--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
@@ -920,7 +926,7 @@ The configured GBP 'Order online' link was pinged and its live status recorded (
 | <a id="event-restaurantgooglebusinessprofileorderlinkverified--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-restaurantgooglebusinessprofileorderlinkverified--status"></a>`status` | [🔤 `GbpLinkStatus`](#scalar-gbplinkstatus) | ✅ |  |
 
-### 📦 Entities _(5)_
+### 📦 Entities _(6)_
 
 <a id="entity-openinghoursslot"></a>
 #### 📦 Entity: `OpeningHoursSlot`
@@ -942,6 +948,16 @@ Both fields optional: HubRise locations do not expose email/phone, so an importe
 | --- | --- | --- | --- |
 | <a id="entity-restaurantcontact--email"></a>`email` | [🔤 `EmailAddress`](#scalar-emailaddress) | ⬜ |  |
 | <a id="entity-restaurantcontact--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ⬜ |  |
+
+<a id="entity-geopoint"></a>
+#### 📦 Entity: `GeoPoint`
+
+WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance).
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-geopoint--latitude"></a>`latitude` | [🔤 `Latitude`](#scalar-latitude) | ✅ |  |
+| <a id="entity-geopoint--longitude"></a>`longitude` | [🔤 `Longitude`](#scalar-longitude) | ✅ |  |
 
 <a id="entity-externalidentifier"></a>
 #### 📦 Entity: `ExternalIdentifier`
@@ -989,6 +1005,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ | Restaurant website (general restaurant info; any source may provide it). |
 | <a id="entity-restaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ | Cuisine/attribute tags (general restaurant info; source-agnostic). |
 | <a id="entity-restaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
+| <a id="entity-restaurant--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ | Geo coordinates (general restaurant info; typically from the Google Maps sync). |
 | <a id="entity-restaurant--status"></a>`status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | ✅ |  |
 | <a id="entity-restaurant--orderacceptance"></a>`orderAcceptance` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) | ✅ |  |
 | <a id="entity-restaurant--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ | Location timezone (a chain may span zones); falls back to the account timezone when absent. |
@@ -997,13 +1014,15 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(15)_
+### 🔤 Scalars _(17)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-restaurantaccountid"></a>🔤 `RestaurantAccountId` | string _uuid_ | Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations. |
 | <a id="scalar-externalidentifierkey"></a>🔤 `ExternalIdentifierKey` | string | Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).  |
 | <a id="scalar-googleplaceid"></a>🔤 `GooglePlaceId` | string | Google Maps Place id identifying the establishment (enrichment / Business Profile). |
+| <a id="scalar-latitude"></a>🔤 `Latitude` | number | WGS84 latitude in decimal degrees. |
+| <a id="scalar-longitude"></a>🔤 `Longitude` | number | WGS84 longitude in decimal degrees. |
 | <a id="scalar-googlerating"></a>🔤 `GoogleRating` | number | Google Maps / Business Profile average rating (0–5), enrichment only. |
 | <a id="scalar-weburl"></a>🔤 `WebUrl` | string `^https?://` | An http(s) URL — restaurant website or the Google Business Profile 'Order online' link. |
 | <a id="scalar-restaurantlegalname"></a>🔤 `RestaurantLegalName` | string | Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.  |

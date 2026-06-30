@@ -91,6 +91,16 @@ RestaurantContact:
       nullable: true
   required: []
 
+GeoPoint:
+  type: object
+  description: "WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance)."
+  properties:
+    latitude:
+      $ref: 'scalars.yaml#/Latitude'
+    longitude:
+      $ref: 'scalars.yaml#/Longitude'
+  required: [latitude, longitude]
+
 ExternalIdentifier:
   type: object
   description: >
@@ -203,6 +213,10 @@ Restaurant:
       description: "Cuisine/attribute tags (general restaurant info; source-agnostic)."
     address:
       $ref: '#/Address'
+    location:
+      $ref: '#/GeoPoint'
+      nullable: true
+      description: "Geo coordinates (general restaurant info; typically from the Google Maps sync)."
     status:
       $ref: 'scalars.yaml#/RestaurantStatus'
     orderAcceptance:

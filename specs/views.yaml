@@ -149,6 +149,12 @@ View_Restaurant:
       from:
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/address' }
         - { $ref: 'events.yaml#/RestaurantUpdated/properties/address' }
+    location:
+      from:
+        - { $ref: 'events.yaml#/RestaurantRegistered/properties/location' }
+        - { $ref: 'events.yaml#/RestaurantUpdated/properties/location' }
+      nullable: true
+      note: "Geo coordinates {latitude, longitude}; typically from the Google Maps sync."
     opening_hours:
       from:
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/openingHours' }
