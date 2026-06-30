@@ -29,6 +29,7 @@ boundedContexts:
     aggregates:
       - { $ref: 'actors.yaml#/RestaurantAccount' }
       - { $ref: 'actors.yaml#/Restaurant' }
+      - { $ref: 'actors.yaml#/Prospect' }
   catalog:
     description: "Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import."
     aggregates:
@@ -75,6 +76,7 @@ containers:
     realizes:
       - { $ref: 'actors.yaml#/RestaurantAccount' }
       - { $ref: 'actors.yaml#/Restaurant' }
+      - { $ref: 'actors.yaml#/Prospect' }
       - { $ref: 'actors.yaml#/Catalog' }
       - { $ref: 'actors.yaml#/Cart' }
       - { $ref: 'actors.yaml#/Order' }
@@ -106,6 +108,9 @@ externalSystems:
   supabase-auth: { description: "Passwordless OTP identity for customers (not a domain concern)." }
   sirene: { description: "INSEE Sirene / Recherche d'Entreprises (Etalab open data): SIRET, name, address, NAF, active/closed. Seeds listings via the ACL." }
   google-maps: { description: "Google Maps Places / Business Profile: rating, reviews, hours, phone, website, place id, and the 'Order online' link (ADR-0021). Enrichment + ownership proof." }
+  hubspot: { description: "CRM for B2B prospection leads (ADR-0020); post-V0." }
+  resend: { description: "Transactional email for prospection outreach sequences (ADR-0020); post-V0." }
+  slack: { description: "Ops/prospection alerts (active-partner closures, sequence events); post-V0." }
 
 # --- Key relationships (integrations that MUST appear in the views) ---
 relationships:
@@ -123,8 +128,11 @@ relationships:
   - { from: api, to: delivery-partner, description: "Dispatch + status (post-V0; inbound facts)" }
   - { from: sync-worker, to: sirene, description: "Poll establishments (SIRET/NAF/address/closures)" }
   - { from: sync-worker, to: google-maps, description: "Fetch Business Profile data (rating/reviews/hours/website)" }
-  - { from: sync-worker, to: api, description: "Register/enrich/close listings via the ACL, as the owner (/external/graphql)" }
+  - { from: sync-worker, to: api, description: "Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql)" }
   - { from: api, to: google-maps, description: "Verify restaurant ownership (GBP) for claim/opt-out" }
+  - { from: sync-worker, to: hubspot, description: "Create/update prospection leads (ADR-0020)" }
+  - { from: sync-worker, to: resend, description: "Send prospection outreach emails (ADR-0020)" }
+  - { from: sync-worker, to: slack, description: "Prospection / ops alerts (ADR-0020)" }
   - { from: bam, to: event-store, description: "Consume the event stream for business metrics" }
   - { from: api, to: otel-collector, description: "Export traces/metrics/logs (OTLP)" }
   - { from: bam, to: otel-collector, description: "Export traces/metrics/logs (OTLP)" }

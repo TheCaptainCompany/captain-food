@@ -351,6 +351,51 @@ RestaurantGoogleBusinessProfileOrderLinkVerified:
     - restaurantId
     - status
 
+# --- Prospection (ADR-0020). Facts only — the score is a read-model projection, never an event. ---
+
+ProspectContacted:
+  description: "A B2B outreach contact was made to a prospect (NON_PARTNER listing) in the sequence."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    channel:
+      $ref: 'scalars.yaml#/OutreachChannel'
+    sequenceStep:
+      type: integer
+      minimum: 0
+      description: "Day-offset step in the sequence (e.g. 0 = J+0, 7 = J+7 relance, 21 = J+21)."
+  required:
+    - restaurantId
+    - channel
+    - sequenceStep
+
+ProspectMarkedCold:
+  description: "A prospect was marked cold (e.g. no reply by J+21); the outreach sequence stops."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
+ProspectReplied:
+  description: "A prospect replied to outreach; the sequence stops pending human follow-up."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    note:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
 # =====================================================================
 # Catalog (Catalog / CatalogCategory / Product / Offer / OptionList)
 # =====================================================================

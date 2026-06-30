@@ -392,6 +392,22 @@ GbpLinkStatus:
   enum: [UNSET, CONFIGURED, VERIFIED, BROKEN]
   description: "State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1)."
 
+ProspectionScore:
+  type: integer
+  minimum: 0
+  maximum: 10
+  description: "B2B prospection priority (0–10), COMPUTED by the View_ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event."
+
+ProspectPipelineStatus:
+  type: string
+  enum: [NEW, CONTACTED, COLD, REPLIED, CONVERTED]
+  description: "Prospect funnel stage, DERIVED in the pipeline projection: NEW (no contact) → CONTACTED → COLD (J+21) / REPLIED, and CONVERTED when the restaurant reaches ACTIVE_PARTNER."
+
+OutreachChannel:
+  type: string
+  enum: [EMAIL, SLACK, PHONE]
+  description: "Channel of a prospection contact (email via Resend, Slack alert, or phone)."
+
 CartStatus:
   type: string
   enum:

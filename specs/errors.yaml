@@ -182,6 +182,32 @@ GbpOrderLinkNotConfigured:
     en: "Configure the Google 'Order online' link before verifying it."
     fr: "Configurez le lien Google « Commander en ligne » avant de le vérifier."
 
+# --- Prospection (ADR-0020) ---
+
+ProspectContactLimitReached:
+  description: "The prospect already received the maximum number of outreach contacts (anti-spam: ≤ 3)."
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "This prospect has already been contacted the maximum number of times."
+    fr: "Ce prospect a déjà été contacté le nombre maximum de fois."
+
+ProspectContactedTooRecently:
+  description: "A new contact is too soon after the previous one (anti-spam: ≥ 7 days apart)."
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "This prospect was contacted too recently; wait before contacting again."
+    fr: "Ce prospect a été contacté trop récemment ; patientez avant de le recontacter."
+
+ProspectNotFound:
+  description: "No prospect (contact history) exists for this restaurant."
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "Prospect not found."
+    fr: "Prospect introuvable."
+
 # =====================================================================
 # Catalog (Catalog / CatalogCategory / Product / Offer / OptionList)
 # =====================================================================

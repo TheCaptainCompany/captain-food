@@ -191,6 +191,11 @@ admin:
         BrowseListings: { $ref: 'api.yaml#/queries/restaurants' }
         ChangeListingStatus: { $ref: 'api.yaml#/mutations/changeRestaurantListingStatus' }
         MarkClosed: { $ref: 'api.yaml#/mutations/markRestaurantClosed' }
+    Prospection:
+      description: As an admin, I work the B2B prospection pipeline (scored leads, log replies).
+      steps:
+        ReviewPipeline: { $ref: 'api.yaml#/queries/prospectionPipeline' }
+        LogReply: { $ref: 'api.yaml#/mutations/recordProspectReply' }
 
 restaurant_sync:
   description: >
@@ -210,3 +215,8 @@ restaurant_sync:
         SeedListing: { $ref: 'api.yaml#/mutations/registerRestaurant' }
         EnrichGoogleProfile: { $ref: 'api.yaml#/mutations/updateRestaurantGoogleBusinessProfile' }
         MarkClosed: { $ref: 'api.yaml#/mutations/markRestaurantClosed' }
+    Prospection:
+      description: As the prospection worker, I contact scored prospects and mark them cold per the schedule.
+      steps:
+        ContactProspect: { $ref: 'api.yaml#/mutations/recordProspectContact' }
+        MarkCold: { $ref: 'api.yaml#/mutations/markProspectCold' }

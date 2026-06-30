@@ -70,5 +70,7 @@ Decision: store the **factual** fields above; they are public facts (not copyrig
 
 ## 7. Gaps / deferred
 
-- **Prospection scoring + outreach** is a separate later step (score = read-model projection, not an event).
-- A combined Sirene+Google reconciliation/observability contract lands with that step.
+- **Prospection scoring + outreach** is now modelled (ADR-0020): score = read-model projection
+  (`View_ProspectionPipeline`), outreach via the `Prospect` aggregate + `prospection-acl` worker +
+  `prospection` observability contract.
+- A combined Sirene+Google reconciliation (de-duping a listing seen by both sources) remains future work.

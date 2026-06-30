@@ -154,6 +154,22 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `preparation_time_minutes` | `integer` | `INTEGER` | nullable |  |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
 
+### `View_ProspectionPipeline` · 🔭 V1 · source aggregate `Prospect`
+
+- **Fed by**: `RestaurantRegistered`, `RestaurantGoogleBusinessProfileUpdated`, `RestaurantListingStatusChanged`, `ProspectContacted`, `ProspectMarkedCold`, `ProspectReplied`
+- **Filters**: Rows for NON_PARTNER / PASSIVE_PARTNER listings (active prospects); CONVERTED once ACTIVE_PARTNER.
+- **Rules**: `score` (0–10) is COMPUTED by the projection from listing facts, NEVER stored in an event: food-truck NAF 56.10C +3, Google rating ≥4.0 +2, reviews <20 +2, created <12mo +2, no website +1, already on Uber/Deliveroo −2, national franchise −3; clamped to 0–10. Inputs not yet captured as fields (Sirene creation date, on-aggregator, national franchise) are best-effort/V1; the formula degrades gracefully to the available signals. `pipeline_status` is derived: NEW (no contact) → CONTACTED → COLD (ProspectMarkedCold) / REPLIED (ProspectReplied); CONVERTED when RestaurantListingStatusChanged reaches ACTIVE_PARTNER.
+- **Note**: B2B prospection pipeline (ADR-0020): one row per worked listing, with the COMPUTED score and outreach state. Read by the admin prospectionPipeline query.
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `restaurant_id` | `RestaurantId` | `UUID` | PK |  |
+| `score` | `ProspectionScore` | `INTEGER` | index | Derived (see rules); not an event field. |
+| `pipeline_status` | `ProspectPipelineStatus` | `TEXT` | index | Derived from the prospect events + listingStatus (see rules). |
+| `contacts_count` | `integer` | `INTEGER` | — | Count of ProspectContacted; drives the anti-spam ≤3 rule. |
+| `last_contacted_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
+| `replied_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
+
 ### `View_Customer` · 🛶 V0 · source aggregate `Customer`
 
 - **Fed by**: `CustomerRegistered`, `RestaurantRated`, `RestaurantFavorited`, `RestaurantUnfavorited`, `CustomerInfoUpdated`, `CustomerEmailVerified`, `CustomerPhoneChanged`, `CustomerLanguageChanged`, `CustomerPreferencesSet`, `CustomerAddressSet`, `CustomerAddressRemoved`, `CustomerPaymentMethodSet`

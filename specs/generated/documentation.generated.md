@@ -139,6 +139,8 @@ A platform operator who onboards accounts and oversees the platform.
 | 🧭 **ManageListings** | BrowseListings | [🔎 `restaurants`](#query-restaurants) |
 |  | ChangeListingStatus | [✏️ `changeRestaurantListingStatus`](#mutation-changerestaurantlistingstatus) |
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
+| 🧭 **Prospection** | ReviewPipeline | [🔎 `prospectionPipeline`](#query-prospectionpipeline) |
+|  | LogReply | [✏️ `recordProspectReply`](#mutation-recordprospectreply) |
 
 <a id="story-restaurant_sync"></a>
 ### 🎬 `restaurant_sync` · 🔌 `EXTERNAL` · 🗣️ `fr-FR`
@@ -151,13 +153,15 @@ The Sirene/Google sync ACL (a scheduled worker) acting as an EXTERNAL caller. It
 | 🧭 **SyncListings** | SeedListing | [✏️ `registerRestaurant`](#mutation-registerrestaurant) |
 |  | EnrichGoogleProfile | [✏️ `updateRestaurantGoogleBusinessProfile`](#mutation-updaterestaurantgooglebusinessprofile) |
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
+| 🧭 **Prospection** | ContactProspect | [✏️ `recordProspectContact`](#mutation-recordprospectcontact) |
+|  | MarkCold | [✏️ `markProspectCold`](#mutation-markprospectcold) |
 
 <a id="sec-ctx-restaurant"></a>
 ## 🔲 1. restaurant
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(17)_
+### 🧰 API operations _(21)_
 
 <a id="query-restaurantlocationsbyaccount"></a>
 #### 🔎 Query: `restaurantLocationsByAccount`
@@ -167,6 +171,15 @@ All restaurant locations under an account (back-office; ownership enforced serve
 - **Input**: 🧩 `RestaurantLocationsByAccountQueryInput!` — `accountId`: [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid)
 - **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `View_Restaurant`](#view-view_restaurant)
 - **Roles**: ADMIN, RESTAURANT_ACCOUNT · **slice** V1
+
+<a id="query-prospectionpipeline"></a>
+#### 🔎 Query: `prospectionPipeline`
+
+B2B prospection pipeline (admin): scored prospects, optionally filtered by minimum score / pipeline status.
+
+- **Input**: 🧩 `ProspectionPipelineQueryInput` — `minScore?`: [🔤 `ProspectionScore`](#scalar-prospectionscore), `status?`: [🔤 `ProspectPipelineStatus`](#scalar-prospectpipelinestatus)
+- **Returns**: [🧩 `Prospect`](#type-prospect) (list) · **reads** [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Roles**: ADMIN · **slice** V1
 
 <a id="mutation-registerrestaurantaccount"></a>
 #### ✏️ Mutation: `registerRestaurantAccount`
@@ -280,7 +293,28 @@ All restaurant locations under an account (back-office; ownership enforced serve
 - **Roles**: RESTAURANT_ACCOUNT, RESTAURANT, ADMIN · **slice** V1
 - **Payload**: correlationId
 
-### 🧩 Output types _(1)_
+<a id="mutation-recordprospectcontact"></a>
+#### ✏️ Mutation: `recordProspectContact`
+
+- **Command**: [📩 `RecordProspectContact`](#command-recordprospectcontact) → handled by [🎭 `Prospect`](#actor-prospect)
+- **Roles**: EXTERNAL, ADMIN · **slice** V1
+- **Payload**: correlationId
+
+<a id="mutation-markprospectcold"></a>
+#### ✏️ Mutation: `markProspectCold`
+
+- **Command**: [📩 `MarkProspectCold`](#command-markprospectcold) → handled by [🎭 `Prospect`](#actor-prospect)
+- **Roles**: EXTERNAL, ADMIN · **slice** V1
+- **Payload**: correlationId
+
+<a id="mutation-recordprospectreply"></a>
+#### ✏️ Mutation: `recordProspectReply`
+
+- **Command**: [📩 `RecordProspectReply`](#command-recordprospectreply) → handled by [🎭 `Prospect`](#actor-prospect)
+- **Roles**: ADMIN, EXTERNAL · **slice** V1
+- **Payload**: correlationId
+
+### 🧩 Output types _(2)_
 
 <a id="type-restaurant"></a>
 #### 🧩 Type: `Restaurant`
@@ -315,7 +349,23 @@ A restaurant (public discovery + single-restaurant header). Navigates to its cat
 | <a id="type-restaurant--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |
 | <a id="type-restaurant--updatedat"></a>`updatedAt` | `string` _date-time_ | ✅ |
 
-### 🎭 Actors _(2)_
+<a id="type-prospect"></a>
+#### 🧩 Type: `Prospect`
+
+A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline).
+
+- **Read model**: [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-prospect--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |
+| <a id="type-prospect--score"></a>`score` | [🔤 `ProspectionScore`](#scalar-prospectionscore) | ✅ |
+| <a id="type-prospect--pipelinestatus"></a>`pipelineStatus` | [🔤 `ProspectPipelineStatus`](#scalar-prospectpipelinestatus) | ✅ |
+| <a id="type-prospect--contactscount"></a>`contactsCount` | `integer` | ✅ |
+| <a id="type-prospect--lastcontactedat"></a>`lastContactedAt` | `string` _date-time_ | ⬜ |
+| <a id="type-prospect--repliedat"></a>`repliedAt` | `string` _date-time_ | ⬜ |
+
+### 🎭 Actors _(3)_
 
 <a id="actor-restaurantaccount"></a>
 #### 🎭 Actor: `RestaurantAccount`
@@ -350,7 +400,19 @@ _🧩 aggregate_ — A single restaurant location: profile, operational status (
 | [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
 | [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `GbpOrderLinkNotConfigured`](#error-gbporderlinknotconfigured) |
 
-### 🗄️ Views (read models) _(2)_
+<a id="actor-prospect"></a>
+#### 🎭 Actor: `Prospect`
+
+_🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked as a B2B prospect (ADR-0020); id = restaurantId. The `prospection-acl` worker (EXTERNAL) reads the COMPUTED score from View_ProspectionPipeline + the schedule, fires HubSpot/Resend/Slack, then records the contact fact here. The score is never an input or an emitted event. First RecordProspectContact is the prospect's birth; anti-spam invariants guard contacts.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `RecordProspectContact`](#command-recordprospectcontact) | [⚡ `ProspectContacted`](#event-prospectcontacted) | [⛔ `ProspectContactLimitReached`](#error-prospectcontactlimitreached), [⛔ `ProspectContactedTooRecently`](#error-prospectcontactedtoorecently) |
+| [📩 `MarkProspectCold`](#command-markprospectcold) | [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold) | [⛔ `ProspectNotFound`](#error-prospectnotfound) |
+| [📩 `RecordProspectReply`](#command-recordprospectreply) | [⚡ `ProspectReplied`](#event-prospectreplied) | [⛔ `ProspectNotFound`](#error-prospectnotfound) |
+
+### 🗄️ Views (read models) _(3)_
 
 <a id="view-view_restaurantaccount"></a>
 #### 🗄️ View: `View_RestaurantAccount`
@@ -400,7 +462,25 @@ _🧩 aggregate_ — A single restaurant location: profile, operational status (
 | `preparation_time_minutes` | `integer` _(derived)_ | [⚡ `RestaurantRegistered`.`preparationTimeMinutes`](#event-restaurantregistered--preparationtimeminutes), [⚡ `RestaurantUpdated`.`preparationTimeMinutes`](#event-restaurantupdated--preparationtimeminutes) | nullable |  |
 | `updated_at` | `timestamptz` | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged), [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged), [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured), [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified) | — | Row write time, stamped on each event. |
 
-### 📩 Commands _(16)_
+<a id="view-view_prospectionpipeline"></a>
+#### 🗄️ View: `View_ProspectionPipeline`
+
+- **Source**: [🎭 `Prospect`](#actor-prospect) · 🔭 V1
+- **Note**: B2B prospection pipeline (ADR-0020): one row per worked listing, with the COMPUTED score and outreach state. Read by the admin prospectionPipeline query.
+- **Filters**: Rows for NON_PARTNER / PASSIVE_PARTNER listings (active prospects); CONVERTED once ACTIVE_PARTNER.
+- **Rules**: `score` (0–10) is COMPUTED by the projection from listing facts, NEVER stored in an event: food-truck NAF 56.10C +3, Google rating ≥4.0 +2, reviews <20 +2, created <12mo +2, no website +1, already on Uber/Deliveroo −2, national franchise −3; clamped to 0–10. Inputs not yet captured as fields (Sirene creation date, on-aggregator, national franchise) are best-effort/V1; the formula degrades gracefully to the available signals. `pipeline_status` is derived: NEW (no contact) → CONTACTED → COLD (ProspectMarkedCold) / REPLIED (ProspectReplied); CONVERTED when RestaurantListingStatusChanged reaches ACTIVE_PARTNER.
+- **Fed by**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged), [⚡ `ProspectContacted`](#event-prospectcontacted), [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold), [⚡ `ProspectReplied`](#event-prospectreplied)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `View_Restaurant`](#view-view_restaurant) | [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid) | PK |  |
+| `score` | [🔤 `ProspectionScore`](#scalar-prospectionscore) | [⚡ `RestaurantRegistered`.`externalIdentifiers`](#event-restaurantregistered--externalidentifiers), [⚡ `RestaurantRegistered`.`website`](#event-restaurantregistered--website), [⚡ `RestaurantGoogleBusinessProfileUpdated`.`rating`](#event-restaurantgooglebusinessprofileupdated--rating), [⚡ `RestaurantGoogleBusinessProfileUpdated`.`reviewsCount`](#event-restaurantgooglebusinessprofileupdated--reviewscount) | index | Derived (see rules); not an event field. |
+| `pipeline_status` | [🔤 `ProspectPipelineStatus`](#scalar-prospectpipelinestatus) | [⚡ `ProspectContacted`](#event-prospectcontacted), [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold), [⚡ `ProspectReplied`](#event-prospectreplied), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged) | index | Derived from the prospect events + listingStatus (see rules). |
+| `contacts_count` | `integer` | [⚡ `ProspectContacted`](#event-prospectcontacted) | — | Count of ProspectContacted; drives the anti-spam ≤3 rule. |
+| `last_contacted_at` | `timestamptz` | [⚡ `ProspectContacted`](#event-prospectcontacted) | nullable |  |
+| `replied_at` | `timestamptz` | [⚡ `ProspectReplied`](#event-prospectreplied) | nullable |  |
+
+### 📩 Commands _(19)_
 
 <a id="command-registerrestaurantaccount"></a>
 #### 📩 Command: `RegisterRestaurantAccount`
@@ -660,7 +740,50 @@ Ping the configured GBP 'Order online' link and record whether it is live (ADR-0
 | --- | --- | --- | --- |
 | <a id="command-verifygooglebusinessprofileorderlink--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 
-### ⚡ Events _(16)_
+<a id="command-recordprospectcontact"></a>
+#### 📩 Command: `RecordProspectContact`
+
+Record a B2B outreach contact to a prospect. The worker decides WHO/WHEN from the read-model score + schedule; this just records the fact. First contact is the prospect's birth. Anti-spam invariants apply.
+
+- **Dispatched by**: [✏️ `recordProspectContact`](#mutation-recordprospectcontact) · **handled by** [🎭 `Prospect`](#actor-prospect)
+- **Emits**: [⚡ `ProspectContacted`](#event-prospectcontacted)
+- **Throws**: [⛔ `ProspectContactLimitReached`](#error-prospectcontactlimitreached), [⛔ `ProspectContactedTooRecently`](#error-prospectcontactedtoorecently)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-recordprospectcontact--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-recordprospectcontact--channel"></a>`channel` | [🔤 `OutreachChannel`](#scalar-outreachchannel) | ✅ |  |
+| <a id="command-recordprospectcontact--sequencestep"></a>`sequenceStep` | `integer` | ✅ |  |
+
+<a id="command-markprospectcold"></a>
+#### 📩 Command: `MarkProspectCold`
+
+Mark a prospect cold (no reply by J+21); stops the outreach sequence.
+
+- **Dispatched by**: [✏️ `markProspectCold`](#mutation-markprospectcold) · **handled by** [🎭 `Prospect`](#actor-prospect)
+- **Emits**: [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold)
+- **Throws**: [⛔ `ProspectNotFound`](#error-prospectnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-markprospectcold--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-markprospectcold--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="command-recordprospectreply"></a>
+#### 📩 Command: `RecordProspectReply`
+
+Record that a prospect replied (CRM/admin or inbound), stopping the sequence.
+
+- **Dispatched by**: [✏️ `recordProspectReply`](#mutation-recordprospectreply) · **handled by** [🎭 `Prospect`](#actor-prospect)
+- **Emits**: [⚡ `ProspectReplied`](#event-prospectreplied)
+- **Throws**: [⛔ `ProspectNotFound`](#error-prospectnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-recordprospectreply--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-recordprospectreply--note"></a>`note` | `string` | ⬜ |  |
+
+### ⚡ Events _(19)_
 
 <a id="event-restaurantaccountregistered"></a>
 #### ⚡ Event: `RestaurantAccountRegistered`
@@ -721,7 +844,7 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -830,7 +953,7 @@ GBP-SPECIFIC metrics for the restaurant's Google Business Profile (place id + Go
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -890,7 +1013,7 @@ The partnership funnel status changed (NON_PARTNER → PASSIVE_PARTNER → ACTIV
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -926,7 +1049,50 @@ The configured GBP 'Order online' link was pinged and its live status recorded (
 | <a id="event-restaurantgooglebusinessprofileorderlinkverified--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-restaurantgooglebusinessprofileorderlinkverified--status"></a>`status` | [🔤 `GbpLinkStatus`](#scalar-gbplinkstatus) | ✅ |  |
 
-### 📦 Entities _(6)_
+<a id="event-prospectcontacted"></a>
+#### ⚡ Event: `ProspectContacted`
+
+A B2B outreach contact was made to a prospect (NON_PARTNER listing) in the sequence.
+
+- **Emitted by**: [🎭 `Prospect`](#actor-prospect)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-prospectcontacted--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-prospectcontacted--channel"></a>`channel` | [🔤 `OutreachChannel`](#scalar-outreachchannel) | ✅ |  |
+| <a id="event-prospectcontacted--sequencestep"></a>`sequenceStep` | `integer` | ✅ | Day-offset step in the sequence (e.g. 0 = J+0, 7 = J+7 relance, 21 = J+21). |
+
+<a id="event-prospectmarkedcold"></a>
+#### ⚡ Event: `ProspectMarkedCold`
+
+A prospect was marked cold (e.g. no reply by J+21); the outreach sequence stops.
+
+- **Emitted by**: [🎭 `Prospect`](#actor-prospect)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-prospectmarkedcold--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-prospectmarkedcold--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="event-prospectreplied"></a>
+#### ⚡ Event: `ProspectReplied`
+
+A prospect replied to outreach; the sequence stops pending human follow-up.
+
+- **Emitted by**: [🎭 `Prospect`](#actor-prospect)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-prospectreplied--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-prospectreplied--note"></a>`note` | `string` | ⬜ |  |
+
+### 📦 Entities _(7)_
 
 <a id="entity-openinghoursslot"></a>
 #### 📦 Entity: `OpeningHoursSlot`
@@ -968,6 +1134,17 @@ A generic external identifier kept on a Restaurant listing, preserving the ORIGI
 | --- | --- | --- | --- |
 | <a id="entity-externalidentifier--key"></a>`key` | [🔤 `ExternalIdentifierKey`](#scalar-externalidentifierkey) | ✅ |  |
 | <a id="entity-externalidentifier--value"></a>`value` | `string` | ✅ |  |
+
+<a id="entity-prospect"></a>
+#### 📦 Entity: `Prospect`
+
+Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020). Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the View_ProspectionPipeline projection, never stored. This holds only the outreach state.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-prospect--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="entity-prospect--pipelinestatus"></a>`pipelineStatus` | [🔤 `ProspectPipelineStatus`](#scalar-prospectpipelinestatus) | ✅ |  |
+| <a id="entity-prospect--lastcontactedat"></a>`lastContactedAt` | `string` _date-time_ | ⬜ |  |
 
 <a id="entity-restaurantaccount"></a>
 #### 📦 Entity: `RestaurantAccount`
@@ -1014,7 +1191,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(17)_
+### 🔤 Scalars _(20)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -1032,11 +1209,14 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-restaurantstatus"></a>🔤 `RestaurantStatus` | enum (DRAFT \| ACTIVE \| INACTIVE) |  |
 | <a id="scalar-restaurantlistingstatus"></a>🔤 `RestaurantListingStatus` | enum (NON_PARTNER \| PASSIVE_PARTNER \| ACTIVE_PARTNER) | Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.  |
 | <a id="scalar-gbplinkstatus"></a>🔤 `GbpLinkStatus` | enum (UNSET \| CONFIGURED \| VERIFIED \| BROKEN) | State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1). |
+| <a id="scalar-prospectionscore"></a>🔤 `ProspectionScore` | integer | B2B prospection priority (0–10), COMPUTED by the View_ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event. |
+| <a id="scalar-prospectpipelinestatus"></a>🔤 `ProspectPipelineStatus` | enum (NEW \| CONTACTED \| COLD \| REPLIED \| CONVERTED) | Prospect funnel stage, DERIVED in the pipeline projection: NEW (no contact) → CONTACTED → COLD (J+21) / REPLIED, and CONVERTED when the restaurant reaches ACTIVE_PARTNER. |
+| <a id="scalar-outreachchannel"></a>🔤 `OutreachChannel` | enum (EMAIL \| SLACK \| PHONE) | Channel of a prospection contact (email via Resend, Slack alert, or phone). |
 | <a id="scalar-orderacceptancemode"></a>🔤 `OrderAcceptanceMode` | enum (NORMAL \| BUSY \| PAUSED) | Current order acceptance mode of a restaurant (HubRise: order_acceptance). |
 | <a id="scalar-pricerange"></a>🔤 `PriceRange` | enum (BUDGET \| MODERATE \| PREMIUM) | Coarse price tier of a restaurant, used as a discovery filter (UI: $ / $$ / $$$). |
 | <a id="scalar-restaurantlistkey"></a>🔤 `RestaurantListKey` | enum (ORDER_AGAIN \| RECOMMENDED \| TOP_DEALS \| GREEN_PACKAGING) | Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model resolves the actual member restaurants (editorial rules / customer history); the client just asks for a list by key.  |
 
-### ⛔ Errors _(9)_
+### ⛔ Errors _(12)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -1049,8 +1229,11 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="error-listingalreadyclaimed"></a>⛔ `ListingAlreadyClaimed` | The restaurant listing has already been claimed by an owner. | 🇬🇧 This restaurant listing has already been claimed. | 🇫🇷 Cette fiche restaurant a déjà été revendiquée. | [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting) |
 | <a id="error-listingownershipnotverified"></a>⛔ `ListingOwnershipNotVerified` | Could not verify ownership of the listing (Google Business Profile proof rejected). | 🇬🇧 We couldn't verify that you own this restaurant. Please confirm via your Google Business Profile. | 🇫🇷 Nous n'avons pas pu vérifier que ce restaurant vous appartient. Confirmez via votre fiche Google Business Profile. | [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting) |
 | <a id="error-gbporderlinknotconfigured"></a>⛔ `GbpOrderLinkNotConfigured` | No Google Business Profile 'Order online' link is configured to verify. | 🇬🇧 Configure the Google 'Order online' link before verifying it. | 🇫🇷 Configurez le lien Google « Commander en ligne » avant de le vérifier. | [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink) |
+| <a id="error-prospectcontactlimitreached"></a>⛔ `ProspectContactLimitReached` | The prospect already received the maximum number of outreach contacts (anti-spam: ≤ 3). | 🇬🇧 This prospect has already been contacted the maximum number of times. | 🇫🇷 Ce prospect a déjà été contacté le nombre maximum de fois. | [📩 `RecordProspectContact`](#command-recordprospectcontact) |
+| <a id="error-prospectcontactedtoorecently"></a>⛔ `ProspectContactedTooRecently` | A new contact is too soon after the previous one (anti-spam: ≥ 7 days apart). | 🇬🇧 This prospect was contacted too recently; wait before contacting again. | 🇫🇷 Ce prospect a été contacté trop récemment ; patientez avant de le recontacter. | [📩 `RecordProspectContact`](#command-recordprospectcontact) |
+| <a id="error-prospectnotfound"></a>⛔ `ProspectNotFound` | No prospect (contact history) exists for this restaurant. | 🇬🇧 Prospect not found. | 🇫🇷 Prospect introuvable. | [📩 `MarkProspectCold`](#command-markprospectcold), [📩 `RecordProspectReply`](#command-recordprospectreply) |
 
-### 🧪 Tests _(2)_
+### 🧪 Tests _(3)_
 
 **[🎭 `RestaurantAccount`](#actor-restaurantaccount)**
 
@@ -1298,6 +1481,94 @@ _Rejects verifying when no order link is configured_
 - **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
 - **When**: [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink)
 - **Thrown**: [⛔ `GbpOrderLinkNotConfigured`](#error-gbporderlinknotconfigured)
+
+**[🎭 `Prospect`](#actor-prospect)**
+
+<a id="test-testprospectcontacted"></a>
+#### 🧪 Test: `TestProspectContacted`
+
+_Records the first prospection contact (prospect is born)_
+
+- **Given**: _(none)_
+- **When**: [📩 `RecordProspectContact`](#command-recordprospectcontact)
+- **Then**: [⚡ `ProspectContacted`](#event-prospectcontacted)
+
+<a id="test-testprospectcontactedtoorecently"></a>
+#### 🧪 Test: `TestProspectContactedTooRecently`
+
+_Rejects a new contact too soon after the previous one (≥7 days apart)_
+
+- **Given**: [⚡ `ProspectContacted`](#event-prospectcontacted)
+- **When**: [📩 `RecordProspectContact`](#command-recordprospectcontact)
+- **Thrown**: [⛔ `ProspectContactedTooRecently`](#error-prospectcontactedtoorecently)
+
+<a id="test-testprospectcontactlimitreached"></a>
+#### 🧪 Test: `TestProspectContactLimitReached`
+
+_Rejects a 4th contact (anti-spam: ≤ 3)_
+
+- **Given**: [⚡ `ProspectContacted`](#event-prospectcontacted), [⚡ `ProspectContacted`](#event-prospectcontacted), [⚡ `ProspectContacted`](#event-prospectcontacted)
+- **When**: [📩 `RecordProspectContact`](#command-recordprospectcontact)
+- **Thrown**: [⛔ `ProspectContactLimitReached`](#error-prospectcontactlimitreached)
+
+<a id="test-testprospectmarkedcold"></a>
+#### 🧪 Test: `TestProspectMarkedCold`
+
+_Marks a contacted prospect cold_
+
+- **Given**: [⚡ `ProspectContacted`](#event-prospectcontacted)
+- **When**: [📩 `MarkProspectCold`](#command-markprospectcold)
+- **Then**: [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold)
+
+<a id="test-testprospectreplied"></a>
+#### 🧪 Test: `TestProspectReplied`
+
+_Records a prospect reply_
+
+- **Given**: [⚡ `ProspectContacted`](#event-prospectcontacted)
+- **When**: [📩 `RecordProspectReply`](#command-recordprospectreply)
+- **Then**: [⚡ `ProspectReplied`](#event-prospectreplied)
+
+<a id="test-testprospectmarkcoldnotfound"></a>
+#### 🧪 Test: `TestProspectMarkColdNotFound`
+
+_Rejects marking cold a prospect that was never contacted_
+
+- **Given**: _(none)_
+- **When**: [📩 `MarkProspectCold`](#command-markprospectcold)
+- **Thrown**: [⛔ `ProspectNotFound`](#error-prospectnotfound)
+
+### 📡 Observability _(1)_
+
+<a id="obs-prospection"></a>
+#### 📡 Contract: `prospection`
+
+_criticality: **medium**_
+
+- **Workflow**:  · command [📩 `RecordProspectContact`](#command-recordprospectcontact)
+- **Emits**: [⚡ `ProspectContacted`](#event-prospectcontacted) · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `command.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `restaurant_id` | `domain.aggregate_id` | ✅ | [🔤 `RestaurantId`](#scalar-restaurantid) |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `pipeline.read` | `INTERNAL` | ✅ | — | `business.score`* |
+| `outreach.dispatch` | `CLIENT` | ✅ | — | `messaging.system`*, `business.channel`*, `business.sequence_step`* |
+| `command.receive` | `SERVER` | ✅ | — | `business.command_type`* |
+| `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`* |
+| `event.publish` | `PRODUCER` | ✅ | — | `business.event_type`* |
+
+- **Metrics**: `prospect_contact_duration_ms` _(histogram)_ · **Business metrics**: `prospect_contacts_sent_total` _(counter)_, `prospects_converted_total` _(counter)_, `prospects_cold_total` _(counter)_
+- **Status rules**: success ⇐ spans [`pipeline.read`, `outreach.dispatch`, `event.store.append`, `event.publish`]
+- **SLOs**: p95 ≤ 2000ms · p99 ≤ 5000ms · error rate ≤ 5%
 
 <a id="sec-ctx-catalog"></a>
 ## 🔲 2. catalog
@@ -4717,7 +4988,7 @@ aggregates; components bind the aggregates they handle and the read models they 
 
 | Context | Description | Aggregates / process managers |
 | --- | --- | --- |
-| 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant) |
+| 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
 | 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order) · [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `RefundProcess`](#actor-refundprocess) |
 | 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
@@ -4732,7 +5003,7 @@ aggregates; components bind the aggregates they handle and the read models they 
 | 🧱 `mobile-customer` | React Native / Expo (iOS + Android) | Customer mobile app (post-V0); same GraphQL API as web-client (/customer/graphql, /public/graphql). |
 | 🧱 `mobile-restaurant` | React Native / Expo | Restaurant-staff mobile app (post-V0): order queue, accept/ready (/restaurant/graphql). |
 | 🧱 `mobile-rider` | React Native / Expo | Delivery-rider mobile app (post-V0): assigned deliveries + status updates (/rider/graphql). |
-| 🧱 `api` | Node + TypeScript (Hono or NestJS), GraphQL | CQRS-light write+read API. Hosts command handlers, projections, GraphQL gateway. Role = path (/{role}/graphql).<br>realizes: [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
+| 🧱 `api` | Node + TypeScript (Hono or NestJS), GraphQL | CQRS-light write+read API. Hosts command handlers, projections, GraphQL gateway. Role = path (/{role}/graphql).<br>realizes: [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
 | 🧱 `event-store` | Managed PostgreSQL (e.g. Supabase) | Append-only domain_events table (the write model / source of truth at runtime). |
 | 🧱 `read-models` | Managed PostgreSQL | Denormalized View_* projection tables fed from the event log; queries read here, never domain_events. |
 | 🧱 `sync-worker` | Scheduled worker (GitHub Actions cron + Node) | Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls the api's RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner. Prospection scoring/outreach is a later step. |
@@ -4749,6 +5020,9 @@ aggregates; components bind the aggregates they handle and the read models they 
 | 🔌 `supabase-auth` | Passwordless OTP identity for customers (not a domain concern). |
 | 🔌 `sirene` | INSEE Sirene / Recherche d'Entreprises (Etalab open data): SIRET, name, address, NAF, active/closed. Seeds listings via the ACL. |
 | 🔌 `google-maps` | Google Maps Places / Business Profile: rating, reviews, hours, phone, website, place id, and the 'Order online' link (ADR-0021). Enrichment + ownership proof. |
+| 🔌 `hubspot` | CRM for B2B prospection leads (ADR-0020); post-V0. |
+| 🔌 `resend` | Transactional email for prospection outreach sequences (ADR-0020); post-V0. |
+| 🔌 `slack` | Ops/prospection alerts (active-partner closures, sequence events); post-V0. |
 
 ### ➡️ L2 — Relationships
 
@@ -4768,8 +5042,11 @@ aggregates; components bind the aggregates they handle and the read models they 
 | `api` → `delivery-partner` | Dispatch + status (post-V0; inbound facts) |
 | `sync-worker` → `sirene` | Poll establishments (SIRET/NAF/address/closures) |
 | `sync-worker` → `google-maps` | Fetch Business Profile data (rating/reviews/hours/website) |
-| `sync-worker` → `api` | Register/enrich/close listings via the ACL, as the owner (/external/graphql) |
+| `sync-worker` → `api` | Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql) |
 | `api` → `google-maps` | Verify restaurant ownership (GBP) for claim/opt-out |
+| `sync-worker` → `hubspot` | Create/update prospection leads (ADR-0020) |
+| `sync-worker` → `resend` | Send prospection outreach emails (ADR-0020) |
+| `sync-worker` → `slack` | Prospection / ops alerts (ADR-0020) |
 | `bam` → `event-store` | Consume the event stream for business metrics |
 | `api` → `otel-collector` | Export traces/metrics/logs (OTLP) |
 | `bam` → `otel-collector` | Export traces/metrics/logs (OTLP) |
@@ -4781,14 +5058,15 @@ aggregates; components bind the aggregates they handle and the read models they 
 | ⚙️ `graphql-gateway` | 📡 yes | Per-role GraphQL endpoint (/{role}/graphql); applies the @auth/@public ACL; entry span (SERVER). | — |
 | ⚙️ `observability-middleware` | 📡 yes | Attaches business.* attributes + correlation/cause ids to spans; structured JSON logging; the only place domain context meets OTel. | — |
 | ⚙️ `command-bus` | 📡 yes | Dispatches commands to handlers; span 'command.receive'/'command.validate'/'command.handle'. | — |
-| ⚙️ `command-handlers` | — no | One handler per aggregate; validates invariants then appends events. Pure domain — NOT instrumented. | handles [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer) |
+| ⚙️ `command-handlers` | — no | One handler per aggregate; validates invariants then appends events. Pure domain — NOT instrumented. | handles [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer) |
 | ⚙️ `process-managers` | 📡 yes | Sagas coordinating aggregates + externals (checkout, refund, cart binding). | handles [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
 | ⚙️ `event-store-adapter` | 📡 yes | Appends to domain_events; span 'event.store.append' with business.event_type/stream_id. | — |
 | ⚙️ `event-publisher` | 📡 yes | Publishes appended events to the bus; span 'event.publish' (PRODUCER). | — |
 | ⚙️ `message-consumers` | 📡 yes | Consume domain + inbound integration events; span 'event.consume.*' (CONSUMER). | — |
-| ⚙️ `projection-updaters` | 📡 yes | Update the View_* read models from events; span 'event.consume.projection'. | updates [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_Customer`](#view-view_customer), [🗄️ `View_Catalog`](#view-view_catalog), [🗄️ `View_Cart`](#view-view_cart), [🗄️ `View_OrderTracking`](#view-view_ordertracking) |
+| ⚙️ `projection-updaters` | 📡 yes | Update the View_* read models from events; span 'event.consume.projection'. | updates [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_Customer`](#view-view_customer), [🗄️ `View_Catalog`](#view-view_catalog), [🗄️ `View_Cart`](#view-view_cart), [🗄️ `View_OrderTracking`](#view-view_ordertracking), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline) |
 | ⚙️ `bam-projector` | 📡 yes | Business Activity Monitoring projection (runs in the bam container); business_metrics only. | — |
 | ⚙️ `hubrise-acl` | 📡 yes | Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain. | — |
 | ⚙️ `stripe-adapter` | 📡 yes | Creates PaymentIntents / refunds; records inbound webhook facts (PaymentCaptured/Failed/Refunded). | — |
 | ⚙️ `supabase-acl` | 📡 yes | Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates. | — |
 | ⚙️ `sirene-google-acl` | 📡 yes | Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate. | — |
+| ⚙️ `prospection-acl` | 📡 yes | B2B prospection worker (ADR-0020): reads the COMPUTED score from View_ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. | — |

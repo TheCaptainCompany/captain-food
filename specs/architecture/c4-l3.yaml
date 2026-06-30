@@ -26,6 +26,7 @@ components:
     handles:
       - { $ref: 'actors.yaml#/RestaurantAccount' }
       - { $ref: 'actors.yaml#/Restaurant' }
+      - { $ref: 'actors.yaml#/Prospect' }
       - { $ref: 'actors.yaml#/Catalog' }
       - { $ref: 'actors.yaml#/Cart' }
       - { $ref: 'actors.yaml#/Order' }
@@ -56,6 +57,7 @@ components:
       - { $ref: 'views.yaml#/View_Catalog' }
       - { $ref: 'views.yaml#/View_Cart' }
       - { $ref: 'views.yaml#/View_OrderTracking' }
+      - { $ref: 'views.yaml#/View_ProspectionPipeline' }
   bam-projector:
     description: "Business Activity Monitoring projection (runs in the bam container); business_metrics only."
     instrumented: true
@@ -70,4 +72,7 @@ components:
     instrumented: true
   sirene-google-acl:
     description: "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate."
+    instrumented: true
+  prospection-acl:
+    description: "B2B prospection worker (ADR-0020): reads the COMPUTED score from View_ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back."
     instrumented: true

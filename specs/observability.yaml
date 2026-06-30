@@ -226,3 +226,70 @@ customer-identification:
 
   latency_budget: { max_p95_ms: 600, max_p99_ms: 1200 }
   error_budget: { max_error_rate_pct: 2.0 }
+
+# =====================================================================
+# prospection — B2B outreach to NON_PARTNER listings (ADR-0020)
+# The prospection-acl worker reads the COMPUTED score from View_ProspectionPipeline, applies the
+# schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact to record the fact.
+# The score is a read-model projection — never an input or an emitted event.
+# =====================================================================
+prospection:
+  feature: prospection
+  criticality: medium
+  workflow:
+    aggregate: { $ref: 'actors.yaml#/Prospect' }
+    command: { $ref: 'commands.yaml#/RecordProspectContact' }
+    emits:
+      - { $ref: 'events.yaml#/ProspectContacted' }
+
+  run_identity:
+    - { name: correlation_id, source: "command.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: restaurant_id, source: "domain.aggregate_id", businessKey: { $ref: 'scalars.yaml#/RestaurantId' }, required: true }
+
+  spans:
+    - name: "pipeline.read"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.score", type: int, required: true }
+    - name: "outreach.dispatch"
+      kind: CLIENT
+      required: true
+      attributes:
+        - { key: "messaging.system", type: string, required: true }
+        - { key: "business.channel", type: string, required: true }
+        - { key: "business.sequence_step", type: int, required: true }
+    - name: "command.receive"
+      kind: SERVER
+      required: true
+      attributes:
+        - { key: "business.command_type", type: string, required: true }
+    - name: "event.store.append"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+    - name: "event.publish"
+      kind: PRODUCER
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+
+  metrics:
+    - { name: "prospect_contact_duration_ms", type: histogram, attributes: ["channel"] }
+  business_metrics:
+    - { name: "prospect_contacts_sent_total", type: counter, attributes: ["channel", "sequence_step"] }
+    - { name: "prospects_converted_total", type: counter, attributes: ["source"] }
+    - { name: "prospects_cold_total", type: counter, attributes: ["reason"] }
+
+  status_rules:
+    success:
+      required_spans: ["pipeline.read", "outreach.dispatch", "event.store.append", "event.publish"]
+    business_rejected:
+      conditions: ["command.receive.business.command_type == 'RecordProspectContact' && error.type == 'ProspectContactLimitReached'"]
+    technical_error:
+      any_span_errors: true
+
+  latency_budget: { max_p95_ms: 2000, max_p99_ms: 5000 }
+  error_budget: { max_error_rate_pct: 5.0 }

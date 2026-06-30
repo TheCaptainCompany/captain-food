@@ -213,6 +213,16 @@ types:
       riderId: { $ref: 'scalars.yaml#/RiderId' }
       displayName: { type: string }
       phone: { $ref: 'scalars.yaml#/PhoneNumber', nullable: true }
+  Prospect:
+    description: "A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline)."
+    reads: [{ $ref: 'views.yaml#/View_ProspectionPipeline' }]
+    properties:
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      score: { $ref: 'scalars.yaml#/ProspectionScore' }
+      pipelineStatus: { $ref: 'scalars.yaml#/ProspectPipelineStatus' }
+      contactsCount: { type: integer }
+      lastContactedAt: { type: string, format: date-time, nullable: true }
+      repliedAt: { type: string, format: date-time, nullable: true }
 
 # --- Reads (queries) ------------------------------------------------------------------------------
 # A query declares only its args, return type (`$ref` into `#/types`), roles and slice. `@reads` is
@@ -336,6 +346,15 @@ queries:
     roles: [ADMIN, RESTAURANT_ACCOUNT]
     slice: V1
 
+  prospectionPipeline:
+    description: "B2B prospection pipeline (admin): scored prospects, optionally filtered by minimum score / pipeline status."
+    args:
+      minScore: { $ref: 'scalars.yaml#/ProspectionScore' }
+      status: { $ref: 'scalars.yaml#/ProspectPipelineStatus' }
+    returns: { $ref: '#/types/Prospect', array: true }
+    roles: [ADMIN]
+    slice: V1
+
 
 
 
@@ -443,6 +462,23 @@ mutations:
   verifyGbpOrderLink:
     command: { $ref: 'commands.yaml#/VerifyGoogleBusinessProfileOrderLink' }
     roles: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]
+    slice: V1
+    payload: {}
+
+  # --- Prospection (ADR-0020); contact/cold issued by the prospection-acl worker (EXTERNAL) ---
+  recordProspectContact:
+    command: { $ref: 'commands.yaml#/RecordProspectContact' }
+    roles: [EXTERNAL, ADMIN]
+    slice: V1
+    payload: {}
+  markProspectCold:
+    command: { $ref: 'commands.yaml#/MarkProspectCold' }
+    roles: [EXTERNAL, ADMIN]
+    slice: V1
+    payload: {}
+  recordProspectReply:
+    command: { $ref: 'commands.yaml#/RecordProspectReply' }
+    roles: [ADMIN, EXTERNAL]
     slice: V1
     payload: {}
 

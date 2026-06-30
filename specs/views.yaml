@@ -200,6 +200,59 @@ View_Restaurant:
         - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified' }
       note: "Row write time, stamped on each event."
 
+View_ProspectionPipeline:
+  aggregate: Prospect
+  slice: V1
+  note: "B2B prospection pipeline (ADR-0020): one row per worked listing, with the COMPUTED score and outreach state. Read by the admin prospectionPipeline query."
+  fedBy:
+    - { $ref: 'events.yaml#/RestaurantRegistered' }
+    - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated' }
+    - { $ref: 'events.yaml#/RestaurantListingStatusChanged' }
+    - { $ref: 'events.yaml#/ProspectContacted' }
+    - { $ref: 'events.yaml#/ProspectMarkedCold' }
+    - { $ref: 'events.yaml#/ProspectReplied' }
+  filters:
+    - "Rows for NON_PARTNER / PASSIVE_PARTNER listings (active prospects); CONVERTED once ACTIVE_PARTNER."
+  rules:
+    - "`score` (0–10) is COMPUTED by the projection from listing facts, NEVER stored in an event: food-truck NAF 56.10C +3, Google rating ≥4.0 +2, reviews <20 +2, created <12mo +2, no website +1, already on Uber/Deliveroo −2, national franchise −3; clamped to 0–10."
+    - "Inputs not yet captured as fields (Sirene creation date, on-aggregator, national franchise) are best-effort/V1; the formula degrades gracefully to the available signals."
+    - "`pipeline_status` is derived: NEW (no contact) → CONTACTED → COLD (ProspectMarkedCold) / REPLIED (ProspectReplied); CONVERTED when RestaurantListingStatusChanged reaches ACTIVE_PARTNER."
+  columns:
+    restaurant_id:
+      from: [{ $ref: 'events.yaml#/RestaurantRegistered/properties/restaurantId' }]
+      pk: true
+      fk: { $ref: '#/View_Restaurant/columns/restaurant_id' }
+    score:
+      type: { $ref: 'scalars.yaml#/ProspectionScore' }
+      from:
+        - { $ref: 'events.yaml#/RestaurantRegistered/properties/externalIdentifiers' }
+        - { $ref: 'events.yaml#/RestaurantRegistered/properties/website' }
+        - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/rating' }
+        - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/reviewsCount' }
+      index: true
+      note: "Derived (see rules); not an event field."
+    pipeline_status:
+      type: { $ref: 'scalars.yaml#/ProspectPipelineStatus' }
+      from:
+        - { $ref: 'events.yaml#/ProspectContacted' }
+        - { $ref: 'events.yaml#/ProspectMarkedCold' }
+        - { $ref: 'events.yaml#/ProspectReplied' }
+        - { $ref: 'events.yaml#/RestaurantListingStatusChanged' }
+      index: true
+      note: "Derived from the prospect events + listingStatus (see rules)."
+    contacts_count:
+      type: integer
+      from: [{ $ref: 'events.yaml#/ProspectContacted' }]
+      note: "Count of ProspectContacted; drives the anti-spam ≤3 rule."
+    last_contacted_at:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/ProspectContacted' }]
+      nullable: true
+    replied_at:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/ProspectReplied' }]
+      nullable: true
+
 # Events deliberately NOT projected into any View_* — transient / saga-internal facts whose data is
 # returned synchronously via the mutation payload, never read through a projection.
 nonProjectedEvents:

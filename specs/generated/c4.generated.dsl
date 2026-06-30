@@ -11,6 +11,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
         group "restaurant" {
           a_RestaurantAccount = component "RestaurantAccount" "Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)." "Aggregate"
           a_Restaurant = component "Restaurant" "Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)." "Aggregate"
+          a_Prospect = component "Prospect" "Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)." "Aggregate"
         }
         group "catalog" {
           a_Catalog = component "Catalog" "Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import." "Aggregate"
@@ -40,6 +41,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
           c_stripe_adapter = component "stripe-adapter" "Creates PaymentIntents / refunds; records inbound webhook facts (PaymentCaptured/Failed/Refunded)." "Instrumented"
           c_supabase_acl = component "supabase-acl" "Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates." "Instrumented"
           c_sirene_google_acl = component "sirene-google-acl" "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate." "Instrumented"
+          c_prospection_acl = component "prospection-acl" "B2B prospection worker (ADR-0020): reads the COMPUTED score from View_ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back." "Instrumented"
         }
       }
       ct_event_store = container "event-store" "Append-only domain_events table (the write model / source of truth at runtime)." "Managed PostgreSQL (e.g. Supabase)"
@@ -54,6 +56,9 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     x_supabase_auth = softwareSystem "supabase-auth" "Passwordless OTP identity for customers (not a domain concern)." "External"
     x_sirene = softwareSystem "sirene" "INSEE Sirene / Recherche d'Entreprises (Etalab open data): SIRET, name, address, NAF, active/closed. Seeds listings via the ACL." "External"
     x_google_maps = softwareSystem "google-maps" "Google Maps Places / Business Profile: rating, reviews, hours, phone, website, place id, and the 'Order online' link (ADR-0021). Enrichment + ownership proof." "External"
+    x_hubspot = softwareSystem "hubspot" "CRM for B2B prospection leads (ADR-0020); post-V0." "External"
+    x_resend = softwareSystem "resend" "Transactional email for prospection outreach sequences (ADR-0020); post-V0." "External"
+    x_slack = softwareSystem "slack" "Ops/prospection alerts (active-partner closures, sequence events); post-V0." "External"
 
     ct_web_client -> ct_api "GraphQL over HTTPS (/customer/graphql, /public/graphql)"
     ct_web_restaurant -> ct_api "GraphQL (/restaurant-account/graphql, /restaurant/graphql)"
@@ -69,8 +74,11 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     ct_api -> x_delivery_partner "Dispatch + status (post-V0; inbound facts)"
     ct_sync_worker -> x_sirene "Poll establishments (SIRET/NAF/address/closures)"
     ct_sync_worker -> x_google_maps "Fetch Business Profile data (rating/reviews/hours/website)"
-    ct_sync_worker -> ct_api "Register/enrich/close listings via the ACL, as the owner (/external/graphql)"
+    ct_sync_worker -> ct_api "Register/enrich/close listings + record prospect contacts via the ACL (/external/graphql)"
     ct_api -> x_google_maps "Verify restaurant ownership (GBP) for claim/opt-out"
+    ct_sync_worker -> x_hubspot "Create/update prospection leads (ADR-0020)"
+    ct_sync_worker -> x_resend "Send prospection outreach emails (ADR-0020)"
+    ct_sync_worker -> x_slack "Prospection / ops alerts (ADR-0020)"
     ct_bam -> ct_event_store "Consume the event stream for business metrics"
     ct_api -> ct_otel_collector "Export traces/metrics/logs (OTLP)"
     ct_bam -> ct_otel_collector "Export traces/metrics/logs (OTLP)"

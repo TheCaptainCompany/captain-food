@@ -115,6 +115,23 @@ ExternalIdentifier:
       maxLength: 255
   required: [key, value]
 
+Prospect:
+  type: object
+  description: >
+    Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020).
+    Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the
+    View_ProspectionPipeline projection, never stored. This holds only the outreach state.
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    pipelineStatus:
+      $ref: 'scalars.yaml#/ProspectPipelineStatus'
+    lastContactedAt:
+      type: string
+      format: date-time
+      nullable: true
+  required: [restaurantId, pipelineStatus]
+
 CustomerContact:
   type: object
   properties:

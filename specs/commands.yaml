@@ -368,6 +368,48 @@ VerifyGoogleBusinessProfileOrderLink:
       $ref: 'scalars.yaml#/RestaurantId'
   required: [restaurantId]
 
+# --- Prospection (ADR-0020). Issued by the prospection-acl worker (it reads the pipeline score +
+#     schedule, fires HubSpot/Resend/Slack, then records the fact). The score is never an input. ---
+
+RecordProspectContact:
+  description: >
+    Record a B2B outreach contact to a prospect. The worker decides WHO/WHEN from the read-model score +
+    schedule; this just records the fact. First contact is the prospect's birth. Anti-spam invariants apply.
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    channel:
+      $ref: 'scalars.yaml#/OutreachChannel'
+    sequenceStep:
+      type: integer
+      minimum: 0
+  required: [restaurantId, channel, sequenceStep]
+
+MarkProspectCold:
+  description: "Mark a prospect cold (no reply by J+21); stops the outreach sequence."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [restaurantId]
+
+RecordProspectReply:
+  description: "Record that a prospect replied (CRM/admin or inbound), stopping the sequence."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    note:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [restaurantId]
+
 # =====================================================================
 # 2. Publish the catalog  (persona: admin)  — story-map activity 2
 # =====================================================================

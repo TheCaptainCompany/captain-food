@@ -66,6 +66,7 @@ scalar OrderNote
 scalar StarRating
 scalar RatingComment
 scalar TimeOfDay
+scalar ProspectionScore
 
 # ==============================================================================
 # Enums
@@ -119,6 +120,20 @@ enum GbpLinkStatus {
   CONFIGURED
   VERIFIED
   BROKEN
+}
+
+enum ProspectPipelineStatus {
+  NEW
+  CONTACTED
+  COLD
+  REPLIED
+  CONVERTED
+}
+
+enum OutreachChannel {
+  EMAIL
+  SLACK
+  PHONE
 }
 
 enum CartStatus {
@@ -305,6 +320,7 @@ type Restaurant {
   timezone: TimeZone
   preparationTimeMinutes: Int
   updatedAt: DateTime!
+  prospects: [Prospect!]!
   catalogs: [Catalog!]!
   carts: [Cart!]!
   orders: [Order!]!
@@ -436,6 +452,16 @@ type Rider {
   riderId: RiderId!
   displayName: String!
   phone: PhoneNumber
+}
+
+type Prospect {
+  restaurantId: RestaurantId!
+  score: ProspectionScore!
+  pipelineStatus: ProspectPipelineStatus!
+  contactsCount: Int!
+  lastContactedAt: DateTime
+  repliedAt: DateTime
+  restaurant: Restaurant!
 }
 
 # ==============================================================================
@@ -570,6 +596,22 @@ input ConfigureGoogleBusinessProfileOrderLinkInput {
 
 input VerifyGoogleBusinessProfileOrderLinkInput {
   restaurantId: RestaurantId!
+}
+
+input RecordProspectContactInput {
+  restaurantId: RestaurantId!
+  channel: OutreachChannel!
+  sequenceStep: Int!
+}
+
+input MarkProspectColdInput {
+  restaurantId: RestaurantId!
+  reason: String
+}
+
+input RecordProspectReplyInput {
+  restaurantId: RestaurantId!
+  note: String
 }
 
 input CreateCatalogInput {
@@ -872,6 +914,11 @@ input RestaurantLocationsByAccountQueryInput {
   accountId: RestaurantAccountId!
 }
 
+input ProspectionPipelineQueryInput {
+  minScore: ProspectionScore
+  status: ProspectPipelineStatus
+}
+
 input OperationStatusChangedSubscriptionInput {
   correlationId: CorrelationId!
 }
@@ -1075,6 +1122,18 @@ type VerifyGbpOrderLinkPayload {
   correlationId: CorrelationId!
 }
 
+type RecordProspectContactPayload {
+  correlationId: CorrelationId!
+}
+
+type MarkProspectColdPayload {
+  correlationId: CorrelationId!
+}
+
+type RecordProspectReplyPayload {
+  correlationId: CorrelationId!
+}
+
 type CreateCatalogPayload {
   correlationId: CorrelationId!
 }
@@ -1248,6 +1307,7 @@ type Query {
   orders(input: OrdersQueryInput): [Order!]! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_OrderTracking"])
   order(input: OrderQueryInput!): Order @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_OrderTracking"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["View_Restaurant"])
+  prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["View_ProspectionPipeline"])
 }
 
 # ==============================================================================
@@ -1273,6 +1333,9 @@ type Mutation {
   changeRestaurantListingStatus(input: ChangeRestaurantListingStatusInput!): ChangeRestaurantListingStatusPayload! @auth(requires: [ADMIN]) @command(name: "ChangeRestaurantListingStatus")
   configureGbpOrderLink(input: ConfigureGoogleBusinessProfileOrderLinkInput!): ConfigureGbpOrderLinkPayload! @auth(requires: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]) @command(name: "ConfigureGoogleBusinessProfileOrderLink")
   verifyGbpOrderLink(input: VerifyGoogleBusinessProfileOrderLinkInput!): VerifyGbpOrderLinkPayload! @auth(requires: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]) @command(name: "VerifyGoogleBusinessProfileOrderLink")
+  recordProspectContact(input: RecordProspectContactInput!): RecordProspectContactPayload! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RecordProspectContact")
+  markProspectCold(input: MarkProspectColdInput!): MarkProspectColdPayload! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkProspectCold")
+  recordProspectReply(input: RecordProspectReplyInput!): RecordProspectReplyPayload! @auth(requires: [ADMIN, EXTERNAL]) @command(name: "RecordProspectReply")
   createCatalog(input: CreateCatalogInput!): CreateCatalogPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "CreateCatalog")
   addProduct(input: AddProductInput!): AddProductPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddProduct")
   updateProduct(input: UpdateProductInput!): UpdateProductPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateProduct")

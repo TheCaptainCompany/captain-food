@@ -116,6 +116,23 @@ fixtures:
     type: { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified' }
     data: { restaurantId: "resto-1", status: "VERIFIED" }
 
+  # --- Prospection ---
+  prospectContacted:
+    type: { $ref: 'events.yaml#/ProspectContacted' }
+    data: { restaurantId: "resto-2", channel: "EMAIL", sequenceStep: 0 }
+  prospectContactedRelance:
+    type: { $ref: 'events.yaml#/ProspectContacted' }
+    data: { restaurantId: "resto-2", channel: "EMAIL", sequenceStep: 7 }
+  prospectContactedFinal:
+    type: { $ref: 'events.yaml#/ProspectContacted' }
+    data: { restaurantId: "resto-2", channel: "SLACK", sequenceStep: 21 }
+  prospectMarkedCold:
+    type: { $ref: 'events.yaml#/ProspectMarkedCold' }
+    data: { restaurantId: "resto-2", reason: "No reply by J+21" }
+  prospectReplied:
+    type: { $ref: 'events.yaml#/ProspectReplied' }
+    data: { restaurantId: "resto-2", note: "Interested — call back" }
+
   # --- Catalog ---
   catalogCreated:
     type: { $ref: 'events.yaml#/CatalogCreated' }
@@ -557,6 +574,68 @@ tests:
       data: { restaurantId: "resto-1" }
     thrown:
       - { $ref: 'errors.yaml#/GbpOrderLinkNotConfigured' }
+
+  # ------------------------- Prospection -----------------------------
+  TestProspectContacted:
+    name: "Records the first prospection contact (prospect is born)"
+    actor: { $ref: 'actors.yaml#/Prospect' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RecordProspectContact' }
+      data: { restaurantId: "resto-2", channel: "EMAIL", sequenceStep: 0 }
+    then:
+      - { $ref: '#/fixtures/prospectContacted' }
+  TestProspectContactedTooRecently:
+    name: "Rejects a new contact too soon after the previous one (≥7 days apart)"
+    actor: { $ref: 'actors.yaml#/Prospect' }
+    given:
+      - { $ref: '#/fixtures/prospectContacted' }
+    when:
+      type: { $ref: 'commands.yaml#/RecordProspectContact' }
+      data: { restaurantId: "resto-2", channel: "EMAIL", sequenceStep: 7 }
+    thrown:
+      - { $ref: 'errors.yaml#/ProspectContactedTooRecently' }
+  TestProspectContactLimitReached:
+    name: "Rejects a 4th contact (anti-spam: ≤ 3)"
+    actor: { $ref: 'actors.yaml#/Prospect' }
+    given:
+      - { $ref: '#/fixtures/prospectContacted' }
+      - { $ref: '#/fixtures/prospectContactedRelance' }
+      - { $ref: '#/fixtures/prospectContactedFinal' }
+    when:
+      type: { $ref: 'commands.yaml#/RecordProspectContact' }
+      data: { restaurantId: "resto-2", channel: "EMAIL", sequenceStep: 28 }
+    thrown:
+      - { $ref: 'errors.yaml#/ProspectContactLimitReached' }
+  TestProspectMarkedCold:
+    name: "Marks a contacted prospect cold"
+    actor: { $ref: 'actors.yaml#/Prospect' }
+    given:
+      - { $ref: '#/fixtures/prospectContacted' }
+    when:
+      type: { $ref: 'commands.yaml#/MarkProspectCold' }
+      data: { restaurantId: "resto-2", reason: "No reply by J+21" }
+    then:
+      - { $ref: '#/fixtures/prospectMarkedCold' }
+  TestProspectReplied:
+    name: "Records a prospect reply"
+    actor: { $ref: 'actors.yaml#/Prospect' }
+    given:
+      - { $ref: '#/fixtures/prospectContacted' }
+    when:
+      type: { $ref: 'commands.yaml#/RecordProspectReply' }
+      data: { restaurantId: "resto-2", note: "Interested — call back" }
+    then:
+      - { $ref: '#/fixtures/prospectReplied' }
+  TestProspectMarkColdNotFound:
+    name: "Rejects marking cold a prospect that was never contacted"
+    actor: { $ref: 'actors.yaml#/Prospect' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/MarkProspectCold' }
+      data: { restaurantId: "resto-2", reason: "n/a" }
+    thrown:
+      - { $ref: 'errors.yaml#/ProspectNotFound' }
 
   # --------------------------- Catalog -------------------------------
   TestCatalogCreated:

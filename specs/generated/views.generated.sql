@@ -38,6 +38,17 @@ CREATE TABLE View_Restaurant (
 CREATE INDEX ON View_Restaurant (restaurant_account_id);
 CREATE INDEX ON View_Restaurant (listing_status);
 
+CREATE TABLE View_ProspectionPipeline (
+  restaurant_id UUID PRIMARY KEY,
+  score INTEGER NOT NULL,
+  pipeline_status TEXT NOT NULL,
+  contacts_count INTEGER NOT NULL,
+  last_contacted_at TIMESTAMPTZ,
+  replied_at TIMESTAMPTZ
+);
+CREATE INDEX ON View_ProspectionPipeline (score);
+CREATE INDEX ON View_ProspectionPipeline (pipeline_status);
+
 CREATE TABLE View_Customer (
   customer_id UUID PRIMARY KEY,
   phone TEXT NOT NULL UNIQUE,

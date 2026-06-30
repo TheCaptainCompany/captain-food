@@ -73,8 +73,8 @@ events. Sirene is **polled**, not pushed (no webhook); freshness is bounded by t
 
 ## 7. Gaps / deferred
 
-- **Prospection scoring + B2B outreach** (HubSpot/Resend/Slack sequences) is a **separate later step**;
-  when built, the score is a **read-model projection** over the listing events, never stored in an event.
-- **Observability contract** for the sync workflow lands with that step.
+- **Prospection scoring + B2B outreach** is now modelled (ADR-0020): the score is a **read-model
+  projection** (`View_ProspectionPipeline`), outreach is the `Prospect` aggregate + `prospection-acl`
+  worker, with a `prospection` observability contract. The sync seeds the listings it scores.
 - INSEE **Sirene API** (keyed) is an alternative source if the open API's freshness/limits become a
   constraint; the mapping above is unchanged.
