@@ -68,15 +68,42 @@ View_Restaurant:
     - { $ref: 'events.yaml#/RestaurantDeactivated' }
     - { $ref: 'events.yaml#/RestaurantAcceptanceModeChanged' }
     - { $ref: 'events.yaml#/RestaurantRemoved' }
+    - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated' }
+    - { $ref: 'events.yaml#/RestaurantListingClaimed' }
+    - { $ref: 'events.yaml#/RestaurantListingOptedOut' }
+    - { $ref: 'events.yaml#/RestaurantMarkedClosed' }
+    - { $ref: 'events.yaml#/RestaurantListingStatusChanged' }
+    - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkConfigured' }
+    - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified' }
     - { $ref: 'events.yaml#/RestaurantAccountRegistered' }   # folds the account's default_currency onto its locations
   columns:
     restaurant_id:
       from: [{ $ref: 'events.yaml#/RestaurantRegistered/properties/restaurantId' }]
       pk: true
     restaurant_account_id:
-      from: [{ $ref: 'events.yaml#/RestaurantRegistered/properties/accountId' }]
+      from:
+        - { $ref: 'events.yaml#/RestaurantRegistered/properties/accountId' }
+        - { $ref: 'events.yaml#/RestaurantListingClaimed/properties/accountId' }
       index: true
+      nullable: true
       fk: { $ref: '#/View_RestaurantAccount/columns/restaurant_account_id' }
+      note: "NULL for a non-partner public listing; set on claim/conversion."
+    listing_status:
+      type: { $ref: 'scalars.yaml#/RestaurantListingStatus' }
+      from:
+        - { $ref: 'events.yaml#/RestaurantRegistered/properties/listingStatus' }
+        - { $ref: 'events.yaml#/RestaurantListingStatusChanged/properties/listingStatus' }
+      index: true
+    external_identifiers:
+      type: jsonb
+      from: [{ $ref: 'events.yaml#/RestaurantRegistered/properties/externalIdentifiers' }]
+      nullable: true
+      note: "Source-agnostic [{key,value}] (siret/naf/google_place_id…); not unique."
+    google_place_id:
+      from:
+        - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/googlePlaceId' }
+      type: { $ref: 'scalars.yaml#/GooglePlaceId' }
+      nullable: true
     slug:
       from: [{ $ref: 'events.yaml#/RestaurantRegistered/properties/slug' }]
       unique: true
@@ -90,7 +117,32 @@ View_Restaurant:
       note: "⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet."
     tags:
       type: jsonb
-      note: "⚠️ HOLE: no event carries restaurant tags — nothing populates this column yet."
+      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/tags' }]
+      nullable: true
+      note: "Cuisine/attribute tags, sourced from Google Business Profile enrichment."
+    rating:
+      type: { $ref: 'scalars.yaml#/GoogleRating' }
+      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/rating' }]
+      nullable: true
+    reviews_count:
+      type: integer
+      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/reviewsCount' }]
+      nullable: true
+    website:
+      type: { $ref: 'scalars.yaml#/WebUrl' }
+      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/website' }]
+      nullable: true
+    phone:
+      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/phone' }]
+      nullable: true
+    gbp_order_url:
+      type: { $ref: 'scalars.yaml#/WebUrl' }
+      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkConfigured/properties/gbpOrderUrl' }]
+      nullable: true
+    gbp_link_status:
+      type: { $ref: 'scalars.yaml#/GbpLinkStatus' }
+      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified/properties/status' }]
+      nullable: true
     address:
       from:
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/address' }
@@ -106,7 +158,8 @@ View_Restaurant:
         - { $ref: 'events.yaml#/RestaurantActivated' }
         - { $ref: 'events.yaml#/RestaurantDeactivated' }
         - { $ref: 'events.yaml#/RestaurantRemoved' }
-      note: "Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation."
+        - { $ref: 'events.yaml#/RestaurantMarkedClosed' }
+      note: "Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure."
     order_acceptance:
       from: [{ $ref: 'events.yaml#/RestaurantAcceptanceModeChanged/properties/mode' }]
     default_currency:
@@ -130,6 +183,13 @@ View_Restaurant:
         - { $ref: 'events.yaml#/RestaurantActivated' }
         - { $ref: 'events.yaml#/RestaurantDeactivated' }
         - { $ref: 'events.yaml#/RestaurantAcceptanceModeChanged' }
+        - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated' }
+        - { $ref: 'events.yaml#/RestaurantListingClaimed' }
+        - { $ref: 'events.yaml#/RestaurantListingOptedOut' }
+        - { $ref: 'events.yaml#/RestaurantMarkedClosed' }
+        - { $ref: 'events.yaml#/RestaurantListingStatusChanged' }
+        - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkConfigured' }
+        - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified' }
       note: "Row write time, stamped on each event."
 
 # Events deliberately NOT projected into any View_* — transient / saga-internal facts whose data is

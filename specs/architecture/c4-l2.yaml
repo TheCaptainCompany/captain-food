@@ -88,6 +88,9 @@ containers:
   read-models:
     technology: "Managed PostgreSQL"
     description: "Denormalized View_* projection tables fed from the event log; queries read here, never domain_events."
+  sync-worker:
+    technology: "Scheduled worker (GitHub Actions cron + Node)"
+    description: "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls the api's RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner. Prospection scoring/outreach is a later step."
   bam:
     technology: "Projection worker"
     description: "Business Activity Monitoring projector — consumes the same event stream to answer business questions."
@@ -101,6 +104,8 @@ externalSystems:
   hubrise: { description: "Existing restaurant catalog/orders systems; import via the Anti-Corruption Layer." }
   delivery-partner: { description: "Delivery partner (e.g. Avelo37); post-V0." }
   supabase-auth: { description: "Passwordless OTP identity for customers (not a domain concern)." }
+  sirene: { description: "INSEE Sirene / Recherche d'Entreprises (Etalab open data): SIRET, name, address, NAF, active/closed. Seeds listings via the ACL." }
+  google-maps: { description: "Google Maps Places / Business Profile: rating, reviews, hours, phone, website, place id, and the 'Order online' link (ADR-0021). Enrichment + ownership proof." }
 
 # --- Key relationships (integrations that MUST appear in the views) ---
 relationships:
@@ -116,6 +121,10 @@ relationships:
   - { from: api, to: hubrise, description: "Import catalog / sync inventory via ACL (inbound facts)" }
   - { from: api, to: supabase-auth, description: "OTP verify / session (out of domain)" }
   - { from: api, to: delivery-partner, description: "Dispatch + status (post-V0; inbound facts)" }
+  - { from: sync-worker, to: sirene, description: "Poll establishments (SIRET/NAF/address/closures)" }
+  - { from: sync-worker, to: google-maps, description: "Fetch Business Profile data (rating/reviews/hours/website)" }
+  - { from: sync-worker, to: api, description: "Register/enrich/close listings via the ACL, as the owner (/external/graphql)" }
+  - { from: api, to: google-maps, description: "Verify restaurant ownership (GBP) for claim/opt-out" }
   - { from: bam, to: event-store, description: "Consume the event stream for business metrics" }
   - { from: api, to: otel-collector, description: "Export traces/metrics/logs (OTLP)" }
   - { from: bam, to: otel-collector, description: "Export traces/metrics/logs (OTLP)" }

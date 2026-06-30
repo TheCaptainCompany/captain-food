@@ -82,16 +82,26 @@ RestaurantAccountDeleted:
     - restaurantAccountId
 
 RestaurantRegistered:
-  description: "A restaurant location has been registered under an account."
+  description: >
+    A restaurant location has been registered. Covers every path: an owner/admin onboarding a partner
+    location (with accountId), or the Sirene/Google sync ACL seeding a public NON_PARTNER listing
+    (no accountId). The listingStatus and externalIdentifiers distinguish them.
   type: object
   properties:
     restaurantId:
       $ref: 'scalars.yaml#/RestaurantId'
     accountId:
       $ref: 'scalars.yaml#/RestaurantAccountId'
+      nullable: true
+    listingStatus:
+      $ref: 'scalars.yaml#/RestaurantListingStatus'
     ref:
       $ref: 'scalars.yaml#/ExternalReference'
       nullable: true
+    externalIdentifiers:
+      type: array
+      items:
+        $ref: 'entities.yaml#/ExternalIdentifier'
     slug:
       $ref: 'scalars.yaml#/Slug'
     displayName:
@@ -116,7 +126,7 @@ RestaurantRegistered:
       $ref: 'scalars.yaml#/UserId'
   required:
     - restaurantId
-    - accountId
+    - listingStatus
     - slug
     - displayName
     - address
@@ -211,6 +221,128 @@ RestaurantRemoved:
   required:
     - restaurantId
     - accountId
+
+RestaurantGoogleBusinessProfileUpdated:
+  description: >
+    The restaurant's Google Business Profile data was observed/refreshed (enrichment). A business fact
+    recorded via the Sirene/Google ACL; carries the FULL latest GBP snapshot (replace semantics).
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    googlePlaceId:
+      $ref: 'scalars.yaml#/GooglePlaceId'
+      nullable: true
+    rating:
+      $ref: 'scalars.yaml#/GoogleRating'
+      nullable: true
+    reviewsCount:
+      type: integer
+      minimum: 0
+      nullable: true
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+      nullable: true
+    openingHours:
+      type: array
+      items:
+        $ref: 'entities.yaml#/OpeningHoursSlot'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+      nullable: true
+  required:
+    - restaurantId
+
+RestaurantListingClaimed:
+  description: "An owner proved ownership of the listing (Google Business Profile verification) and claimed it."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    accountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+      nullable: true
+    claimedBy:
+      $ref: 'scalars.yaml#/UserId'
+    proof:
+      type: string
+      maxLength: 255
+      description: "Reference to the accepted Google ownership proof (audit; the token itself is not stored)."
+  required:
+    - restaurantId
+    - claimedBy
+
+RestaurantListingOptedOut:
+  description: "An owner asked to edit/remove their public listing (opt-out), proven via GBP ownership."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
+RestaurantMarkedClosed:
+  description: "The establishment was reported closed (e.g. Sirene closure); recorded via the sync ACL."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+
+RestaurantListingStatusChanged:
+  description: "The partnership funnel status changed (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    listingStatus:
+      $ref: 'scalars.yaml#/RestaurantListingStatus'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required:
+    - restaurantId
+    - listingStatus
+
+RestaurantGoogleBusinessProfileOrderLinkConfigured:
+  description: "The restaurant's GBP 'Order online' link was set to its {slug}.captain.food page (ADR-0021; V1)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    gbpOrderUrl:
+      $ref: 'scalars.yaml#/WebUrl'
+  required:
+    - restaurantId
+    - gbpOrderUrl
+
+RestaurantGoogleBusinessProfileOrderLinkVerified:
+  description: "The configured GBP 'Order online' link was pinged and its live status recorded (ADR-0021; V1)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    status:
+      $ref: 'scalars.yaml#/GbpLinkStatus'
+  required:
+    - restaurantId
+    - status
 
 # =====================================================================
 # Catalog (Catalog / CatalogCategory / Product / Offer / OptionList)

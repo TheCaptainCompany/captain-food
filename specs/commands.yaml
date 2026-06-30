@@ -112,15 +112,23 @@ DeleteRestaurantAccount:
   required: [restaurantAccountId]
 
 RegisterRestaurant:
-  description: "Admin onboards a new restaurant LOCATION under an existing account (starts in DRAFT)."
+  description: >
+    The single, generic way to register a restaurant LOCATION. Used by an owner/admin onboarding a partner
+    location (accountId set), AND by the Sirene/Google sync ACL seeding a public listing as if it were the
+    owner (no accountId, listingStatus NON_PARTNER, externalIdentifiers from the source). Starts in DRAFT.
   type: object
   properties:
     restaurantId:
       $ref: 'scalars.yaml#/RestaurantId'
-      description: "Client-generated id for the new location."
+      description: "Client/ACL-generated id for the new location."
     accountId:
       $ref: 'scalars.yaml#/RestaurantAccountId'
-      description: "The owning account (must already exist)."
+      nullable: true
+      description: "The owning account (must already exist) — omitted for a non-partner public listing."
+    listingStatus:
+      $ref: 'scalars.yaml#/RestaurantListingStatus'
+      nullable: true
+      description: "Partnership funnel; defaults to NON_PARTNER when omitted (e.g. sync-seeded listing)."
     slug:
       $ref: 'scalars.yaml#/Slug'
     displayName:
@@ -143,11 +151,16 @@ RegisterRestaurant:
       type: array
       items:
         $ref: 'entities.yaml#/OpeningHoursSlot'
+    externalIdentifiers:
+      type: array
+      items:
+        $ref: 'entities.yaml#/ExternalIdentifier'
+      description: "Source-agnostic identifiers preserving original keys (siret/naf/google_place_id…). Not unique."
     ref:
       $ref: 'scalars.yaml#/ExternalReference'
       nullable: true
       description: "Set only when seeded from an external source (e.g. HubRise location)."
-  required: [restaurantId, accountId, slug, displayName, address]
+  required: [restaurantId, slug, displayName, address]
 
 ActivateRestaurant:
   description: "Admin makes a restaurant visible and orderable by customers."
@@ -228,6 +241,124 @@ ChangeOrderAcceptanceMode:
     mode:
       $ref: 'scalars.yaml#/OrderAcceptanceMode'
   required: [restaurantId, mode]
+
+# --- Restaurant listing & pre-registration (ADR-0019/0021). The Sirene/Google sync is an ACL that
+#     issues RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the
+#     owner — no dedicated "pre-register" command. ---
+
+UpdateRestaurantGoogleBusinessProfile:
+  description: >
+    Record the restaurant's latest Google Business Profile data (rating, reviews, hours, website, phone,
+    place id, tags). Issued by the Sirene/Google sync ACL (or admin); full-replace snapshot.
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    googlePlaceId:
+      $ref: 'scalars.yaml#/GooglePlaceId'
+      nullable: true
+    rating:
+      $ref: 'scalars.yaml#/GoogleRating'
+      nullable: true
+    reviewsCount:
+      type: integer
+      minimum: 0
+      nullable: true
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+      nullable: true
+    openingHours:
+      type: array
+      items:
+        $ref: 'entities.yaml#/OpeningHoursSlot'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+      nullable: true
+  required: [restaurantId]
+
+MarkRestaurantClosed:
+  description: "Record that the establishment is closed (e.g. Sirene closure); issued by the sync ACL or admin."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [restaurantId]
+
+ClaimRestaurantListing:
+  description: >
+    An owner claims a public listing. Ownership is proven by verifying the restaurant's Google Business
+    Profile (delegated to Google as a start); the backend validates the proof server-side before accepting.
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    accountId:
+      $ref: 'scalars.yaml#/RestaurantAccountId'
+      nullable: true
+      description: "Account to attach the claimed listing to, when the claimant already has one."
+    googleOwnershipProof:
+      type: string
+      maxLength: 4096
+      description: "Opaque Google Business Profile ownership proof/token, verified server-side."
+  required: [restaurantId, googleOwnershipProof]
+
+OptOutRestaurantListing:
+  description: "An owner opts a public listing out (edit/remove), proven via Google Business Profile ownership."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    googleOwnershipProof:
+      type: string
+      maxLength: 4096
+      description: "Opaque Google Business Profile ownership proof/token, verified server-side."
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [restaurantId, googleOwnershipProof]
+
+ChangeRestaurantListingStatus:
+  description: "Admin moves a listing along the partnership funnel (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    listingStatus:
+      $ref: 'scalars.yaml#/RestaurantListingStatus'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [restaurantId, listingStatus]
+
+ConfigureGoogleBusinessProfileOrderLink:
+  description: "Restaurant/admin sets the GBP 'Order online' link to its {slug}.captain.food page (ADR-0021; V1)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    gbpOrderUrl:
+      $ref: 'scalars.yaml#/WebUrl'
+  required: [restaurantId, gbpOrderUrl]
+
+VerifyGoogleBusinessProfileOrderLink:
+  description: "Ping the configured GBP 'Order online' link and record whether it is live (ADR-0021; V1)."
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+  required: [restaurantId]
 
 # =====================================================================
 # 2. Publish the catalog  (persona: admin)  — story-map activity 2

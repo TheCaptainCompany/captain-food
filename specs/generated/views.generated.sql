@@ -12,11 +12,20 @@ CREATE TABLE View_RestaurantAccount (
 
 CREATE TABLE View_Restaurant (
   restaurant_id UUID PRIMARY KEY,
-  restaurant_account_id UUID NOT NULL,
+  restaurant_account_id UUID,
+  listing_status TEXT NOT NULL,
+  external_identifiers JSONB,
+  google_place_id TEXT,
   slug TEXT NOT NULL UNIQUE,
   display_name TEXT NOT NULL,
   description TEXT,
-  tags JSONB NOT NULL,
+  tags JSONB,
+  rating TEXT,
+  reviews_count INTEGER,
+  website TEXT,
+  phone TEXT,
+  gbp_order_url TEXT,
+  gbp_link_status TEXT,
   address JSONB NOT NULL,
   opening_hours JSONB NOT NULL,
   status TEXT NOT NULL,
@@ -27,6 +36,7 @@ CREATE TABLE View_Restaurant (
   updated_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX ON View_Restaurant (restaurant_account_id);
+CREATE INDEX ON View_Restaurant (listing_status);
 
 CREATE TABLE View_Customer (
   customer_id UUID PRIMARY KEY,

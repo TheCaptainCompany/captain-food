@@ -126,19 +126,28 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `View_Restaurant` · 🛶 V0 · source aggregate `Restaurant`
 
-- **Fed by**: `RestaurantRegistered`, `RestaurantUpdated`, `RestaurantActivated`, `RestaurantDeactivated`, `RestaurantAcceptanceModeChanged`, `RestaurantRemoved`, `RestaurantAccountRegistered`
+- **Fed by**: `RestaurantRegistered`, `RestaurantUpdated`, `RestaurantActivated`, `RestaurantDeactivated`, `RestaurantAcceptanceModeChanged`, `RestaurantRemoved`, `RestaurantGoogleBusinessProfileUpdated`, `RestaurantListingClaimed`, `RestaurantListingOptedOut`, `RestaurantMarkedClosed`, `RestaurantListingStatusChanged`, `RestaurantGoogleBusinessProfileOrderLinkConfigured`, `RestaurantGoogleBusinessProfileOrderLinkVerified`, `RestaurantAccountRegistered`
 
 | Column | Type | SQL | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `restaurant_id` | `RestaurantId` | `UUID` | PK |  |
-| `restaurant_account_id` | `RestaurantAccountId` | `UUID` | index |  |
+| `restaurant_account_id` | `RestaurantAccountId` | `UUID` | index, nullable | NULL for a non-partner public listing; set on claim/conversion. |
+| `listing_status` | `RestaurantListingStatus` | `TEXT` | index |  |
+| `external_identifiers` | `jsonb` | `JSONB` | nullable | Source-agnostic [{key,value}] (siret/naf/google_place_id…); not unique. |
+| `google_place_id` | `GooglePlaceId` | `TEXT` | nullable |  |
 | `slug` | `Slug` | `TEXT` | unique |  |
 | `display_name` | `RestaurantDisplayName` | `TEXT` | — |  |
 | `description` | `text` | `TEXT` | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
-| `tags` | `jsonb` | `JSONB` | — | ⚠️ HOLE: no event carries restaurant tags — nothing populates this column yet. |
+| `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags, sourced from Google Business Profile enrichment. |
+| `rating` | `GoogleRating` | `TEXT` | nullable |  |
+| `reviews_count` | `integer` | `INTEGER` | nullable |  |
+| `website` | `WebUrl` | `TEXT` | nullable |  |
+| `phone` | `PhoneNumber` | `TEXT` | nullable |  |
+| `gbp_order_url` | `WebUrl` | `TEXT` | nullable |  |
+| `gbp_link_status` | `GbpLinkStatus` | `TEXT` | nullable |  |
 | `address` | `jsonb` | `JSONB` | — |  |
 | `opening_hours` | `jsonb` | `JSONB` | — |  |
-| `status` | `RestaurantStatus` | `TEXT` | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation. |
+| `status` | `RestaurantStatus` | `TEXT` | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure. |
 | `order_acceptance` | `OrderAcceptanceMode` | `TEXT` | — |  |
 | `default_currency` | `CurrencyCode` | `TEXT` | — |  |
 | `timezone` | `TimeZone` | `TEXT` | nullable | Location timezone; falls back to the account's when null. |

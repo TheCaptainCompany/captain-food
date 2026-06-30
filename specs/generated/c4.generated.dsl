@@ -39,10 +39,12 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
           c_hubrise_acl = component "hubrise-acl" "Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain." "Instrumented"
           c_stripe_adapter = component "stripe-adapter" "Creates PaymentIntents / refunds; records inbound webhook facts (PaymentCaptured/Failed/Refunded)." "Instrumented"
           c_supabase_acl = component "supabase-acl" "Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates." "Instrumented"
+          c_sirene_google_acl = component "sirene-google-acl" "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate." "Instrumented"
         }
       }
       ct_event_store = container "event-store" "Append-only domain_events table (the write model / source of truth at runtime)." "Managed PostgreSQL (e.g. Supabase)"
       ct_read_models = container "read-models" "Denormalized View_* projection tables fed from the event log; queries read here, never domain_events." "Managed PostgreSQL"
+      ct_sync_worker = container "sync-worker" "Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls the api's RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner. Prospection scoring/outreach is a later step." "Scheduled worker (GitHub Actions cron + Node)"
       ct_bam = container "bam" "Business Activity Monitoring projector — consumes the same event stream to answer business questions." "Projection worker"
       ct_otel_collector = container "otel-collector" "Receives traces/metrics/logs from the api and bam containers; exports to the backend(s)." "OpenTelemetry Collector"
     }
@@ -50,6 +52,8 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     x_hubrise = softwareSystem "hubrise" "Existing restaurant catalog/orders systems; import via the Anti-Corruption Layer." "External"
     x_delivery_partner = softwareSystem "delivery-partner" "Delivery partner (e.g. Avelo37); post-V0." "External"
     x_supabase_auth = softwareSystem "supabase-auth" "Passwordless OTP identity for customers (not a domain concern)." "External"
+    x_sirene = softwareSystem "sirene" "INSEE Sirene / Recherche d'Entreprises (Etalab open data): SIRET, name, address, NAF, active/closed. Seeds listings via the ACL." "External"
+    x_google_maps = softwareSystem "google-maps" "Google Maps Places / Business Profile: rating, reviews, hours, phone, website, place id, and the 'Order online' link (ADR-0021). Enrichment + ownership proof." "External"
 
     ct_web_client -> ct_api "GraphQL over HTTPS (/customer/graphql, /public/graphql)"
     ct_web_restaurant -> ct_api "GraphQL (/restaurant-account/graphql, /restaurant/graphql)"
@@ -63,6 +67,10 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
     ct_api -> x_hubrise "Import catalog / sync inventory via ACL (inbound facts)"
     ct_api -> x_supabase_auth "OTP verify / session (out of domain)"
     ct_api -> x_delivery_partner "Dispatch + status (post-V0; inbound facts)"
+    ct_sync_worker -> x_sirene "Poll establishments (SIRET/NAF/address/closures)"
+    ct_sync_worker -> x_google_maps "Fetch Business Profile data (rating/reviews/hours/website)"
+    ct_sync_worker -> ct_api "Register/enrich/close listings via the ACL, as the owner (/external/graphql)"
+    ct_api -> x_google_maps "Verify restaurant ownership (GBP) for claim/opt-out"
     ct_bam -> ct_event_store "Consume the event stream for business metrics"
     ct_api -> ct_otel_collector "Export traces/metrics/logs (OTLP)"
     ct_bam -> ct_otel_collector "Export traces/metrics/logs (OTLP)"

@@ -106,6 +106,32 @@ ExternalReference:
     Used for idempotent import/sync and as a stable reference inside orders.
     Example: 'MARGHERITA', 'CAT-PIZZAS'.
 
+ExternalIdentifierKey:
+  type: string
+  maxLength: 64
+  description: >
+    Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier).
+    Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id',
+    'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands;
+    cross-reference sources (a google_place_id usually distinguishes them).
+
+GooglePlaceId:
+  type: string
+  maxLength: 255
+  description: "Google Maps Place id identifying the establishment (enrichment / Business Profile)."
+
+GoogleRating:
+  type: number
+  minimum: 0
+  maximum: 5
+  description: "Google Maps / Business Profile average rating (0–5), enrichment only."
+
+WebUrl:
+  type: string
+  pattern: "^https?://"
+  maxLength: 2048
+  description: "An http(s) URL — restaurant website or the Google Business Profile 'Order online' link."
+
 Slug:
   type: string
   pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
@@ -338,6 +364,21 @@ RestaurantStatus:
     - DRAFT
     - ACTIVE
     - INACTIVE
+
+RestaurantListingStatus:
+  type: string
+  enum:
+    - NON_PARTNER       # public listing seeded from open data (Sirene/Google); not orderable, no agreement
+    - PASSIVE_PARTNER   # menu synced (e.g. HubRise) but no signed contract; not orderable
+    - ACTIVE_PARTNER    # signed partner; orderable when also RestaurantStatus ACTIVE and not PAUSED
+  description: >
+    Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational
+    DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.
+
+GbpLinkStatus:
+  type: string
+  enum: [UNSET, CONFIGURED, VERIFIED, BROKEN]
+  description: "State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1)."
 
 CartStatus:
   type: string

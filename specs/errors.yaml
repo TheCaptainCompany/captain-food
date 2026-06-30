@@ -156,6 +156,32 @@ NoEditableFieldProvided:
     en: "Provide at least one field to update."
     fr: "Indiquez au moins un champ à modifier."
 
+# --- Restaurant listing & pre-registration (ADR-0019/0021) ---
+
+ListingAlreadyClaimed:
+  description: "The restaurant listing has already been claimed by an owner."
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "This restaurant listing has already been claimed."
+    fr: "Cette fiche restaurant a déjà été revendiquée."
+
+ListingOwnershipNotVerified:
+  description: "Could not verify ownership of the listing (Google Business Profile proof rejected)."
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "We couldn't verify that you own this restaurant. Please confirm via your Google Business Profile."
+    fr: "Nous n'avons pas pu vérifier que ce restaurant vous appartient. Confirmez via votre fiche Google Business Profile."
+
+GbpOrderLinkNotConfigured:
+  description: "No Google Business Profile 'Order online' link is configured to verify."
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "Configure the Google 'Order online' link before verifying it."
+    fr: "Configurez le lien Google « Commander en ligne » avant de le vérifier."
+
 # =====================================================================
 # Catalog (Catalog / CatalogCategory / Product / Offer / OptionList)
 # =====================================================================

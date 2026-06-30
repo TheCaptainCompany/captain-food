@@ -60,7 +60,12 @@ RestaurantAccount:
 
 Restaurant:
   type: aggregate
-  description: "A single restaurant location (under an account): profile, status (DRAFT/ACTIVE/INACTIVE) and live acceptance mode."
+  description: >
+    A single restaurant location: profile, operational status (DRAFT/ACTIVE/INACTIVE), live acceptance
+    mode, and the partnership LISTING funnel (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER). The
+    Sirene/Google sync is an EXTERNAL ACL that calls RegisterRestaurant /
+    UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed here AS THE OWNER — there is no dedicated
+    pre-registration command; an account-less registration with listingStatus NON_PARTNER is a seeded listing.
   receives:
     - message: { $ref: 'commands.yaml#/RegisterRestaurant' }
       emits: [{ $ref: 'events.yaml#/RestaurantRegistered' }]
@@ -96,6 +101,38 @@ Restaurant:
       emits: [{ $ref: 'events.yaml#/RestaurantRemoved' }]
       throws:
         - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/UpdateRestaurantGoogleBusinessProfile' }
+      emits: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/MarkRestaurantClosed' }
+      emits: [{ $ref: 'events.yaml#/RestaurantMarkedClosed' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
+      emits: [{ $ref: 'events.yaml#/RestaurantListingClaimed' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/ListingOwnershipNotVerified' }
+        - { $ref: 'errors.yaml#/ListingAlreadyClaimed' }
+    - message: { $ref: 'commands.yaml#/OptOutRestaurantListing' }
+      emits: [{ $ref: 'events.yaml#/RestaurantListingOptedOut' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/ListingOwnershipNotVerified' }
+    - message: { $ref: 'commands.yaml#/ChangeRestaurantListingStatus' }
+      emits: [{ $ref: 'events.yaml#/RestaurantListingStatusChanged' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/ConfigureGoogleBusinessProfileOrderLink' }
+      emits: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkConfigured' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+    - message: { $ref: 'commands.yaml#/VerifyGoogleBusinessProfileOrderLink' }
+      emits: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/GbpOrderLinkNotConfigured' }
 
 Catalog:
   type: aggregate

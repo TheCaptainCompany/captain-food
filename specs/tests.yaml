@@ -75,7 +75,10 @@ fixtures:
     data: { restaurantAccountId: "acct-1", reason: "Closed business" }
   restaurantRegistered:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-1", accountId: "acct-1", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris", createdBy: "user-1" }
+    data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris", createdBy: "user-1" }
+  restaurantSeeded:
+    type: { $ref: 'events.yaml#/RestaurantRegistered' }
+    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }], createdBy: "sync-1" }
   restaurantUpdated:
     type: { $ref: 'events.yaml#/RestaurantUpdated' }
     data: { restaurantId: "resto-1", displayName: "Chez Marco — Centre", updatedBy: "user-1" }
@@ -91,6 +94,27 @@ fixtures:
   restaurantRemoved:
     type: { $ref: 'events.yaml#/RestaurantRemoved' }
     data: { restaurantId: "resto-1", accountId: "acct-1", reason: "Delisted" }
+  restaurantGoogleBusinessProfileUpdated:
+    type: { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated' }
+    data: { restaurantId: "resto-2", googlePlaceId: "ChIJxyz", rating: 4.4, reviewsCount: 18, website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"] }
+  restaurantListingClaimed:
+    type: { $ref: 'events.yaml#/RestaurantListingClaimed' }
+    data: { restaurantId: "resto-2", accountId: "acct-9", claimedBy: "user-9", proof: "gbp-proof-ref-1" }
+  restaurantListingOptedOut:
+    type: { $ref: 'events.yaml#/RestaurantListingOptedOut' }
+    data: { restaurantId: "resto-2", reason: "Please remove my listing" }
+  restaurantMarkedClosed:
+    type: { $ref: 'events.yaml#/RestaurantMarkedClosed' }
+    data: { restaurantId: "resto-2", reason: "Sirene: établissement fermé" }
+  restaurantListingStatusChanged:
+    type: { $ref: 'events.yaml#/RestaurantListingStatusChanged' }
+    data: { restaurantId: "resto-2", listingStatus: "PASSIVE_PARTNER", reason: "HubRise menu connected" }
+  restaurantGbpOrderLinkConfigured:
+    type: { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkConfigured' }
+    data: { restaurantId: "resto-1", gbpOrderUrl: "https://chez-marco.captain.food" }
+  restaurantGbpOrderLinkVerified:
+    type: { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified' }
+    data: { restaurantId: "resto-1", status: "VERIFIED" }
 
   # --- Catalog ---
   catalogCreated:
@@ -420,6 +444,119 @@ tests:
       data: { restaurantId: "resto-1", accountId: "acct-1", reason: "Delisted" }
     then:
       - { $ref: '#/fixtures/restaurantRemoved' }
+
+  # ------------------- Listing & pre-registration --------------------
+  TestRestaurantSeededFromSync:
+    name: "Sync ACL seeds a public NON_PARTNER listing (no account)"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RegisterRestaurant' }
+      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
+    then:
+      - { $ref: '#/fixtures/restaurantSeeded' }
+  TestRestaurantGoogleBusinessProfileUpdated:
+    name: "Records Google Business Profile enrichment"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantSeeded' }
+    when:
+      type: { $ref: 'commands.yaml#/UpdateRestaurantGoogleBusinessProfile' }
+      data: { restaurantId: "resto-2", googlePlaceId: "ChIJxyz", rating: 4.4, reviewsCount: 18, website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"] }
+    then:
+      - { $ref: '#/fixtures/restaurantGoogleBusinessProfileUpdated' }
+  TestRestaurantMarkedClosed:
+    name: "Marks a listing closed (Sirene closure)"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantSeeded' }
+    when:
+      type: { $ref: 'commands.yaml#/MarkRestaurantClosed' }
+      data: { restaurantId: "resto-2", reason: "Sirene: établissement fermé" }
+    then:
+      - { $ref: '#/fixtures/restaurantMarkedClosed' }
+  TestRestaurantListingClaimed:
+    name: "Owner claims a listing with a valid Google ownership proof"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantSeeded' }
+    when:
+      type: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
+      data: { restaurantId: "resto-2", accountId: "acct-9", googleOwnershipProof: "valid-gbp-token" }
+    then:
+      - { $ref: '#/fixtures/restaurantListingClaimed' }
+  TestRestaurantListingClaimUnverifiedIsRejected:
+    name: "Rejects a claim whose Google ownership proof fails"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantSeeded' }
+    when:
+      type: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
+      data: { restaurantId: "resto-2", googleOwnershipProof: "bad-token" }
+    thrown:
+      - { $ref: 'errors.yaml#/ListingOwnershipNotVerified' }
+  TestRestaurantListingClaimAgainIsRejected:
+    name: "Rejects claiming an already-claimed listing"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantSeeded' }
+      - { $ref: '#/fixtures/restaurantListingClaimed' }
+    when:
+      type: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
+      data: { restaurantId: "resto-2", accountId: "acct-9", googleOwnershipProof: "valid-gbp-token" }
+    thrown:
+      - { $ref: 'errors.yaml#/ListingAlreadyClaimed' }
+  TestRestaurantListingOptedOut:
+    name: "Owner opts a listing out (proven via GBP)"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantSeeded' }
+    when:
+      type: { $ref: 'commands.yaml#/OptOutRestaurantListing' }
+      data: { restaurantId: "resto-2", googleOwnershipProof: "valid-gbp-token", reason: "Please remove my listing" }
+    then:
+      - { $ref: '#/fixtures/restaurantListingOptedOut' }
+  TestRestaurantListingStatusChanged:
+    name: "Admin moves a listing along the partnership funnel"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantSeeded' }
+    when:
+      type: { $ref: 'commands.yaml#/ChangeRestaurantListingStatus' }
+      data: { restaurantId: "resto-2", listingStatus: "PASSIVE_PARTNER", reason: "HubRise menu connected" }
+    then:
+      - { $ref: '#/fixtures/restaurantListingStatusChanged' }
+  TestRestaurantGbpOrderLinkConfigured:
+    name: "Configures the Google 'Order online' link"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureGoogleBusinessProfileOrderLink' }
+      data: { restaurantId: "resto-1", gbpOrderUrl: "https://chez-marco.captain.food" }
+    then:
+      - { $ref: '#/fixtures/restaurantGbpOrderLinkConfigured' }
+  TestRestaurantGbpOrderLinkVerified:
+    name: "Verifies the configured Google 'Order online' link"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantGbpOrderLinkConfigured' }
+    when:
+      type: { $ref: 'commands.yaml#/VerifyGoogleBusinessProfileOrderLink' }
+      data: { restaurantId: "resto-1" }
+    then:
+      - { $ref: '#/fixtures/restaurantGbpOrderLinkVerified' }
+  TestRestaurantGbpOrderLinkVerifyIsRejected:
+    name: "Rejects verifying when no order link is configured"
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/VerifyGoogleBusinessProfileOrderLink' }
+      data: { restaurantId: "resto-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/GbpOrderLinkNotConfigured' }
 
   # --------------------------- Catalog -------------------------------
   TestCatalogCreated:

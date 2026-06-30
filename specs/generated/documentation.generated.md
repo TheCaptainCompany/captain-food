@@ -85,6 +85,11 @@ Owns a restaurant ACCOUNT (HubRise restaurant). Manages the account, its locatio
 |  | UpdateLocationProfile | [✏️ `updateRestaurant`](#mutation-updaterestaurant) |
 |  | RemoveLocation | [✏️ `removeRestaurant`](#mutation-removerestaurant) |
 |  | ViewAllLocations | [🔎 `restaurantLocationsByAccount`](#query-restaurantlocationsbyaccount) |
+| 🧭 **ClaimListing** | FindMyListing | [🔎 `restaurant`](#query-restaurant) |
+|  | ClaimIt | [✏️ `claimRestaurantListing`](#mutation-claimrestaurantlisting) |
+|  | OptOut | [✏️ `optOutRestaurantListing`](#mutation-optoutrestaurantlisting) |
+|  | ConfigureGoogleOrderButton | [✏️ `configureGbpOrderLink`](#mutation-configuregbporderlink) |
+|  | VerifyGoogleOrderButton | [✏️ `verifyGbpOrderLink`](#mutation-verifygbporderlink) |
 | 🧭 **ManageCatalog** | ViewCatalog | [🔎 `catalog`](#query-catalog) |
 |  | CreateCatalog | [✏️ `createCatalog`](#mutation-createcatalog) |
 |  | AddProduct | [✏️ `addProduct`](#mutation-addproduct) |
@@ -131,13 +136,28 @@ A platform operator who onboards accounts and oversees the platform.
 |  | AddLocation | [✏️ `registerRestaurant`](#mutation-registerrestaurant) |
 |  | ActivateRestaurant | [✏️ `activateRestaurant`](#mutation-activaterestaurant) |
 |  | ImportCatalog | [✏️ `importCatalog`](#mutation-importcatalog) |
+| 🧭 **ManageListings** | BrowseListings | [🔎 `restaurants`](#query-restaurants) |
+|  | ChangeListingStatus | [✏️ `changeRestaurantListingStatus`](#mutation-changerestaurantlistingstatus) |
+|  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
+
+<a id="story-restaurant_sync"></a>
+### 🎬 `restaurant_sync` · 🔌 `EXTERNAL` · 🗣️ `fr-FR`
+
+The Sirene/Google sync ACL (a scheduled worker) acting as an EXTERNAL caller. It seeds and refreshes public listings on the restaurants' behalf — no human; it issues the same commands an owner would.
+
+
+| Activity | Step | Operation |
+| --- | --- | --- |
+| 🧭 **SyncListings** | SeedListing | [✏️ `registerRestaurant`](#mutation-registerrestaurant) |
+|  | EnrichGoogleProfile | [✏️ `updateRestaurantGoogleBusinessProfile`](#mutation-updaterestaurantgooglebusinessprofile) |
+|  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
 
 <a id="sec-ctx-restaurant"></a>
 ## 🔲 1. restaurant
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(10)_
+### 🧰 API operations _(17)_
 
 <a id="query-restaurantlocationsbyaccount"></a>
 #### 🔎 Query: `restaurantLocationsByAccount`
@@ -173,7 +193,7 @@ All restaurant locations under an account (back-office; ownership enforced serve
 #### ✏️ Mutation: `registerRestaurant`
 
 - **Command**: [📩 `RegisterRestaurant`](#command-registerrestaurant) → handled by [🎭 `Restaurant`](#actor-restaurant)
-- **Roles**: ADMIN, RESTAURANT_ACCOUNT · **slice** V0
+- **Roles**: ADMIN, RESTAURANT_ACCOUNT, EXTERNAL · **slice** V0
 - **Payload**: correlationId
 
 <a id="mutation-activaterestaurant"></a>
@@ -211,6 +231,55 @@ All restaurant locations under an account (back-office; ownership enforced serve
 - **Roles**: RESTAURANT, RESTAURANT_ACCOUNT · **slice** V1
 - **Payload**: correlationId
 
+<a id="mutation-updaterestaurantgooglebusinessprofile"></a>
+#### ✏️ Mutation: `updateRestaurantGoogleBusinessProfile`
+
+- **Command**: [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile) → handled by [🎭 `Restaurant`](#actor-restaurant)
+- **Roles**: EXTERNAL, ADMIN · **slice** V0
+- **Payload**: correlationId
+
+<a id="mutation-markrestaurantclosed"></a>
+#### ✏️ Mutation: `markRestaurantClosed`
+
+- **Command**: [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed) → handled by [🎭 `Restaurant`](#actor-restaurant)
+- **Roles**: EXTERNAL, ADMIN · **slice** V0
+- **Payload**: correlationId
+
+<a id="mutation-claimrestaurantlisting"></a>
+#### ✏️ Mutation: `claimRestaurantListing`
+
+- **Command**: [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting) → handled by [🎭 `Restaurant`](#actor-restaurant)
+- **Roles**: PUBLIC, RESTAURANT_ACCOUNT · **slice** V0
+- **Payload**: correlationId
+
+<a id="mutation-optoutrestaurantlisting"></a>
+#### ✏️ Mutation: `optOutRestaurantListing`
+
+- **Command**: [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting) → handled by [🎭 `Restaurant`](#actor-restaurant)
+- **Roles**: PUBLIC, RESTAURANT_ACCOUNT · **slice** V0
+- **Payload**: correlationId
+
+<a id="mutation-changerestaurantlistingstatus"></a>
+#### ✏️ Mutation: `changeRestaurantListingStatus`
+
+- **Command**: [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus) → handled by [🎭 `Restaurant`](#actor-restaurant)
+- **Roles**: ADMIN · **slice** V0
+- **Payload**: correlationId
+
+<a id="mutation-configuregbporderlink"></a>
+#### ✏️ Mutation: `configureGbpOrderLink`
+
+- **Command**: [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink) → handled by [🎭 `Restaurant`](#actor-restaurant)
+- **Roles**: RESTAURANT_ACCOUNT, RESTAURANT, ADMIN · **slice** V1
+- **Payload**: correlationId
+
+<a id="mutation-verifygbporderlink"></a>
+#### ✏️ Mutation: `verifyGbpOrderLink`
+
+- **Command**: [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink) → handled by [🎭 `Restaurant`](#actor-restaurant)
+- **Roles**: RESTAURANT_ACCOUNT, RESTAURANT, ADMIN · **slice** V1
+- **Payload**: correlationId
+
 ### 🧩 Output types _(1)_
 
 <a id="type-restaurant"></a>
@@ -223,11 +292,19 @@ A restaurant (public discovery + single-restaurant header). Navigates to its cat
 | Field | Type | Required |
 | --- | --- | --- |
 | <a id="type-restaurant--id"></a>`id` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |
-| <a id="type-restaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ✅ |
+| <a id="type-restaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ |
+| <a id="type-restaurant--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ |
+| <a id="type-restaurant--orderable"></a>`orderable` | `boolean` | ✅ |
+| <a id="type-restaurant--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ✅ |
 | <a id="type-restaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |
 | <a id="type-restaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |
 | <a id="type-restaurant--description"></a>`description` | `string` | ⬜ |
 | <a id="type-restaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ✅ |
+| <a id="type-restaurant--rating"></a>`rating` | [🔤 `GoogleRating`](#scalar-googlerating) | ⬜ |
+| <a id="type-restaurant--reviewscount"></a>`reviewsCount` | `integer` | ⬜ |
+| <a id="type-restaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |
+| <a id="type-restaurant--gbporderurl"></a>`gbpOrderUrl` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |
+| <a id="type-restaurant--gbplinkstatus"></a>`gbpLinkStatus` | [🔤 `GbpLinkStatus`](#scalar-gbplinkstatus) | ⬜ |
 | <a id="type-restaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |
 | <a id="type-restaurant--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ✅ |
 | <a id="type-restaurant--status"></a>`status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | ✅ |
@@ -253,7 +330,8 @@ _🧩 aggregate_ — A restaurant account (HubRise: restaurant) that owns one or
 <a id="actor-restaurant"></a>
 #### 🎭 Actor: `Restaurant`
 
-_🧩 aggregate_ — A single restaurant location (under an account): profile, status (DRAFT/ACTIVE/INACTIVE) and live acceptance mode.
+_🧩 aggregate_ — A single restaurant location: profile, operational status (DRAFT/ACTIVE/INACTIVE), live acceptance mode, and the partnership LISTING funnel (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER). The Sirene/Google sync is an EXTERNAL ACL that calls RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed here AS THE OWNER — there is no dedicated pre-registration command; an account-less registration with listingStatus NON_PARTNER is a seeded listing.
+
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
@@ -263,6 +341,13 @@ _🧩 aggregate_ — A single restaurant location (under an account): profile, s
 | [📩 `DeactivateRestaurant`](#command-deactivaterestaurant) | [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
 | [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode) | [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotActive`](#error-restaurantnotactive), [⛔ `AcceptanceModeUnchanged`](#error-acceptancemodeunchanged) |
 | [📩 `RemoveRestaurant`](#command-removerestaurant) | [⚡ `RestaurantRemoved`](#event-restaurantremoved) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
+| [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile) | [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
+| [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed) | [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
+| [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting) | [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `ListingOwnershipNotVerified`](#error-listingownershipnotverified), [⛔ `ListingAlreadyClaimed`](#error-listingalreadyclaimed) |
+| [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting) | [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `ListingOwnershipNotVerified`](#error-listingownershipnotverified) |
+| [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus) | [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
+| [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
+| [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `GbpOrderLinkNotConfigured`](#error-gbporderlinknotconfigured) |
 
 ### 🗄️ Views (read models) _(2)_
 
@@ -286,26 +371,35 @@ _🧩 aggregate_ — A single restaurant location (under an account): profile, s
 #### 🗄️ View: `View_Restaurant`
 
 - **Source**: [🎭 `Restaurant`](#actor-restaurant) · 🛶 V0
-- **Fed by**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged), [⚡ `RestaurantRemoved`](#event-restaurantremoved), [⚡ `RestaurantAccountRegistered`](#event-restaurantaccountregistered)
+- **Fed by**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged), [⚡ `RestaurantRemoved`](#event-restaurantremoved), [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged), [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured), [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified), [⚡ `RestaurantAccountRegistered`](#event-restaurantaccountregistered)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ | [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid) | PK |  |
-| `restaurant_account_id` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) _(derived)_ → [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount) | [⚡ `RestaurantRegistered`.`accountId`](#event-restaurantregistered--accountid) | index |  |
+| `restaurant_account_id` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) _(derived)_ → [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount) | [⚡ `RestaurantRegistered`.`accountId`](#event-restaurantregistered--accountid), [⚡ `RestaurantListingClaimed`.`accountId`](#event-restaurantlistingclaimed--accountid) | index, nullable | NULL for a non-partner public listing; set on claim/conversion. |
+| `listing_status` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | [⚡ `RestaurantRegistered`.`listingStatus`](#event-restaurantregistered--listingstatus), [⚡ `RestaurantListingStatusChanged`.`listingStatus`](#event-restaurantlistingstatuschanged--listingstatus) | index |  |
+| `external_identifiers` | `jsonb` | [⚡ `RestaurantRegistered`.`externalIdentifiers`](#event-restaurantregistered--externalidentifiers) | nullable | Source-agnostic [{key,value}] (siret/naf/google_place_id…); not unique. |
+| `google_place_id` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`googlePlaceId`](#event-restaurantgooglebusinessprofileupdated--googleplaceid) | nullable |  |
 | `slug` | [🔤 `Slug`](#scalar-slug) _(derived)_ | [⚡ `RestaurantRegistered`.`slug`](#event-restaurantregistered--slug) | unique |  |
 | `display_name` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) _(derived)_ | [⚡ `RestaurantRegistered`.`displayName`](#event-restaurantregistered--displayname), [⚡ `RestaurantUpdated`.`displayName`](#event-restaurantupdated--displayname) | — |  |
 | `description` | `text` | ⚠️ _(none)_ | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
-| `tags` | `jsonb` | ⚠️ _(none)_ | — | ⚠️ HOLE: no event carries restaurant tags — nothing populates this column yet. |
+| `tags` | `jsonb` | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`tags`](#event-restaurantgooglebusinessprofileupdated--tags) | nullable | Cuisine/attribute tags, sourced from Google Business Profile enrichment. |
+| `rating` | [🔤 `GoogleRating`](#scalar-googlerating) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`rating`](#event-restaurantgooglebusinessprofileupdated--rating) | nullable |  |
+| `reviews_count` | `integer` | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`reviewsCount`](#event-restaurantgooglebusinessprofileupdated--reviewscount) | nullable |  |
+| `website` | [🔤 `WebUrl`](#scalar-weburl) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`website`](#event-restaurantgooglebusinessprofileupdated--website) | nullable |  |
+| `phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) _(derived)_ | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`phone`](#event-restaurantgooglebusinessprofileupdated--phone) | nullable |  |
+| `gbp_order_url` | [🔤 `WebUrl`](#scalar-weburl) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`.`gbpOrderUrl`](#event-restaurantgooglebusinessprofileorderlinkconfigured--gbporderurl) | nullable |  |
+| `gbp_link_status` | [🔤 `GbpLinkStatus`](#scalar-gbplinkstatus) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`.`status`](#event-restaurantgooglebusinessprofileorderlinkverified--status) | nullable |  |
 | `address` | `jsonb` _(derived)_ | [⚡ `RestaurantRegistered`.`address`](#event-restaurantregistered--address), [⚡ `RestaurantUpdated`.`address`](#event-restaurantupdated--address) | — |  |
 | `opening_hours` | `jsonb` _(derived)_ | [⚡ `RestaurantRegistered`.`openingHours`](#event-restaurantregistered--openinghours), [⚡ `RestaurantUpdated`.`openingHours`](#event-restaurantupdated--openinghours) | — |  |
-| `status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantRemoved`](#event-restaurantremoved) | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation. |
+| `status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantRemoved`](#event-restaurantremoved), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed) | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure. |
 | `order_acceptance` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) _(derived)_ | [⚡ `RestaurantAcceptanceModeChanged`.`mode`](#event-restaurantacceptancemodechanged--mode) | — |  |
 | `default_currency` | [🔤 `CurrencyCode`](#scalar-currencycode) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`defaultCurrency`](#event-restaurantaccountregistered--defaultcurrency) | — |  |
 | `timezone` | [🔤 `TimeZone`](#scalar-timezone) _(derived)_ | [⚡ `RestaurantRegistered`.`timezone`](#event-restaurantregistered--timezone), [⚡ `RestaurantUpdated`.`timezone`](#event-restaurantupdated--timezone) | nullable | Location timezone; falls back to the account's when null. |
 | `preparation_time_minutes` | `integer` _(derived)_ | [⚡ `RestaurantRegistered`.`preparationTimeMinutes`](#event-restaurantregistered--preparationtimeminutes), [⚡ `RestaurantUpdated`.`preparationTimeMinutes`](#event-restaurantupdated--preparationtimeminutes) | nullable |  |
-| `updated_at` | `timestamptz` | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged) | — | Row write time, stamped on each event. |
+| `updated_at` | `timestamptz` | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged), [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged), [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured), [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified) | — | Row write time, stamped on each event. |
 
-### 📩 Commands _(9)_
+### 📩 Commands _(16)_
 
 <a id="command-registerrestaurantaccount"></a>
 #### 📩 Command: `RegisterRestaurantAccount`
@@ -360,7 +454,7 @@ Owner/admin closes a restaurant account (its locations must already be removed).
 <a id="command-registerrestaurant"></a>
 #### 📩 Command: `RegisterRestaurant`
 
-Admin onboards a new restaurant LOCATION under an existing account (starts in DRAFT).
+The single, generic way to register a restaurant LOCATION. Used by an owner/admin onboarding a partner location (accountId set), AND by the Sirene/Google sync ACL seeding a public listing as if it were the owner (no accountId, listingStatus NON_PARTNER, externalIdentifiers from the source). Starts in DRAFT.
 
 - **Dispatched by**: [✏️ `registerRestaurant`](#mutation-registerrestaurant) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
 - **Emits**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
@@ -368,8 +462,9 @@ Admin onboards a new restaurant LOCATION under an existing account (starts in DR
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <a id="command-registerrestaurant--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ | Client-generated id for the new location. |
-| <a id="command-registerrestaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ✅ | The owning account (must already exist). |
+| <a id="command-registerrestaurant--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ | Client/ACL-generated id for the new location. |
+| <a id="command-registerrestaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ | The owning account (must already exist) — omitted for a non-partner public listing. |
+| <a id="command-registerrestaurant--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ⬜ | Partnership funnel; defaults to NON_PARTNER when omitted (e.g. sync-seeded listing). |
 | <a id="command-registerrestaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 | <a id="command-registerrestaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="command-registerrestaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ | Location-specific contact; falls back to the account contact when absent. |
@@ -377,6 +472,7 @@ Admin onboards a new restaurant LOCATION under an existing account (starts in DR
 | <a id="command-registerrestaurant--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ | Location timezone; falls back to the account timezone when absent. |
 | <a id="command-registerrestaurant--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
 | <a id="command-registerrestaurant--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
+| <a id="command-registerrestaurant--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ⬜ | Source-agnostic identifiers preserving original keys (siret/naf/google_place_id…). Not unique. |
 | <a id="command-registerrestaurant--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ | Set only when seeded from an external source (e.g. HubRise location). |
 
 <a id="command-activaterestaurant"></a>
@@ -455,7 +551,113 @@ Restaurant toggles its live order-acceptance mode (NORMAL / BUSY / PAUSED).
 | <a id="command-changeorderacceptancemode--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-changeorderacceptancemode--mode"></a>`mode` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) | ✅ |  |
 
-### ⚡ Events _(9)_
+<a id="command-updaterestaurantgooglebusinessprofile"></a>
+#### 📩 Command: `UpdateRestaurantGoogleBusinessProfile`
+
+Record the restaurant's latest Google Business Profile data (rating, reviews, hours, website, phone, place id, tags). Issued by the Sirene/Google sync ACL (or admin); full-replace snapshot.
+
+- **Dispatched by**: [✏️ `updateRestaurantGoogleBusinessProfile`](#mutation-updaterestaurantgooglebusinessprofile) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Emits**: [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-updaterestaurantgooglebusinessprofile--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-updaterestaurantgooglebusinessprofile--googleplaceid"></a>`googlePlaceId` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | ⬜ |  |
+| <a id="command-updaterestaurantgooglebusinessprofile--rating"></a>`rating` | [🔤 `GoogleRating`](#scalar-googlerating) | ⬜ |  |
+| <a id="command-updaterestaurantgooglebusinessprofile--reviewscount"></a>`reviewsCount` | `integer` | ⬜ |  |
+| <a id="command-updaterestaurantgooglebusinessprofile--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
+| <a id="command-updaterestaurantgooglebusinessprofile--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ⬜ |  |
+| <a id="command-updaterestaurantgooglebusinessprofile--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
+| <a id="command-updaterestaurantgooglebusinessprofile--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
+
+<a id="command-markrestaurantclosed"></a>
+#### 📩 Command: `MarkRestaurantClosed`
+
+Record that the establishment is closed (e.g. Sirene closure); issued by the sync ACL or admin.
+
+- **Dispatched by**: [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Emits**: [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-markrestaurantclosed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-markrestaurantclosed--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="command-claimrestaurantlisting"></a>
+#### 📩 Command: `ClaimRestaurantListing`
+
+An owner claims a public listing. Ownership is proven by verifying the restaurant's Google Business Profile (delegated to Google as a start); the backend validates the proof server-side before accepting.
+
+- **Dispatched by**: [✏️ `claimRestaurantListing`](#mutation-claimrestaurantlisting) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Emits**: [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `ListingOwnershipNotVerified`](#error-listingownershipnotverified), [⛔ `ListingAlreadyClaimed`](#error-listingalreadyclaimed)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-claimrestaurantlisting--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-claimrestaurantlisting--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ | Account to attach the claimed listing to, when the claimant already has one. |
+| <a id="command-claimrestaurantlisting--googleownershipproof"></a>`googleOwnershipProof` | `string` | ✅ | Opaque Google Business Profile ownership proof/token, verified server-side. |
+
+<a id="command-optoutrestaurantlisting"></a>
+#### 📩 Command: `OptOutRestaurantListing`
+
+An owner opts a public listing out (edit/remove), proven via Google Business Profile ownership.
+
+- **Dispatched by**: [✏️ `optOutRestaurantListing`](#mutation-optoutrestaurantlisting) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Emits**: [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `ListingOwnershipNotVerified`](#error-listingownershipnotverified)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-optoutrestaurantlisting--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-optoutrestaurantlisting--googleownershipproof"></a>`googleOwnershipProof` | `string` | ✅ | Opaque Google Business Profile ownership proof/token, verified server-side. |
+| <a id="command-optoutrestaurantlisting--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="command-changerestaurantlistingstatus"></a>
+#### 📩 Command: `ChangeRestaurantListingStatus`
+
+Admin moves a listing along the partnership funnel (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER).
+
+- **Dispatched by**: [✏️ `changeRestaurantListingStatus`](#mutation-changerestaurantlistingstatus) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Emits**: [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-changerestaurantlistingstatus--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-changerestaurantlistingstatus--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ |  |
+| <a id="command-changerestaurantlistingstatus--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="command-configuregooglebusinessprofileorderlink"></a>
+#### 📩 Command: `ConfigureGoogleBusinessProfileOrderLink`
+
+Restaurant/admin sets the GBP 'Order online' link to its {slug}.captain.food page (ADR-0021; V1).
+
+- **Dispatched by**: [✏️ `configureGbpOrderLink`](#mutation-configuregbporderlink) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Emits**: [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-configuregooglebusinessprofileorderlink--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-configuregooglebusinessprofileorderlink--gbporderurl"></a>`gbpOrderUrl` | [🔤 `WebUrl`](#scalar-weburl) | ✅ |  |
+
+<a id="command-verifygooglebusinessprofileorderlink"></a>
+#### 📩 Command: `VerifyGoogleBusinessProfileOrderLink`
+
+Ping the configured GBP 'Order online' link and record whether it is live (ADR-0021; V1).
+
+- **Dispatched by**: [✏️ `verifyGbpOrderLink`](#mutation-verifygbporderlink) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Emits**: [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `GbpOrderLinkNotConfigured`](#error-gbporderlinknotconfigured)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-verifygooglebusinessprofileorderlink--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+
+### ⚡ Events _(16)_
 
 <a id="event-restaurantaccountregistered"></a>
 #### ⚡ Event: `RestaurantAccountRegistered`
@@ -512,7 +714,7 @@ A restaurant account was closed/deleted.
 <a id="event-restaurantregistered"></a>
 #### ⚡ Event: `RestaurantRegistered`
 
-A restaurant location has been registered under an account.
+A restaurant location has been registered. Covers every path: an owner/admin onboarding a partner location (with accountId), or the Sirene/Google sync ACL seeding a public NON_PARTNER listing (no accountId). The listingStatus and externalIdentifiers distinguish them.
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
@@ -521,8 +723,10 @@ A restaurant location has been registered under an account.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-restaurantregistered--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-restaurantregistered--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ✅ |  |
+| <a id="event-restaurantregistered--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ |  |
+| <a id="event-restaurantregistered--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ |  |
 | <a id="event-restaurantregistered--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
+| <a id="event-restaurantregistered--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ⬜ |  |
 | <a id="event-restaurantregistered--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 | <a id="event-restaurantregistered--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="event-restaurantregistered--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
@@ -610,7 +814,114 @@ A location was removed (delisted) from its account.
 | <a id="event-restaurantremoved--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ✅ |  |
 | <a id="event-restaurantremoved--reason"></a>`reason` | `string` | ⬜ |  |
 
-### 📦 Entities _(4)_
+<a id="event-restaurantgooglebusinessprofileupdated"></a>
+#### ⚡ Event: `RestaurantGoogleBusinessProfileUpdated`
+
+The restaurant's Google Business Profile data was observed/refreshed (enrichment). A business fact recorded via the Sirene/Google ACL; carries the FULL latest GBP snapshot (replace semantics).
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantgooglebusinessprofileupdated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantgooglebusinessprofileupdated--googleplaceid"></a>`googlePlaceId` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | ⬜ |  |
+| <a id="event-restaurantgooglebusinessprofileupdated--rating"></a>`rating` | [🔤 `GoogleRating`](#scalar-googlerating) | ⬜ |  |
+| <a id="event-restaurantgooglebusinessprofileupdated--reviewscount"></a>`reviewsCount` | `integer` | ⬜ |  |
+| <a id="event-restaurantgooglebusinessprofileupdated--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
+| <a id="event-restaurantgooglebusinessprofileupdated--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ⬜ |  |
+| <a id="event-restaurantgooglebusinessprofileupdated--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
+| <a id="event-restaurantgooglebusinessprofileupdated--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
+
+<a id="event-restaurantlistingclaimed"></a>
+#### ⚡ Event: `RestaurantListingClaimed`
+
+An owner proved ownership of the listing (Google Business Profile verification) and claimed it.
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantlistingclaimed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantlistingclaimed--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ |  |
+| <a id="event-restaurantlistingclaimed--claimedby"></a>`claimedBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
+| <a id="event-restaurantlistingclaimed--proof"></a>`proof` | `string` | ⬜ | Reference to the accepted Google ownership proof (audit; the token itself is not stored). |
+
+<a id="event-restaurantlistingoptedout"></a>
+#### ⚡ Event: `RestaurantListingOptedOut`
+
+An owner asked to edit/remove their public listing (opt-out), proven via GBP ownership.
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantlistingoptedout--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantlistingoptedout--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="event-restaurantmarkedclosed"></a>
+#### ⚡ Event: `RestaurantMarkedClosed`
+
+The establishment was reported closed (e.g. Sirene closure); recorded via the sync ACL.
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantmarkedclosed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantmarkedclosed--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="event-restaurantlistingstatuschanged"></a>
+#### ⚡ Event: `RestaurantListingStatusChanged`
+
+The partnership funnel status changed (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER).
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantlistingstatuschanged--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantlistingstatuschanged--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ |  |
+| <a id="event-restaurantlistingstatuschanged--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="event-restaurantgooglebusinessprofileorderlinkconfigured"></a>
+#### ⚡ Event: `RestaurantGoogleBusinessProfileOrderLinkConfigured`
+
+The restaurant's GBP 'Order online' link was set to its {slug}.captain.food page (ADR-0021; V1).
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantgooglebusinessprofileorderlinkconfigured--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantgooglebusinessprofileorderlinkconfigured--gbporderurl"></a>`gbpOrderUrl` | [🔤 `WebUrl`](#scalar-weburl) | ✅ |  |
+
+<a id="event-restaurantgooglebusinessprofileorderlinkverified"></a>
+#### ⚡ Event: `RestaurantGoogleBusinessProfileOrderLinkVerified`
+
+The configured GBP 'Order online' link was pinged and its live status recorded (ADR-0021; V1).
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantgooglebusinessprofileorderlinkverified--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantgooglebusinessprofileorderlinkverified--status"></a>`status` | [🔤 `GbpLinkStatus`](#scalar-gbplinkstatus) | ✅ |  |
+
+### 📦 Entities _(5)_
 
 <a id="entity-openinghoursslot"></a>
 #### 📦 Entity: `OpeningHoursSlot`
@@ -632,6 +943,16 @@ Both fields optional: HubRise locations do not expose email/phone, so an importe
 | --- | --- | --- | --- |
 | <a id="entity-restaurantcontact--email"></a>`email` | [🔤 `EmailAddress`](#scalar-emailaddress) | ⬜ |  |
 | <a id="entity-restaurantcontact--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ⬜ |  |
+
+<a id="entity-externalidentifier"></a>
+#### 📦 Entity: `ExternalIdentifier`
+
+A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-externalidentifier--key"></a>`key` | [🔤 `ExternalIdentifierKey`](#scalar-externalidentifierkey) | ✅ |  |
+| <a id="entity-externalidentifier--value"></a>`value` | `string` | ✅ |  |
 
 <a id="entity-restaurantaccount"></a>
 #### 📦 Entity: `RestaurantAccount`
@@ -658,8 +979,11 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="entity-restaurant--id"></a>`id` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="entity-restaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ✅ | The owning RestaurantAccount. |
+| <a id="entity-restaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ | The owning RestaurantAccount; NULL for a non-partner listing (no account yet), set on claim/conversion. |
+| <a id="entity-restaurant--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ | Partnership funnel: NON_PARTNER (seeded from open data) → PASSIVE_PARTNER → ACTIVE_PARTNER. |
 | <a id="entity-restaurant--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ | HubRise location reference, when imported. |
+| <a id="entity-restaurant--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ⬜ | Source-agnostic identifiers preserving original keys (siret/naf/google_place_id/hubrise_ref…). Not unique. |
+| <a id="entity-restaurant--googleplaceid"></a>`googlePlaceId` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | ⬜ | Google Place id, when known (enrichment / GBP). |
 | <a id="entity-restaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 | <a id="entity-restaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="entity-restaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ | Location-specific contact; falls back to the account contact when absent. |
@@ -672,21 +996,27 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(9)_
+### 🔤 Scalars _(15)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-restaurantaccountid"></a>🔤 `RestaurantAccountId` | string _uuid_ | Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations. |
+| <a id="scalar-externalidentifierkey"></a>🔤 `ExternalIdentifierKey` | string | Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).  |
+| <a id="scalar-googleplaceid"></a>🔤 `GooglePlaceId` | string | Google Maps Place id identifying the establishment (enrichment / Business Profile). |
+| <a id="scalar-googlerating"></a>🔤 `GoogleRating` | number | Google Maps / Business Profile average rating (0–5), enrichment only. |
+| <a id="scalar-weburl"></a>🔤 `WebUrl` | string `^https?://` | An http(s) URL — restaurant website or the Google Business Profile 'Order online' link. |
 | <a id="scalar-restaurantlegalname"></a>🔤 `RestaurantLegalName` | string | Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.  |
 | <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
 | <a id="scalar-weekday"></a>🔤 `Weekday` | enum (MONDAY \| TUESDAY \| WEDNESDAY \| THURSDAY \| FRIDAY \| SATURDAY \| SUNDAY) |  |
 | <a id="scalar-timeofday"></a>🔤 `TimeOfDay` | string `^([01][0-9]|2[0-3]):[0-5][0-9]$` | Local time of day, HH:mm (HubRise opening_hours format). |
 | <a id="scalar-restaurantstatus"></a>🔤 `RestaurantStatus` | enum (DRAFT \| ACTIVE \| INACTIVE) |  |
+| <a id="scalar-restaurantlistingstatus"></a>🔤 `RestaurantListingStatus` | enum (NON_PARTNER \| PASSIVE_PARTNER \| ACTIVE_PARTNER) | Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.  |
+| <a id="scalar-gbplinkstatus"></a>🔤 `GbpLinkStatus` | enum (UNSET \| CONFIGURED \| VERIFIED \| BROKEN) | State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1). |
 | <a id="scalar-orderacceptancemode"></a>🔤 `OrderAcceptanceMode` | enum (NORMAL \| BUSY \| PAUSED) | Current order acceptance mode of a restaurant (HubRise: order_acceptance). |
 | <a id="scalar-pricerange"></a>🔤 `PriceRange` | enum (BUDGET \| MODERATE \| PREMIUM) | Coarse price tier of a restaurant, used as a discovery filter (UI: $ / $$ / $$$). |
 | <a id="scalar-restaurantlistkey"></a>🔤 `RestaurantListKey` | enum (ORDER_AGAIN \| RECOMMENDED \| TOP_DEALS \| GREEN_PACKAGING) | Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model resolves the actual member restaurants (editorial rules / customer history); the client just asks for a list by key.  |
 
-### ⛔ Errors _(6)_
+### ⛔ Errors _(9)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -696,6 +1026,9 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="error-invalidcurrency"></a>⛔ `InvalidCurrency` | Currency is not a valid ISO 4217 code. | 🇬🇧 '{currency}' is not a valid currency. | 🇫🇷 '{currency}' n'est pas une devise valide. | [📩 `RegisterRestaurantAccount`](#command-registerrestaurantaccount) |
 | <a id="error-restaurantnotreadyforactivation"></a>⛔ `RestaurantNotReadyForActivation` | Activation requires at least one catalog with one orderable offer. | 🇬🇧 Add at least one orderable product before activating '{restaurantName}'. | 🇫🇷 Ajoutez au moins un produit commandable avant d'activer '{restaurantName}'. | [📩 `ActivateRestaurant`](#command-activaterestaurant) |
 | <a id="error-acceptancemodeunchanged"></a>⛔ `AcceptanceModeUnchanged` | Requested acceptance mode equals the current one. | 🇬🇧 '{restaurantName}' is already in '{mode}' mode. | 🇫🇷 '{restaurantName}' est déjà en mode '{mode}'. | [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode) |
+| <a id="error-listingalreadyclaimed"></a>⛔ `ListingAlreadyClaimed` | The restaurant listing has already been claimed by an owner. | 🇬🇧 This restaurant listing has already been claimed. | 🇫🇷 Cette fiche restaurant a déjà été revendiquée. | [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting) |
+| <a id="error-listingownershipnotverified"></a>⛔ `ListingOwnershipNotVerified` | Could not verify ownership of the listing (Google Business Profile proof rejected). | 🇬🇧 We couldn't verify that you own this restaurant. Please confirm via your Google Business Profile. | 🇫🇷 Nous n'avons pas pu vérifier que ce restaurant vous appartient. Confirmez via votre fiche Google Business Profile. | [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting) |
+| <a id="error-gbporderlinknotconfigured"></a>⛔ `GbpOrderLinkNotConfigured` | No Google Business Profile 'Order online' link is configured to verify. | 🇬🇧 Configure the Google 'Order online' link before verifying it. | 🇫🇷 Configurez le lien Google « Commander en ligne » avant de le vérifier. | [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink) |
 
 ### 🧪 Tests _(2)_
 
@@ -846,6 +1179,105 @@ _Removes (delists) a location from its account_
 - **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
 - **When**: [📩 `RemoveRestaurant`](#command-removerestaurant)
 - **Then**: [⚡ `RestaurantRemoved`](#event-restaurantremoved)
+
+<a id="test-testrestaurantseededfromsync"></a>
+#### 🧪 Test: `TestRestaurantSeededFromSync`
+
+_Sync ACL seeds a public NON_PARTNER listing (no account)_
+
+- **Given**: _(none)_
+- **When**: [📩 `RegisterRestaurant`](#command-registerrestaurant)
+- **Then**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+
+<a id="test-testrestaurantgooglebusinessprofileupdated"></a>
+#### 🧪 Test: `TestRestaurantGoogleBusinessProfileUpdated`
+
+_Records Google Business Profile enrichment_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile)
+- **Then**: [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated)
+
+<a id="test-testrestaurantmarkedclosed"></a>
+#### 🧪 Test: `TestRestaurantMarkedClosed`
+
+_Marks a listing closed (Sirene closure)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed)
+- **Then**: [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed)
+
+<a id="test-testrestaurantlistingclaimed"></a>
+#### 🧪 Test: `TestRestaurantListingClaimed`
+
+_Owner claims a listing with a valid Google ownership proof_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting)
+- **Then**: [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed)
+
+<a id="test-testrestaurantlistingclaimunverifiedisrejected"></a>
+#### 🧪 Test: `TestRestaurantListingClaimUnverifiedIsRejected`
+
+_Rejects a claim whose Google ownership proof fails_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting)
+- **Thrown**: [⛔ `ListingOwnershipNotVerified`](#error-listingownershipnotverified)
+
+<a id="test-testrestaurantlistingclaimagainisrejected"></a>
+#### 🧪 Test: `TestRestaurantListingClaimAgainIsRejected`
+
+_Rejects claiming an already-claimed listing_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed)
+- **When**: [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting)
+- **Thrown**: [⛔ `ListingAlreadyClaimed`](#error-listingalreadyclaimed)
+
+<a id="test-testrestaurantlistingoptedout"></a>
+#### 🧪 Test: `TestRestaurantListingOptedOut`
+
+_Owner opts a listing out (proven via GBP)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting)
+- **Then**: [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout)
+
+<a id="test-testrestaurantlistingstatuschanged"></a>
+#### 🧪 Test: `TestRestaurantListingStatusChanged`
+
+_Admin moves a listing along the partnership funnel_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus)
+- **Then**: [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged)
+
+<a id="test-testrestaurantgbporderlinkconfigured"></a>
+#### 🧪 Test: `TestRestaurantGbpOrderLinkConfigured`
+
+_Configures the Google 'Order online' link_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink)
+- **Then**: [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured)
+
+<a id="test-testrestaurantgbporderlinkverified"></a>
+#### 🧪 Test: `TestRestaurantGbpOrderLinkVerified`
+
+_Verifies the configured Google 'Order online' link_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured)
+- **When**: [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink)
+- **Then**: [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified)
+
+<a id="test-testrestaurantgbporderlinkverifyisrejected"></a>
+#### 🧪 Test: `TestRestaurantGbpOrderLinkVerifyIsRejected`
+
+_Rejects verifying when no order link is configured_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink)
+- **Thrown**: [⛔ `GbpOrderLinkNotConfigured`](#error-gbporderlinknotconfigured)
 
 <a id="sec-ctx-catalog"></a>
 ## 🔲 2. catalog
@@ -3131,7 +3563,7 @@ The customer's favorited restaurants (View_Customer.favorite_restaurant_ids join
 Discover: public list of restaurants. All args are optional filters resolved by the read side (View_Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
 
 
-- **Input**: 🧩 `RestaurantsQueryInput` — `search?`: `string`, `tags?`: [[🔤 `Tag`](#scalar-tag)], `serviceType?`: [🔤 `ServiceType`](#scalar-servicetype), `openNow?`: `boolean`, `city?`: [🔤 `CityName`](#scalar-cityname), `priceRange?`: [🔤 `PriceRange`](#scalar-pricerange), `list?`: [🔤 `RestaurantListKey`](#scalar-restaurantlistkey)
+- **Input**: 🧩 `RestaurantsQueryInput` — `search?`: `string`, `tags?`: [[🔤 `Tag`](#scalar-tag)], `serviceType?`: [🔤 `ServiceType`](#scalar-servicetype), `openNow?`: `boolean`, `city?`: [🔤 `CityName`](#scalar-cityname), `priceRange?`: [🔤 `PriceRange`](#scalar-pricerange), `list?`: [🔤 `RestaurantListKey`](#scalar-restaurantlistkey), `listingStatus?`: [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus), `orderableOnly?`: `boolean`
 - **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `View_Restaurant`](#view-view_restaurant)
 - **Roles**: PUBLIC · **slice** V0
 
@@ -4248,7 +4680,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-conflict"></a>⛔ `Conflict` | Concurrent modification (optimistic-concurrency version clash); retry. | 🇬🇧 This item was modified meanwhile. Please retry. | 🇫🇷 Cet élément a été modifié entre-temps. Veuillez réessayer. | — |
 | <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path. | 🇬🇧 Too many requests. Please slow down. | 🇫🇷 Trop de requêtes. Veuillez patienter. | — |
 | <a id="error-internal"></a>⛔ `Internal` | Unexpected server error. | 🇬🇧 Something went wrong on our side. | 🇫🇷 Une erreur est survenue de notre côté. | — |
-| <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `PlaceOrder`](#command-placeorder) |
+| <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-restaurantnotactive"></a>⛔ `RestaurantNotActive` | Operation requires an ACTIVE restaurant. | 🇬🇧 The restaurant '{restaurantName}' is not active. | 🇫🇷 Le restaurant '{restaurantName}' n'est pas actif. | [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
@@ -4283,6 +4715,7 @@ aggregates; components bind the aggregates they handle and the read models they 
 | 🧱 `api` | Node + TypeScript (Hono or NestJS), GraphQL | CQRS-light write+read API. Hosts command handlers, projections, GraphQL gateway. Role = path (/{role}/graphql).<br>realizes: [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
 | 🧱 `event-store` | Managed PostgreSQL (e.g. Supabase) | Append-only domain_events table (the write model / source of truth at runtime). |
 | 🧱 `read-models` | Managed PostgreSQL | Denormalized View_* projection tables fed from the event log; queries read here, never domain_events. |
+| 🧱 `sync-worker` | Scheduled worker (GitHub Actions cron + Node) | Restaurant listing sync (ADR-0020): polls INSEE Sirene + Google Maps and, via the ACL, calls the api's RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed as the owner. Prospection scoring/outreach is a later step. |
 | 🧱 `bam` | Projection worker | Business Activity Monitoring projector — consumes the same event stream to answer business questions. |
 | 🧱 `otel-collector` | OpenTelemetry Collector | Receives traces/metrics/logs from the api and bam containers; exports to the backend(s). |
 
@@ -4294,6 +4727,8 @@ aggregates; components bind the aggregates they handle and the read models they 
 | 🔌 `hubrise` | Existing restaurant catalog/orders systems; import via the Anti-Corruption Layer. |
 | 🔌 `delivery-partner` | Delivery partner (e.g. Avelo37); post-V0. |
 | 🔌 `supabase-auth` | Passwordless OTP identity for customers (not a domain concern). |
+| 🔌 `sirene` | INSEE Sirene / Recherche d'Entreprises (Etalab open data): SIRET, name, address, NAF, active/closed. Seeds listings via the ACL. |
+| 🔌 `google-maps` | Google Maps Places / Business Profile: rating, reviews, hours, phone, website, place id, and the 'Order online' link (ADR-0021). Enrichment + ownership proof. |
 
 ### ➡️ L2 — Relationships
 
@@ -4311,6 +4746,10 @@ aggregates; components bind the aggregates they handle and the read models they 
 | `api` → `hubrise` | Import catalog / sync inventory via ACL (inbound facts) |
 | `api` → `supabase-auth` | OTP verify / session (out of domain) |
 | `api` → `delivery-partner` | Dispatch + status (post-V0; inbound facts) |
+| `sync-worker` → `sirene` | Poll establishments (SIRET/NAF/address/closures) |
+| `sync-worker` → `google-maps` | Fetch Business Profile data (rating/reviews/hours/website) |
+| `sync-worker` → `api` | Register/enrich/close listings via the ACL, as the owner (/external/graphql) |
+| `api` → `google-maps` | Verify restaurant ownership (GBP) for claim/opt-out |
 | `bam` → `event-store` | Consume the event stream for business metrics |
 | `api` → `otel-collector` | Export traces/metrics/logs (OTLP) |
 | `bam` → `otel-collector` | Export traces/metrics/logs (OTLP) |
@@ -4332,3 +4771,4 @@ aggregates; components bind the aggregates they handle and the read models they 
 | ⚙️ `hubrise-acl` | 📡 yes | Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain. | — |
 | ⚙️ `stripe-adapter` | 📡 yes | Creates PaymentIntents / refunds; records inbound webhook facts (PaymentCaptured/Failed/Refunded). | — |
 | ⚙️ `supabase-acl` | 📡 yes | Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates. | — |
+| ⚙️ `sirene-google-acl` | 📡 yes | Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate. | — |

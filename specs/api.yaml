@@ -45,11 +45,19 @@ types:
     reads: [{ $ref: 'views.yaml#/View_Restaurant' }]
     properties:
       id: { $ref: 'scalars.yaml#/RestaurantId' }
-      accountId: { $ref: 'scalars.yaml#/RestaurantAccountId' }
+      accountId: { $ref: 'scalars.yaml#/RestaurantAccountId', nullable: true }   # null for a non-partner listing
+      listingStatus: { $ref: 'scalars.yaml#/RestaurantListingStatus' }
+      orderable: { type: boolean }   # derived: ACTIVE_PARTNER + status ACTIVE + acceptance ≠ PAUSED
+      externalIdentifiers: { $ref: 'entities.yaml#/ExternalIdentifier', array: true }
       slug: { $ref: 'scalars.yaml#/Slug' }
       displayName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
       description: { type: string, nullable: true }   # free text — no domain scalar (matches the view column)
       tags: { $ref: 'scalars.yaml#/Tag', array: true }
+      rating: { $ref: 'scalars.yaml#/GoogleRating', nullable: true }
+      reviewsCount: { type: integer, nullable: true }
+      website: { $ref: 'scalars.yaml#/WebUrl', nullable: true }
+      gbpOrderUrl: { $ref: 'scalars.yaml#/WebUrl', nullable: true }
+      gbpLinkStatus: { $ref: 'scalars.yaml#/GbpLinkStatus', nullable: true }
       address: { $ref: 'entities.yaml#/Address' }
       openingHours: { $ref: 'entities.yaml#/OpeningHoursSlot', array: true }
       status: { $ref: 'scalars.yaml#/RestaurantStatus' }
@@ -255,6 +263,8 @@ queries:
       city: { $ref: 'scalars.yaml#/CityName' }
       priceRange: { $ref: 'scalars.yaml#/PriceRange' }
       list: { $ref: 'scalars.yaml#/RestaurantListKey' }     # curated/personalized shelf (e.g. ORDER_AGAIN)
+      listingStatus: { $ref: 'scalars.yaml#/RestaurantListingStatus' }   # filter by partnership funnel
+      orderableOnly: { type: boolean }                      # only orderable (active partner) restaurants; non-partner cards show by default
     returns: { $ref: '#/types/Restaurant', array: true }
     roles: [PUBLIC]
     slice: V0
@@ -369,7 +379,7 @@ mutations:
     payload: {}
   registerRestaurant:
     command: { $ref: 'commands.yaml#/RegisterRestaurant' }
-    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    roles: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]   # EXTERNAL = the Sirene/Google sync ACL seeding a listing
     slice: V0
     payload: {}
   activateRestaurant:
@@ -395,6 +405,43 @@ mutations:
   changeOrderAcceptanceMode:
     command: { $ref: 'commands.yaml#/ChangeOrderAcceptanceMode' }
     roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    slice: V1
+    payload: {}
+
+  # --- Restaurant listing & pre-registration (ADR-0019/0021) ---
+  updateRestaurantGoogleBusinessProfile:
+    command: { $ref: 'commands.yaml#/UpdateRestaurantGoogleBusinessProfile' }
+    roles: [EXTERNAL, ADMIN]   # the Sirene/Google sync ACL (or admin)
+    slice: V0
+    payload: {}
+  markRestaurantClosed:
+    command: { $ref: 'commands.yaml#/MarkRestaurantClosed' }
+    roles: [EXTERNAL, ADMIN]
+    slice: V0
+    payload: {}
+  claimRestaurantListing:
+    command: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
+    roles: [PUBLIC, RESTAURANT_ACCOUNT]   # an owner proves ownership via Google Business Profile
+    slice: V0
+    payload: {}
+  optOutRestaurantListing:
+    command: { $ref: 'commands.yaml#/OptOutRestaurantListing' }
+    roles: [PUBLIC, RESTAURANT_ACCOUNT]
+    slice: V0
+    payload: {}
+  changeRestaurantListingStatus:
+    command: { $ref: 'commands.yaml#/ChangeRestaurantListingStatus' }
+    roles: [ADMIN]
+    slice: V0
+    payload: {}
+  configureGbpOrderLink:
+    command: { $ref: 'commands.yaml#/ConfigureGoogleBusinessProfileOrderLink' }
+    roles: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]
+    slice: V1
+    payload: {}
+  verifyGbpOrderLink:
+    command: { $ref: 'commands.yaml#/VerifyGoogleBusinessProfileOrderLink' }
+    roles: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]
     slice: V1
     payload: {}
 

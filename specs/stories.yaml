@@ -107,6 +107,14 @@ restaurant_owner:
         UpdateLocationProfile: { $ref: 'api.yaml#/mutations/updateRestaurant' }
         RemoveLocation: { $ref: 'api.yaml#/mutations/removeRestaurant' }
         ViewAllLocations: { $ref: 'api.yaml#/queries/restaurantLocationsByAccount' }
+    ClaimListing:
+      description: As an owner, I claim my pre-listed restaurant (proven via Google Business Profile) and point Google's "Order online" button at my page.
+      steps:
+        FindMyListing: { $ref: 'api.yaml#/queries/restaurant' }
+        ClaimIt: { $ref: 'api.yaml#/mutations/claimRestaurantListing' }
+        OptOut: { $ref: 'api.yaml#/mutations/optOutRestaurantListing' }
+        ConfigureGoogleOrderButton: { $ref: 'api.yaml#/mutations/configureGbpOrderLink' }
+        VerifyGoogleOrderButton: { $ref: 'api.yaml#/mutations/verifyGbpOrderLink' }
     ManageCatalog:
       description: As an owner, I build and maintain the catalog.
       steps:
@@ -177,3 +185,28 @@ admin:
         AddLocation: { $ref: 'api.yaml#/mutations/registerRestaurant' }
         ActivateRestaurant: { $ref: 'api.yaml#/mutations/activateRestaurant' }
         ImportCatalog: { $ref: 'api.yaml#/mutations/importCatalog' }
+    ManageListings:
+      description: As an admin, I curate the restaurant listings and partnership funnel.
+      steps:
+        BrowseListings: { $ref: 'api.yaml#/queries/restaurants' }
+        ChangeListingStatus: { $ref: 'api.yaml#/mutations/changeRestaurantListingStatus' }
+        MarkClosed: { $ref: 'api.yaml#/mutations/markRestaurantClosed' }
+
+restaurant_sync:
+  description: >
+    The Sirene/Google sync ACL (a scheduled worker) acting as an EXTERNAL caller. It seeds and refreshes
+    public listings on the restaurants' behalf — no human; it issues the same commands an owner would.
+  personaRole: EXTERNAL
+  locale: fr-FR
+  goals:
+    - Seed Touraine restaurant listings from open data before any agreement.
+    - Keep listings fresh (enrichment + closures).
+  frustrations:
+    - Source data gaps (SIRET shared by dark kitchens; Sirene closure lag).
+  activities:
+    SyncListings:
+      description: As the sync ACL, I register, enrich and close listings via the API.
+      steps:
+        SeedListing: { $ref: 'api.yaml#/mutations/registerRestaurant' }
+        EnrichGoogleProfile: { $ref: 'api.yaml#/mutations/updateRestaurantGoogleBusinessProfile' }
+        MarkClosed: { $ref: 'api.yaml#/mutations/markRestaurantClosed' }

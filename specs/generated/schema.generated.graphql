@@ -28,6 +28,10 @@ scalar AddressId
 scalar PaymentMethodId
 scalar ImageId
 scalar ExternalReference
+scalar ExternalIdentifierKey
+scalar GooglePlaceId
+scalar GoogleRating
+scalar WebUrl
 scalar Slug
 scalar RestaurantDisplayName
 scalar RestaurantLegalName
@@ -100,6 +104,19 @@ enum RestaurantStatus {
   DRAFT
   ACTIVE
   INACTIVE
+}
+
+enum RestaurantListingStatus {
+  NON_PARTNER
+  PASSIVE_PARTNER
+  ACTIVE_PARTNER
+}
+
+enum GbpLinkStatus {
+  UNSET
+  CONFIGURED
+  VERIFIED
+  BROKEN
 }
 
 enum CartStatus {
@@ -209,6 +226,11 @@ type RestaurantContact {
   phone: PhoneNumber
 }
 
+type ExternalIdentifier {
+  key: ExternalIdentifierKey!
+  value: String!
+}
+
 type CustomerContact {
   displayName: CustomerDisplayName!
   email: EmailAddress!
@@ -254,11 +276,19 @@ type OrderLineItem {
 
 type Restaurant {
   id: RestaurantId!
-  accountId: RestaurantAccountId!
+  accountId: RestaurantAccountId
+  listingStatus: RestaurantListingStatus!
+  orderable: Boolean!
+  externalIdentifiers: [ExternalIdentifier!]!
   slug: Slug!
   displayName: RestaurantDisplayName!
   description: String
   tags: [Tag!]!
+  rating: GoogleRating
+  reviewsCount: Int
+  website: WebUrl
+  gbpOrderUrl: WebUrl
+  gbpLinkStatus: GbpLinkStatus
   address: Address!
   openingHours: [OpeningHoursSlot!]!
   status: RestaurantStatus!
@@ -445,7 +475,8 @@ input DeleteRestaurantAccountInput {
 
 input RegisterRestaurantInput {
   restaurantId: RestaurantId!
-  accountId: RestaurantAccountId!
+  accountId: RestaurantAccountId
+  listingStatus: RestaurantListingStatus
   slug: Slug!
   displayName: RestaurantDisplayName!
   contact: RestaurantContactInput
@@ -453,6 +484,7 @@ input RegisterRestaurantInput {
   timezone: TimeZone
   preparationTimeMinutes: Int
   openingHours: [OpeningHoursSlotInput!]
+  externalIdentifiers: [ExternalIdentifierInput!]
   ref: ExternalReference
 }
 
@@ -485,6 +517,49 @@ input RemoveRestaurantInput {
 input ChangeOrderAcceptanceModeInput {
   restaurantId: RestaurantId!
   mode: OrderAcceptanceMode!
+}
+
+input UpdateRestaurantGoogleBusinessProfileInput {
+  restaurantId: RestaurantId!
+  googlePlaceId: GooglePlaceId
+  rating: GoogleRating
+  reviewsCount: Int
+  website: WebUrl
+  phone: PhoneNumber
+  openingHours: [OpeningHoursSlotInput!]
+  tags: [Tag!]
+}
+
+input MarkRestaurantClosedInput {
+  restaurantId: RestaurantId!
+  reason: String
+}
+
+input ClaimRestaurantListingInput {
+  restaurantId: RestaurantId!
+  accountId: RestaurantAccountId
+  googleOwnershipProof: String!
+}
+
+input OptOutRestaurantListingInput {
+  restaurantId: RestaurantId!
+  googleOwnershipProof: String!
+  reason: String
+}
+
+input ChangeRestaurantListingStatusInput {
+  restaurantId: RestaurantId!
+  listingStatus: RestaurantListingStatus!
+  reason: String
+}
+
+input ConfigureGoogleBusinessProfileOrderLinkInput {
+  restaurantId: RestaurantId!
+  gbpOrderUrl: WebUrl!
+}
+
+input VerifyGoogleBusinessProfileOrderLinkInput {
+  restaurantId: RestaurantId!
 }
 
 input CreateCatalogInput {
@@ -749,6 +824,8 @@ input RestaurantsQueryInput {
   city: CityName
   priceRange: PriceRange
   list: RestaurantListKey
+  listingStatus: RestaurantListingStatus
+  orderableOnly: Boolean
 }
 
 input CatalogQueryInput {
@@ -823,6 +900,11 @@ input OpeningHoursSlotInput {
   weekday: Weekday!
   from: TimeOfDay!
   to: TimeOfDay!
+}
+
+input ExternalIdentifierInput {
+  key: ExternalIdentifierKey!
+  value: String!
 }
 
 input OfferInput {
@@ -947,6 +1029,34 @@ type RemoveRestaurantPayload {
 }
 
 type ChangeOrderAcceptanceModePayload {
+  correlationId: CorrelationId!
+}
+
+type UpdateRestaurantGoogleBusinessProfilePayload {
+  correlationId: CorrelationId!
+}
+
+type MarkRestaurantClosedPayload {
+  correlationId: CorrelationId!
+}
+
+type ClaimRestaurantListingPayload {
+  correlationId: CorrelationId!
+}
+
+type OptOutRestaurantListingPayload {
+  correlationId: CorrelationId!
+}
+
+type ChangeRestaurantListingStatusPayload {
+  correlationId: CorrelationId!
+}
+
+type ConfigureGbpOrderLinkPayload {
+  correlationId: CorrelationId!
+}
+
+type VerifyGbpOrderLinkPayload {
   correlationId: CorrelationId!
 }
 
@@ -1135,12 +1245,19 @@ type Mutation {
   registerRestaurantAccount(input: RegisterRestaurantAccountInput!): RegisterRestaurantAccountPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RegisterRestaurantAccount")
   updateRestaurantAccount(input: UpdateRestaurantAccountInput!): UpdateRestaurantAccountPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateRestaurantAccount")
   deleteRestaurantAccount(input: DeleteRestaurantAccountInput!): DeleteRestaurantAccountPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "DeleteRestaurantAccount")
-  registerRestaurant(input: RegisterRestaurantInput!): RegisterRestaurantPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RegisterRestaurant")
+  registerRestaurant(input: RegisterRestaurantInput!): RegisterRestaurantPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]) @command(name: "RegisterRestaurant")
   activateRestaurant(input: ActivateRestaurantInput!): ActivateRestaurantPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "ActivateRestaurant")
   updateRestaurant(input: UpdateRestaurantInput!): UpdateRestaurantPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateRestaurant")
   deactivateRestaurant(input: DeactivateRestaurantInput!): DeactivateRestaurantPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "DeactivateRestaurant")
   removeRestaurant(input: RemoveRestaurantInput!): RemoveRestaurantPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveRestaurant")
   changeOrderAcceptanceMode(input: ChangeOrderAcceptanceModeInput!): ChangeOrderAcceptanceModePayload! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @command(name: "ChangeOrderAcceptanceMode")
+  updateRestaurantGoogleBusinessProfile(input: UpdateRestaurantGoogleBusinessProfileInput!): UpdateRestaurantGoogleBusinessProfilePayload! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "UpdateRestaurantGoogleBusinessProfile")
+  markRestaurantClosed(input: MarkRestaurantClosedInput!): MarkRestaurantClosedPayload! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkRestaurantClosed")
+  claimRestaurantListing(input: ClaimRestaurantListingInput!): ClaimRestaurantListingPayload! @public @command(name: "ClaimRestaurantListing")
+  optOutRestaurantListing(input: OptOutRestaurantListingInput!): OptOutRestaurantListingPayload! @public @command(name: "OptOutRestaurantListing")
+  changeRestaurantListingStatus(input: ChangeRestaurantListingStatusInput!): ChangeRestaurantListingStatusPayload! @auth(requires: [ADMIN]) @command(name: "ChangeRestaurantListingStatus")
+  configureGbpOrderLink(input: ConfigureGoogleBusinessProfileOrderLinkInput!): ConfigureGbpOrderLinkPayload! @auth(requires: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]) @command(name: "ConfigureGoogleBusinessProfileOrderLink")
+  verifyGbpOrderLink(input: VerifyGoogleBusinessProfileOrderLinkInput!): VerifyGbpOrderLinkPayload! @auth(requires: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]) @command(name: "VerifyGoogleBusinessProfileOrderLink")
   createCatalog(input: CreateCatalogInput!): CreateCatalogPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "CreateCatalog")
   addProduct(input: AddProductInput!): AddProductPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "AddProduct")
   updateProduct(input: UpdateProductInput!): UpdateProductPayload! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateProduct")

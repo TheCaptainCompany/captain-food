@@ -91,6 +91,20 @@ RestaurantContact:
       nullable: true
   required: []
 
+ExternalIdentifier:
+  type: object
+  description: >
+    A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value
+    (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and
+    multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
+  properties:
+    key:
+      $ref: 'scalars.yaml#/ExternalIdentifierKey'
+    value:
+      type: string
+      maxLength: 255
+  required: [key, value]
+
 CustomerContact:
   type: object
   properties:
@@ -152,11 +166,24 @@ Restaurant:
       $ref: 'scalars.yaml#/RestaurantId'
     accountId:
       $ref: 'scalars.yaml#/RestaurantAccountId'
-      description: "The owning RestaurantAccount."
+      nullable: true
+      description: "The owning RestaurantAccount; NULL for a non-partner listing (no account yet), set on claim/conversion."
+    listingStatus:
+      $ref: 'scalars.yaml#/RestaurantListingStatus'
+      description: "Partnership funnel: NON_PARTNER (seeded from open data) → PASSIVE_PARTNER → ACTIVE_PARTNER."
     ref:
       $ref: 'scalars.yaml#/ExternalReference'
       nullable: true
       description: "HubRise location reference, when imported."
+    externalIdentifiers:
+      type: array
+      items:
+        $ref: '#/ExternalIdentifier'
+      description: "Source-agnostic identifiers preserving original keys (siret/naf/google_place_id/hubrise_ref…). Not unique."
+    googlePlaceId:
+      $ref: 'scalars.yaml#/GooglePlaceId'
+      nullable: true
+      description: "Google Place id, when known (enrichment / GBP)."
     slug:
       $ref: 'scalars.yaml#/Slug'
     displayName:
@@ -191,7 +218,7 @@ Restaurant:
       format: date-time
   required:
     - id
-    - accountId
+    - listingStatus
     - slug
     - displayName
     - address
