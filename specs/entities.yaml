@@ -192,6 +192,15 @@ Restaurant:
       $ref: '#/RestaurantContact'
       nullable: true
       description: "Location-specific contact; falls back to the account contact when absent."
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+      description: "Restaurant website (general restaurant info; any source may provide it)."
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
+      description: "Cuisine/attribute tags (general restaurant info; source-agnostic)."
     address:
       $ref: '#/Address'
     status:

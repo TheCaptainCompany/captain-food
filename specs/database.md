@@ -138,11 +138,10 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `slug` | `Slug` | `TEXT` | unique |  |
 | `display_name` | `RestaurantDisplayName` | `TEXT` | — |  |
 | `description` | `text` | `TEXT` | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
-| `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags, sourced from Google Business Profile enrichment. |
-| `rating` | `GoogleRating` | `TEXT` | nullable |  |
-| `reviews_count` | `integer` | `INTEGER` | nullable |  |
+| `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
 | `website` | `WebUrl` | `TEXT` | nullable |  |
-| `phone` | `PhoneNumber` | `TEXT` | nullable |  |
+| `rating` | `GoogleRating` | `TEXT` | nullable | GBP-specific metric (Google listing), independent of the restaurant's own info. |
+| `reviews_count` | `integer` | `INTEGER` | nullable |  |
 | `gbp_order_url` | `WebUrl` | `TEXT` | nullable |  |
 | `gbp_link_status` | `GbpLinkStatus` | `TEXT` | nullable |  |
 | `address` | `jsonb` | `JSONB` | — |  |

@@ -480,6 +480,8 @@ input RegisterRestaurantInput {
   slug: Slug!
   displayName: RestaurantDisplayName!
   contact: RestaurantContactInput
+  website: WebUrl
+  tags: [Tag!]
   address: AddressInput!
   timezone: TimeZone
   preparationTimeMinutes: Int
@@ -497,6 +499,8 @@ input UpdateRestaurantInput {
   restaurantId: RestaurantId!
   displayName: RestaurantDisplayName
   contact: RestaurantContactInput
+  website: WebUrl
+  tags: [Tag!]
   address: AddressInput
   timezone: TimeZone
   preparationTimeMinutes: Int
@@ -524,10 +528,6 @@ input UpdateRestaurantGoogleBusinessProfileInput {
   googlePlaceId: GooglePlaceId
   rating: GoogleRating
   reviewsCount: Int
-  website: WebUrl
-  phone: PhoneNumber
-  openingHours: [OpeningHoursSlotInput!]
-  tags: [Tag!]
 }
 
 input MarkRestaurantClosedInput {

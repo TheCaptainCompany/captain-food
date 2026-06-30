@@ -383,11 +383,10 @@ _🧩 aggregate_ — A single restaurant location: profile, operational status (
 | `slug` | [🔤 `Slug`](#scalar-slug) _(derived)_ | [⚡ `RestaurantRegistered`.`slug`](#event-restaurantregistered--slug) | unique |  |
 | `display_name` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) _(derived)_ | [⚡ `RestaurantRegistered`.`displayName`](#event-restaurantregistered--displayname), [⚡ `RestaurantUpdated`.`displayName`](#event-restaurantupdated--displayname) | — |  |
 | `description` | `text` | ⚠️ _(none)_ | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
-| `tags` | `jsonb` | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`tags`](#event-restaurantgooglebusinessprofileupdated--tags) | nullable | Cuisine/attribute tags, sourced from Google Business Profile enrichment. |
-| `rating` | [🔤 `GoogleRating`](#scalar-googlerating) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`rating`](#event-restaurantgooglebusinessprofileupdated--rating) | nullable |  |
+| `tags` | `jsonb` | [⚡ `RestaurantRegistered`.`tags`](#event-restaurantregistered--tags), [⚡ `RestaurantUpdated`.`tags`](#event-restaurantupdated--tags) | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
+| `website` | [🔤 `WebUrl`](#scalar-weburl) | [⚡ `RestaurantRegistered`.`website`](#event-restaurantregistered--website), [⚡ `RestaurantUpdated`.`website`](#event-restaurantupdated--website) | nullable |  |
+| `rating` | [🔤 `GoogleRating`](#scalar-googlerating) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`rating`](#event-restaurantgooglebusinessprofileupdated--rating) | nullable | GBP-specific metric (Google listing), independent of the restaurant's own info. |
 | `reviews_count` | `integer` | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`reviewsCount`](#event-restaurantgooglebusinessprofileupdated--reviewscount) | nullable |  |
-| `website` | [🔤 `WebUrl`](#scalar-weburl) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`website`](#event-restaurantgooglebusinessprofileupdated--website) | nullable |  |
-| `phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) _(derived)_ | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`phone`](#event-restaurantgooglebusinessprofileupdated--phone) | nullable |  |
 | `gbp_order_url` | [🔤 `WebUrl`](#scalar-weburl) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`.`gbpOrderUrl`](#event-restaurantgooglebusinessprofileorderlinkconfigured--gbporderurl) | nullable |  |
 | `gbp_link_status` | [🔤 `GbpLinkStatus`](#scalar-gbplinkstatus) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`.`status`](#event-restaurantgooglebusinessprofileorderlinkverified--status) | nullable |  |
 | `address` | `jsonb` _(derived)_ | [⚡ `RestaurantRegistered`.`address`](#event-restaurantregistered--address), [⚡ `RestaurantUpdated`.`address`](#event-restaurantupdated--address) | — |  |
@@ -468,6 +467,8 @@ The single, generic way to register a restaurant LOCATION. Used by an owner/admi
 | <a id="command-registerrestaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 | <a id="command-registerrestaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="command-registerrestaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ | Location-specific contact; falls back to the account contact when absent. |
+| <a id="command-registerrestaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
+| <a id="command-registerrestaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 | <a id="command-registerrestaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
 | <a id="command-registerrestaurant--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ | Location timezone; falls back to the account timezone when absent. |
 | <a id="command-registerrestaurant--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
@@ -503,6 +504,8 @@ Admin edits one or more mutable LOCATION fields (full replace of provided fields
 | <a id="command-updaterestaurant--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-updaterestaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ⬜ |  |
 | <a id="command-updaterestaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
+| <a id="command-updaterestaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
+| <a id="command-updaterestaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 | <a id="command-updaterestaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ⬜ |  |
 | <a id="command-updaterestaurant--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="command-updaterestaurant--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
@@ -554,7 +557,7 @@ Restaurant toggles its live order-acceptance mode (NORMAL / BUSY / PAUSED).
 <a id="command-updaterestaurantgooglebusinessprofile"></a>
 #### 📩 Command: `UpdateRestaurantGoogleBusinessProfile`
 
-Record the restaurant's latest Google Business Profile data (rating, reviews, hours, website, phone, place id, tags). Issued by the Sirene/Google sync ACL (or admin); full-replace snapshot.
+Record GBP-SPECIFIC metrics (Google place id + rating/reviews) for a restaurant. Issued by the Sirene/Google sync ACL (or admin). Carries ONLY Google-listing data — general restaurant info (name/address/hours/phone/website/tags) is set via Register/UpdateRestaurant, so the two data sources stay independent.
 
 - **Dispatched by**: [✏️ `updateRestaurantGoogleBusinessProfile`](#mutation-updaterestaurantgooglebusinessprofile) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
 - **Emits**: [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated)
@@ -566,10 +569,6 @@ Record the restaurant's latest Google Business Profile data (rating, reviews, ho
 | <a id="command-updaterestaurantgooglebusinessprofile--googleplaceid"></a>`googlePlaceId` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | ⬜ |  |
 | <a id="command-updaterestaurantgooglebusinessprofile--rating"></a>`rating` | [🔤 `GoogleRating`](#scalar-googlerating) | ⬜ |  |
 | <a id="command-updaterestaurantgooglebusinessprofile--reviewscount"></a>`reviewsCount` | `integer` | ⬜ |  |
-| <a id="command-updaterestaurantgooglebusinessprofile--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
-| <a id="command-updaterestaurantgooglebusinessprofile--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ⬜ |  |
-| <a id="command-updaterestaurantgooglebusinessprofile--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
-| <a id="command-updaterestaurantgooglebusinessprofile--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 
 <a id="command-markrestaurantclosed"></a>
 #### 📩 Command: `MarkRestaurantClosed`
@@ -730,6 +729,8 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 | <a id="event-restaurantregistered--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 | <a id="event-restaurantregistered--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="event-restaurantregistered--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
+| <a id="event-restaurantregistered--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
+| <a id="event-restaurantregistered--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 | <a id="event-restaurantregistered--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
 | <a id="event-restaurantregistered--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="event-restaurantregistered--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
@@ -750,6 +751,8 @@ One or more editable LOCATION fields of a restaurant have changed.
 | <a id="event-restaurantupdated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-restaurantupdated--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ⬜ |  |
 | <a id="event-restaurantupdated--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
+| <a id="event-restaurantupdated--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
+| <a id="event-restaurantupdated--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 | <a id="event-restaurantupdated--address"></a>`address` | [📦 `Address`](#entity-address) | ⬜ |  |
 | <a id="event-restaurantupdated--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="event-restaurantupdated--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
@@ -817,7 +820,7 @@ A location was removed (delisted) from its account.
 <a id="event-restaurantgooglebusinessprofileupdated"></a>
 #### ⚡ Event: `RestaurantGoogleBusinessProfileUpdated`
 
-The restaurant's Google Business Profile data was observed/refreshed (enrichment). A business fact recorded via the Sirene/Google ACL; carries the FULL latest GBP snapshot (replace semantics).
+GBP-SPECIFIC metrics for the restaurant's Google Business Profile (place id + Google's rating/reviews) were observed/refreshed. Carries ONLY data intrinsic to the Google listing — never general restaurant info (name/address/hours/phone/website/tags), which flows through Register/UpdateRestaurant. This keeps Sirene and Google feeding the same restaurant side-by-side with no cross-source dependency.
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
@@ -829,10 +832,6 @@ The restaurant's Google Business Profile data was observed/refreshed (enrichment
 | <a id="event-restaurantgooglebusinessprofileupdated--googleplaceid"></a>`googlePlaceId` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | ⬜ |  |
 | <a id="event-restaurantgooglebusinessprofileupdated--rating"></a>`rating` | [🔤 `GoogleRating`](#scalar-googlerating) | ⬜ |  |
 | <a id="event-restaurantgooglebusinessprofileupdated--reviewscount"></a>`reviewsCount` | `integer` | ⬜ |  |
-| <a id="event-restaurantgooglebusinessprofileupdated--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
-| <a id="event-restaurantgooglebusinessprofileupdated--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ⬜ |  |
-| <a id="event-restaurantgooglebusinessprofileupdated--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
-| <a id="event-restaurantgooglebusinessprofileupdated--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
 
 <a id="event-restaurantlistingclaimed"></a>
 #### ⚡ Event: `RestaurantListingClaimed`
@@ -987,6 +986,8 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 | <a id="entity-restaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="entity-restaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ | Location-specific contact; falls back to the account contact when absent. |
+| <a id="entity-restaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ | Restaurant website (general restaurant info; any source may provide it). |
+| <a id="entity-restaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ | Cuisine/attribute tags (general restaurant info; source-agnostic). |
 | <a id="entity-restaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
 | <a id="entity-restaurant--status"></a>`status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | ✅ |  |
 | <a id="entity-restaurant--orderacceptance"></a>`orderAcceptance` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) | ✅ |  |

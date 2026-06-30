@@ -137,6 +137,13 @@ RegisterRestaurant:
       $ref: 'entities.yaml#/RestaurantContact'
       nullable: true
       description: "Location-specific contact; falls back to the account contact when absent."
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
     address:
       $ref: 'entities.yaml#/Address'
     timezone:
@@ -188,6 +195,14 @@ UpdateRestaurant:
       nullable: true
     contact:
       $ref: 'entities.yaml#/RestaurantContact'
+      nullable: true
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
       nullable: true
     address:
       $ref: 'entities.yaml#/Address'
@@ -248,8 +263,10 @@ ChangeOrderAcceptanceMode:
 
 UpdateRestaurantGoogleBusinessProfile:
   description: >
-    Record the restaurant's latest Google Business Profile data (rating, reviews, hours, website, phone,
-    place id, tags). Issued by the Sirene/Google sync ACL (or admin); full-replace snapshot.
+    Record GBP-SPECIFIC metrics (Google place id + rating/reviews) for a restaurant. Issued by the
+    Sirene/Google sync ACL (or admin). Carries ONLY Google-listing data — general restaurant info
+    (name/address/hours/phone/website/tags) is set via Register/UpdateRestaurant, so the two data sources
+    stay independent.
   type: object
   properties:
     restaurantId:
@@ -263,22 +280,6 @@ UpdateRestaurantGoogleBusinessProfile:
     reviewsCount:
       type: integer
       minimum: 0
-      nullable: true
-    website:
-      $ref: 'scalars.yaml#/WebUrl'
-      nullable: true
-    phone:
-      $ref: 'scalars.yaml#/PhoneNumber'
-      nullable: true
-    openingHours:
-      type: array
-      items:
-        $ref: 'entities.yaml#/OpeningHoursSlot'
-      nullable: true
-    tags:
-      type: array
-      items:
-        $ref: 'scalars.yaml#/Tag'
       nullable: true
   required: [restaurantId]
 

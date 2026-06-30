@@ -109,6 +109,13 @@ RestaurantRegistered:
     contact:
       $ref: 'entities.yaml#/RestaurantContact'
       nullable: true
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
     address:
       $ref: 'entities.yaml#/Address'
     timezone:
@@ -143,6 +150,14 @@ RestaurantUpdated:
       nullable: true
     contact:
       $ref: 'entities.yaml#/RestaurantContact'
+      nullable: true
+    website:
+      $ref: 'scalars.yaml#/WebUrl'
+      nullable: true
+    tags:
+      type: array
+      items:
+        $ref: 'scalars.yaml#/Tag'
       nullable: true
     address:
       $ref: 'entities.yaml#/Address'
@@ -224,8 +239,10 @@ RestaurantRemoved:
 
 RestaurantGoogleBusinessProfileUpdated:
   description: >
-    The restaurant's Google Business Profile data was observed/refreshed (enrichment). A business fact
-    recorded via the Sirene/Google ACL; carries the FULL latest GBP snapshot (replace semantics).
+    GBP-SPECIFIC metrics for the restaurant's Google Business Profile (place id + Google's rating/reviews)
+    were observed/refreshed. Carries ONLY data intrinsic to the Google listing — never general restaurant
+    info (name/address/hours/phone/website/tags), which flows through Register/UpdateRestaurant. This keeps
+    Sirene and Google feeding the same restaurant side-by-side with no cross-source dependency.
   type: object
   properties:
     restaurantId:
@@ -239,22 +256,6 @@ RestaurantGoogleBusinessProfileUpdated:
     reviewsCount:
       type: integer
       minimum: 0
-      nullable: true
-    website:
-      $ref: 'scalars.yaml#/WebUrl'
-      nullable: true
-    phone:
-      $ref: 'scalars.yaml#/PhoneNumber'
-      nullable: true
-    openingHours:
-      type: array
-      items:
-        $ref: 'entities.yaml#/OpeningHoursSlot'
-      nullable: true
-    tags:
-      type: array
-      items:
-        $ref: 'scalars.yaml#/Tag'
       nullable: true
   required:
     - restaurantId

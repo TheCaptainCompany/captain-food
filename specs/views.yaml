@@ -117,23 +117,25 @@ View_Restaurant:
       note: "⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet."
     tags:
       type: jsonb
-      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/tags' }]
+      from:
+        - { $ref: 'events.yaml#/RestaurantRegistered/properties/tags' }
+        - { $ref: 'events.yaml#/RestaurantUpdated/properties/tags' }
       nullable: true
-      note: "Cuisine/attribute tags, sourced from Google Business Profile enrichment."
+      note: "Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event."
+    website:
+      type: { $ref: 'scalars.yaml#/WebUrl' }
+      from:
+        - { $ref: 'events.yaml#/RestaurantRegistered/properties/website' }
+        - { $ref: 'events.yaml#/RestaurantUpdated/properties/website' }
+      nullable: true
     rating:
       type: { $ref: 'scalars.yaml#/GoogleRating' }
       from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/rating' }]
       nullable: true
+      note: "GBP-specific metric (Google listing), independent of the restaurant's own info."
     reviews_count:
       type: integer
       from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/reviewsCount' }]
-      nullable: true
-    website:
-      type: { $ref: 'scalars.yaml#/WebUrl' }
-      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/website' }]
-      nullable: true
-    phone:
-      from: [{ $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated/properties/phone' }]
       nullable: true
     gbp_order_url:
       type: { $ref: 'scalars.yaml#/WebUrl' }

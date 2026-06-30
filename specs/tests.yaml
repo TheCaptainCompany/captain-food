@@ -78,7 +78,7 @@ fixtures:
     data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris", createdBy: "user-1" }
   restaurantSeeded:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }], createdBy: "sync-1" }
+    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }], createdBy: "sync-1" }
   restaurantUpdated:
     type: { $ref: 'events.yaml#/RestaurantUpdated' }
     data: { restaurantId: "resto-1", displayName: "Chez Marco — Centre", updatedBy: "user-1" }
@@ -96,7 +96,7 @@ fixtures:
     data: { restaurantId: "resto-1", accountId: "acct-1", reason: "Delisted" }
   restaurantGoogleBusinessProfileUpdated:
     type: { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileUpdated' }
-    data: { restaurantId: "resto-2", googlePlaceId: "ChIJxyz", rating: 4.4, reviewsCount: 18, website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"] }
+    data: { restaurantId: "resto-2", googlePlaceId: "ChIJxyz", rating: 4.4, reviewsCount: 18 }
   restaurantListingClaimed:
     type: { $ref: 'events.yaml#/RestaurantListingClaimed' }
     data: { restaurantId: "resto-2", accountId: "acct-9", claimedBy: "user-9", proof: "gbp-proof-ref-1" }
@@ -452,7 +452,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/RegisterRestaurant' }
-      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
+      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
     then:
       - { $ref: '#/fixtures/restaurantSeeded' }
   TestRestaurantGoogleBusinessProfileUpdated:
@@ -462,7 +462,7 @@ tests:
       - { $ref: '#/fixtures/restaurantSeeded' }
     when:
       type: { $ref: 'commands.yaml#/UpdateRestaurantGoogleBusinessProfile' }
-      data: { restaurantId: "resto-2", googlePlaceId: "ChIJxyz", rating: 4.4, reviewsCount: 18, website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"] }
+      data: { restaurantId: "resto-2", googlePlaceId: "ChIJxyz", rating: 4.4, reviewsCount: 18 }
     then:
       - { $ref: '#/fixtures/restaurantGoogleBusinessProfileUpdated' }
   TestRestaurantMarkedClosed:
