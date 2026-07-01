@@ -20,6 +20,7 @@ CREATE TABLE View_Restaurant (
   display_name TEXT NOT NULL,
   description TEXT,
   tags JSONB,
+  margin_rate TEXT,
   website TEXT,
   rating TEXT,
   reviews_count INTEGER,
@@ -75,6 +76,15 @@ CREATE TABLE View_PhoneCountry (
 );
 CREATE INDEX ON View_PhoneCountry (dialing_code);
 
+CREATE TABLE View_PricingPolicy (
+  currency TEXT PRIMARY KEY,
+  fee_rate NUMERIC NOT NULL,
+  buyer_share NUMERIC NOT NULL,
+  margin_low NUMERIC NOT NULL,
+  margin_high NUMERIC NOT NULL,
+  effective_from TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE View_Catalog (
   catalog_id UUID PRIMARY KEY,
   restaurant_id UUID NOT NULL,
@@ -93,6 +103,7 @@ CREATE TABLE View_Cart (
   lines JSONB NOT NULL,
   total_amount_cents BIGINT NOT NULL,
   currency TEXT NOT NULL,
+  estimated_breakdown JSONB,
   updated_at TIMESTAMPTZ NOT NULL
 );
 
@@ -106,6 +117,12 @@ CREATE TABLE View_OrderTracking (
   items JSONB NOT NULL,
   total_amount_cents BIGINT NOT NULL,
   currency TEXT NOT NULL,
+  articles_cents BIGINT NOT NULL,
+  delivery_cents BIGINT NOT NULL,
+  service_fee_cents BIGINT NOT NULL,
+  restaurant_payout_cents BIGINT NOT NULL,
+  rider_payout_cents BIGINT NOT NULL,
+  captain_net_cents BIGINT NOT NULL,
   delivery_address JSONB,
   estimated_ready_at TIMESTAMPTZ,
   placed_at TIMESTAMPTZ NOT NULL,

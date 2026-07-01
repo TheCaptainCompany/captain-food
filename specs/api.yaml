@@ -88,7 +88,8 @@ types:
       customerId: { $ref: 'scalars.yaml#/CustomerId', nullable: true }
       status: { $ref: 'scalars.yaml#/CartStatus' }
       lines: { $ref: 'entities.yaml#/OrderLineItem', array: true }   # read lines are priced (same shape as order lines)
-      totalAmount: { $ref: 'entities.yaml#/Money' }
+      totalAmount: { $ref: 'entities.yaml#/Money' }   # food sub-total (the cart's items)
+      breakdown: { $ref: 'entities.yaml#/PaymentBreakdown', nullable: true }   # estimated checkout fee breakdown (ADR-0018)
       updatedAt: { type: string, format: date-time }
   Order:
     description: "An order with its tracking status and payment state."
@@ -101,7 +102,8 @@ types:
       status: { $ref: 'scalars.yaml#/OrderStatus' }
       serviceType: { $ref: 'scalars.yaml#/ServiceType' }
       items: { $ref: 'entities.yaml#/OrderLineItem', array: true }
-      totalAmount: { $ref: 'entities.yaml#/Money' }
+      totalAmount: { $ref: 'entities.yaml#/Money' }   # buyer total (== breakdown.total)
+      breakdown: { $ref: 'entities.yaml#/PaymentBreakdown' }   # fee/split breakdown (ADR-0016/0017/0018)
       deliveryAddress: { $ref: 'entities.yaml#/Address', nullable: true }
       estimatedReadyAt: { type: string, format: date-time, nullable: true }
       placedAt: { type: string, format: date-time }
@@ -223,6 +225,16 @@ types:
       contactsCount: { type: integer }
       lastContactedAt: { type: string, format: date-time, nullable: true }
       repliedAt: { type: string, format: date-time, nullable: true }
+  PricingPolicy:
+    description: "The calibratable Captain service-fee policy (ADR-0016/0017); admin/transparency."
+    reads: [{ $ref: 'views.yaml#/View_PricingPolicy' }]
+    properties:
+      currency: { $ref: 'scalars.yaml#/CurrencyCode' }
+      feeRate: { type: number }
+      buyerShare: { type: number }
+      marginLow: { type: number }
+      marginHigh: { type: number }
+      effectiveFrom: { type: string, format: date-time }
 
 # --- Reads (queries) ------------------------------------------------------------------------------
 # A query declares only its args, return type (`$ref` into `#/types`), roles and slice. `@reads` is
@@ -352,6 +364,12 @@ queries:
       minScore: { $ref: 'scalars.yaml#/ProspectionScore' }
       status: { $ref: 'scalars.yaml#/ProspectPipelineStatus' }
     returns: { $ref: '#/types/Prospect', array: true }
+    roles: [ADMIN]
+    slice: V1
+
+  pricingPolicy:
+    description: "The active Captain service-fee policy (admin; calibration/transparency)."
+    returns: { $ref: '#/types/PricingPolicy', array: true }
     roles: [ADMIN]
     slice: V1
 

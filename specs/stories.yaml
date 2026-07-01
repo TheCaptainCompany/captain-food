@@ -53,6 +53,7 @@ customer:
         AddToCartLine: { $ref: 'api.yaml#/mutations/addCartLine' }
         RemoveFromCart: { $ref: 'api.yaml#/mutations/removeCartLine' }
         ChangeCartLineQuantity: { $ref: 'api.yaml#/mutations/changeCartLineQuantity' }
+        SeeCheckoutBreakdown: { $ref: 'api.yaml#/queries/cart' }   # transparent fee breakdown before paying (ADR-0018)
         PlaceOrder: { $ref: 'api.yaml#/mutations/placeOrder' }
         TrackOrderStatus: { $ref: 'api.yaml#/queries/order' }
         RateOrder: { $ref: 'api.yaml#/mutations/rateOrder' }
@@ -196,6 +197,11 @@ admin:
       steps:
         ReviewPipeline: { $ref: 'api.yaml#/queries/prospectionPipeline' }
         LogReply: { $ref: 'api.yaml#/mutations/recordProspectReply' }
+    Pricing:
+      description: As an admin, I review the service-fee policy and set each restaurant's margin (ADR-0016/0017).
+      steps:
+        ReviewPolicy: { $ref: 'api.yaml#/queries/pricingPolicy' }
+        SetRestaurantMargin: { $ref: 'api.yaml#/mutations/updateRestaurant' }
 
 restaurant_sync:
   description: >

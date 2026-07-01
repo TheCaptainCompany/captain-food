@@ -67,6 +67,12 @@ place-order:
       required: true
       attributes:
         - { key: "business.aggregate_id", type: string, required: true }
+    - name: "pricing.compute"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.service_fee", type: int, required: true }
+        - { key: "business.split_ok", type: string, required: true }
     - name: "payment.intent.create"
       kind: CLIENT
       required: true
@@ -100,7 +106,7 @@ place-order:
 
   status_rules:
     success:
-      required_spans: ["command.receive", "payment.intent.create", "event.store.append", "event.publish", "event.consume.projection"]
+      required_spans: ["command.receive", "pricing.compute", "payment.intent.create", "event.store.append", "event.publish", "event.consume.projection"]
       conditions: ["payment.intent.create.business.result == 'captured'"]
     technical_error:
       any_span_errors: true

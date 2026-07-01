@@ -58,6 +58,7 @@ Concrete architecture/domain-model decisions taken while building the specs (Acc
 | ADR | Title |
 |---|---|
 | [0027](0027-restaurant-pre-registration-prospection-model.md) | Restaurant pre-registration & prospection domain model (extend `Restaurant`, generic `externalIdentifiers`, dual-source ACLs, score in read model; rejects a separate `RestaurantDirectory` BC — dark kitchens) |
+| [0028](0028-pricing-3way-split-model.md) | Pricing & 3-way split model (`PaymentBreakdown` VO, reference `View_PricingPolicy`, restaurant `marginRate`, breakdown on OrderPlaced/Cart/Order; realizes 0016/0017/0018) |
 
 ## Proposed (deferred until app/runtime code exists)
 

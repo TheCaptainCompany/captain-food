@@ -139,6 +139,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `display_name` | `RestaurantDisplayName` | `TEXT` | — |  |
 | `description` | `text` | `TEXT` | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
 | `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
+| `margin_rate` | `MarginPercent` | `TEXT` | nullable | Food margin %, input to the Captain service-fee split (ADR-0017); back-office only. |
 | `website` | `WebUrl` | `TEXT` | nullable |  |
 | `rating` | `GoogleRating` | `TEXT` | nullable | GBP-specific metric (Google listing), independent of the restaurant's own info. |
 | `reviews_count` | `integer` | `INTEGER` | nullable |  |
@@ -205,6 +206,21 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `name` | `text` | `TEXT` | — |  |
 | `default_locale` | `Locale` | `TEXT` | — |  |
 
+### `View_PricingPolicy` · 🛶 V0 · 📦 reference (static seed)
+
+- **Reference data**: seeded at deploy time (not event-fed).
+- **Rules**: Seeded with ADR-0017 indicative values: fee_rate 5.0, buyer_share 60.0, margin_low 55.0, margin_high 70.0. Calibrate by simulation before launch.
+- **Note**: Calibratable Captain service-fee policy (ADR-0016/0017). Seeded config the pricing projection reads to compute cart/order breakdowns; transparent + tunable without code. Single active row per currency.
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `currency` | `CurrencyCode` | `TEXT` | PK |  |
+| `fee_rate` | `numeric` | `NUMERIC` | — | Service fee F as a % of food TTC (e.g. 5.0). |
+| `buyer_share` | `numeric` | `NUMERIC` | — | Share of F charged to the buyer (e.g. 60.0); the rest is the restaurant's margin-scaled contribution. |
+| `margin_low` | `numeric` | `NUMERIC` | — | Lower bound of the margin band for score_margin (e.g. 55.0). |
+| `margin_high` | `numeric` | `NUMERIC` | — | Upper bound of the margin band for score_margin (e.g. 70.0). |
+| `effective_from` | `timestamptz` | `TIMESTAMPTZ` | — | When this policy row took effect (audit / calibration history). |
+
 ### `View_Catalog` · 🛶 V0 · source aggregate `Catalog`
 
 - **Fed by**: `CatalogCreated`, `CatalogCategoryAdded`, `CatalogCategoryUpdated`, `CatalogCategoryRemoved`, `ProductAdded`, `ProductUpdated`, `ProductRemoved`, `OptionListAdded`, `OptionListUpdated`, `OptionListRemoved`, `OfferStockUpdated`, `CatalogImported`
@@ -222,7 +238,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 ### `View_Cart` · 🛶 V0 · source aggregate `Cart`
 
 - **Fed by**: `CartStarted`, `CartLineAdded`, `CartLineQuantityChanged`, `CartLineRemoved`, `CartCheckedOut`, `CustomerIdentified`
-- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout.
+- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout. `estimated_breakdown` applies View_PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown.
 - **Note**: Joined with the catalog for pricing (secondary source).
 
 | Column | Type | SQL | Constraints | Notes |
@@ -234,6 +250,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `lines` | `jsonb` | `JSONB` | — | Priced by the projection from the live catalog: [{ cart_line_id, offer_id, product_id, name, offer_name, quantity, unit_price_cents, selected_options, line_total_cents }]. |
 | `total_amount_cents` | `MoneyCents` | `BIGINT` | — | COMPUTED by the projection from the live catalog (never trusted from the client). |
 | `currency` | `CurrencyCode` | `TEXT` | — | From the catalog currency at pricing time (the restaurant's default_currency). |
+| `estimated_breakdown` | `jsonb` | `JSONB` | nullable | ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + View_PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order. |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
 
 ### `View_OrderTracking` · 🛶 V0 · source aggregate `Order`
@@ -255,6 +272,12 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `items` | `jsonb` | `JSONB` | — |  |
 | `total_amount_cents` | `MoneyCents` | `BIGINT` | — | amountCents of OrderPlaced.totalAmount (Money). |
 | `currency` | `CurrencyCode` | `TEXT` | — | currency of OrderPlaced.totalAmount (Money). |
+| `articles_cents` | `MoneyCents` | `BIGINT` | — | breakdown.articles.amountCents (food TTC; ADR-0016/0018). |
+| `delivery_cents` | `MoneyCents` | `BIGINT` | — | breakdown.delivery.amountCents (→ rider; 0 for collection). |
+| `service_fee_cents` | `MoneyCents` | `BIGINT` | — | breakdown.serviceFee.amountCents (Captain buyer service fee). |
+| `restaurant_payout_cents` | `MoneyCents` | `BIGINT` | — | breakdown.restaurantPayout.amountCents (3-way split → restaurant). |
+| `rider_payout_cents` | `MoneyCents` | `BIGINT` | — | breakdown.riderPayout.amountCents (3-way split → rider). |
+| `captain_net_cents` | `MoneyCents` | `BIGINT` | — | breakdown.captainNet.amountCents (kept by Captain; feeds Open-Collective totals). |
 | `delivery_address` | `jsonb` | `JSONB` | nullable |  |
 | `estimated_ready_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
 | `placed_at` | `timestamptz` | `TIMESTAMPTZ` | — | OrderPlaced occurrence time. |

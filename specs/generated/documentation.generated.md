@@ -48,6 +48,7 @@ An authenticated person who orders food via Captain.Food.
 |  | AddToCartLine | [✏️ `addCartLine`](#mutation-addcartline) |
 |  | RemoveFromCart | [✏️ `removeCartLine`](#mutation-removecartline) |
 |  | ChangeCartLineQuantity | [✏️ `changeCartLineQuantity`](#mutation-changecartlinequantity) |
+|  | SeeCheckoutBreakdown | [🔎 `cart`](#query-cart) |
 |  | PlaceOrder | [✏️ `placeOrder`](#mutation-placeorder) |
 |  | TrackOrderStatus | [🔎 `order`](#query-order) |
 |  | RateOrder | [✏️ `rateOrder`](#mutation-rateorder) |
@@ -141,6 +142,8 @@ A platform operator who onboards accounts and oversees the platform.
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
 | 🧭 **Prospection** | ReviewPipeline | [🔎 `prospectionPipeline`](#query-prospectionpipeline) |
 |  | LogReply | [✏️ `recordProspectReply`](#mutation-recordprospectreply) |
+| 🧭 **Pricing** | ReviewPolicy | [🔎 `pricingPolicy`](#query-pricingpolicy) |
+|  | SetRestaurantMargin | [✏️ `updateRestaurant`](#mutation-updaterestaurant) |
 
 <a id="story-restaurant_sync"></a>
 ### 🎬 `restaurant_sync` · 🔌 `EXTERNAL` · 🗣️ `fr-FR`
@@ -447,6 +450,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `display_name` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) _(derived)_ | [⚡ `RestaurantRegistered`.`displayName`](#event-restaurantregistered--displayname), [⚡ `RestaurantUpdated`.`displayName`](#event-restaurantupdated--displayname) | — |  |
 | `description` | `text` | ⚠️ _(none)_ | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
 | `tags` | `jsonb` | [⚡ `RestaurantRegistered`.`tags`](#event-restaurantregistered--tags), [⚡ `RestaurantUpdated`.`tags`](#event-restaurantupdated--tags) | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
+| `margin_rate` | [🔤 `MarginPercent`](#scalar-marginpercent) | [⚡ `RestaurantRegistered`.`marginRate`](#event-restaurantregistered--marginrate), [⚡ `RestaurantUpdated`.`marginRate`](#event-restaurantupdated--marginrate) | nullable | Food margin %, input to the Captain service-fee split (ADR-0017); back-office only. |
 | `website` | [🔤 `WebUrl`](#scalar-weburl) | [⚡ `RestaurantRegistered`.`website`](#event-restaurantregistered--website), [⚡ `RestaurantUpdated`.`website`](#event-restaurantupdated--website) | nullable |  |
 | `rating` | [🔤 `GoogleRating`](#scalar-googlerating) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`rating`](#event-restaurantgooglebusinessprofileupdated--rating) | nullable | GBP-specific metric (Google listing), independent of the restaurant's own info. |
 | `reviews_count` | `integer` | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`reviewsCount`](#event-restaurantgooglebusinessprofileupdated--reviewscount) | nullable |  |
@@ -551,6 +555,7 @@ The single, generic way to register a restaurant LOCATION. Used by an owner/admi
 | <a id="command-registerrestaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ | Location-specific contact; falls back to the account contact when absent. |
 | <a id="command-registerrestaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="command-registerrestaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
+| <a id="command-registerrestaurant--marginrate"></a>`marginRate` | [🔤 `MarginPercent`](#scalar-marginpercent) | ⬜ | Food margin %, input to the service-fee split (ADR-0017). |
 | <a id="command-registerrestaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
 | <a id="command-registerrestaurant--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ | Geo coordinates (typically from the Google Maps sync). |
 | <a id="command-registerrestaurant--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ | Location timezone; falls back to the account timezone when absent. |
@@ -589,6 +594,7 @@ Admin edits one or more mutable LOCATION fields (full replace of provided fields
 | <a id="command-updaterestaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
 | <a id="command-updaterestaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="command-updaterestaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
+| <a id="command-updaterestaurant--marginrate"></a>`marginRate` | [🔤 `MarginPercent`](#scalar-marginpercent) | ⬜ |  |
 | <a id="command-updaterestaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ⬜ |  |
 | <a id="command-updaterestaurant--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ |  |
 | <a id="command-updaterestaurant--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
@@ -858,6 +864,7 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 | <a id="event-restaurantregistered--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
 | <a id="event-restaurantregistered--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="event-restaurantregistered--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
+| <a id="event-restaurantregistered--marginrate"></a>`marginRate` | [🔤 `MarginPercent`](#scalar-marginpercent) | ⬜ |  |
 | <a id="event-restaurantregistered--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
 | <a id="event-restaurantregistered--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ |  |
 | <a id="event-restaurantregistered--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
@@ -881,6 +888,7 @@ One or more editable LOCATION fields of a restaurant have changed.
 | <a id="event-restaurantupdated--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
 | <a id="event-restaurantupdated--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
 | <a id="event-restaurantupdated--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ |  |
+| <a id="event-restaurantupdated--marginrate"></a>`marginRate` | [🔤 `MarginPercent`](#scalar-marginpercent) | ⬜ |  |
 | <a id="event-restaurantupdated--address"></a>`address` | [📦 `Address`](#entity-address) | ⬜ |  |
 | <a id="event-restaurantupdated--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ |  |
 | <a id="event-restaurantupdated--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
@@ -1181,6 +1189,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ | Location-specific contact; falls back to the account contact when absent. |
 | <a id="entity-restaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ | Restaurant website (general restaurant info; any source may provide it). |
 | <a id="entity-restaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ⬜ | Cuisine/attribute tags (general restaurant info; source-agnostic). |
+| <a id="entity-restaurant--marginrate"></a>`marginRate` | [🔤 `MarginPercent`](#scalar-marginpercent) | ⬜ | Food margin %, input to the Captain service-fee split (ADR-0017); null → 0 restaurant contribution. |
 | <a id="entity-restaurant--address"></a>`address` | [📦 `Address`](#entity-address) | ✅ |  |
 | <a id="entity-restaurant--location"></a>`location` | [📦 `GeoPoint`](#entity-geopoint) | ⬜ | Geo coordinates (general restaurant info; typically from the Google Maps sync). |
 | <a id="entity-restaurant--status"></a>`status` | [🔤 `RestaurantStatus`](#scalar-restaurantstatus) | ✅ |  |
@@ -1191,7 +1200,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(20)_
+### 🔤 Scalars _(21)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -1204,6 +1213,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-weburl"></a>🔤 `WebUrl` | string `^https?://` | An http(s) URL — restaurant website or the Google Business Profile 'Order online' link. |
 | <a id="scalar-restaurantlegalname"></a>🔤 `RestaurantLegalName` | string | Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.  |
 | <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
+| <a id="scalar-marginpercent"></a>🔤 `MarginPercent` | number | A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.  |
 | <a id="scalar-weekday"></a>🔤 `Weekday` | enum (MONDAY \| TUESDAY \| WEDNESDAY \| THURSDAY \| FRIDAY \| SATURDAY \| SUNDAY) |  |
 | <a id="scalar-timeofday"></a>🔤 `TimeOfDay` | string `^([01][0-9]|2[0-3]):[0-5][0-9]$` | Local time of day, HH:mm (HubRise opening_hours format). |
 | <a id="scalar-restaurantstatus"></a>🔤 `RestaurantStatus` | enum (DRAFT \| ACTIVE \| INACTIVE) |  |
@@ -2639,6 +2649,7 @@ A customer's in-progress selection for a single restaurant (priced by the projec
 | <a id="type-cart--status"></a>`status` | [🔤 `CartStatus`](#scalar-cartstatus) | ✅ |
 | <a id="type-cart--lines"></a>`lines` | [[📦 `OrderLineItem`](#entity-orderlineitem)] | ✅ |
 | <a id="type-cart--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |
+| <a id="type-cart--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ⬜ |
 | <a id="type-cart--updatedat"></a>`updatedAt` | `string` _date-time_ | ✅ |
 
 <a id="type-order"></a>
@@ -2658,6 +2669,7 @@ An order with its tracking status and payment state.
 | <a id="type-order--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |
 | <a id="type-order--items"></a>`items` | [[📦 `OrderLineItem`](#entity-orderlineitem)] | ✅ |
 | <a id="type-order--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |
+| <a id="type-order--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ✅ |
 | <a id="type-order--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |
 | <a id="type-order--estimatedreadyat"></a>`estimatedReadyAt` | `string` _date-time_ | ⬜ |
 | <a id="type-order--placedat"></a>`placedAt` | `string` _date-time_ | ✅ |
@@ -2734,7 +2746,7 @@ _⚙️ process manager_ — Coordinates refunds. Reacts to an order reaching a 
 
 - **Source**: [🎭 `Cart`](#actor-cart) · 🛶 V0
 - **Note**: Joined with the catalog for pricing (secondary source).
-- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout.
+- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout. `estimated_breakdown` applies View_PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown.
 - **Fed by**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved), [⚡ `CartCheckedOut`](#event-cartcheckedout), [⚡ `CustomerIdentified`](#event-customeridentified)
 
 | Column | Type | Sourced from | Constraints | Notes |
@@ -2746,6 +2758,7 @@ _⚙️ process manager_ — Coordinates refunds. Reacts to an order reaching a 
 | `lines` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | Priced by the projection from the live catalog: [{ cart_line_id, offer_id, product_id, name, offer_name, quantity, unit_price_cents, selected_options, line_total_cents }]. |
 | `total_amount_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | COMPUTED by the projection from the live catalog (never trusted from the client). |
 | `currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | [⚡ `CartLineAdded`](#event-cartlineadded) | — | From the catalog currency at pricing time (the restaurant's default_currency). |
+| `estimated_breakdown` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | nullable | ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + View_PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order. |
 | `updated_at` | `timestamptz` | [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved), [⚡ `CartCheckedOut`](#event-cartcheckedout) | — | Row write time, stamped on each event. |
 
 <a id="view-view_ordertracking"></a>
@@ -2767,6 +2780,12 @@ _⚙️ process manager_ — Coordinates refunds. Reacts to an order reaching a 
 | `items` | `jsonb` _(derived)_ | [⚡ `OrderPlaced`.`items`](#event-orderplaced--items) | — |  |
 | `total_amount_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderPlaced`.`totalAmount`](#event-orderplaced--totalamount) | — | amountCents of OrderPlaced.totalAmount (Money). |
 | `currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | [⚡ `OrderPlaced`.`totalAmount`](#event-orderplaced--totalamount) | — | currency of OrderPlaced.totalAmount (Money). |
+| `articles_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderPlaced`.`breakdown`](#event-orderplaced--breakdown) | — | breakdown.articles.amountCents (food TTC; ADR-0016/0018). |
+| `delivery_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderPlaced`.`breakdown`](#event-orderplaced--breakdown) | — | breakdown.delivery.amountCents (→ rider; 0 for collection). |
+| `service_fee_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderPlaced`.`breakdown`](#event-orderplaced--breakdown) | — | breakdown.serviceFee.amountCents (Captain buyer service fee). |
+| `restaurant_payout_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderPlaced`.`breakdown`](#event-orderplaced--breakdown) | — | breakdown.restaurantPayout.amountCents (3-way split → restaurant). |
+| `rider_payout_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderPlaced`.`breakdown`](#event-orderplaced--breakdown) | — | breakdown.riderPayout.amountCents (3-way split → rider). |
+| `captain_net_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderPlaced`.`breakdown`](#event-orderplaced--breakdown) | — | breakdown.captainNet.amountCents (kept by Captain; feeds Open-Collective totals). |
 | `delivery_address` | `jsonb` _(derived)_ | [⚡ `OrderPlaced`.`deliveryAddress`](#event-orderplaced--deliveryaddress) | nullable |  |
 | `estimated_ready_at` | `timestamptz` _(derived)_ | [⚡ `OrderAcceptedByRestaurant`.`estimatedReadyAt`](#event-orderacceptedbyrestaurant--estimatedreadyat) | nullable |  |
 | `placed_at` | `timestamptz` | [⚡ `OrderPlaced`](#event-orderplaced) | — | OrderPlaced occurrence time. |
@@ -3103,6 +3122,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 | <a id="event-orderplaced--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
 | <a id="event-orderplaced--items"></a>`items` | [[📦 `OrderLineItem`](#entity-orderlineitem)] | ✅ |  |
 | <a id="event-orderplaced--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |  |
+| <a id="event-orderplaced--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ✅ | Server-computed fee/split breakdown (ADR-0016/0017); breakdown.total == totalAmount. |
 | <a id="event-orderplaced--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 | <a id="event-orderplaced--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
 
@@ -3339,7 +3359,7 @@ A captured payment was refunded (e.g. after rejection or cancellation).
 | <a id="event-paymentrefunded--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="event-paymentrefunded--reason"></a>`reason` | `string` | ⬜ |  |
 
-### 📦 Entities _(7)_
+### 📦 Entities _(8)_
 
 <a id="entity-money"></a>
 #### 📦 Entity: `Money`
@@ -3350,6 +3370,22 @@ Stronger-typed money than HubRise's "9.80 EUR" string. Converted at the HubRise 
 | --- | --- | --- | --- |
 | <a id="entity-money--amountcents"></a>`amountCents` | [🔤 `MoneyCents`](#scalar-moneycents) | ✅ |  |
 | <a id="entity-money--currency"></a>`currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | ✅ |  |
+
+<a id="entity-paymentbreakdown"></a>
+#### 📦 Entity: `PaymentBreakdown`
+
+The order's money breakdown, computed server-side by PlaceOrderProcess (ADR-0016/0017/0018). Carries BOTH the buyer-facing checkout lines and the 3-way Stripe Connect split, in one place so they can't diverge. Invariants: total = articles + delivery + serviceFee; restaurantPayout = articles − restaurantContribution; riderPayout = delivery; captainNet = serviceFee + restaurantContribution (gross of Stripe fees, which Captain absorbs as merchant of record). 0% commission on food: restaurantContribution is a distinct service line, never a cut of the menu price.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-paymentbreakdown--articles"></a>`articles` | [📦 `Money`](#entity-money) | ✅ | Food sub-total TTC (100% to the restaurant, minus its service contribution). |
+| <a id="entity-paymentbreakdown--delivery"></a>`delivery` | [📦 `Money`](#entity-money) | ✅ | Delivery fee (→ rider); zero for collection. Delivery integration is post-V0. |
+| <a id="entity-paymentbreakdown--servicefee"></a>`serviceFee` | [📦 `Money`](#entity-money) | ✅ | Captain service fee shown to the buyer (the buyer part of the fee). |
+| <a id="entity-paymentbreakdown--total"></a>`total` | [📦 `Money`](#entity-money) | ✅ | What the buyer pays = articles + delivery + serviceFee (the PaymentIntent amount). |
+| <a id="entity-paymentbreakdown--restaurantcontribution"></a>`restaurantContribution` | [📦 `Money`](#entity-money) | ✅ | Restaurant's variable service part (margin-proportional); deducted from its payout. |
+| <a id="entity-paymentbreakdown--restaurantpayout"></a>`restaurantPayout` | [📦 `Money`](#entity-money) | ✅ | Transfer to the restaurant Connect account = articles − restaurantContribution. |
+| <a id="entity-paymentbreakdown--riderpayout"></a>`riderPayout` | [📦 `Money`](#entity-money) | ✅ | Transfer to the rider Connect account = delivery. |
+| <a id="entity-paymentbreakdown--captainnet"></a>`captainNet` | [📦 `Money`](#entity-money) | ✅ | Kept on the Captain platform account = serviceFee + restaurantContribution (gross of Stripe). |
 
 <a id="entity-customercontact"></a>
 #### 📦 Entity: `CustomerContact`
@@ -3777,13 +3813,14 @@ _criticality: **high**_
 | `command.receive` | `SERVER` | ✅ | — | `business.command_type`*, `business.actor`* |
 | `command.validate` | `INTERNAL` | ✅ | — | `business.validation_status`* |
 | `cart.read` | `INTERNAL` | ✅ | — | `business.aggregate_id`* |
+| `pricing.compute` | `INTERNAL` | ✅ | — | `business.service_fee`*, `business.split_ok`* |
 | `payment.intent.create` | `CLIENT` | ✅ | — | `messaging.system`*, `business.result`* |
 | `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`*, `business.stream_id`* |
 | `event.publish` | `PRODUCER` | ✅ | — | `messaging.system`*, `business.event_type`* |
 | `event.consume.projection` | `CONSUMER` | ✅ | `>= 1` | `business.projection_name`* |
 
 - **Metrics**: `place_order_duration_ms` _(histogram)_ · **Business metrics**: `orders_placed_total` _(counter)_, `checkout_payment_failures_total` _(counter)_
-- **Status rules**: success ⇐ spans [`command.receive`, `payment.intent.create`, `event.store.append`, `event.publish`, `event.consume.projection`]
+- **Status rules**: success ⇐ spans [`command.receive`, `pricing.compute`, `payment.intent.create`, `event.store.append`, `event.publish`, `event.consume.projection`]
 - **SLOs**: p95 ≤ 800ms · p99 ≤ 1500ms · error rate ≤ 1%
 
 <a id="obs-refund"></a>
@@ -4744,7 +4781,7 @@ _criticality: **high**_
 
 _Shared vocabulary and operations that span several bounded contexts (or belong to none)._
 
-### 🧰 API operations _(2)_
+### 🧰 API operations _(3)_
 
 <a id="query-operation"></a>
 #### 🔎 Query: `operation`
@@ -4755,6 +4792,15 @@ Poll a command/operation's status by its correlationId (the pull counterpart of 
 - **Returns**: [🧩 `Operation`](#type-operation) · **reads** —
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
+<a id="query-pricingpolicy"></a>
+#### 🔎 Query: `pricingPolicy`
+
+The active Captain service-fee policy (admin; calibration/transparency).
+
+- **Input**: _(none)_
+- **Returns**: [🧩 `PricingPolicy`](#type-pricingpolicy) (list) · **reads** [🗄️ `View_PricingPolicy`](#view-view_pricingpolicy)
+- **Roles**: ADMIN · **slice** V1
+
 <a id="subscription-operationstatuschanged"></a>
 #### 🔔 Subscription: [`operationStatusChanged`](#subscription-operationstatuschanged)
 
@@ -4764,7 +4810,7 @@ Operation status change events (for the owning customer or restaurant).
 - **Streams**: [🧩 `Operation`](#type-operation)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT · **slice** V0
 
-### 🧩 Output types _(8)_
+### 🧩 Output types _(9)_
 
 <a id="type-product"></a>
 #### 🧩 Type: `Product`
@@ -4889,7 +4935,23 @@ Delivery courier. POST-V0 placeholder — delivery is not modelled as an aggrega
 | <a id="type-rider--displayname"></a>`displayName` | `string` | ✅ |
 | <a id="type-rider--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ⬜ |
 
-### 🗄️ Views (read models) _(1)_
+<a id="type-pricingpolicy"></a>
+#### 🧩 Type: `PricingPolicy`
+
+The calibratable Captain service-fee policy (ADR-0016/0017); admin/transparency.
+
+- **Read model**: [🗄️ `View_PricingPolicy`](#view-view_pricingpolicy)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-pricingpolicy--currency"></a>`currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | ✅ |
+| <a id="type-pricingpolicy--feerate"></a>`feeRate` | `number` | ✅ |
+| <a id="type-pricingpolicy--buyershare"></a>`buyerShare` | `number` | ✅ |
+| <a id="type-pricingpolicy--marginlow"></a>`marginLow` | `number` | ✅ |
+| <a id="type-pricingpolicy--marginhigh"></a>`marginHigh` | `number` | ✅ |
+| <a id="type-pricingpolicy--effectivefrom"></a>`effectiveFrom` | `string` _date-time_ | ✅ |
+
+### 🗄️ Views (read models) _(2)_
 
 <a id="view-view_phonecountry"></a>
 #### 🗄️ View: `View_PhoneCountry`
@@ -4904,6 +4966,23 @@ Delivery courier. POST-V0 placeholder — delivery is not modelled as an aggrega
 | `dialing_code` | [🔤 `DialingCode`](#scalar-dialingcode) | ⚠️ _(none)_ | index |  |
 | `name` | `text` | ⚠️ _(none)_ | — |  |
 | `default_locale` | [🔤 `Locale`](#scalar-locale) | ⚠️ _(none)_ | — |  |
+
+<a id="view-view_pricingpolicy"></a>
+#### 🗄️ View: `View_PricingPolicy`
+
+- **Source**: 📦 reference (static seed) · 🛶 V0
+- **Note**: Calibratable Captain service-fee policy (ADR-0016/0017). Seeded config the pricing projection reads to compute cart/order breakdowns; transparent + tunable without code. Single active row per currency.
+- **Rules**: Seeded with ADR-0017 indicative values: fee_rate 5.0, buyer_share 60.0, margin_low 55.0, margin_high 70.0. Calibrate by simulation before launch.
+- **Fed by**: —
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | ⚠️ _(none)_ | PK |  |
+| `fee_rate` | `numeric` | ⚠️ _(none)_ | — | Service fee F as a % of food TTC (e.g. 5.0). |
+| `buyer_share` | `numeric` | ⚠️ _(none)_ | — | Share of F charged to the buyer (e.g. 60.0); the rest is the restaurant's margin-scaled contribution. |
+| `margin_low` | `numeric` | ⚠️ _(none)_ | — | Lower bound of the margin band for score_margin (e.g. 55.0). |
+| `margin_high` | `numeric` | ⚠️ _(none)_ | — | Upper bound of the margin band for score_margin (e.g. 70.0). |
+| `effective_from` | `timestamptz` | ⚠️ _(none)_ | — | When this policy row took effect (audit / calibration history). |
 
 ### 📦 Entities _(2)_
 
@@ -5066,7 +5145,7 @@ aggregates; components bind the aggregates they handle and the read models they 
 | ⚙️ `projection-updaters` | 📡 yes | Update the View_* read models from events; span 'event.consume.projection'. | updates [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_Customer`](#view-view_customer), [🗄️ `View_Catalog`](#view-view_catalog), [🗄️ `View_Cart`](#view-view_cart), [🗄️ `View_OrderTracking`](#view-view_ordertracking), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline) |
 | ⚙️ `bam-projector` | 📡 yes | Business Activity Monitoring projection (runs in the bam container); business_metrics only. | — |
 | ⚙️ `hubrise-acl` | 📡 yes | Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain. | — |
-| ⚙️ `stripe-adapter` | 📡 yes | Creates PaymentIntents / refunds; records inbound webhook facts (PaymentCaptured/Failed/Refunded). | — |
+| ⚙️ `stripe-adapter` | 📡 yes | Stripe Connect (Separate Charges & Transfers, transfer_group=ORDER_{id}; Captain = merchant of record): creates the PaymentIntent for the buyer total, then after capture transfers restaurantPayout/riderPayout to the connected accounts (3-way split, ADR-0017), keeping captainNet on the platform; refunds reverse the transfers. Records inbound webhook facts (PaymentCaptured/Failed/Refunded). | — |
 | ⚙️ `supabase-acl` | 📡 yes | Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates. | — |
 | ⚙️ `sirene-google-acl` | 📡 yes | Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate. | — |
 | ⚙️ `prospection-acl` | 📡 yes | B2B prospection worker (ADR-0020): reads the COMPUTED score from View_ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. | — |

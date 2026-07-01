@@ -293,6 +293,14 @@ TaxRatePercent:
   maximum: 100
   description: "Percentage tax rate. Example: 10.0 for 10%."
 
+MarginPercent:
+  type: number
+  minimum: 0
+  maximum: 100
+  description: >
+    A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017):
+    the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.
+
 # --- Stock ---
 
 Quantity:

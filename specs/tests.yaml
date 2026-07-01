@@ -75,7 +75,7 @@ fixtures:
     data: { restaurantAccountId: "acct-1", reason: "Closed business" }
   restaurantRegistered:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris", createdBy: "user-1" }
+    data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", marginRate: 62.0, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris", createdBy: "user-1" }
   restaurantSeeded:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
     data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }], createdBy: "sync-1" }
@@ -236,7 +236,16 @@ fixtures:
       serviceType: "DELIVERY"
       items:
         - { offerId: "off-1", name: "Margherita", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
-      totalAmount: { amountCents: 1960, currency: "EUR" }
+      totalAmount: { amountCents: 2019, currency: "EUR" }
+      breakdown:
+        articles: { amountCents: 1960, currency: "EUR" }
+        delivery: { amountCents: 0, currency: "EUR" }
+        serviceFee: { amountCents: 59, currency: "EUR" }
+        total: { amountCents: 2019, currency: "EUR" }
+        restaurantContribution: { amountCents: 0, currency: "EUR" }
+        restaurantPayout: { amountCents: 1960, currency: "EUR" }
+        riderPayout: { amountCents: 0, currency: "EUR" }
+        captainNet: { amountCents: 59, currency: "EUR" }
       paymentIntentId: "pi_123"
   orderAcceptedByRestaurant:
     type: { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }

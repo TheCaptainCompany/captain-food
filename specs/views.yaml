@@ -122,6 +122,13 @@ View_Restaurant:
         - { $ref: 'events.yaml#/RestaurantUpdated/properties/tags' }
       nullable: true
       note: "Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event."
+    margin_rate:
+      type: { $ref: 'scalars.yaml#/MarginPercent' }
+      from:
+        - { $ref: 'events.yaml#/RestaurantRegistered/properties/marginRate' }
+        - { $ref: 'events.yaml#/RestaurantUpdated/properties/marginRate' }
+      nullable: true
+      note: "Food margin %, input to the Captain service-fee split (ADR-0017); back-office only."
     website:
       type: { $ref: 'scalars.yaml#/WebUrl' }
       from:
@@ -367,6 +374,32 @@ View_PhoneCountry:
     default_locale:
       type: { $ref: 'scalars.yaml#/Locale' }
 
+View_PricingPolicy:
+  source: reference
+  slice: V0
+  note: "Calibratable Captain service-fee policy (ADR-0016/0017). Seeded config the pricing projection reads to compute cart/order breakdowns; transparent + tunable without code. Single active row per currency."
+  rules:
+    - "Seeded with ADR-0017 indicative values: fee_rate 5.0, buyer_share 60.0, margin_low 55.0, margin_high 70.0. Calibrate by simulation before launch."
+  columns:
+    currency:
+      type: { $ref: 'scalars.yaml#/CurrencyCode' }
+      pk: true
+    fee_rate:
+      type: numeric
+      note: "Service fee F as a % of food TTC (e.g. 5.0)."
+    buyer_share:
+      type: numeric
+      note: "Share of F charged to the buyer (e.g. 60.0); the rest is the restaurant's margin-scaled contribution."
+    margin_low:
+      type: numeric
+      note: "Lower bound of the margin band for score_margin (e.g. 55.0)."
+    margin_high:
+      type: numeric
+      note: "Upper bound of the margin band for score_margin (e.g. 70.0)."
+    effective_from:
+      type: timestamptz
+      note: "When this policy row took effect (audit / calibration history)."
+
 View_Catalog:
   aggregate: Catalog
   slice: V0
@@ -435,6 +468,7 @@ View_Cart:
   rules:
     - "Prices are computed by the projection from the current catalog, never trusted from the client."
     - "`customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout."
+    - "`estimated_breakdown` applies View_PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown."
   columns:
     cart_id:
       from: [{ $ref: 'events.yaml#/CartStarted/properties/cartId' }]
@@ -473,6 +507,14 @@ View_Cart:
       type: { $ref: 'scalars.yaml#/CurrencyCode' }
       from: [{ $ref: 'events.yaml#/CartLineAdded' }]
       note: "From the catalog currency at pricing time (the restaurant's default_currency)."
+    estimated_breakdown:
+      type: jsonb
+      from:
+        - { $ref: 'events.yaml#/CartLineAdded' }
+        - { $ref: 'events.yaml#/CartLineQuantityChanged' }
+        - { $ref: 'events.yaml#/CartLineRemoved' }
+      nullable: true
+      note: "ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + View_PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order."
     updated_at:
       type: timestamptz
       from:
@@ -547,6 +589,30 @@ View_OrderTracking:
       type: { $ref: 'scalars.yaml#/CurrencyCode' }
       from: [{ $ref: 'events.yaml#/OrderPlaced/properties/totalAmount' }]
       note: "currency of OrderPlaced.totalAmount (Money)."
+    articles_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/breakdown' }]
+      note: "breakdown.articles.amountCents (food TTC; ADR-0016/0018)."
+    delivery_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/breakdown' }]
+      note: "breakdown.delivery.amountCents (→ rider; 0 for collection)."
+    service_fee_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/breakdown' }]
+      note: "breakdown.serviceFee.amountCents (Captain buyer service fee)."
+    restaurant_payout_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/breakdown' }]
+      note: "breakdown.restaurantPayout.amountCents (3-way split → restaurant)."
+    rider_payout_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/breakdown' }]
+      note: "breakdown.riderPayout.amountCents (3-way split → rider)."
+    captain_net_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/OrderPlaced/properties/breakdown' }]
+      note: "breakdown.captainNet.amountCents (kept by Captain; feeds Open-Collective totals)."
     delivery_address:
       from: [{ $ref: 'events.yaml#/OrderPlaced/properties/deliveryAddress' }]
       nullable: true

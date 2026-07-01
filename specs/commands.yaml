@@ -144,6 +144,10 @@ RegisterRestaurant:
       type: array
       items:
         $ref: 'scalars.yaml#/Tag'
+    marginRate:
+      $ref: 'scalars.yaml#/MarginPercent'
+      nullable: true
+      description: "Food margin %, input to the service-fee split (ADR-0017)."
     address:
       $ref: 'entities.yaml#/Address'
     location:
@@ -207,6 +211,9 @@ UpdateRestaurant:
       type: array
       items:
         $ref: 'scalars.yaml#/Tag'
+      nullable: true
+    marginRate:
+      $ref: 'scalars.yaml#/MarginPercent'
       nullable: true
     address:
       $ref: 'entities.yaml#/Address'

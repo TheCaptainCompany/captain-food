@@ -12,6 +12,44 @@ Money:
       $ref: 'scalars.yaml#/CurrencyCode'
   required: [amountCents, currency]
 
+PaymentBreakdown:
+  type: object
+  description: >
+    The order's money breakdown, computed server-side by PlaceOrderProcess (ADR-0016/0017/0018). Carries
+    BOTH the buyer-facing checkout lines and the 3-way Stripe Connect split, in one place so they can't
+    diverge. Invariants: total = articles + delivery + serviceFee; restaurantPayout = articles −
+    restaurantContribution; riderPayout = delivery; captainNet = serviceFee + restaurantContribution
+    (gross of Stripe fees, which Captain absorbs as merchant of record). 0% commission on food:
+    restaurantContribution is a distinct service line, never a cut of the menu price.
+  properties:
+    # buyer-facing (checkout display, ADR-0018)
+    articles:
+      $ref: '#/Money'
+      description: "Food sub-total TTC (100% to the restaurant, minus its service contribution)."
+    delivery:
+      $ref: '#/Money'
+      description: "Delivery fee (→ rider); zero for collection. Delivery integration is post-V0."
+    serviceFee:
+      $ref: '#/Money'
+      description: "Captain service fee shown to the buyer (the buyer part of the fee)."
+    total:
+      $ref: '#/Money'
+      description: "What the buyer pays = articles + delivery + serviceFee (the PaymentIntent amount)."
+    # 3-way split (ADR-0017)
+    restaurantContribution:
+      $ref: '#/Money'
+      description: "Restaurant's variable service part (margin-proportional); deducted from its payout."
+    restaurantPayout:
+      $ref: '#/Money'
+      description: "Transfer to the restaurant Connect account = articles − restaurantContribution."
+    riderPayout:
+      $ref: '#/Money'
+      description: "Transfer to the rider Connect account = delivery."
+    captainNet:
+      $ref: '#/Money'
+      description: "Kept on the Captain platform account = serviceFee + restaurantContribution (gross of Stripe)."
+  required: [articles, delivery, serviceFee, total, restaurantContribution, restaurantPayout, riderPayout, captainNet]
+
 TaxRate:
   type: object
   description: "Per-service-mode VAT, mirroring HubRise product tax_rate."
@@ -228,6 +266,10 @@ Restaurant:
       items:
         $ref: 'scalars.yaml#/Tag'
       description: "Cuisine/attribute tags (general restaurant info; source-agnostic)."
+    marginRate:
+      $ref: 'scalars.yaml#/MarginPercent'
+      nullable: true
+      description: "Food margin %, input to the Captain service-fee split (ADR-0017); null → 0 restaurant contribution."
     address:
       $ref: '#/Address'
     location:

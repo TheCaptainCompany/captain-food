@@ -65,7 +65,7 @@ components:
     description: "Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain."
     instrumented: true
   stripe-adapter:
-    description: "Creates PaymentIntents / refunds; records inbound webhook facts (PaymentCaptured/Failed/Refunded)."
+    description: "Stripe Connect (Separate Charges & Transfers, transfer_group=ORDER_{id}; Captain = merchant of record): creates the PaymentIntent for the buyer total, then after capture transfers restaurantPayout/riderPayout to the connected accounts (3-way split, ADR-0017), keeping captainNet on the platform; refunds reverse the transfers. Records inbound webhook facts (PaymentCaptured/Failed/Refunded)."
     instrumented: true
   supabase-acl:
     description: "Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates."

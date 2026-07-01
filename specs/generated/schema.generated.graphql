@@ -60,6 +60,7 @@ scalar Locale
 scalar CurrencyCode
 scalar MoneyCents
 scalar TaxRatePercent
+scalar MarginPercent
 scalar Quantity
 scalar CustomerDisplayName
 scalar OrderNote
@@ -211,6 +212,17 @@ type Money {
   currency: CurrencyCode!
 }
 
+type PaymentBreakdown {
+  articles: Money!
+  delivery: Money!
+  serviceFee: Money!
+  total: Money!
+  restaurantContribution: Money!
+  restaurantPayout: Money!
+  riderPayout: Money!
+  captainNet: Money!
+}
+
 type TaxRate {
   delivery: TaxRatePercent!
   collection: TaxRatePercent
@@ -345,6 +357,7 @@ type Cart {
   status: CartStatus!
   lines: [OrderLineItem!]!
   totalAmount: Money!
+  breakdown: PaymentBreakdown
   updatedAt: DateTime!
   restaurant: Restaurant!
 }
@@ -358,6 +371,7 @@ type Order {
   serviceType: ServiceType!
   items: [OrderLineItem!]!
   totalAmount: Money!
+  breakdown: PaymentBreakdown!
   deliveryAddress: Address
   estimatedReadyAt: DateTime
   placedAt: DateTime!
@@ -464,6 +478,15 @@ type Prospect {
   restaurant: Restaurant!
 }
 
+type PricingPolicy {
+  currency: CurrencyCode!
+  feeRate: String!
+  buyerShare: String!
+  marginLow: String!
+  marginHigh: String!
+  effectiveFrom: DateTime!
+}
+
 # ==============================================================================
 # Input types (mutation command payloads + query args)
 # ==============================================================================
@@ -516,6 +539,7 @@ input RegisterRestaurantInput {
   contact: RestaurantContactInput
   website: WebUrl
   tags: [Tag!]
+  marginRate: MarginPercent
   address: AddressInput!
   location: GeoPointInput
   timezone: TimeZone
@@ -536,6 +560,7 @@ input UpdateRestaurantInput {
   contact: RestaurantContactInput
   website: WebUrl
   tags: [Tag!]
+  marginRate: MarginPercent
   address: AddressInput
   location: GeoPointInput
   timezone: TimeZone
@@ -1308,6 +1333,7 @@ type Query {
   order(input: OrderQueryInput!): Order @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_OrderTracking"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["View_Restaurant"])
   prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["View_ProspectionPipeline"])
+  pricingPolicy: [PricingPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["View_PricingPolicy"])
 }
 
 # ==============================================================================

@@ -116,6 +116,9 @@ RestaurantRegistered:
       type: array
       items:
         $ref: 'scalars.yaml#/Tag'
+    marginRate:
+      $ref: 'scalars.yaml#/MarginPercent'
+      nullable: true
     address:
       $ref: 'entities.yaml#/Address'
     location:
@@ -161,6 +164,9 @@ RestaurantUpdated:
       type: array
       items:
         $ref: 'scalars.yaml#/Tag'
+      nullable: true
+    marginRate:
+      $ref: 'scalars.yaml#/MarginPercent'
       nullable: true
     address:
       $ref: 'entities.yaml#/Address'
@@ -884,6 +890,9 @@ OrderPlaced:
       minItems: 1
     totalAmount:
       $ref: 'entities.yaml#/Money'
+    breakdown:
+      $ref: 'entities.yaml#/PaymentBreakdown'
+      description: "Server-computed fee/split breakdown (ADR-0016/0017); breakdown.total == totalAmount."
     note:
       $ref: 'scalars.yaml#/OrderNote'
       nullable: true
@@ -896,6 +905,7 @@ OrderPlaced:
     - serviceType
     - items
     - totalAmount
+    - breakdown
     - paymentIntentId
 
 OrderAcceptedByRestaurant:
