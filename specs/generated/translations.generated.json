@@ -1,0 +1,598 @@
+{
+  "account.captain_coins": {
+    "en": "Captain Coins",
+    "fr": "Captain Coins"
+  },
+  "account.coins_badge": {
+    "en": "{points} pts",
+    "fr": "{points} pts"
+  },
+  "account.contact": {
+    "en": "Contact us",
+    "fr": "Nous contacter"
+  },
+  "account.default_name": {
+    "en": "Captain",
+    "fr": "Captain"
+  },
+  "account.favorites": {
+    "en": "Favorite restaurants",
+    "fr": "Restaurants favoris"
+  },
+  "account.help": {
+    "en": "Help Center",
+    "fr": "Centre d'aide"
+  },
+  "account.legal": {
+    "en": "Terms & Privacy",
+    "fr": "Conditions et confidentialité"
+  },
+  "account.notifications": {
+    "en": "Notifications",
+    "fr": "Notifications"
+  },
+  "account.passkeys": {
+    "en": "Passkeys",
+    "fr": "Clés d'accès"
+  },
+  "account.payment_methods": {
+    "en": "Payment methods",
+    "fr": "Moyens de paiement"
+  },
+  "account.refer": {
+    "en": "Refer a friend",
+    "fr": "Parrainer un ami"
+  },
+  "account.saved_addresses": {
+    "en": "Saved addresses",
+    "fr": "Adresses enregistrées"
+  },
+  "account.section.captain": {
+    "en": "Captain.Food",
+    "fr": "Captain.Food"
+  },
+  "account.section.my_account": {
+    "en": "My account",
+    "fr": "Mon compte"
+  },
+  "account.section.support": {
+    "en": "Support",
+    "fr": "Assistance"
+  },
+  "account.sign_out": {
+    "en": "Sign out",
+    "fr": "Se déconnecter"
+  },
+  "auth.body": {
+    "en": "Enter your phone number to continue. No password needed.",
+    "fr": "Entrez votre numéro de téléphone pour continuer. Aucun mot de passe requis."
+  },
+  "auth.continue": {
+    "en": "Continue",
+    "fr": "Continuer"
+  },
+  "auth.or": {
+    "en": "or",
+    "fr": "ou"
+  },
+  "auth.otp_body": {
+    "en": "We sent a code to {phone}. Enter it below.",
+    "fr": "Nous avons envoyé un code au {phone}. Saisissez-le ci-dessous."
+  },
+  "auth.otp_title": {
+    "en": "Verify your number",
+    "fr": "Vérifiez votre numéro"
+  },
+  "auth.passkey": {
+    "en": "Continue with passkey",
+    "fr": "Continuer avec une clé d'accès"
+  },
+  "auth.phone_label": {
+    "en": "Phone number",
+    "fr": "Numéro de téléphone"
+  },
+  "auth.resend": {
+    "en": "Resend code",
+    "fr": "Renvoyer le code"
+  },
+  "auth.resend_in": {
+    "en": "Resend in {seconds}s",
+    "fr": "Renvoyer dans {seconds}s"
+  },
+  "auth.title": {
+    "en": "Sign in or create account",
+    "fr": "Se connecter ou créer un compte"
+  },
+  "cart.checkout_cta": {
+    "en": "Go to checkout — {total}",
+    "fr": "Passer au paiement — {total}"
+  },
+  "cart.delivery_fee": {
+    "en": "Delivery fee",
+    "fr": "Frais de livraison"
+  },
+  "cart.discount": {
+    "en": "Discount",
+    "fr": "Réduction"
+  },
+  "cart.empty.body": {
+    "en": "Add items from a restaurant to get started.",
+    "fr": "Ajoutez des articles d'un restaurant pour commencer."
+  },
+  "cart.empty.browse": {
+    "en": "Browse restaurants",
+    "fr": "Parcourir les restaurants"
+  },
+  "cart.empty.title": {
+    "en": "Your cart is empty",
+    "fr": "Votre panier est vide"
+  },
+  "cart.min_warning": {
+    "en": "Minimum order is {min}. Add {shortfall} more.",
+    "fr": "Commande minimum : {min}. Ajoutez {shortfall}."
+  },
+  "cart.promo_applied": {
+    "en": "Code {code} applied — {amount} off",
+    "fr": "Code {code} appliqué — {amount} de réduction"
+  },
+  "cart.promo_placeholder": {
+    "en": "Promo code",
+    "fr": "Code promo"
+  },
+  "cart.service_fee": {
+    "en": "Service fee",
+    "fr": "Frais de service"
+  },
+  "cart.subtotal": {
+    "en": "Subtotal",
+    "fr": "Sous-total"
+  },
+  "cart.title": {
+    "en": "Your cart",
+    "fr": "Votre panier"
+  },
+  "cart.total": {
+    "en": "Total",
+    "fr": "Total"
+  },
+  "checkout.contact": {
+    "en": "Contact",
+    "fr": "Contact"
+  },
+  "checkout.delivery_details": {
+    "en": "Delivery details",
+    "fr": "Détails de livraison"
+  },
+  "checkout.delivery_instructions": {
+    "en": "Delivery instructions",
+    "fr": "Instructions de livraison"
+  },
+  "checkout.delivery_instructions_ph": {
+    "en": "Floor, door code, landmarks…",
+    "fr": "Étage, code d'accès, points de repère…"
+  },
+  "checkout.email": {
+    "en": "Email (for receipt)",
+    "fr": "E-mail (pour le reçu)"
+  },
+  "checkout.full_name": {
+    "en": "Full name",
+    "fr": "Nom complet"
+  },
+  "checkout.order_summary": {
+    "en": "Order summary",
+    "fr": "Récapitulatif"
+  },
+  "checkout.payment": {
+    "en": "Payment",
+    "fr": "Paiement"
+  },
+  "checkout.phone": {
+    "en": "Phone",
+    "fr": "Téléphone"
+  },
+  "checkout.phone_helper": {
+    "en": "Verified via SMS",
+    "fr": "Vérifié par SMS"
+  },
+  "checkout.place_order": {
+    "en": "Place order — {total}",
+    "fr": "Commander — {total}"
+  },
+  "checkout.processing": {
+    "en": "Processing…",
+    "fr": "Traitement…"
+  },
+  "checkout.title": {
+    "en": "Checkout",
+    "fr": "Paiement"
+  },
+  "common.action.apply": {
+    "en": "Apply",
+    "fr": "Appliquer"
+  },
+  "common.action.change": {
+    "en": "Change",
+    "fr": "Modifier"
+  },
+  "common.action.see_all": {
+    "en": "See all",
+    "fr": "Tout voir"
+  },
+  "common.action.submit": {
+    "en": "Submit",
+    "fr": "Envoyer"
+  },
+  "common.cart.view": {
+    "en": "View cart",
+    "fr": "Voir le panier"
+  },
+  "common.delivery.free": {
+    "en": "Free delivery",
+    "fr": "Livraison gratuite"
+  },
+  "common.filter.sort": {
+    "en": "Sort",
+    "fr": "Trier"
+  },
+  "common.mode.delivery": {
+    "en": "Delivery",
+    "fr": "Livraison"
+  },
+  "common.mode.pickup": {
+    "en": "Pickup",
+    "fr": "À emporter"
+  },
+  "common.nav.account": {
+    "en": "Account",
+    "fr": "Compte"
+  },
+  "common.nav.home": {
+    "en": "Home",
+    "fr": "Accueil"
+  },
+  "common.nav.orders": {
+    "en": "Orders",
+    "fr": "Commandes"
+  },
+  "common.nav.search": {
+    "en": "Search",
+    "fr": "Recherche"
+  },
+  "home.all_restaurants": {
+    "en": "All restaurants",
+    "fr": "Tous les restaurants"
+  },
+  "home.craving": {
+    "en": "What are you craving?",
+    "fr": "Une envie particulière ?"
+  },
+  "home.empty.body": {
+    "en": "Try adjusting your filters.",
+    "fr": "Essayez d'ajuster vos filtres."
+  },
+  "home.empty.title": {
+    "en": "No restaurants match",
+    "fr": "Aucun restaurant correspondant"
+  },
+  "home.featured": {
+    "en": "Featured near you",
+    "fr": "En vedette près de chez vous"
+  },
+  "home.filter.category": {
+    "en": "Category",
+    "fr": "Catégorie"
+  },
+  "home.filter.delivery_mode": {
+    "en": "Delivery / Pickup",
+    "fr": "Livraison / À emporter"
+  },
+  "home.partner_cta.body": {
+    "en": "Join Captain.Food and grow your sales.",
+    "fr": "Rejoignez Captain.Food et augmentez vos ventes."
+  },
+  "home.partner_cta.button": {
+    "en": "Become a partner",
+    "fr": "Devenir partenaire"
+  },
+  "home.partner_cta.title": {
+    "en": "Are you a restaurant?",
+    "fr": "Vous êtes un restaurant ?"
+  },
+  "home.search_placeholder": {
+    "en": "Search restaurants or dishes…",
+    "fr": "Rechercher un restaurant ou un plat…"
+  },
+  "home.sort.delivery_time": {
+    "en": "Fastest delivery",
+    "fr": "Livraison la plus rapide"
+  },
+  "home.sort.price": {
+    "en": "Price: low to high",
+    "fr": "Prix : croissant"
+  },
+  "home.sort.rating": {
+    "en": "Top rated",
+    "fr": "Les mieux notés"
+  },
+  "home.sort.recommended": {
+    "en": "Recommended",
+    "fr": "Recommandés"
+  },
+  "item.add_to_cart": {
+    "en": "Add to cart — {total}",
+    "fr": "Ajouter au panier — {total}"
+  },
+  "item.choose_one": {
+    "en": "Choose 1",
+    "fr": "Choisissez 1"
+  },
+  "item.instructions_placeholder": {
+    "en": "Special instructions (optional)",
+    "fr": "Instructions spéciales (facultatif)"
+  },
+  "location.recent": {
+    "en": "Recent",
+    "fr": "Récentes"
+  },
+  "location.saved": {
+    "en": "Saved",
+    "fr": "Enregistrées"
+  },
+  "location.search_placeholder": {
+    "en": "Search for an address…",
+    "fr": "Rechercher une adresse…"
+  },
+  "location.title": {
+    "en": "Delivery address",
+    "fr": "Adresse de livraison"
+  },
+  "location.use_current": {
+    "en": "Use current location",
+    "fr": "Utiliser ma position"
+  },
+  "order.count_total": {
+    "en": "{count} items · {total}",
+    "fr": "{count} articles · {total}"
+  },
+  "order.empty.body": {
+    "en": "Your order history will appear here.",
+    "fr": "Votre historique de commandes apparaîtra ici."
+  },
+  "order.empty.cta": {
+    "en": "Order now",
+    "fr": "Commander"
+  },
+  "order.empty.title": {
+    "en": "No orders yet",
+    "fr": "Aucune commande"
+  },
+  "order.eta": {
+    "en": "Estimated arrival",
+    "fr": "Arrivée estimée"
+  },
+  "order.help": {
+    "en": "Get help",
+    "fr": "Obtenir de l'aide"
+  },
+  "order.history_title": {
+    "en": "Your orders",
+    "fr": "Vos commandes"
+  },
+  "order.id_label": {
+    "en": "Order ID",
+    "fr": "N° de commande"
+  },
+  "order.rate": {
+    "en": "Rate your order",
+    "fr": "Évaluer la commande"
+  },
+  "order.reorder": {
+    "en": "Reorder",
+    "fr": "Recommander"
+  },
+  "order.status.accepted.body": {
+    "en": "{restaurant} is preparing your food.",
+    "fr": "{restaurant} prépare votre commande."
+  },
+  "order.status.accepted.title": {
+    "en": "Order accepted",
+    "fr": "Commande acceptée"
+  },
+  "order.status.cancelled.body": {
+    "en": "If you were charged, a refund is on its way.",
+    "fr": "Si vous avez été débité, un remboursement est en cours."
+  },
+  "order.status.cancelled.title": {
+    "en": "Order cancelled",
+    "fr": "Commande annulée"
+  },
+  "order.status.delivered.body": {
+    "en": "Enjoy your meal. 🎉",
+    "fr": "Bon appétit. 🎉"
+  },
+  "order.status.delivered.title": {
+    "en": "Delivered!",
+    "fr": "Livré !"
+  },
+  "order.status.out_for_delivery.body": {
+    "en": "Your delivery is en route.",
+    "fr": "Votre livraison est en route."
+  },
+  "order.status.out_for_delivery.title": {
+    "en": "On the way!",
+    "fr": "En route !"
+  },
+  "order.status.placed.body": {
+    "en": "Your order is being sent to {restaurant}.",
+    "fr": "Votre commande est envoyée à {restaurant}."
+  },
+  "order.status.placed.title": {
+    "en": "Order placed!",
+    "fr": "Commande passée !"
+  },
+  "order.status.preparing.body": {
+    "en": "Estimated ready in {minutes} min.",
+    "fr": "Prêt dans environ {minutes} min."
+  },
+  "order.status.preparing.title": {
+    "en": "Being prepared",
+    "fr": "En préparation"
+  },
+  "order.status.ready.body": {
+    "en": "Your order is ready.",
+    "fr": "Votre commande est prête."
+  },
+  "order.status.ready.title": {
+    "en": "Ready for pickup!",
+    "fr": "Prêt à récupérer !"
+  },
+  "order.status.rejected.body": {
+    "en": "The restaurant couldn't accept your order. You will be refunded.",
+    "fr": "Le restaurant n'a pas pu accepter votre commande. Vous serez remboursé."
+  },
+  "order.status.rejected.title": {
+    "en": "Order rejected",
+    "fr": "Commande refusée"
+  },
+  "order.tab.active": {
+    "en": "Active",
+    "fr": "En cours"
+  },
+  "order.tab.past": {
+    "en": "Past",
+    "fr": "Passées"
+  },
+  "order.tracking_title": {
+    "en": "Order tracking",
+    "fr": "Suivi de commande"
+  },
+  "partner.apply": {
+    "en": "Apply to join",
+    "fr": "Postuler"
+  },
+  "partner.header": {
+    "en": "Partner with us",
+    "fr": "Devenez partenaire"
+  },
+  "partner.hero_body": {
+    "en": "Join Tours' leading food platform. No commission model — flat subscription.",
+    "fr": "Rejoignez la première plateforme food de Tours. Sans commission — abonnement forfaitaire."
+  },
+  "partner.hero_title": {
+    "en": "Grow your restaurant with Captain.Food",
+    "fr": "Développez votre restaurant avec Captain.Food"
+  },
+  "partner.prop.control.body": {
+    "en": "Manage your menu, hours, and catalog in real-time.",
+    "fr": "Gérez votre menu, vos horaires et votre catalogue en temps réel."
+  },
+  "partner.prop.control.title": {
+    "en": "Full control",
+    "fr": "Contrôle total"
+  },
+  "partner.prop.margins.body": {
+    "en": "Flat monthly fee. No per-order commission.",
+    "fr": "Forfait mensuel fixe. Aucune commission par commande."
+  },
+  "partner.prop.margins.title": {
+    "en": "Keep your margins",
+    "fr": "Préservez vos marges"
+  },
+  "partner.prop.orders.body": {
+    "en": "Reach thousands of new customers in your city.",
+    "fr": "Touchez des milliers de nouveaux clients dans votre ville."
+  },
+  "partner.prop.orders.title": {
+    "en": "Increase orders",
+    "fr": "Augmentez vos commandes"
+  },
+  "rating.comment_placeholder": {
+    "en": "Add a comment (optional)",
+    "fr": "Ajouter un commentaire (facultatif)"
+  },
+  "rating.food_question": {
+    "en": "How was the food?",
+    "fr": "Comment était le repas ?"
+  },
+  "rating.tag.accurate": {
+    "en": "Accurate order",
+    "fr": "Commande conforme"
+  },
+  "rating.tag.fast": {
+    "en": "Fast delivery",
+    "fr": "Livraison rapide"
+  },
+  "rating.tag.packaging": {
+    "en": "Great packaging",
+    "fr": "Bon emballage"
+  },
+  "rating.tag.portions": {
+    "en": "Good portions",
+    "fr": "Bonnes portions"
+  },
+  "rating.tag.taste": {
+    "en": "Great taste",
+    "fr": "Très bon goût"
+  },
+  "rating.tags_label": {
+    "en": "What went well? (optional)",
+    "fr": "Qu'est-ce qui vous a plu ? (facultatif)"
+  },
+  "rating.thanks": {
+    "en": "Thanks for your feedback!",
+    "fr": "Merci pour votre retour !"
+  },
+  "rating.title": {
+    "en": "Rate your order",
+    "fr": "Évaluez votre commande"
+  },
+  "restaurant.closed": {
+    "en": "Closed",
+    "fr": "Fermé"
+  },
+  "restaurant.min_order": {
+    "en": "Min. {amount}",
+    "fr": "Min. {amount}"
+  },
+  "restaurant.open": {
+    "en": "Open",
+    "fr": "Ouvert"
+  },
+  "restaurant.opens_at": {
+    "en": "Opens at {time}",
+    "fr": "Ouvre à {time}"
+  },
+  "restaurant.unavailable": {
+    "en": "Unavailable",
+    "fr": "Indisponible"
+  },
+  "search.dishes": {
+    "en": "Dishes",
+    "fr": "Plats"
+  },
+  "search.empty.body": {
+    "en": "Try a different dish or restaurant name.",
+    "fr": "Essayez un autre plat ou nom de restaurant."
+  },
+  "search.empty.title": {
+    "en": "No results for \"{query}\"",
+    "fr": "Aucun résultat pour « {query} »"
+  },
+  "search.placeholder": {
+    "en": "Restaurants, dishes, cuisines…",
+    "fr": "Restaurants, plats, cuisines…"
+  },
+  "search.popular": {
+    "en": "Popular categories",
+    "fr": "Catégories populaires"
+  },
+  "search.recent": {
+    "en": "Recent searches",
+    "fr": "Recherches récentes"
+  },
+  "search.restaurants": {
+    "en": "Restaurants",
+    "fr": "Restaurants"
+  }
+}

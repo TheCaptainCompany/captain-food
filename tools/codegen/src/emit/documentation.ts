@@ -1,6 +1,6 @@
 import type { ApiField, Model, SchemaNode } from '../model.ts';
 import type { Derived } from '../validate.ts';
-import { refName } from '../refs.ts';
+import { refName, resolveRef } from '../refs.ts';
 import { buildContextMap, CROSS } from './contexts.ts';
 
 /**
@@ -21,7 +21,7 @@ const KIND_EMOJI: Record<string, string> = {
   scalar: '🔤', entity: '📦', command: '📩', event: '⚡', view: '🗄️', actor: '🎭',
   type: '🧩', query: '🔎', mutation: '✏️', error: '⛔', property: '🔹',
   story: '🎬', activity: '🧭', test: '🧪', obs: '📡', context: '🔲', container: '🧱', component: '⚙️',
-  subscription: '🔔', rule: '📐',
+  subscription: '🔔', rule: '📐', screen: '📱', translation: '🌐',
 };
 const emo = (kind: string) => KIND_EMOJI[kind] ?? '•';
 
@@ -488,6 +488,78 @@ export function emitDocumentation(model: Model, derived: Derived): string {
   ).join('\n\n');
   const ctxToc = ctxBlocks.map(({ ctx }) => `[${emo('context')} ${ctx}](#sec-ctx-${slug(ctx)})`).join(' · ');
 
+  // ============================================================================================
+  // SDUI customer screens + translations (customer_screens.yaml + translations.yaml — ADR-0033)
+  // ============================================================================================
+  const screensFile = (defs['customer_screens.yaml'] ?? {}) as Record<string, unknown>;
+  const resolvers = (screensFile.resolvers ?? {}) as Record<string, Record<string, unknown>>;
+  const actionDefs = (screensFile.actions ?? {}) as Record<string, Record<string, unknown>>;
+  const screensArr = (Array.isArray(screensFile.screens) ? screensFile.screens : []) as Array<Record<string, unknown>>;
+  const trDefs = (defs['translations.yaml'] ?? {}) as Record<string, { params?: Record<string, unknown>; messages?: Record<string, string> }>;
+
+  const trEn = (ref: string): string => {
+    const t = resolveRef(model, ref, 'customer_screens.yaml') as { messages?: Record<string, string> } | null;
+    return t?.messages?.en ?? (ref.split('/').pop() ?? ref);
+  };
+  const tText = (v: unknown): string =>
+    v && typeof v === 'object' && typeof (v as { $ref?: string }).$ref === 'string' ? trEn((v as { $ref: string }).$ref)
+      : typeof v === 'string' ? v : '';
+  const cell = (s: string) => s.replace(/\|/g, '\\|');
+
+  // 🌐 Translations table
+  const trRows = Object.keys(trDefs).map((k) => {
+    const t = trDefs[k]!;
+    const params = Object.keys(t.params ?? {}).map((p) => `\`${p}\``).join(', ') || '—';
+    return [`${idTag(anchor('translation', k))}\`${k}\``, params, cell(String(t.messages?.en ?? '')), cell(String(t.messages?.fr ?? ''))];
+  });
+  const translationsSection = mdTable(['Key', 'Params', '🇬🇧 en', '🇫🇷 fr'], trRows);
+
+  // 📱 Screens: mockup + operations table + gaps
+  const opCell = (ref: string | undefined, gap: string | undefined): string => {
+    if (gap) return `⚠️ _gap: ${cell(gap)}_`;
+    if (!ref) return '—';
+    const name = ref.split('/').pop() ?? '';
+    const kind = ref.includes('/mutations/') ? 'mutation' : ref.includes('/subscriptions/') ? 'subscription' : 'query';
+    return link(kind, name);
+  };
+  const actionKeys = new Set(Object.keys(actionDefs));
+  const collectActions = (node: unknown, acc: Set<string>): void => {
+    if (Array.isArray(node)) node.forEach((n) => collectActions(n, acc));
+    else if (node && typeof node === 'object') {
+      const o = node as Record<string, unknown>;
+      if (typeof o.type === 'string' && actionKeys.has(o.type)) acc.add(o.type);
+      for (const v of Object.values(o)) collectActions(v, acc);
+    }
+  };
+  const box = (w: number, s: string) => `│ ${s.length > w ? s.slice(0, w - 1) + '…' : s.padEnd(w)} │`;
+  const screenDocs = screensArr.map((s) => {
+    const id = String(s.id ?? '?');
+    const route = String(s.route ?? '');
+    const title = tText(s.title) || id;
+    const sduiBadge = s.sdui === false ? `🚫 not SDUI${s.sdui_reason ? ` — ${String(s.sdui_reason)}` : ''}` : '📱 SDUI';
+    const auth = s.requires_auth ? ' · 🔒 auth' : '';
+    const reads = (Array.isArray(s.data_requirements) ? (s.data_requirements as string[]) : []).map((rn) => {
+      const r = resolvers[rn] ?? {};
+      return ['read', `\`${rn}\``, opCell((r.query as { $ref?: string } | undefined)?.$ref, r.gap as string | undefined)];
+    });
+    const acts = new Set<string>();
+    collectActions(s.components, acts);
+    (Array.isArray(s.actions_used) ? (s.actions_used as string[]) : []).forEach((a) => acts.add(a));
+    const writes = [...acts].filter((a) => actionDefs[a] && (actionDefs[a]!.mutation || actionDefs[a]!.gap))
+      .map((a) => ['write', `\`${a}\``, opCell((actionDefs[a]!.mutation as { $ref?: string } | undefined)?.$ref, actionDefs[a]!.gap as string | undefined)]);
+    const opsTable = mdTable(['Kind', 'UI need', 'GraphQL operation'], [...reads, ...writes]);
+    const comps = Array.isArray(s.components) ? (s.components as Array<Record<string, unknown>>) : [];
+    const mockLines = comps.map((c) => {
+      const t = c.component ? `«${String(c.component)}»` : String(c.type ?? '?');
+      const lbl = tText(c.title) || tText(c.label) || tText(c.placeholder) || '';
+      return box(40, t + (lbl ? ` — ${lbl}` : ''));
+    });
+    const mock = ['┌' + '─'.repeat(42) + '┐', box(40, title), '├' + '─'.repeat(42) + '┤', ...mockLines, '└' + '─'.repeat(42) + '┘'].join('\n');
+    const gaps = (Array.isArray(s.gaps) ? (s.gaps as string[]) : []).map((g) => `- ⚠️ ${g}`).join('\n');
+    return `${idTag(anchor('screen', id))}\n### ${emo('screen')} \`${id}\` · \`${route}\` · ${sduiBadge}${auth}\n\n\`\`\`\n${mock}\n\`\`\`\n\n${opsTable}${gaps ? `\n\n**Gaps**\n${gaps}` : ''}`;
+  });
+  const screensSection = screenDocs.join('\n\n');
+
   return `<!-- GENERATED by tools/codegen — do not edit by hand. Source: specs/*.yaml. -->
 # 📖 Captain.Food — Product Documentation (generated)
 
@@ -502,7 +574,7 @@ that belong to no single context. Stories and Architecture span all contexts.
 **Roles**: 🌐 PUBLIC · 🙋 CUSTOMER · 🏪 RESTAURANT_ACCOUNT · 🍽️ RESTAURANT · 🛵 RIDER · 🛠️ ADMIN · 🔌 EXTERNAL
 **Markers**: ✅ required · ⬜ optional · 🛶 V0 · 🔭 V1 · 🔒 internal · ⚠️ design hole
 
-**Contents** — [🎬 Stories](#sec-stories) · ${ctxToc} · [🏛️ Architecture](#sec-architecture)
+**Contents** — [🎬 Stories](#sec-stories) · ${ctxToc} · [📱 Customer screens](#sec-screens) · [🌐 Translations](#sec-translations) · [🏛️ Architecture](#sec-architecture)
 
 ${sec('stories', '🎬', 'Stories')}
 
@@ -511,6 +583,22 @@ How each persona uses the API. \`personaRole\` is the persona's GraphQL path-rol
 ${storiesSection}
 
 ${ctxSections}
+
+${sec('screens', '📱', 'Customer screens (SDUI)')}
+
+Server-Driven UI screens (\`specs/customer_screens.yaml\`, ADR-0033). Each screen's **reads** (resolvers →
+queries) and **writes** (actions → mutations) are \`$ref\`-bound to the GraphQL API and validated, so the
+mockups below are the **proof the API answers the UI**. ⚠️ gaps mark UI needs the API does not serve yet.
+Screens marked 🚫 are intentionally not SDUI-rendered (Stripe/subscription/auth integrity).
+
+${screensSection}
+
+${sec('translations', '🌐', 'Translations')}
+
+The i18n catalog (\`specs/translations.yaml\`) — every user-visible screen string, referenced by \`$ref\` and
+generated to a single \`translations.generated.json\`. \`{param}\` tokens are validated against \`params\`.
+
+${translationsSection}
 
 ${sec('architecture', '🏛️', 'Architecture (C4)')}
 

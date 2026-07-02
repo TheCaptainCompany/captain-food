@@ -9,6 +9,7 @@ import { emitDocumentationHtml } from './emit/documentation-html.ts';
 import { emitViewsMarkdown, emitViewsSql } from './emit/database.ts';
 import { emitSchema } from './emit/schema.ts';
 import { emitStructurizr, emitMermaid } from './emit/c4.ts';
+import { emitTranslationsJson } from './emit/translations.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..', '..', '..');
@@ -87,6 +88,9 @@ function main(): void {
   console.error(
     `• obs:    ${coverage.obsContracts} observability contracts · C4: ${Object.keys((model.defs['architecture/c4-l2.yaml']?.boundedContexts ?? {}) as object).length} bounded contexts`,
   );
+  console.error(
+    `• ui:     ${coverage.screens} SDUI screens, ${coverage.screenBindings} API bindings, ${coverage.screenGaps} gaps · ${coverage.translations} translation keys (en/fr)`,
+  );
 
   // Make the spec-based validation visible: list what was actually cross-checked.
   console.error('• validated against specs:');
@@ -97,6 +101,7 @@ function main(): void {
   console.error(`    - stories: ${coverage.storyLinks} step→op links resolve, persona role authorized, every mutation/query reached by a story step`);
   console.error(`    - tests: ${coverage.testCases} Given/When/Then cases — data fields, actor handles \`when\`, \`then\`⊆emits, \`thrown\`⊆throws; every message/event/error exercised`);
   console.error(`    - rules: ${coverage.rules} business rules — every test asserts ≥1 rule, every rule asserted by ≥1 test (ADR-0032)`);
+  console.error(`    - ui: ${coverage.screens} SDUI screens — resolver/action bindings $ref real api ops (API-meets-UI), data_requirements resolve; ${coverage.translations} translations (en+fr, params match)`);
   console.error(`    - observability: ${coverage.obsContracts} workflow contracts — $ref bindings resolve, mandatory ids (correlation_id/trace_id), span kinds, success.required_spans ⊆ declared spans`);
   console.error('    - c4: bounded-context↔actor mapping (no unmapped aggregate / phantom container ref)');
 
@@ -146,6 +151,10 @@ function main(): void {
   const mermaidTarget = join(args.outDir, 'c4.generated.md');
   writeFileSync(mermaidTarget, emitMermaid(model), 'utf8');
   console.error(`✓ wrote ${mermaidTarget}`);
+
+  const i18nTarget = join(args.outDir, 'translations.generated.json');
+  writeFileSync(i18nTarget, emitTranslationsJson(model), 'utf8');
+  console.error(`✓ wrote ${i18nTarget}`);
 
   const databaseMd = join(args.specsDir, 'database.md');
   if (injectGenerated(databaseMd, 'views', emitViewsMarkdown(model))) {

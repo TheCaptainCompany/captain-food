@@ -1,5 +1,5 @@
 import type { ApiField, Model, SchemaNode } from '../model.ts';
-import { refName } from '../refs.ts';
+import { refName, resolveRef } from '../refs.ts';
 import { buildContextMap, CROSS } from './contexts.ts';
 
 /**
@@ -20,6 +20,7 @@ const KIND_EMOJI: Record<string, string> = {
   scalar: '🔤', entity: '📦', command: '📩', event: '⚡', view: '🗄️', actor: '🎭',
   type: '🧩', query: '🔎', mutation: '✏️', error: '⛔', property: '🔹', story: '🎬', test: '🧪',
   obs: '📡', context: '🔲', container: '🧱', component: '⚙️', subscription: '🔔', rule: '📐',
+  screen: '📱', translation: '🌐',
 };
 const emo = (k: string) => KIND_EMOJI[k] ?? '•';
 
@@ -36,7 +37,7 @@ const KIND_CLASS: Record<string, string> = {
   scalar: 'k-scalar', query: 'k-op', mutation: 'k-op', command: 'k-op',
   event: 'k-event', error: 'k-error', property: 'k-prop', test: 'k-op',
   obs: 'k-event', context: 'k-type', container: 'k-type', component: 'k-op', subscription: 'k-op',
-  rule: 'k-scalar',
+  rule: 'k-scalar', screen: 'k-type', translation: 'k-scalar',
 };
 const cls = (k: string) => KIND_CLASS[k] ?? 'k-id';
 
@@ -497,7 +498,7 @@ export function emitDocumentationHtml(model: Model): string {
     `${emo('view')} <span class="k-type">view</span>`, `${emo('command')} <span class="k-op">command</span>`,
     `${emo('event')} <span class="k-event">event</span>`, `${emo('entity')} <span class="k-type">entity</span>`,
     `${emo('scalar')} <span class="k-scalar">scalar</span>`, `${emo('error')} <span class="k-error">error</span>`,
-    `🔹 <span class="k-prop">property</span>`, `<span class="k-param">parameter</span>`, `${emo('rule')} <span class="k-scalar">rule</span>`, `${emo('test')} <span class="k-op">test</span>`, `${emo('obs')} <span class="k-event">observability</span>`,
+    `🔹 <span class="k-prop">property</span>`, `<span class="k-param">parameter</span>`, `${emo('rule')} <span class="k-scalar">rule</span>`, `${emo('test')} <span class="k-op">test</span>`, `${emo('screen')} <span class="k-type">screen</span>`, `${emo('translation')} <span class="k-scalar">translation</span>`, `${emo('obs')} <span class="k-event">observability</span>`,
   ].join(' · ');
   // Assemble each bounded context as a TOP-LEVEL section: a description + one subsection per kind
   // (only non-empty kinds are shown). `cross-cutting` collects the shared vocabulary and ops.
@@ -531,7 +532,77 @@ export function emitDocumentationHtml(model: Model): string {
     .map(({ ctx, inner }, i) => sec(`ctx-${slug(ctx)}`, emo('context'), `${i + 1}. ${ctx}`, `<div class="desc">${esc(cx.describe(ctx))}</div>${inner}`))
     .join('');
   const ctxToc = ctxBlocks.map(({ ctx }) => `<a href="#sec-ctx-${slug(ctx)}">${emo('context')} ${esc(ctx)}</a>`).join('');
-  const toc = `<a href="#sec-stories">🎬 Stories</a>${ctxToc}<a href="#sec-architecture">🏛️ Architecture</a><a href="#sec-map">🗺️ Map</a>`;
+  const toc = `<a href="#sec-stories">🎬 Stories</a>${ctxToc}<a href="#sec-screens">📱 Screens</a><a href="#sec-translations">🌐 Translations</a><a href="#sec-architecture">🏛️ Architecture</a><a href="#sec-map">🗺️ Map</a>`;
+
+  // ── SDUI customer screens + translations (customer_screens.yaml + translations.yaml — ADR-0033) ──
+  const screensFile = (defs['customer_screens.yaml'] ?? {}) as Record<string, unknown>;
+  const resolvers = (screensFile.resolvers ?? {}) as Record<string, Record<string, unknown>>;
+  const actionDefs = (screensFile.actions ?? {}) as Record<string, Record<string, unknown>>;
+  const screensArr = (Array.isArray(screensFile.screens) ? screensFile.screens : []) as Array<Record<string, unknown>>;
+  const trDefs = (defs['translations.yaml'] ?? {}) as Record<string, { params?: Record<string, unknown>; messages?: Record<string, string> }>;
+
+  const trEn = (ref: string): string => {
+    const t = resolveRef(model, ref, 'customer_screens.yaml') as { messages?: Record<string, string> } | null;
+    return t?.messages?.en ?? (ref.split('/').pop() ?? ref);
+  };
+  const tText = (v: unknown): string =>
+    v && typeof v === 'object' && typeof (v as { $ref?: string }).$ref === 'string' ? trEn((v as { $ref: string }).$ref)
+      : typeof v === 'string' ? v : '';
+
+  const trRows = Object.keys(trDefs).map((k) => {
+    const t = trDefs[k]!;
+    const params = Object.keys(t.params ?? {}).map((p) => `<span class="k-param">${esc(p)}</span>`).join(', ') || '<span class="muted">—</span>';
+    return [`<span id="${anchor('translation', k)}" class="k-scalar">${emo('translation')} ${esc(k)}</span>`, params, `🇬🇧 ${esc(String(t.messages?.en ?? ''))}`, `🇫🇷 ${esc(String(t.messages?.fr ?? ''))}`];
+  });
+  const translationsHtml = table(['Key', 'Params', 'en', 'fr'], trRows);
+
+  const opLinkHtml = (ref: string | undefined, gap: string | undefined): string => {
+    if (gap) return `<span class="opt">⚠️ ${esc(gap)}</span>`;
+    if (!ref) return '—';
+    const name = ref.split('/').pop() ?? '';
+    const kind = ref.includes('/mutations/') ? 'mutation' : ref.includes('/subscriptions/') ? 'subscription' : 'query';
+    return link(kind, name);
+  };
+  const actionKeys = new Set(Object.keys(actionDefs));
+  const collectActions = (node: unknown, acc: Set<string>): void => {
+    if (Array.isArray(node)) node.forEach((n) => collectActions(n, acc));
+    else if (node && typeof node === 'object') {
+      const o = node as Record<string, unknown>;
+      if (typeof o.type === 'string' && actionKeys.has(o.type)) acc.add(o.type);
+      for (const v of Object.values(o)) collectActions(v, acc);
+    }
+  };
+  const screenDocs: Doc[] = screensArr.map((s) => {
+    const id = String(s.id ?? '?');
+    const route = String(s.route ?? '');
+    const title = tText(s.title) || id;
+    const notSdui = s.sdui === false;
+    const badge = notSdui ? `<span class="badge">🚫 not SDUI</span>` : `<span class="badge">📱 SDUI</span>`;
+    const auth = s.requires_auth ? `<span class="badge">🔒 auth</span>` : '';
+    const reason = notSdui && s.sdui_reason ? `<div class="desc">${esc(String(s.sdui_reason))}</div>` : '';
+    const comps = Array.isArray(s.components) ? (s.components as Array<Record<string, unknown>>) : [];
+    const mockRows = comps.map((c) => {
+      const t = c.component ? `«${String(c.component)}»` : String(c.type ?? '?');
+      const lbl = tText(c.title) || tText(c.label) || tText(c.placeholder) || '';
+      return `<div style="padding:5px 10px;border-top:1px solid var(--line)"><span class="muted">${esc(t)}</span>${lbl ? ` ${esc(lbl)}` : ''}</div>`;
+    }).join('');
+    const mock = `<div style="border:1px solid var(--line);border-radius:12px;max-width:340px;overflow:hidden;margin:8px 0"><div style="background:var(--bg3);padding:7px 10px;font-weight:600">📱 ${esc(title)}<span class="muted"> · ${esc(route)}</span></div>${mockRows}</div>`;
+    const reads = (Array.isArray(s.data_requirements) ? (s.data_requirements as string[]) : []).map((rn) => {
+      const r = resolvers[rn] ?? {};
+      return ['<span class="muted">read</span>', `<span class="k-op">${esc(rn)}</span>`, opLinkHtml((r.query as { $ref?: string } | undefined)?.$ref, r.gap as string | undefined)];
+    });
+    const acts = new Set<string>();
+    collectActions(s.components, acts);
+    (Array.isArray(s.actions_used) ? (s.actions_used as string[]) : []).forEach((a) => acts.add(a));
+    const writes = [...acts].filter((a) => actionDefs[a] && (actionDefs[a]!.mutation || actionDefs[a]!.gap))
+      .map((a) => ['<span class="muted">write</span>', `<span class="k-op">${esc(a)}</span>`, opLinkHtml((actionDefs[a]!.mutation as { $ref?: string } | undefined)?.$ref, actionDefs[a]!.gap as string | undefined)]);
+    const opsTable = table(['', 'UI need', 'GraphQL operation'], [...reads, ...writes]);
+    const gaps = (Array.isArray(s.gaps) ? (s.gaps as string[]) : []).map((g) => `<li>⚠️ ${esc(g)}</li>`).join('');
+    const body = `${reason}<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">${mock}<div style="flex:1;min-width:280px">${opsTable}${gaps ? `<p class="muted">Gaps</p><ul>${gaps}</ul>` : ''}</div></div>`;
+    const sdBadge = `${badge}${auth}`;
+    return { ctx: CROSS, html: `<details class="item" id="${anchor('screen', id)}" data-crumb="${emo('screen')} ${esc(id)}" open><summary><span class="tw">▸</span><span class="muted">Screen:</span> <span class="k-type">${emo('screen')} ${esc(id)}</span> <span class="muted">${esc(route)}</span> ${sdBadge}<a class="perma" href="#${anchor('screen', id)}">🔗</a></summary>${body}</details>` };
+  });
+  const screensHtml = screenDocs.map((d) => d.html).join('');
 
   // CENTRALIZED descriptions: one id→description map (anchor id → text), emitted once and looked up by
   // the hover-tooltip on every cross-link — no per-link duplication.
@@ -550,6 +621,8 @@ export function emitDocumentationHtml(model: Model): string {
   for (const s of model.api.subscriptions) putDesc('subscription', s.name, s.description);
   for (const [f, c] of Object.entries((defs['observability.yaml'] ?? {}) as Record<string, Record<string, unknown>>)) putDesc('obs', f, `Observability contract — criticality: ${String(c.criticality ?? '—')}.`);
   for (const [n, d] of Object.entries(ruleDefs)) putDesc('rule', n, (d as Record<string, unknown>).description as string);
+  for (const [k, t] of Object.entries(trDefs)) putDesc('translation', k, `${t.messages?.en ?? ''} / ${t.messages?.fr ?? ''}`);
+  for (const s of screensArr) putDesc('screen', String(s.id ?? ''), `${s.sdui === false ? 'Non-SDUI ' : 'SDUI '}screen ${String(s.route ?? '')}`);
   const descScript = `<script>window.CF_DESC=${JSON.stringify(descIndex).replace(/</g, '\\u003c')};</script>`;
 
   // Sticky breadcrumb (context › section › item, scroll-spy) + centralized-description hover tooltip.
@@ -587,6 +660,8 @@ export function emitDocumentationHtml(model: Model): string {
   <div class="toolbar"><button onclick="setAll(true)">⊞ Expand all</button> <button onclick="setAll(false)">⊟ Collapse all</button> &nbsp; <span class="toc">${toc}</span></div>
   ${sec('stories', '🎬', 'Stories', storiesHtml)}
   ${ctxSections}
+  ${sec('screens', '📱', 'Customer screens (SDUI)', '<p class="muted">Server-Driven UI screens (customer_screens.yaml, ADR-0033). Per screen, the reads (resolvers→queries) and writes (actions→mutations) are $ref-bound to the GraphQL API and validated — the mockups are the <strong>proof the API answers the UI</strong>. ⚠️ marks gaps the API does not serve yet; 🚫 screens are intentionally not SDUI-rendered.</p>' + screensHtml)}
+  ${sec('translations', '🌐', 'Translations', '<p class="muted">The i18n catalog (translations.yaml) — every screen string, referenced by $ref, generated to one translations.generated.json. {param} tokens are validated against declared params.</p>' + translationsHtml)}
   ${sec('architecture', '🏛️', 'Architecture (C4)', c4Html)}
   ${sec('map', '🗺️', 'System map (interactive)', '<p class="muted">Drill in: <strong>System → container → bounded context → aggregate flow</strong>. Boxes are colored by kind (containers/aggregates teal, externals orange, contexts gold, commands yellow, events purple, views blue). Click to go deeper; leaf boxes jump to their section; use ◀ back to climb out.</p>' + mapHtml)}
 </div></div>

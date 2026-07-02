@@ -27,6 +27,8 @@ export const SOURCE_FILES = [
   'stories.yaml',
   'rules.yaml',
   'tests.yaml',
+  'translations.yaml',
+  'customer_screens.yaml',
   'observability.yaml',
   'architecture/c4-l2.yaml',
   'architecture/c4-l3.yaml',

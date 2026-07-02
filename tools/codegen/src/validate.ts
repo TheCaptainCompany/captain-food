@@ -27,6 +27,10 @@ export interface Coverage {
   testCases: number;
   rules: number;
   obsContracts: number;
+  translations: number;
+  screens: number;
+  screenBindings: number;
+  screenGaps: number;
 }
 
 /**
@@ -52,7 +56,7 @@ function targetsFile(ref: string, file: SourceFile, contextFile: SourceFile): bo
 export function validate(model: Model): { report: ValidationReport; derived: Derived; coverage: Coverage } {
   const issues: Issue[] = [];
   const add = (i: Issue) => issues.push(i);
-  const coverage: Coverage = { refs: 0, views: 0, viewColumns: 0, viewFedBy: 0, mutationLinks: 0, readsLinks: 0, storyLinks: 0, testCases: 0, rules: 0, obsContracts: 0 };
+  const coverage: Coverage = { refs: 0, views: 0, viewColumns: 0, viewFedBy: 0, mutationLinks: 0, readsLinks: 0, storyLinks: 0, testCases: 0, rules: 0, obsContracts: 0, translations: 0, screens: 0, screenBindings: 0, screenGaps: 0 };
 
   // --- 1. Referential integrity: every `$ref` anywhere must resolve -----------------------------
   for (const file of Object.keys(model.defs) as SourceFile[]) {
@@ -557,6 +561,76 @@ export function validate(model: Model): { report: ValidationReport; derived: Der
         const prev = roleOwner.get(r);
         if (prev && prev !== cid) add({ level: 'error', rule: 'c4-context-role-overlap', location: `architecture/c4-l2.yaml/${cid}`, message: `UserType '${r}' is claimed by both '${prev}' and '${cid}' — each role maps to at most one context.` });
         else roleOwner.set(r, cid);
+      }
+    }
+  }
+
+  // --- 10. Translations (translations.yaml): every key has en+fr; placeholders match declared params ---
+  // The non-error i18n catalog (ADR-0033). `{param}` tokens in en/fr must reference a declared `params`
+  // name, and both locales must use exactly the declared param set (no drift, no undocumented tokens).
+  {
+    const tr = (model.defs['translations.yaml'] ?? {}) as Record<string, SchemaNode>;
+    const placeholders = (s: unknown): Set<string> => {
+      const out = new Set<string>();
+      if (typeof s === 'string') for (const m of s.matchAll(/\{(\w+)\}/g)) out.add(m[1]!);
+      return out;
+    };
+    for (const [key, raw] of Object.entries(tr)) {
+      const t = raw as Record<string, unknown>;
+      const at = `translations.yaml/${key}`;
+      coverage.translations++;
+      const messages = (t.messages ?? {}) as Record<string, unknown>;
+      for (const loc of ['en', 'fr']) {
+        if (typeof messages[loc] !== 'string' || !(messages[loc] as string).length)
+          add({ level: 'error', rule: 'translation-missing-locale', location: at, message: `translation '${key}' has no '${loc}' message (both en and fr are required).` });
+      }
+      const params = new Set(Object.keys((t.params ?? {}) as Record<string, unknown>));
+      for (const loc of ['en', 'fr']) {
+        for (const ph of placeholders(messages[loc])) {
+          if (!params.has(ph)) add({ level: 'error', rule: 'translation-param-mismatch', location: at, message: `'${loc}' message uses {${ph}} but it is not declared in \`params\`.` });
+        }
+      }
+      // every declared param must be used by at least one locale (no dead params).
+      const used = new Set<string>([...placeholders(messages.en), ...placeholders(messages.fr)]);
+      for (const p of params) if (!used.has(p)) add({ level: 'error', rule: 'translation-param-mismatch', location: at, message: `declared param '${p}' is used by no message.` });
+    }
+  }
+
+  // --- 11. Customer screens (customer_screens.yaml): the SDUI spec is bound to the API (ADR-0033) -----
+  // Every resolver/action `$ref` already resolved in §1 (a screen calling a non-existent op → ref-dangling:
+  // the API-meets-UI gate). Here: resolver/action bindings target the right api op-kind, each screen's
+  // data_requirements name a declared resolver, and we count screens/bindings/gaps for the summary.
+  {
+    const cs = (model.defs['customer_screens.yaml'] ?? {}) as Record<string, SchemaNode>;
+    const resolvers = (cs.resolvers ?? {}) as Record<string, Record<string, unknown>>;
+    const actions = (cs.actions ?? {}) as Record<string, Record<string, unknown>>;
+    const queryNames = new Set(api.queries.map((q) => q.name));
+    const mutationNames = new Set(api.mutations.map((m) => m.name));
+
+    // op refs are nested (api.yaml#/queries/<name>) so the op name is the LAST path segment.
+    const opName = (ref: string): string => ref.split('/').pop() ?? '';
+    for (const [name, r] of Object.entries(resolvers)) {
+      if (r?.gap) { coverage.screenGaps++; continue; }
+      const ref = (r?.query as { $ref?: string } | undefined)?.$ref;
+      if (!ref) { add({ level: 'error', rule: 'resolver-no-binding', location: `customer_screens.yaml/resolvers/${name}`, message: `resolver '${name}' must declare a \`query\` ($ref into api.yaml) or a \`gap\`.` }); continue; }
+      if (refTargetFile(ref, 'customer_screens.yaml') !== 'api.yaml' || !ref.includes('/queries/') || !queryNames.has(opName(ref)))
+        add({ level: 'error', rule: 'resolver-not-a-query', location: `customer_screens.yaml/resolvers/${name}`, message: `resolver '${name}' query must $ref an api.yaml query; '${ref}' is not one.` });
+      else coverage.screenBindings++;
+    }
+    for (const [name, a] of Object.entries(actions)) {
+      const ref = (a?.mutation as { $ref?: string } | undefined)?.$ref;
+      if (!ref) continue; // client/auth/gap actions carry no mutation binding
+      if (refTargetFile(ref, 'customer_screens.yaml') !== 'api.yaml' || !ref.includes('/mutations/') || !mutationNames.has(opName(ref)))
+        add({ level: 'error', rule: 'action-not-a-mutation', location: `customer_screens.yaml/actions/${name}`, message: `action '${name}' mutation must $ref an api.yaml mutation; '${ref}' is not one.` });
+      else coverage.screenBindings++;
+    }
+    const screens = Array.isArray(cs.screens) ? (cs.screens as Array<Record<string, unknown>>) : [];
+    for (const s of screens) {
+      coverage.screens++;
+      const sid = String(s?.id ?? '?');
+      coverage.screenGaps += Array.isArray(s?.gaps) ? (s.gaps as unknown[]).length : 0;
+      for (const dr of (Array.isArray(s?.data_requirements) ? s.data_requirements : []) as unknown[]) {
+        if (!resolvers[String(dr)]) add({ level: 'error', rule: 'screen-unknown-resolver', location: `customer_screens.yaml/screens/${sid}`, message: `data_requirement '${dr}' is not a declared resolver.` });
       }
     }
   }

@@ -63,6 +63,7 @@ Concrete architecture/domain-model decisions taken while building the specs (Acc
 | [0030](0030-uber-eats-comparison-model.md) | Uber Eats price-comparison model (single primary `cuisineCategory` + two reference policies, estimate-default with opt-in `basis` for real HubRise prices, `UberComparison` on Offer/Cart/Order computed in projections, no scraping, no new commands/events; realizes 0022/0023/0024/0025) |
 | [0031](0031-delivery-bounded-context.md) | Delivery bounded context (`DeliveryJob` aggregate + `DeliveryDispatchProcess`; one lifecycle, two paths — partner INBOUND facts via `avelo37-acl` AND independent-rider commands; PM-emitted `DeliveryRequested`, dual-emitter `OrderDelivered`, `View_DeliveryJob`, RIDER role wired to the context) |
 | [0032](0032-business-rules-and-completeness-gates.md) | Business-rules layer (`specs/rules.yaml`) + blocking completeness gates (bidirectional rule↔test linkage; `test-uncovered-*` promoted warning→error; new `op-uncovered-by-story` — every mutation/query anchored to a persona) |
+| [0033](0033-spec-driven-sdui-customer-screens.md) | Spec-Driven SDUI (`customer_screens.yaml`) + `translations.yaml` (errors.yaml-style i18n → one `translations.json`); screen reads/writes `$ref`-bound to `api.yaml` (API-meets-UI gate), non-SDUI screens flagged, gaps surfaced; screens+translations rendered in the docs; runtime deferred |
 
 ## Proposed (deferred until app/runtime code exists)
 

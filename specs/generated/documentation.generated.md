@@ -12,7 +12,7 @@ that belong to no single context. Stories and Architecture span all contexts.
 **Roles**: 🌐 PUBLIC · 🙋 CUSTOMER · 🏪 RESTAURANT_ACCOUNT · 🍽️ RESTAURANT · 🛵 RIDER · 🛠️ ADMIN · 🔌 EXTERNAL
 **Markers**: ✅ required · ⬜ optional · 🛶 V0 · 🔭 V1 · 🔒 internal · ⚠️ design hole
 
-**Contents** — [🎬 Stories](#sec-stories) · [🔲 restaurant](#sec-ctx-restaurant) · [🔲 catalog](#sec-ctx-catalog) · [🔲 order](#sec-ctx-order) · [🔲 customer](#sec-ctx-customer) · [🔲 delivery](#sec-ctx-delivery) · [🔲 cross-cutting](#sec-ctx-cross-cutting) · [🏛️ Architecture](#sec-architecture)
+**Contents** — [🎬 Stories](#sec-stories) · [🔲 restaurant](#sec-ctx-restaurant) · [🔲 catalog](#sec-ctx-catalog) · [🔲 order](#sec-ctx-order) · [🔲 customer](#sec-ctx-customer) · [🔲 delivery](#sec-ctx-delivery) · [🔲 cross-cutting](#sec-ctx-cross-cutting) · [📱 Customer screens](#sec-screens) · [🌐 Translations](#sec-translations) · [🏛️ Architecture](#sec-architecture)
 
 <a id="sec-stories"></a>
 ## 🎬 Stories
@@ -6176,6 +6176,392 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-restaurantnotactive"></a>⛔ `RestaurantNotActive` | Operation requires an ACTIVE restaurant. | 🇬🇧 The restaurant '{restaurantName}' is not active. | 🇫🇷 Le restaurant '{restaurantName}' n'est pas actif. | [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
+
+<a id="sec-screens"></a>
+## 📱 Customer screens (SDUI)
+
+Server-Driven UI screens (`specs/customer_screens.yaml`, ADR-0033). Each screen's **reads** (resolvers →
+queries) and **writes** (actions → mutations) are `$ref`-bound to the GraphQL API and validated, so the
+mockups below are the **proof the API answers the UI**. ⚠️ gaps mark UI needs the API does not serve yet.
+Screens marked 🚫 are intentionally not SDUI-rendered (Stripe/subscription/auth integrity).
+
+<a id="screen-home"></a>
+### 📱 `home` · `/` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Home                                     │
+├──────────────────────────────────────────┤
+│ «topbar»                                 │
+│ hero_search_bar — Search restaurants or… │
+│ horizontal_scroll                        │
+│ section — What are you craving?          │
+│ section — Featured near you              │
+│ section — All restaurants                │
+│ cta_banner — Are you a restaurant?       │
+│ «cart_fab»                               │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `promotions.active` | ⚠️ _gap: No promotions/deals query — HubRise deals not modelled in V0 (home promo banners)._ |
+| read | `categories.all` | [🔎 `categories`](#query-categories) |
+| read | `restaurants.featured` | [🔎 `restaurants`](#query-restaurants) |
+| read | `restaurants.all` | [🔎 `restaurants`](#query-restaurants) |
+
+**Gaps**
+- ⚠️ `promotions.active` (promo banners) has no backing query — deals deferred.
+
+<a id="screen-search"></a>
+### 📱 `search` · `/search` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Search                                   │
+├──────────────────────────────────────────┤
+│ «topbar»                                 │
+│ search_bar_active — Restaurants, dishes… │
+│ conditional_section                      │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `restaurants.search` | [🔎 `restaurants`](#query-restaurants) |
+| read | `categories.all` | [🔎 `categories`](#query-categories) |
+| read | `dishes.search` | ⚠️ _gap: No dish/product search query — only restaurant search (queries/restaurants) exists._ |
+
+**Gaps**
+- ⚠️ `dishes.search` (the "Dishes" results) has no backing query — only restaurant search exists.
+
+<a id="screen-restaurant"></a>
+### 📱 `restaurant` · `/r/:slug` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ {{ restaurant.name }}                    │
+├──────────────────────────────────────────┤
+│ back_button_header                       │
+│ hero_image                               │
+│ section                                  │
+│ sticky_category_nav                      │
+│ catalog_sections                         │
+│ spacer                                   │
+│ «cart_fab»                               │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `restaurant.bySlug` | [🔎 `restaurant`](#query-restaurant) |
+| read | `catalog.byRestaurant` | [🔎 `catalog`](#query-catalog) |
+| write | `toggle_favorite` | [✏️ `markRestaurantAsFavorite`](#mutation-markrestaurantasfavorite) |
+
+**Gaps**
+- ⚠️ Restaurant presentation fields the UI reads (coverUrl, logoUrl, deliveryTime, deliveryFee, minimumOrder, badges, isOpen) are not on the domain Restaurant/api type yet.
+
+<a id="screen-cart"></a>
+### 📱 `cart` · `/cart` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Your cart                                │
+├──────────────────────────────────────────┤
+│ back_button_header — Your cart           │
+│ cart_lines                               │
+│ promo_code_input — Promo code            │
+│ delivery_mode_toggle                     │
+│ order_summary_block                      │
+│ minimum_order_warning                    │
+│ sticky_bottom_bar                        │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `cart.current` | [🔎 `cart`](#query-cart) |
+| write | `change_cart_line_quantity` | [✏️ `changeCartLineQuantity`](#mutation-changecartlinequantity) |
+| write | `apply_promo_code` | ⚠️ _gap: No applyPromoCode mutation — promo codes / cart discount not modelled._ |
+| write | `set_delivery_mode` | ⚠️ _gap: Cart-level delivery-mode toggle not modelled — serviceType is chosen at placeOrder._ |
+
+**Gaps**
+- ⚠️ `apply_promo_code` action + cart.discount/promoCode have no backing mutation — promo codes not modelled.
+- ⚠️ `set_delivery_mode` action has no backing mutation — serviceType is chosen at placeOrder, not stored on the cart.
+
+<a id="screen-checkout"></a>
+### 📱 `checkout` · `/checkout` · 🚫 not SDUI — Stripe Elements + payment security — a static React page, not runtime JSON. · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Checkout                                 │
+├──────────────────────────────────────────┤
+│ back_button_header — Checkout            │
+│ checkout_section — Delivery details      │
+│ checkout_section — Contact               │
+│ checkout_section — Delivery instructions │
+│ checkout_section — Order summary         │
+│ checkout_section — Payment               │
+│ sticky_bottom_bar                        │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `cart.current` | [🔎 `cart`](#query-cart) |
+| read | `me.profile` | [🔎 `me`](#query-me) |
+| write | `place_order` | [✏️ `placeOrder`](#mutation-placeorder) |
+| write | `set_delivery_address_saved` | [✏️ `setCustomerAddress`](#mutation-setcustomeraddress) |
+
+<a id="screen-order_tracking"></a>
+### 📱 `order_tracking` · `/orders/:orderId/confirmation` · 🚫 not SDUI — Realtime GraphQL subscription + order state machine — a static React page. · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Order tracking                           │
+├──────────────────────────────────────────┤
+│ order_status_hero                        │
+│ eta_bar — Estimated arrival              │
+│ order_timeline                           │
+│ restaurant_contact_row                   │
+│ order_items_summary                      │
+│ order_id_row — Order ID                  │
+│ section                                  │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `order.byId` | [🔎 `order`](#query-order) |
+| write | `reorder` | ⚠️ _gap: No reorder op — client re-adds past order lines via add_to_cart._ |
+| write | `rate_order` | [✏️ `rateOrder`](#mutation-rateorder) |
+
+**Gaps**
+- ⚠️ `reorder` action has no backing op — the client re-adds past lines via add_to_cart.
+
+<a id="screen-order_history"></a>
+### 📱 `order_history` · `/orders` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Your orders                              │
+├──────────────────────────────────────────┤
+│ «topbar»                                 │
+│ page_header — Your orders                │
+│ tab_bar                                  │
+│ order_list                               │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `orders.mine` | [🔎 `orders`](#query-orders) |
+
+<a id="screen-account"></a>
+### 📱 `account` · `/account` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Account                                  │
+├──────────────────────────────────────────┤
+│ «topbar»                                 │
+│ account_header                           │
+│ menu_section — My account                │
+│ menu_section — Captain.Food              │
+│ menu_section — Support                   │
+│ sign_out_button — Sign out               │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `me.profile` | [🔎 `me`](#query-me) |
+| read | `favorites.mine` | [🔎 `favoriteRestaurants`](#query-favoriterestaurants) |
+| read | `rewards.balance` | ⚠️ _gap: Captain Coins / loyalty balance not modelled (deferred domain)._ |
+| write | `open_intercom` | ⚠️ _gap: Support chat (Intercom) is a third-party widget, not a domain op._ |
+| write | `set_delivery_address_saved` | [✏️ `setCustomerAddress`](#mutation-setcustomeraddress) |
+
+**Gaps**
+- ⚠️ `rewards.balance` (Captain Coins), referral and passkeys/notifications management are not modelled (deferred domains).
+
+<a id="screen-partner_landing"></a>
+### 📱 `partner_landing` · `/partner` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Partner with us                          │
+├──────────────────────────────────────────┤
+│ back_button_header — Partner with us     │
+│ hero_section — Grow your restaurant wit… │
+│ value_props                              │
+│ cta_section                              │
+└──────────────────────────────────────────┘
+```
+
+
+
+<a id="sec-translations"></a>
+## 🌐 Translations
+
+The i18n catalog (`specs/translations.yaml`) — every user-visible screen string, referenced by `$ref` and
+generated to a single `translations.generated.json`. `{param}` tokens are validated against `params`.
+
+| Key | Params | 🇬🇧 en | 🇫🇷 fr |
+| --- | --- | --- | --- |
+| <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
+| <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
+| <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |
+| <a id="translation-common-nav-account"></a>`common.nav.account` | — | Account | Compte |
+| <a id="translation-common-cart-view"></a>`common.cart.view` | — | View cart | Voir le panier |
+| <a id="translation-common-action-change"></a>`common.action.change` | — | Change | Modifier |
+| <a id="translation-common-action-apply"></a>`common.action.apply` | — | Apply | Appliquer |
+| <a id="translation-common-action-submit"></a>`common.action.submit` | — | Submit | Envoyer |
+| <a id="translation-common-action-see_all"></a>`common.action.see_all` | — | See all | Tout voir |
+| <a id="translation-common-filter-sort"></a>`common.filter.sort` | — | Sort | Trier |
+| <a id="translation-common-delivery-free"></a>`common.delivery.free` | — | Free delivery | Livraison gratuite |
+| <a id="translation-common-mode-delivery"></a>`common.mode.delivery` | — | Delivery | Livraison |
+| <a id="translation-common-mode-pickup"></a>`common.mode.pickup` | — | Pickup | À emporter |
+| <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
+| <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
+| <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |
+| <a id="translation-location-saved"></a>`location.saved` | — | Saved | Enregistrées |
+| <a id="translation-location-use_current"></a>`location.use_current` | — | Use current location | Utiliser ma position |
+| <a id="translation-auth-title"></a>`auth.title` | — | Sign in or create account | Se connecter ou créer un compte |
+| <a id="translation-auth-body"></a>`auth.body` | — | Enter your phone number to continue. No password needed. | Entrez votre numéro de téléphone pour continuer. Aucun mot de passe requis. |
+| <a id="translation-auth-phone_label"></a>`auth.phone_label` | — | Phone number | Numéro de téléphone |
+| <a id="translation-auth-continue"></a>`auth.continue` | — | Continue | Continuer |
+| <a id="translation-auth-or"></a>`auth.or` | — | or | ou |
+| <a id="translation-auth-passkey"></a>`auth.passkey` | — | Continue with passkey | Continuer avec une clé d'accès |
+| <a id="translation-auth-otp_title"></a>`auth.otp_title` | — | Verify your number | Vérifiez votre numéro |
+| <a id="translation-auth-otp_body"></a>`auth.otp_body` | `phone` | We sent a code to {phone}. Enter it below. | Nous avons envoyé un code au {phone}. Saisissez-le ci-dessous. |
+| <a id="translation-auth-resend"></a>`auth.resend` | — | Resend code | Renvoyer le code |
+| <a id="translation-auth-resend_in"></a>`auth.resend_in` | `seconds` | Resend in {seconds}s | Renvoyer dans {seconds}s |
+| <a id="translation-item-choose_one"></a>`item.choose_one` | — | Choose 1 | Choisissez 1 |
+| <a id="translation-item-instructions_placeholder"></a>`item.instructions_placeholder` | — | Special instructions (optional) | Instructions spéciales (facultatif) |
+| <a id="translation-item-add_to_cart"></a>`item.add_to_cart` | `total` | Add to cart — {total} | Ajouter au panier — {total} |
+| <a id="translation-rating-title"></a>`rating.title` | — | Rate your order | Évaluez votre commande |
+| <a id="translation-rating-food_question"></a>`rating.food_question` | — | How was the food? | Comment était le repas ? |
+| <a id="translation-rating-tags_label"></a>`rating.tags_label` | — | What went well? (optional) | Qu'est-ce qui vous a plu ? (facultatif) |
+| <a id="translation-rating-tag-taste"></a>`rating.tag.taste` | — | Great taste | Très bon goût |
+| <a id="translation-rating-tag-portions"></a>`rating.tag.portions` | — | Good portions | Bonnes portions |
+| <a id="translation-rating-tag-fast"></a>`rating.tag.fast` | — | Fast delivery | Livraison rapide |
+| <a id="translation-rating-tag-accurate"></a>`rating.tag.accurate` | — | Accurate order | Commande conforme |
+| <a id="translation-rating-tag-packaging"></a>`rating.tag.packaging` | — | Great packaging | Bon emballage |
+| <a id="translation-rating-comment_placeholder"></a>`rating.comment_placeholder` | — | Add a comment (optional) | Ajouter un commentaire (facultatif) |
+| <a id="translation-rating-thanks"></a>`rating.thanks` | — | Thanks for your feedback! | Merci pour votre retour ! |
+| <a id="translation-home-search_placeholder"></a>`home.search_placeholder` | — | Search restaurants or dishes… | Rechercher un restaurant ou un plat… |
+| <a id="translation-home-craving"></a>`home.craving` | — | What are you craving? | Une envie particulière ? |
+| <a id="translation-home-featured"></a>`home.featured` | — | Featured near you | En vedette près de chez vous |
+| <a id="translation-home-all_restaurants"></a>`home.all_restaurants` | — | All restaurants | Tous les restaurants |
+| <a id="translation-home-sort-recommended"></a>`home.sort.recommended` | — | Recommended | Recommandés |
+| <a id="translation-home-sort-delivery_time"></a>`home.sort.delivery_time` | — | Fastest delivery | Livraison la plus rapide |
+| <a id="translation-home-sort-rating"></a>`home.sort.rating` | — | Top rated | Les mieux notés |
+| <a id="translation-home-sort-price"></a>`home.sort.price` | — | Price: low to high | Prix : croissant |
+| <a id="translation-home-filter-category"></a>`home.filter.category` | — | Category | Catégorie |
+| <a id="translation-home-filter-delivery_mode"></a>`home.filter.delivery_mode` | — | Delivery / Pickup | Livraison / À emporter |
+| <a id="translation-home-empty-title"></a>`home.empty.title` | — | No restaurants match | Aucun restaurant correspondant |
+| <a id="translation-home-empty-body"></a>`home.empty.body` | — | Try adjusting your filters. | Essayez d'ajuster vos filtres. |
+| <a id="translation-home-partner_cta-title"></a>`home.partner_cta.title` | — | Are you a restaurant? | Vous êtes un restaurant ? |
+| <a id="translation-home-partner_cta-body"></a>`home.partner_cta.body` | — | Join Captain.Food and grow your sales. | Rejoignez Captain.Food et augmentez vos ventes. |
+| <a id="translation-home-partner_cta-button"></a>`home.partner_cta.button` | — | Become a partner | Devenir partenaire |
+| <a id="translation-search-placeholder"></a>`search.placeholder` | — | Restaurants, dishes, cuisines… | Restaurants, plats, cuisines… |
+| <a id="translation-search-recent"></a>`search.recent` | — | Recent searches | Recherches récentes |
+| <a id="translation-search-popular"></a>`search.popular` | — | Popular categories | Catégories populaires |
+| <a id="translation-search-restaurants"></a>`search.restaurants` | — | Restaurants | Restaurants |
+| <a id="translation-search-dishes"></a>`search.dishes` | — | Dishes | Plats |
+| <a id="translation-search-empty-title"></a>`search.empty.title` | `query` | No results for "{query}" | Aucun résultat pour « {query} » |
+| <a id="translation-search-empty-body"></a>`search.empty.body` | — | Try a different dish or restaurant name. | Essayez un autre plat ou nom de restaurant. |
+| <a id="translation-restaurant-open"></a>`restaurant.open` | — | Open | Ouvert |
+| <a id="translation-restaurant-closed"></a>`restaurant.closed` | — | Closed | Fermé |
+| <a id="translation-restaurant-opens_at"></a>`restaurant.opens_at` | `time` | Opens at {time} | Ouvre à {time} |
+| <a id="translation-restaurant-min_order"></a>`restaurant.min_order` | `amount` | Min. {amount} | Min. {amount} |
+| <a id="translation-restaurant-unavailable"></a>`restaurant.unavailable` | — | Unavailable | Indisponible |
+| <a id="translation-cart-title"></a>`cart.title` | — | Your cart | Votre panier |
+| <a id="translation-cart-empty-title"></a>`cart.empty.title` | — | Your cart is empty | Votre panier est vide |
+| <a id="translation-cart-empty-body"></a>`cart.empty.body` | — | Add items from a restaurant to get started. | Ajoutez des articles d'un restaurant pour commencer. |
+| <a id="translation-cart-empty-browse"></a>`cart.empty.browse` | — | Browse restaurants | Parcourir les restaurants |
+| <a id="translation-cart-promo_placeholder"></a>`cart.promo_placeholder` | — | Promo code | Code promo |
+| <a id="translation-cart-promo_applied"></a>`cart.promo_applied` | `code`, `amount` | Code {code} applied — {amount} off | Code {code} appliqué — {amount} de réduction |
+| <a id="translation-cart-subtotal"></a>`cart.subtotal` | — | Subtotal | Sous-total |
+| <a id="translation-cart-delivery_fee"></a>`cart.delivery_fee` | — | Delivery fee | Frais de livraison |
+| <a id="translation-cart-service_fee"></a>`cart.service_fee` | — | Service fee | Frais de service |
+| <a id="translation-cart-discount"></a>`cart.discount` | — | Discount | Réduction |
+| <a id="translation-cart-total"></a>`cart.total` | — | Total | Total |
+| <a id="translation-cart-min_warning"></a>`cart.min_warning` | `min`, `shortfall` | Minimum order is {min}. Add {shortfall} more. | Commande minimum : {min}. Ajoutez {shortfall}. |
+| <a id="translation-cart-checkout_cta"></a>`cart.checkout_cta` | `total` | Go to checkout — {total} | Passer au paiement — {total} |
+| <a id="translation-checkout-title"></a>`checkout.title` | — | Checkout | Paiement |
+| <a id="translation-checkout-delivery_details"></a>`checkout.delivery_details` | — | Delivery details | Détails de livraison |
+| <a id="translation-checkout-contact"></a>`checkout.contact` | — | Contact | Contact |
+| <a id="translation-checkout-full_name"></a>`checkout.full_name` | — | Full name | Nom complet |
+| <a id="translation-checkout-phone"></a>`checkout.phone` | — | Phone | Téléphone |
+| <a id="translation-checkout-phone_helper"></a>`checkout.phone_helper` | — | Verified via SMS | Vérifié par SMS |
+| <a id="translation-checkout-email"></a>`checkout.email` | — | Email (for receipt) | E-mail (pour le reçu) |
+| <a id="translation-checkout-delivery_instructions"></a>`checkout.delivery_instructions` | — | Delivery instructions | Instructions de livraison |
+| <a id="translation-checkout-delivery_instructions_ph"></a>`checkout.delivery_instructions_ph` | — | Floor, door code, landmarks… | Étage, code d'accès, points de repère… |
+| <a id="translation-checkout-order_summary"></a>`checkout.order_summary` | — | Order summary | Récapitulatif |
+| <a id="translation-checkout-payment"></a>`checkout.payment` | — | Payment | Paiement |
+| <a id="translation-checkout-processing"></a>`checkout.processing` | — | Processing… | Traitement… |
+| <a id="translation-checkout-place_order"></a>`checkout.place_order` | `total` | Place order — {total} | Commander — {total} |
+| <a id="translation-order-tracking_title"></a>`order.tracking_title` | — | Order tracking | Suivi de commande |
+| <a id="translation-order-status-placed-title"></a>`order.status.placed.title` | — | Order placed! | Commande passée ! |
+| <a id="translation-order-status-placed-body"></a>`order.status.placed.body` | `restaurant` | Your order is being sent to {restaurant}. | Votre commande est envoyée à {restaurant}. |
+| <a id="translation-order-status-accepted-title"></a>`order.status.accepted.title` | — | Order accepted | Commande acceptée |
+| <a id="translation-order-status-accepted-body"></a>`order.status.accepted.body` | `restaurant` | {restaurant} is preparing your food. | {restaurant} prépare votre commande. |
+| <a id="translation-order-status-rejected-title"></a>`order.status.rejected.title` | — | Order rejected | Commande refusée |
+| <a id="translation-order-status-rejected-body"></a>`order.status.rejected.body` | — | The restaurant couldn't accept your order. You will be refunded. | Le restaurant n'a pas pu accepter votre commande. Vous serez remboursé. |
+| <a id="translation-order-status-preparing-title"></a>`order.status.preparing.title` | — | Being prepared | En préparation |
+| <a id="translation-order-status-preparing-body"></a>`order.status.preparing.body` | `minutes` | Estimated ready in {minutes} min. | Prêt dans environ {minutes} min. |
+| <a id="translation-order-status-ready-title"></a>`order.status.ready.title` | — | Ready for pickup! | Prêt à récupérer ! |
+| <a id="translation-order-status-ready-body"></a>`order.status.ready.body` | — | Your order is ready. | Votre commande est prête. |
+| <a id="translation-order-status-out_for_delivery-title"></a>`order.status.out_for_delivery.title` | — | On the way! | En route ! |
+| <a id="translation-order-status-out_for_delivery-body"></a>`order.status.out_for_delivery.body` | — | Your delivery is en route. | Votre livraison est en route. |
+| <a id="translation-order-status-delivered-title"></a>`order.status.delivered.title` | — | Delivered! | Livré ! |
+| <a id="translation-order-status-delivered-body"></a>`order.status.delivered.body` | — | Enjoy your meal. 🎉 | Bon appétit. 🎉 |
+| <a id="translation-order-status-cancelled-title"></a>`order.status.cancelled.title` | — | Order cancelled | Commande annulée |
+| <a id="translation-order-status-cancelled-body"></a>`order.status.cancelled.body` | — | If you were charged, a refund is on its way. | Si vous avez été débité, un remboursement est en cours. |
+| <a id="translation-order-eta"></a>`order.eta` | — | Estimated arrival | Arrivée estimée |
+| <a id="translation-order-id_label"></a>`order.id_label` | — | Order ID | N° de commande |
+| <a id="translation-order-rate"></a>`order.rate` | — | Rate your order | Évaluer la commande |
+| <a id="translation-order-reorder"></a>`order.reorder` | — | Reorder | Recommander |
+| <a id="translation-order-help"></a>`order.help` | — | Get help | Obtenir de l'aide |
+| <a id="translation-order-history_title"></a>`order.history_title` | — | Your orders | Vos commandes |
+| <a id="translation-order-tab-active"></a>`order.tab.active` | — | Active | En cours |
+| <a id="translation-order-tab-past"></a>`order.tab.past` | — | Past | Passées |
+| <a id="translation-order-count_total"></a>`order.count_total` | `count`, `total` | {count} items · {total} | {count} articles · {total} |
+| <a id="translation-order-empty-title"></a>`order.empty.title` | — | No orders yet | Aucune commande |
+| <a id="translation-order-empty-body"></a>`order.empty.body` | — | Your order history will appear here. | Votre historique de commandes apparaîtra ici. |
+| <a id="translation-order-empty-cta"></a>`order.empty.cta` | — | Order now | Commander |
+| <a id="translation-account-default_name"></a>`account.default_name` | — | Captain | Captain |
+| <a id="translation-account-section-my_account"></a>`account.section.my_account` | — | My account | Mon compte |
+| <a id="translation-account-saved_addresses"></a>`account.saved_addresses` | — | Saved addresses | Adresses enregistrées |
+| <a id="translation-account-payment_methods"></a>`account.payment_methods` | — | Payment methods | Moyens de paiement |
+| <a id="translation-account-passkeys"></a>`account.passkeys` | — | Passkeys | Clés d'accès |
+| <a id="translation-account-notifications"></a>`account.notifications` | — | Notifications | Notifications |
+| <a id="translation-account-section-captain"></a>`account.section.captain` | — | Captain.Food | Captain.Food |
+| <a id="translation-account-captain_coins"></a>`account.captain_coins` | — | Captain Coins | Captain Coins |
+| <a id="translation-account-refer"></a>`account.refer` | — | Refer a friend | Parrainer un ami |
+| <a id="translation-account-favorites"></a>`account.favorites` | — | Favorite restaurants | Restaurants favoris |
+| <a id="translation-account-section-support"></a>`account.section.support` | — | Support | Assistance |
+| <a id="translation-account-help"></a>`account.help` | — | Help Center | Centre d'aide |
+| <a id="translation-account-contact"></a>`account.contact` | — | Contact us | Nous contacter |
+| <a id="translation-account-legal"></a>`account.legal` | — | Terms & Privacy | Conditions et confidentialité |
+| <a id="translation-account-sign_out"></a>`account.sign_out` | — | Sign out | Se déconnecter |
+| <a id="translation-account-coins_badge"></a>`account.coins_badge` | `points` | {points} pts | {points} pts |
+| <a id="translation-partner-header"></a>`partner.header` | — | Partner with us | Devenez partenaire |
+| <a id="translation-partner-hero_title"></a>`partner.hero_title` | — | Grow your restaurant with Captain.Food | Développez votre restaurant avec Captain.Food |
+| <a id="translation-partner-hero_body"></a>`partner.hero_body` | — | Join Tours' leading food platform. No commission model — flat subscription. | Rejoignez la première plateforme food de Tours. Sans commission — abonnement forfaitaire. |
+| <a id="translation-partner-prop-orders-title"></a>`partner.prop.orders.title` | — | Increase orders | Augmentez vos commandes |
+| <a id="translation-partner-prop-orders-body"></a>`partner.prop.orders.body` | — | Reach thousands of new customers in your city. | Touchez des milliers de nouveaux clients dans votre ville. |
+| <a id="translation-partner-prop-margins-title"></a>`partner.prop.margins.title` | — | Keep your margins | Préservez vos marges |
+| <a id="translation-partner-prop-margins-body"></a>`partner.prop.margins.body` | — | Flat monthly fee. No per-order commission. | Forfait mensuel fixe. Aucune commission par commande. |
+| <a id="translation-partner-prop-control-title"></a>`partner.prop.control.title` | — | Full control | Contrôle total |
+| <a id="translation-partner-prop-control-body"></a>`partner.prop.control.body` | — | Manage your menu, hours, and catalog in real-time. | Gérez votre menu, vos horaires et votre catalogue en temps réel. |
+| <a id="translation-partner-apply"></a>`partner.apply` | — | Apply to join | Postuler |
 
 <a id="sec-architecture"></a>
 ## 🏛️ Architecture (C4)
