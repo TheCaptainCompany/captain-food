@@ -1227,88 +1227,125 @@ fn validate(model: &Model) -> Report {
         }
     }
 
-    // --- 11. Customer screens (screens/customer_screens.yaml): the SDUI spec is bound to the API --------
+    // --- 11. SDUI screens (screens/*.yaml, one file per app/audience): each app's spec is bound to the
+    // API (ADR-0033/0037). Generic over all screens files — no hard-coded `customer_screens`. Each screen
+    // declares `roles` (⊆ UserType) and the file declares `app_types` (⊆ web|ios|android|windows).
     {
-        let cs = model.defs.get("screens/customer_screens.yaml");
-        let resolvers = cs.and_then(|v| v.get("resolvers")).and_then(|x| x.as_mapping());
-        let actions = cs.and_then(|v| v.get("actions")).and_then(|x| x.as_mapping());
         let query_names: BTreeSet<&str> = api.queries.iter().map(|q| q.name.as_str()).collect();
         let mutation_names: BTreeSet<&str> = api.mutations.iter().map(|m| m.name.as_str()).collect();
         let op_name = |r: &str| r.rsplit('/').next().unwrap_or("").to_string();
-        let mut resolver_names: BTreeSet<String> = BTreeSet::new();
+        const APP_TYPES: [&str; 4] = ["web", "ios", "android", "windows"];
+        let screens_files: Vec<String> =
+            model.defs.keys().filter(|k| k.starts_with("screens/")).cloned().collect();
 
-        if let Some(rmap) = resolvers {
-            for (nk, r) in rmap {
-                let name = match nk.as_str() {
-                    Some(s) => s,
-                    None => continue,
-                };
-                resolver_names.insert(name.to_string());
-                if r.get("gap").map(|v| !v.is_null()).unwrap_or(false) {
-                    cov.screen_gaps += 1;
-                    continue;
-                }
-                match r.get("query").and_then(|q| q.get("$ref")).and_then(|x| x.as_str()) {
-                    None => issues.push(err(
-                        "resolver-no-binding",
-                        format!("customer_screens.yaml/resolvers/{}", name),
-                        format!("resolver '{}' must declare a `query` ($ref into api.yaml) or a `gap`.", name),
-                    )),
-                    Some(rf) => {
-                        if ref_target_file(rf, "screens/customer_screens.yaml").as_deref() != Some("api.yaml")
-                            || !rf.contains("/queries/")
-                            || !query_names.contains(op_name(rf).as_str())
-                        {
+        for sfkey in &screens_files {
+            let cs = model.defs.get(sfkey);
+            let resolvers = cs.and_then(|v| v.get("resolvers")).and_then(|x| x.as_mapping());
+            let actions = cs.and_then(|v| v.get("actions")).and_then(|x| x.as_mapping());
+            let mut resolver_names: BTreeSet<String> = BTreeSet::new();
+
+            // File-level app_types (target platforms) must be known.
+            if let Some(ats) = cs.and_then(|v| v.get("app_types")).and_then(|x| x.as_sequence()) {
+                for at in ats {
+                    if let Some(a) = at.as_str() {
+                        if !APP_TYPES.contains(&a) {
                             issues.push(err(
-                                "resolver-not-a-query",
-                                format!("customer_screens.yaml/resolvers/{}", name),
-                                format!("resolver '{}' query must $ref an api.yaml query; '{}' is not one.", name, rf),
+                                "screen-unknown-apptype",
+                                format!("{}/app_types", sfkey),
+                                format!("app_type '{}' is not one of web|ios|android|windows.", a),
                             ));
-                        } else {
-                            cov.screen_bindings += 1;
                         }
                     }
                 }
             }
-        }
-        if let Some(amap) = actions {
-            for (nk, a) in amap {
-                let name = match nk.as_str() {
-                    Some(s) => s,
-                    None => continue,
-                };
-                let rf = match a.get("mutation").and_then(|m| m.get("$ref")).and_then(|x| x.as_str()) {
-                    Some(r) => r,
-                    None => continue,
-                };
-                if ref_target_file(rf, "screens/customer_screens.yaml").as_deref() != Some("api.yaml")
-                    || !rf.contains("/mutations/")
-                    || !mutation_names.contains(op_name(rf).as_str())
-                {
-                    issues.push(err(
-                        "action-not-a-mutation",
-                        format!("customer_screens.yaml/actions/{}", name),
-                        format!("action '{}' mutation must $ref an api.yaml mutation; '{}' is not one.", name, rf),
-                    ));
-                } else {
-                    cov.screen_bindings += 1;
+
+            if let Some(rmap) = resolvers {
+                for (nk, r) in rmap {
+                    let name = match nk.as_str() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    resolver_names.insert(name.to_string());
+                    if r.get("gap").map(|v| !v.is_null()).unwrap_or(false) {
+                        cov.screen_gaps += 1;
+                        continue;
+                    }
+                    match r.get("query").and_then(|q| q.get("$ref")).and_then(|x| x.as_str()) {
+                        None => issues.push(err(
+                            "resolver-no-binding",
+                            format!("{}/resolvers/{}", sfkey, name),
+                            format!("resolver '{}' must declare a `query` ($ref into api.yaml) or a `gap`.", name),
+                        )),
+                        Some(rf) => {
+                            if ref_target_file(rf, sfkey).as_deref() != Some("api.yaml")
+                                || !rf.contains("/queries/")
+                                || !query_names.contains(op_name(rf).as_str())
+                            {
+                                issues.push(err(
+                                    "resolver-not-a-query",
+                                    format!("{}/resolvers/{}", sfkey, name),
+                                    format!("resolver '{}' query must $ref an api.yaml query; '{}' is not one.", name, rf),
+                                ));
+                            } else {
+                                cov.screen_bindings += 1;
+                            }
+                        }
+                    }
                 }
             }
-        }
-        if let Some(screens) = cs.and_then(|v| v.get("screens")).and_then(|x| x.as_sequence()) {
-            for s in screens {
-                cov.screens += 1;
-                let sid = s.get("id").and_then(|x| x.as_str()).unwrap_or("?").to_string();
-                cov.screen_gaps += s.get("gaps").and_then(|x| x.as_sequence()).map(|g| g.len()).unwrap_or(0);
-                if let Some(drs) = s.get("data_requirements").and_then(|x| x.as_sequence()) {
-                    for dr in drs {
-                        let name = dr.as_str().map(|s| s.to_string()).unwrap_or_else(|| format!("{:?}", dr));
-                        if !resolver_names.contains(&name) {
-                            issues.push(err(
-                                "screen-unknown-resolver",
-                                format!("customer_screens.yaml/screens/{}", sid),
-                                format!("data_requirement '{}' is not a declared resolver.", name),
-                            ));
+            if let Some(amap) = actions {
+                for (nk, a) in amap {
+                    let name = match nk.as_str() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    let rf = match a.get("mutation").and_then(|m| m.get("$ref")).and_then(|x| x.as_str()) {
+                        Some(r) => r,
+                        None => continue,
+                    };
+                    if ref_target_file(rf, sfkey).as_deref() != Some("api.yaml")
+                        || !rf.contains("/mutations/")
+                        || !mutation_names.contains(op_name(rf).as_str())
+                    {
+                        issues.push(err(
+                            "action-not-a-mutation",
+                            format!("{}/actions/{}", sfkey, name),
+                            format!("action '{}' mutation must $ref an api.yaml mutation; '{}' is not one.", name, rf),
+                        ));
+                    } else {
+                        cov.screen_bindings += 1;
+                    }
+                }
+            }
+            if let Some(screens) = cs.and_then(|v| v.get("screens")).and_then(|x| x.as_sequence()) {
+                for s in screens {
+                    cov.screens += 1;
+                    let sid = s.get("id").and_then(|x| x.as_str()).unwrap_or("?").to_string();
+                    cov.screen_gaps += s.get("gaps").and_then(|x| x.as_sequence()).map(|g| g.len()).unwrap_or(0);
+                    // Per-screen roles must be scalars.yaml#/UserType values.
+                    if let Some(rs) = s.get("roles").and_then(|x| x.as_sequence()) {
+                        for r in rs {
+                            if let Some(role) = r.as_str() {
+                                if !user_type_set.contains(role) {
+                                    issues.push(err(
+                                        "screen-unknown-role",
+                                        format!("{}/screens/{}", sfkey, sid),
+                                        format!("role '{}' is not a scalars.yaml#/UserType value.", role),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if let Some(drs) = s.get("data_requirements").and_then(|x| x.as_sequence()) {
+                        for dr in drs {
+                            let name = dr.as_str().map(|s| s.to_string()).unwrap_or_else(|| format!("{:?}", dr));
+                            if !resolver_names.contains(&name) {
+                                issues.push(err(
+                                    "screen-unknown-resolver",
+                                    format!("{}/screens/{}", sfkey, sid),
+                                    format!("data_requirement '{}' is not a declared resolver.", name),
+                                ));
+                            }
                         }
                     }
                 }
