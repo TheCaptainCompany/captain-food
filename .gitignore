@@ -1,8 +1,6 @@
 # Structurizr Lite staging (built by `make c4-render`)
 .structurizr/
 .claude/settings.local.json
-# Raw external research dropped for review (Perplexity, etc.) — working material, not part of the repo.
-incoming_news_from_perplexity/
 # Rust codegen build artifacts (ADR-0034)
 tools/codegen-rs/target/
 target/
