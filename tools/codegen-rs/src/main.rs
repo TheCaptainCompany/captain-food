@@ -1,13 +1,14 @@
-//! Captain.Food codegen — Rust port (ADR-0034), stage 1.
+//! Captain.Food codegen — Rust port (ADR-0034).
 //!
-//! Faithful re-implementation of `tools/codegen` (TypeScript), built incrementally and verified by CI
-//! (no local Rust toolchain yet). This stage covers the foundation: loading every `specs/**` DSL file and
-//! validating referential integrity — every `$ref` anywhere must parse and resolve (mirrors validate.ts
-//! §1). Later stages port the remaining gates (actor wiring, api↔model, views, stories, tests, rules,
-//! translations, screens, observability, C4) and the emitters. Until parity, the TypeScript codegen stays
-//! the blocking gate (see ADR-0034).
+//! Faithful re-implementation of `tools/codegen` (TypeScript). It loads every `specs/**` DSL file and runs
+//! the full validator (validate.ts §1–§11: referential integrity, actor wiring, api↔model, views, stories,
+//! tests, rules, translations, screens, observability, C4) and every generator (translations, views SQL +
+//! the `database.md` §2 injection, C4 Structurizr/Mermaid, GraphQL SDL, and the Markdown + HTML docs). All
+//! 8 generated artifacts are byte-identical to the TypeScript codegen, and the validator emits the same
+//! (rule, location) issue set — both verified in CI. Until the TypeScript codegen is retired, it remains
+//! the blocking gate; the Rust `rust-codegen` CI job runs in parallel (validate + generate + diff).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -125,7 +126,7 @@ fn collect_refs(v: &Value, loc: &str, out: &mut Vec<(String, String)>) {
                         out.push((loc.to_string(), r.to_string()));
                     }
                 } else {
-                    collect_refs(val, &format!("{}/{}", loc, key), out);
+                    collect_refs(val, &format!("{}.{}", loc, key), out);
                 }
             }
         }
@@ -138,25 +139,1192 @@ fn collect_refs(v: &Value, loc: &str, out: &mut Vec<(String, String)>) {
     }
 }
 
-/// §1 — referential integrity: every `$ref` must parse and resolve. Returns (errors, refs_checked).
-fn validate(model: &Model) -> (Vec<String>, usize) {
-    let mut errors = Vec::new();
-    let mut checked = 0usize;
+// ─── Validation report (faithful port of validate.ts) ───────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Level {
+    Error,
+    Warning,
+}
+
+#[derive(Clone)]
+struct Issue {
+    level: Level,
+    rule: &'static str,
+    location: String,
+    message: String,
+}
+
+fn err(rule: &'static str, location: String, message: String) -> Issue {
+    Issue { level: Level::Error, rule, location, message }
+}
+fn warn(rule: &'static str, location: String, message: String) -> Issue {
+    Issue { level: Level::Warning, rule, location, message }
+}
+
+/// Count of what was actually checked — so a clean run shows coverage, not just silence (Coverage in TS).
+#[derive(Default)]
+struct Coverage {
+    refs: usize,
+    views: usize,
+    view_columns: usize,
+    view_fed_by: usize,
+    mutation_links: usize,
+    reads_links: usize,
+    story_links: usize,
+    test_cases: usize,
+    rules: usize,
+    obs_contracts: usize,
+    translations: usize,
+    screens: usize,
+    screen_bindings: usize,
+    screen_gaps: usize,
+}
+
+struct Report {
+    issues: Vec<Issue>,
+    coverage: Coverage,
+    /// Commands actually handled by some actor (the cli's "commands" count; ≤ total command defs, the
+    /// difference being command value objects referenced only from `properties`).
+    handled_commands: usize,
+}
+
+const INLINE_TYPES: [&str; 4] = ["string", "boolean", "integer", "float"];
+
+/// checkRoles: an operation must declare ≥1 role, and each must be a scalars.yaml#/UserType value.
+fn check_roles(issues: &mut Vec<Issue>, roles: &[String], where_: &str, uts: &BTreeSet<String>) {
+    if roles.is_empty() {
+        issues.push(err("op-no-authz", where_.into(), "operation declares no roles (→ @auth/@public).".into()));
+    }
+    for r in roles {
+        if !uts.contains(r) {
+            issues.push(err(
+                "op-unknown-usertype",
+                where_.into(),
+                format!("unknown user type '{}' (not in scalars.yaml#/UserType).", r),
+            ));
+        }
+    }
+}
+
+/// checkInline: a non-`$ref` field must use one of the inline primitive types.
+fn check_inline(issues: &mut Vec<Issue>, f: &ApiField, where_: &str) {
+    if !f.is_ref && !INLINE_TYPES.contains(&f.ty.as_str()) {
+        issues.push(err(
+            "api-inline-type",
+            where_.into(),
+            format!("inline type '{}' must be one of {} (or a $ref).", f.ty, INLINE_TYPES.join("|")),
+        ));
+    }
+}
+
+/// checkShape: every REQUIRED property is set and no UNKNOWN field appears; recurses through `$ref`s,
+/// inline `properties` and `array` items (mirrors validate.ts §7 checkShape).
+fn check_shape(model: &Model, issues: &mut Vec<Issue>, node: Option<&Value>, data: Option<&Value>, where_: &str) {
+    let node = match node {
+        Some(n) => n,
+        None => return,
+    };
+    if let Some(rf) = node.get("$ref").and_then(|x| x.as_str()) {
+        check_shape(model, issues, resolve_ref(model, rf, "tests.yaml"), data, where_);
+        return;
+    }
+    if let Some(props) = node.get("properties").and_then(|p| p.as_mapping()) {
+        let required: Vec<&str> = node
+            .get("required")
+            .and_then(|r| r.as_sequence())
+            .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        let obj = data.and_then(|d| d.as_mapping());
+        for r in &required {
+            let present = obj.map(|o| o.contains_key(Value::String((*r).to_string()))).unwrap_or(false);
+            if !present {
+                issues.push(err(
+                    "test-missing-required",
+                    format!("{}.{}", where_, r),
+                    format!("required property '{}' is not set by the data.", r),
+                ));
+            }
+        }
+        if let Some(o) = obj {
+            for (k, v) in o {
+                let key = match k.as_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                match props.get(Value::String(key.to_string())) {
+                    None => issues.push(err(
+                        "test-unknown-field",
+                        format!("{}.{}", where_, key),
+                        format!("data field '{}' is not a property of this schema.", key),
+                    )),
+                    Some(child) => check_shape(model, issues, Some(child), Some(v), &format!("{}.{}", where_, key)),
+                }
+            }
+        }
+        return;
+    }
+    if node.get("type").and_then(|x| x.as_str()) == Some("array") {
+        if let (Some(items), Some(arr)) = (node.get("items"), data.and_then(|d| d.as_sequence())) {
+            for (i, item) in arr.iter().enumerate() {
+                check_shape(model, issues, Some(items), Some(item), &format!("{}[{}]", where_, i));
+            }
+        }
+    }
+    // otherwise a leaf (scalar / primitive) — nothing to check.
+}
+
+/// The event name a `#/fixtures/<name>` ref ultimately denotes (via its `type.$ref`).
+fn fixture_event(model: &Model, fx_ref: Option<&str>) -> Option<String> {
+    let fx = resolve_ref(model, fx_ref?, "tests.yaml")?;
+    ref_name(fx.get("type")?.get("$ref")?.as_str()?)
+}
+
+/// `{param}` placeholder names in a string (mirrors `/\{(\w+)\}/g`, `\w` = ASCII alnum + `_`).
+fn placeholders(v: Option<&Value>) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let s = match v.and_then(|x| x.as_str()) {
+        Some(s) => s,
+        None => return out,
+    };
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '{' {
+            let mut j = i + 1;
+            let mut name = String::new();
+            while j < chars.len() && (chars[j].is_ascii_alphanumeric() || chars[j] == '_') {
+                name.push(chars[j]);
+                j += 1;
+            }
+            if !name.is_empty() && j < chars.len() && chars[j] == '}' {
+                out.insert(name);
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+fn map_keys(v: Option<&Value>) -> Vec<String> {
+    v.and_then(|x| x.as_mapping())
+        .map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default()
+}
+
+/// The full validator — a faithful port of validate.ts §1–§11. Returns issues + coverage.
+fn validate(model: &Model) -> Report {
+    let mut issues: Vec<Issue> = Vec::new();
+    let mut cov = Coverage::default();
+
+    // --- 1. Referential integrity: every `$ref` anywhere must resolve ---------------------------
     for &f in SOURCE_FILES {
         if let Some(v) = model.defs.get(f) {
             let mut refs = Vec::new();
             collect_refs(v, f, &mut refs);
             for (loc, r) in refs {
-                checked += 1;
+                cov.refs += 1;
                 if parse_ref(&r).is_none() {
-                    errors.push(format!("[ref-format]   {}: malformed $ref '{}'", loc, r));
+                    issues.push(err("ref-format", loc, format!("Malformed $ref '{}'.", r)));
                 } else if resolve_ref(model, &r, f).is_none() {
-                    errors.push(format!("[ref-dangling] {}: $ref '{}' does not resolve", loc, r));
+                    issues.push(err("ref-dangling", loc, format!("$ref '{}' does not resolve.", r)));
                 }
             }
         }
     }
-    (errors, checked)
+
+    let actors = parse_actors(model);
+    let api = parse_api(model);
+
+    // --- 2. Actor wiring: messages, emits and throws must target the right kind of file ---------
+    let mut handled_commands: BTreeSet<String> = BTreeSet::new();
+    let mut emitted_events: BTreeSet<String> = BTreeSet::new();
+    let mut consumed_events: BTreeSet<String> = BTreeSet::new();
+    for actor in &actors {
+        for (i, entry) in actor.receives.iter().enumerate() {
+            let where_ = format!("actors.yaml/{}.receives[{}]", actor.name, i);
+            if entry.message_ref.is_empty() {
+                issues.push(err("actor-message", where_.clone(), "receives entry has no message $ref.".into()));
+            } else if ref_target_file(&entry.message_ref, "actors.yaml").as_deref() == Some("commands.yaml") {
+                if let Some(n) = ref_name(&entry.message_ref) {
+                    handled_commands.insert(n);
+                }
+            } else if ref_target_file(&entry.message_ref, "actors.yaml").as_deref() == Some("events.yaml") {
+                if let Some(n) = ref_name(&entry.message_ref) {
+                    consumed_events.insert(n);
+                }
+            } else {
+                issues.push(err(
+                    "actor-message",
+                    format!("{}.message", where_),
+                    format!("message must reference commands.yaml or events.yaml, got '{}'.", entry.message_ref),
+                ));
+            }
+            for (j, e) in entry.emits.iter().enumerate() {
+                if ref_target_file(e, "actors.yaml").as_deref() != Some("events.yaml") {
+                    issues.push(err(
+                        "actor-emits",
+                        format!("{}.emits[{}]", where_, j),
+                        format!("emits must reference events.yaml, got '{}'.", e),
+                    ));
+                } else if let Some(n) = ref_name(e) {
+                    emitted_events.insert(n);
+                }
+            }
+            for (j, t) in entry.throws.iter().enumerate() {
+                if ref_target_file(t, "actors.yaml").as_deref() != Some("errors.yaml") {
+                    issues.push(err(
+                        "actor-throws",
+                        format!("{}.throws[{}]", where_, j),
+                        format!("throws must reference errors.yaml, got '{}'.", t),
+                    ));
+                }
+            }
+        }
+    }
+
+    // --- 3. Coverage: derive value-objects vs commands, and orphan events ------------------------
+    let mut refd_from_properties: BTreeSet<String> = BTreeSet::new();
+    for &f in SOURCE_FILES {
+        if let Some(v) = model.defs.get(f) {
+            let mut refs = Vec::new();
+            collect_refs(v, f, &mut refs);
+            for (loc, r) in refs {
+                if ref_target_file(&r, f).as_deref() == Some("commands.yaml") && loc.contains(".properties.") {
+                    if let Some(n) = ref_name(&r) {
+                        refd_from_properties.insert(n);
+                    }
+                }
+            }
+        }
+    }
+    for c in map_keys(model.defs.get("commands.yaml")) {
+        if handled_commands.contains(&c) {
+            continue;
+        }
+        if !refd_from_properties.contains(&c) {
+            issues.push(warn(
+                "command-unhandled",
+                format!("commands.yaml/{}", c),
+                format!("Command '{}' is defined but no actor handles it.", c),
+            ));
+        }
+    }
+    let mut produced_events: BTreeSet<String> = emitted_events.clone();
+    produced_events.extend(consumed_events.iter().cloned());
+    for e in map_keys(model.defs.get("events.yaml")) {
+        if !produced_events.contains(&e) {
+            issues.push(warn(
+                "event-orphan",
+                format!("events.yaml/{}", e),
+                format!("Event '{}' is never emitted nor consumed by any actor.", e),
+            ));
+        }
+    }
+
+    // --- 4. API surface (api.yaml ↔ model) ------------------------------------------------------
+    let user_type_set: BTreeSet<String> = model
+        .defs
+        .get("scalars.yaml")
+        .and_then(|s| s.get("UserType"))
+        .and_then(|u| u.get("enum"))
+        .and_then(|e| e.as_sequence())
+        .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect())
+        .unwrap_or_default();
+    let all_commands: BTreeSet<String> = map_keys(model.defs.get("commands.yaml")).into_iter().collect();
+
+    // 4a. mutations
+    let mut declared_by_command: BTreeMap<String, String> = BTreeMap::new();
+    for m in &api.mutations {
+        let where_ = format!("api.yaml/mutations.{}", m.name);
+        check_roles(&mut issues, &m.roles, &where_, &user_type_set);
+        if m.command.is_empty() {
+            issues.push(err("op-missing-command", where_.clone(), "mutation declares no command.".into()));
+        } else if !all_commands.contains(&m.command) {
+            issues.push(err(
+                "mutation-unknown-command",
+                where_.clone(),
+                format!("command '{}' is not defined in commands.yaml.", m.command),
+            ));
+        } else if !handled_commands.contains(&m.command) {
+            issues.push(warn(
+                "mutation-command-unhandled",
+                where_.clone(),
+                format!("command '{}' has no actor handler.", m.command),
+            ));
+        }
+        if !m.command.is_empty() {
+            if let Some(prev) = declared_by_command.get(&m.command) {
+                issues.push(err(
+                    "command-duplicate-mutation",
+                    where_.clone(),
+                    format!("command '{}' is already dispatched by mutation '{}'.", m.command, prev),
+                ));
+            } else {
+                declared_by_command.insert(m.command.clone(), m.name.clone());
+            }
+        }
+        for f in &m.payload {
+            check_inline(&mut issues, f, &format!("{}.payload.{}", where_, f.name));
+        }
+    }
+    cov.mutation_links = declared_by_command.len();
+    // 4b. every handled command must be dispatched by exactly one mutation.
+    for cmd in &handled_commands {
+        if !declared_by_command.contains_key(cmd) {
+            issues.push(warn(
+                "command-no-mutation",
+                format!("commands.yaml/{}", cmd),
+                format!("Handled command '{}' is not dispatched by any mutation.", cmd),
+            ));
+        }
+    }
+
+    // 4c. queries
+    let mut output_types: BTreeSet<String> = map_keys(model.defs.get("entities.yaml")).into_iter().collect();
+    for t in &api.types {
+        output_types.insert(t.name.clone());
+    }
+    let transient_types: BTreeSet<String> =
+        api.types.iter().filter(|t| t.reads.is_empty()).map(|t| t.name.clone()).collect();
+    for q in &api.queries {
+        let where_ = format!("api.yaml/queries.{}", q.name);
+        check_roles(&mut issues, &q.roles, &where_, &user_type_set);
+        if q.reads.is_empty() && !transient_types.contains(&q.returns_type) {
+            issues.push(err(
+                "op-missing-reads",
+                where_.clone(),
+                format!(
+                    "return type '{}' declares no `reads` binding (→ @reads); bind it to a View_* in api.yaml types.",
+                    if q.returns_type.is_empty() { "?" } else { &q.returns_type }
+                ),
+            ));
+        }
+        if q.returns_type.is_empty() {
+            issues.push(err("query-no-returns", where_.clone(), "query has no return type.".into()));
+        } else if !output_types.contains(&q.returns_type) {
+            issues.push(err(
+                "query-unknown-type",
+                where_.clone(),
+                format!("return type '{}' is neither an entities.yaml type nor an api projection.", q.returns_type),
+            ));
+        }
+        for a in &q.args {
+            check_inline(&mut issues, a, &format!("{}.args.{}", where_, a.name));
+        }
+    }
+
+    // 4d. subscriptions
+    for s in &api.subscriptions {
+        let where_ = format!("api.yaml/subscriptions.{}", s.name);
+        check_roles(&mut issues, &s.roles, &where_, &user_type_set);
+        if s.returns_type.is_empty() {
+            issues.push(err("subscription-no-returns", where_.clone(), "subscription has no return type.".into()));
+        } else if !output_types.contains(&s.returns_type) {
+            issues.push(err(
+                "subscription-unknown-type",
+                where_.clone(),
+                format!("return type '{}' is neither an entities.yaml type nor an api projection.", s.returns_type),
+            ));
+        }
+        for a in &s.args {
+            check_inline(&mut issues, a, &format!("{}.args.{}", where_, a.name));
+        }
+    }
+
+    // --- 5. Read models (views.yaml) ------------------------------------------------------------
+    let sql_primitives: BTreeSet<&str> =
+        ["uuid", "text", "integer", "bigint", "boolean", "timestamptz", "jsonb", "numeric"].into_iter().collect();
+    let scalar_names: BTreeSet<String> = map_keys(model.defs.get("scalars.yaml")).into_iter().collect();
+    let aggregate_names: BTreeSet<String> =
+        actors.iter().filter(|a| a.kind == "aggregate").map(|a| a.name.clone()).collect();
+    let views = parse_views(model);
+
+    cov.views = views.len();
+    for view in &views {
+        let at = format!("views.yaml/{}", view.name);
+        cov.view_columns += view.columns.len();
+        cov.view_fed_by += view.fedby.len();
+        if !view.name.starts_with("View_") {
+            issues.push(warn("view-naming", at.clone(), format!("Read table '{}' should be prefixed 'View_'.", view.name)));
+        }
+        if !view.reference && !aggregate_names.contains(&view.aggregate) {
+            issues.push(err(
+                "view-unknown-aggregate",
+                at.clone(),
+                format!("aggregate '{}' is not an aggregate in actors.yaml.", view.aggregate),
+            ));
+        }
+        if view.columns.is_empty() {
+            issues.push(err("view-no-columns", at.clone(), "view has no columns.".into()));
+        }
+
+        let col_names: BTreeSet<&str> = view.columns.iter().map(|c| c.name.as_str()).collect();
+        let fed_by_names: BTreeSet<&str> = view.fedby.iter().map(|s| s.as_str()).collect();
+        let mut used_events: BTreeSet<String> = BTreeSet::new();
+        let mut pk_count = 0;
+        for col in &view.columns {
+            if col.pk {
+                pk_count += 1;
+            }
+            if col.ty.is_empty() {
+                issues.push(err(
+                    "view-column-no-type",
+                    format!("{}.{}", at, col.name),
+                    "column has no `type` and none could be derived from `from` (declare a type or map it to a typed event property).".into(),
+                ));
+            } else if !sql_primitives.contains(col.ty.as_str()) && !scalar_names.contains(&col.ty) {
+                issues.push(err(
+                    "view-column-type",
+                    format!("{}.{}", at, col.name),
+                    format!("type '{}' is neither a SQL primitive nor a scalars.yaml type.", col.ty),
+                ));
+            }
+            if col.from.is_empty() {
+                if !view.reference {
+                    issues.push(warn(
+                        "view-column-no-source",
+                        format!("{}.{}", at, col.name),
+                        "column has no `from` — not traced to any event (possible design hole).".into(),
+                    ));
+                }
+            } else {
+                for r in &col.from {
+                    if let Some(ev) = ref_name(r) {
+                        if !fed_by_names.contains(ev.as_str()) {
+                            issues.push(err(
+                                "view-column-source-not-fedby",
+                                format!("{}.{}", at, col.name),
+                                format!("from '{}' refers to event '{}', which is not in this view's fedBy.", r, ev),
+                            ));
+                        }
+                        used_events.insert(ev);
+                    }
+                }
+            }
+            if let Some(fk) = &col.fk {
+                let mut parts = fk.splitn(2, '.');
+                let fk_view = parts.next().unwrap_or("");
+                let fk_col = parts.next().unwrap_or("");
+                match views.iter().find(|v| v.name == fk_view) {
+                    None => issues.push(err(
+                        "view-fk-unknown-view",
+                        format!("{}.{}", at, col.name),
+                        format!("fk '{}' references unknown view '{}'.", fk, fk_view),
+                    )),
+                    Some(target) => {
+                        if !target.columns.iter().any(|c| c.name == fk_col) {
+                            issues.push(err(
+                                "view-fk-unknown-column",
+                                format!("{}.{}", at, col.name),
+                                format!("fk '{}' references unknown column '{}' on '{}'.", fk, fk_col, fk_view),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        if pk_count == 0 {
+            issues.push(warn("view-no-pk", at.clone(), "view declares no primary-key column.".into()));
+        }
+
+        for (i, n) in view.fedby.iter().enumerate() {
+            if !produced_events.contains(n) {
+                issues.push(warn(
+                    "view-fedby-unproduced",
+                    format!("{}.fedBy[{}]", at, i),
+                    format!("fed by '{}', which no actor emits or consumes.", n),
+                ));
+            }
+        }
+        for (i, ix) in view.indexes.iter().enumerate() {
+            for c in ix {
+                if !col_names.contains(c.as_str()) {
+                    issues.push(err(
+                        "view-index-column",
+                        format!("{}.indexes[{}]", at, i),
+                        format!("index references unknown column '{}'.", c),
+                    ));
+                }
+            }
+        }
+        if !used_events.is_empty() {
+            let mut seen: BTreeSet<&str> = BTreeSet::new();
+            for ev in &view.fedby {
+                if !seen.insert(ev.as_str()) {
+                    continue;
+                }
+                if !used_events.contains(ev) {
+                    issues.push(warn(
+                        "view-fedby-unused",
+                        at.clone(),
+                        format!("fed by '{}' but no column maps `from` it (possible design hole).", ev),
+                    ));
+                }
+            }
+        }
+    }
+
+    // 5b. every emitted event should be projected into a view, unless declared non-projected.
+    let non_projected: BTreeSet<String> = model
+        .defs
+        .get("views.yaml")
+        .and_then(|v| v.get("nonProjectedEvents"))
+        .and_then(|x| x.as_sequence())
+        .map(|s| s.iter().filter_map(|r| r.get("$ref").and_then(|x| x.as_str()).and_then(ref_name)).collect())
+        .unwrap_or_default();
+    for e in &emitted_events {
+        if non_projected.contains(e) {
+            continue;
+        }
+        if !views.iter().any(|v| v.fedby.iter().any(|n| n == e)) {
+            issues.push(warn(
+                "event-not-projected",
+                format!("events.yaml/{}", e),
+                format!("Emitted event '{}' feeds no View_* (mark it under views.yaml nonProjectedEvents if intentional).", e),
+            ));
+        }
+    }
+
+    // 5c. type `reads` (api.yaml) bind output types to views.
+    {
+        let view_names: BTreeSet<&str> = views.iter().map(|v| v.name.as_str()).collect();
+        let internal_views: BTreeSet<&str> = views.iter().filter(|v| v.internal).map(|v| v.name.as_str()).collect();
+        let mut bound_views: BTreeSet<String> = BTreeSet::new();
+        for t in &api.types {
+            for v in &t.reads {
+                cov.reads_links += 1;
+                bound_views.insert(v.clone());
+                if !view_names.contains(v.as_str()) {
+                    issues.push(err(
+                        "reads-unknown-view",
+                        format!("api.yaml/types.{}", t.name),
+                        format!("reads references unknown view '{}'.", v),
+                    ));
+                }
+            }
+        }
+        for v in &views {
+            if !bound_views.contains(&v.name) && !internal_views.contains(v.name.as_str()) {
+                issues.push(warn(
+                    "view-no-query",
+                    format!("views.yaml/{}", v.name),
+                    format!("View '{}' is bound by no output type (api.yaml types reads).", v.name),
+                ));
+            }
+        }
+    }
+
+    // --- 6. Story map (stories.yaml): personas → activities → steps -----------------------------
+    let personas = parse_stories(model);
+    {
+        let query_roles: HashMap<&str, &Vec<String>> = api.queries.iter().map(|q| (q.name.as_str(), &q.roles)).collect();
+        let mutation_roles: HashMap<&str, &Vec<String>> =
+            api.mutations.iter().map(|m| (m.name.as_str(), &m.roles)).collect();
+        for p in &personas {
+            let at = format!("stories.yaml/{}", p.name);
+            if p.role.is_empty() {
+                issues.push(err("persona-no-role", at.clone(), "persona declares no personaRole.".into()));
+            } else if !user_type_set.contains(&p.role) {
+                issues.push(err(
+                    "persona-unknown-role",
+                    at.clone(),
+                    format!("personaRole '{}' is not a scalars.yaml#/UserType.", p.role),
+                ));
+            }
+            for act in &p.activities {
+                for step in &act.steps {
+                    let (op, op_kind) = match (&step.op, &step.op_kind) {
+                        (Some(o), Some(k)) => (o, k),
+                        _ => continue,
+                    };
+                    cov.story_links += 1;
+                    let where_ = format!("{}.{}.{}", at, act.name, step.name);
+                    let roles = if op_kind == "query" { query_roles.get(op.as_str()) } else { mutation_roles.get(op.as_str()) };
+                    let roles = match roles {
+                        Some(r) => *r,
+                        None => {
+                            issues.push(err(
+                                "story-unknown-op",
+                                where_.clone(),
+                                format!("step references unknown {} '{}'.", op_kind, op),
+                            ));
+                            continue;
+                        }
+                    };
+                    let allowed = roles.iter().any(|r| r == "PUBLIC") || (!p.role.is_empty() && roles.iter().any(|r| r == &p.role));
+                    if !allowed {
+                        issues.push(err(
+                            "story-role-not-authorized",
+                            where_,
+                            format!(
+                                "persona role '{}' may not call {} '{}' (op roles: [{}]).",
+                                p.role,
+                                op_kind,
+                                op,
+                                roles.join(", ")
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        // COMPLETENESS: every mutation & query must be reached by ≥1 story step.
+        let mut story_ops: BTreeSet<&str> = BTreeSet::new();
+        for p in &personas {
+            for act in &p.activities {
+                for step in &act.steps {
+                    if let Some(o) = &step.op {
+                        story_ops.insert(o.as_str());
+                    }
+                }
+            }
+        }
+        for m in &api.mutations {
+            if !story_ops.contains(m.name.as_str()) {
+                issues.push(err(
+                    "op-uncovered-by-story",
+                    format!("api.yaml/mutations/{}", m.name),
+                    format!("mutation '{}' is referenced by no story step (stories.yaml) — every write must anchor to a persona use case.", m.name),
+                ));
+            }
+        }
+        for q in &api.queries {
+            if !story_ops.contains(q.name.as_str()) {
+                issues.push(err(
+                    "op-uncovered-by-story",
+                    format!("api.yaml/queries/{}", q.name),
+                    format!("query '{}' is referenced by no story step (stories.yaml) — every read must anchor to a persona use case.", q.name),
+                ));
+            }
+        }
+    }
+
+    // --- 7. Behaviour tests (tests.yaml): fixtures + Given/When/Then consistency -----------------
+    {
+        let empty = Value::Mapping(Default::default());
+        let tests_file = model.defs.get("tests.yaml").unwrap_or(&empty);
+        let fixtures = tests_file.get("fixtures").and_then(|x| x.as_mapping());
+        let tests = tests_file.get("tests").and_then(|x| x.as_mapping());
+
+        // Per-actor inbox.
+        struct InboxEntry {
+            actor: String,
+            message: String,
+            is_command: bool,
+            emits: BTreeSet<String>,
+            throws: BTreeSet<String>,
+        }
+        let mut inbox: HashMap<String, HashMap<String, usize>> = HashMap::new();
+        let mut inbox_entries: Vec<InboxEntry> = Vec::new();
+        let mut t_emitted_events: BTreeSet<String> = BTreeSet::new();
+        let mut t_throwable_errors: BTreeSet<String> = BTreeSet::new();
+        for a in &actors {
+            let mut by_msg: HashMap<String, usize> = HashMap::new();
+            for e in &a.receives {
+                let msg = match ref_name(&e.message_ref) {
+                    Some(m) => m,
+                    None => continue,
+                };
+                let emits: BTreeSet<String> = e.emits.iter().filter_map(|r| ref_name(r)).collect();
+                let throws: BTreeSet<String> = e.throws.iter().filter_map(|r| ref_name(r)).collect();
+                for ev in &emits {
+                    t_emitted_events.insert(ev.clone());
+                }
+                for er in &throws {
+                    t_throwable_errors.insert(er.clone());
+                }
+                let idx = inbox_entries.len();
+                inbox_entries.push(InboxEntry {
+                    actor: a.name.clone(),
+                    message: msg.clone(),
+                    is_command: e.message_ref.starts_with("commands.yaml#/"),
+                    emits,
+                    throws,
+                });
+                by_msg.insert(msg, idx);
+            }
+            inbox.insert(a.name.clone(), by_msg);
+        }
+
+        let mut used_messages: BTreeSet<String> = BTreeSet::new();
+        let mut used_events: BTreeSet<String> = BTreeSet::new();
+        let mut used_errors: BTreeSet<String> = BTreeSet::new();
+        let mut used_rules: BTreeSet<String> = BTreeSet::new();
+        let all_rules = map_keys(model.defs.get("rules.yaml"));
+        cov.rules = all_rules.len();
+
+        // 7a. fixtures: data shape.
+        if let Some(fx_map) = fixtures {
+            for (k, fx) in fx_map {
+                let name = match k.as_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let where_ = format!("tests.yaml/fixtures.{}", name);
+                match fx.get("type").and_then(|t| t.get("$ref")).and_then(|x| x.as_str()) {
+                    None => issues.push(err("fixture-no-type", where_, "fixture has no `type.$ref`.".into())),
+                    Some(rf) => check_data_shape(model, &mut issues, rf, fx.get("data"), &where_),
+                }
+            }
+        }
+
+        // 7b. tests.
+        cov.test_cases = tests.map(|t| t.len()).unwrap_or(0);
+        if let Some(t_map) = tests {
+            for (k, t) in t_map {
+                let name = match k.as_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let where_ = format!("tests.yaml/tests.{}", name);
+                let actor_name = t
+                    .get("actor")
+                    .and_then(|a| a.get("$ref"))
+                    .and_then(|x| x.as_str())
+                    .and_then(ref_name)
+                    .unwrap_or_default();
+                let when = t.get("when");
+                let when_ref = when.and_then(|w| w.get("type")).and_then(|ty| ty.get("$ref")).and_then(|x| x.as_str());
+                let when_ref = match when_ref {
+                    Some(r) => r,
+                    None => {
+                        issues.push(err("test-no-when", where_, "test has no `when.type.$ref` (command or event).".into()));
+                        continue;
+                    }
+                };
+                check_data_shape(model, &mut issues, when_ref, when.and_then(|w| w.get("data")), &format!("{}.when", where_));
+
+                let msg = ref_name(when_ref).unwrap_or_default();
+                let entry_idx = if !actor_name.is_empty() && !msg.is_empty() {
+                    inbox.get(&actor_name).and_then(|m| m.get(&msg)).copied()
+                } else {
+                    None
+                };
+                match entry_idx {
+                    None => issues.push(err(
+                        "test-message-not-handled",
+                        format!("{}.when", where_),
+                        format!("actor '{}' does not receive '{}' (actors.yaml inbox).", actor_name, msg),
+                    )),
+                    Some(idx) => {
+                        used_messages.insert(format!("{}::{}", actor_name, msg));
+                        if !inbox_entries[idx].is_command {
+                            used_events.insert(msg.clone());
+                        }
+                    }
+                }
+
+                // `given` preconditions exercise their events too.
+                if let Some(given) = t.get("given").and_then(|x| x.as_sequence()) {
+                    for g in given {
+                        if let Some(ev) = fixture_event(model, g.get("$ref").and_then(|x| x.as_str())) {
+                            used_events.insert(ev);
+                        }
+                    }
+                }
+
+                // Every test must assert ≥1 business rule (ADR-0032).
+                let test_rules = t.get("rules").and_then(|x| x.as_sequence()).cloned().unwrap_or_default();
+                if test_rules.is_empty() {
+                    issues.push(err(
+                        "test-no-rule",
+                        where_.clone(),
+                        "test asserts no business rule — add `rules: [{ $ref: 'rules.yaml#/<Rule>' }]` (ADR-0032).".into(),
+                    ));
+                }
+                for (i, r) in test_rules.iter().enumerate() {
+                    let rf = r.get("$ref").and_then(|x| x.as_str()).unwrap_or("");
+                    if ref_target_file(rf, "tests.yaml").as_deref() != Some("rules.yaml") {
+                        issues.push(err(
+                            "test-rule-wrong-file",
+                            format!("{}.rules[{}]", where_, i),
+                            format!("rule ref '{}' must target rules.yaml.", rf),
+                        ));
+                        continue;
+                    }
+                    if let Some(rn) = ref_name(rf) {
+                        used_rules.insert(rn);
+                    }
+                }
+
+                // A test must assert SOMETHING.
+                let obj = t.as_mapping();
+                let has_then = obj.map(|o| o.contains_key(Value::String("then".into()))).unwrap_or(false);
+                let has_thrown = obj.map(|o| o.contains_key(Value::String("thrown".into()))).unwrap_or(false);
+                if !has_then && !has_thrown {
+                    issues.push(err(
+                        "test-no-assertion",
+                        where_.clone(),
+                        "test asserts nothing — declare `then` (events, [] for a no-op) and/or `thrown` (errors).".into(),
+                    ));
+                }
+
+                if let Some(thens) = t.get("then").and_then(|x| x.as_sequence()) {
+                    for (i, th) in thens.iter().enumerate() {
+                        let ev = match fixture_event(model, th.get("$ref").and_then(|x| x.as_str())) {
+                            Some(e) => e,
+                            None => continue,
+                        };
+                        used_events.insert(ev.clone());
+                        if let Some(idx) = entry_idx {
+                            if !inbox_entries[idx].emits.contains(&ev) {
+                                issues.push(err(
+                                    "test-then-not-emitted",
+                                    format!("{}.then[{}]", where_, i),
+                                    format!("expected event '{}' is not emitted by '{}' for '{}'.", ev, inbox_entries[idx].actor, msg),
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                if let Some(throwns) = t.get("thrown").and_then(|x| x.as_sequence()) {
+                    for (i, th) in throwns.iter().enumerate() {
+                        let er = match th.get("$ref").and_then(|x| x.as_str()).and_then(ref_name) {
+                            Some(e) => e,
+                            None => continue,
+                        };
+                        used_errors.insert(er.clone());
+                        if let Some(idx) = entry_idx {
+                            if !inbox_entries[idx].throws.contains(&er) {
+                                issues.push(err(
+                                    "test-thrown-not-declared",
+                                    format!("{}.thrown[{}]", where_, i),
+                                    format!("error '{}' is not declared in '{}' throws for '{}' (actors.yaml).", er, inbox_entries[idx].actor, msg),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 7c. COVERAGE (blocking).
+        for e in &inbox_entries {
+            if !used_messages.contains(&format!("{}::{}", e.actor, e.message)) {
+                issues.push(err(
+                    "test-uncovered-message",
+                    format!("actors.yaml/{}", e.actor),
+                    format!("no test exercises {} '{}' on '{}'.", if e.is_command { "command" } else { "event" }, e.message, e.actor),
+                ));
+            }
+        }
+        for ev in &t_emitted_events {
+            if !used_events.contains(ev) {
+                issues.push(err(
+                    "test-uncovered-event",
+                    format!("events.yaml/{}", ev),
+                    format!("emitted event '{}' is asserted by no test (in a `then`/`given`).", ev),
+                ));
+            }
+        }
+        for er in &t_throwable_errors {
+            if !used_errors.contains(er) {
+                issues.push(err(
+                    "test-uncovered-error",
+                    format!("errors.yaml/{}", er),
+                    format!("throwable error '{}' is asserted by no test (in a `thrown`).", er),
+                ));
+            }
+        }
+        for rn in &all_rules {
+            if !used_rules.contains(rn) {
+                issues.push(err(
+                    "rule-uncovered",
+                    format!("rules.yaml/{}", rn),
+                    format!("business rule '{}' is asserted by no test — add a test with `rules: [{{ $ref: 'rules.yaml#/{}' }}]` or remove the rule (ADR-0032).", rn, rn),
+                ));
+            }
+        }
+    }
+
+    // --- 8. Observability contracts (observability.yaml) ----------------------------------------
+    {
+        let span_kinds: BTreeSet<&str> = ["SERVER", "CLIENT", "INTERNAL", "PRODUCER", "CONSUMER"].into_iter().collect();
+        if let Some(obs) = model.defs.get("observability.yaml").and_then(|x| x.as_mapping()) {
+            for (fk, c) in obs {
+                let feature = match fk.as_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let at = format!("observability.yaml/{}", feature);
+                cov.obs_contracts += 1;
+
+                let wf = c.get("workflow");
+                let has = |k: &str| wf.and_then(|w| w.get(k)).map(|v| !v.is_null()).unwrap_or(false);
+                if !has("command") && !has("saga") && !has("aggregate") {
+                    issues.push(err(
+                        "obs-no-workflow-binding",
+                        at.clone(),
+                        "workflow must bind a `command` and/or `saga`/`aggregate` ($ref into the model).".into(),
+                    ));
+                }
+
+                let id_names: BTreeSet<&str> = c
+                    .get("run_identity")
+                    .and_then(|x| x.as_sequence())
+                    .map(|s| s.iter().filter_map(|i| i.get("name").and_then(|n| n.as_str())).collect())
+                    .unwrap_or_default();
+                for must in ["correlation_id", "trace_id"] {
+                    if !id_names.contains(must) {
+                        issues.push(err(
+                            "obs-missing-id",
+                            format!("{}.run_identity", at),
+                            format!("run_identity must declare the mandatory id '{}'.", must),
+                        ));
+                    }
+                }
+
+                let spans = c.get("spans").and_then(|x| x.as_sequence()).cloned().unwrap_or_default();
+                if spans.is_empty() {
+                    issues.push(err("obs-no-spans", at.clone(), "contract declares no spans.".into()));
+                }
+                let mut span_names: BTreeSet<String> = BTreeSet::new();
+                for (i, s) in spans.iter().enumerate() {
+                    match s.get("name").and_then(|x| x.as_str()) {
+                        None => issues.push(err("obs-span-no-name", format!("{}.spans[{}]", at, i), "span has no `name`.".into())),
+                        Some(n) => {
+                            span_names.insert(n.to_string());
+                        }
+                    }
+                    if let Some(kind) = s.get("kind").and_then(|x| x.as_str()) {
+                        if !span_kinds.contains(kind) {
+                            issues.push(err(
+                                "obs-span-kind",
+                                format!("{}.spans[{}]", at, i),
+                                format!("span kind '{}' is not one of SERVER|CLIENT|INTERNAL|PRODUCER|CONSUMER.", kind),
+                            ));
+                        }
+                    }
+                }
+
+                let req_spans = c
+                    .get("status_rules")
+                    .and_then(|sr| sr.get("success"))
+                    .and_then(|s| s.get("required_spans"))
+                    .and_then(|x| x.as_sequence())
+                    .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                for rs in &req_spans {
+                    if !span_names.contains(rs) {
+                        issues.push(err(
+                            "obs-required-span-undeclared",
+                            format!("{}.status_rules.success", at),
+                            format!("required_span '{}' is not a declared span.", rs),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 9. C4 consistency (architecture/c4-l2.yaml) --------------------------------------------
+    {
+        let l2 = model.defs.get("architecture/c4-l2.yaml");
+        let bcs = l2.and_then(|v| v.get("boundedContexts")).and_then(|x| x.as_mapping());
+        let mut mapped: BTreeSet<String> = BTreeSet::new();
+        if let Some(bcs) = bcs {
+            for (_, bc) in bcs {
+                for key in ["aggregates", "processManagers"] {
+                    if let Some(seq) = bc.get(key).and_then(|x| x.as_sequence()) {
+                        for r in seq {
+                            if let Some(n) = r.get("$ref").and_then(|x| x.as_str()).and_then(ref_name) {
+                                mapped.insert(n);
+                            }
+                        }
+                    }
+                }
+            }
+            for a in &actors {
+                if !mapped.contains(&a.name) {
+                    issues.push(warn(
+                        "c4-actor-unmapped",
+                        "architecture/c4-l2.yaml".into(),
+                        format!("actor '{}' belongs to no bounded context (C4 L2 drift).", a.name),
+                    ));
+                }
+            }
+            let mut role_owner: HashMap<String, String> = HashMap::new();
+            for (ck, bc) in bcs {
+                let cid = ck.as_str().unwrap_or("");
+                if let Some(roles) = bc.get("roles").and_then(|x| x.as_sequence()) {
+                    for role in roles {
+                        let r = role.as_str().map(|s| s.to_string()).unwrap_or_else(|| format!("{:?}", role));
+                        if !user_type_set.is_empty() && !user_type_set.contains(&r) {
+                            issues.push(err(
+                                "c4-context-role-unknown",
+                                format!("architecture/c4-l2.yaml/{}", cid),
+                                format!("bounded-context role '{}' is not a scalars.yaml#/UserType value.", r),
+                            ));
+                        }
+                        match role_owner.get(&r) {
+                            Some(prev) if prev != cid => issues.push(err(
+                                "c4-context-role-overlap",
+                                format!("architecture/c4-l2.yaml/{}", cid),
+                                format!("UserType '{}' is claimed by both '{}' and '{}' — each role maps to at most one context.", r, prev, cid),
+                            )),
+                            _ => {
+                                role_owner.insert(r, cid.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 10. Translations (translations.yaml) ---------------------------------------------------
+    if let Some(tr) = model.defs.get("translations.yaml").and_then(|x| x.as_mapping()) {
+        for (kk, t) in tr {
+            let key = match kk.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            let at = format!("translations.yaml/{}", key);
+            cov.translations += 1;
+            let messages = t.get("messages");
+            for loc in ["en", "fr"] {
+                let ok = messages
+                    .and_then(|m| m.get(loc))
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                if !ok {
+                    issues.push(err(
+                        "translation-missing-locale",
+                        at.clone(),
+                        format!("translation '{}' has no '{}' message (both en and fr are required).", key, loc),
+                    ));
+                }
+            }
+            let params: BTreeSet<String> = t.get("params").and_then(|p| p.as_mapping()).map(map_of_keys).unwrap_or_default();
+            for loc in ["en", "fr"] {
+                for ph in placeholders(messages.and_then(|m| m.get(loc))) {
+                    if !params.contains(&ph) {
+                        issues.push(err(
+                            "translation-param-mismatch",
+                            at.clone(),
+                            format!("'{}' message uses {{{}}} but it is not declared in `params`.", loc, ph),
+                        ));
+                    }
+                }
+            }
+            let mut used: BTreeSet<String> = placeholders(messages.and_then(|m| m.get("en")));
+            used.extend(placeholders(messages.and_then(|m| m.get("fr"))));
+            for p in &params {
+                if !used.contains(p) {
+                    issues.push(err(
+                        "translation-param-mismatch",
+                        at.clone(),
+                        format!("declared param '{}' is used by no message.", p),
+                    ));
+                }
+            }
+        }
+    }
+
+    // --- 11. Customer screens (customer_screens.yaml): the SDUI spec is bound to the API --------
+    {
+        let cs = model.defs.get("customer_screens.yaml");
+        let resolvers = cs.and_then(|v| v.get("resolvers")).and_then(|x| x.as_mapping());
+        let actions = cs.and_then(|v| v.get("actions")).and_then(|x| x.as_mapping());
+        let query_names: BTreeSet<&str> = api.queries.iter().map(|q| q.name.as_str()).collect();
+        let mutation_names: BTreeSet<&str> = api.mutations.iter().map(|m| m.name.as_str()).collect();
+        let op_name = |r: &str| r.rsplit('/').next().unwrap_or("").to_string();
+        let mut resolver_names: BTreeSet<String> = BTreeSet::new();
+
+        if let Some(rmap) = resolvers {
+            for (nk, r) in rmap {
+                let name = match nk.as_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                resolver_names.insert(name.to_string());
+                if r.get("gap").map(|v| !v.is_null()).unwrap_or(false) {
+                    cov.screen_gaps += 1;
+                    continue;
+                }
+                match r.get("query").and_then(|q| q.get("$ref")).and_then(|x| x.as_str()) {
+                    None => issues.push(err(
+                        "resolver-no-binding",
+                        format!("customer_screens.yaml/resolvers/{}", name),
+                        format!("resolver '{}' must declare a `query` ($ref into api.yaml) or a `gap`.", name),
+                    )),
+                    Some(rf) => {
+                        if ref_target_file(rf, "customer_screens.yaml").as_deref() != Some("api.yaml")
+                            || !rf.contains("/queries/")
+                            || !query_names.contains(op_name(rf).as_str())
+                        {
+                            issues.push(err(
+                                "resolver-not-a-query",
+                                format!("customer_screens.yaml/resolvers/{}", name),
+                                format!("resolver '{}' query must $ref an api.yaml query; '{}' is not one.", name, rf),
+                            ));
+                        } else {
+                            cov.screen_bindings += 1;
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(amap) = actions {
+            for (nk, a) in amap {
+                let name = match nk.as_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let rf = match a.get("mutation").and_then(|m| m.get("$ref")).and_then(|x| x.as_str()) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                if ref_target_file(rf, "customer_screens.yaml").as_deref() != Some("api.yaml")
+                    || !rf.contains("/mutations/")
+                    || !mutation_names.contains(op_name(rf).as_str())
+                {
+                    issues.push(err(
+                        "action-not-a-mutation",
+                        format!("customer_screens.yaml/actions/{}", name),
+                        format!("action '{}' mutation must $ref an api.yaml mutation; '{}' is not one.", name, rf),
+                    ));
+                } else {
+                    cov.screen_bindings += 1;
+                }
+            }
+        }
+        if let Some(screens) = cs.and_then(|v| v.get("screens")).and_then(|x| x.as_sequence()) {
+            for s in screens {
+                cov.screens += 1;
+                let sid = s.get("id").and_then(|x| x.as_str()).unwrap_or("?").to_string();
+                cov.screen_gaps += s.get("gaps").and_then(|x| x.as_sequence()).map(|g| g.len()).unwrap_or(0);
+                if let Some(drs) = s.get("data_requirements").and_then(|x| x.as_sequence()) {
+                    for dr in drs {
+                        let name = dr.as_str().map(|s| s.to_string()).unwrap_or_else(|| format!("{:?}", dr));
+                        if !resolver_names.contains(&name) {
+                            issues.push(err(
+                                "screen-unknown-resolver",
+                                format!("customer_screens.yaml/screens/{}", sid),
+                                format!("data_requirement '{}' is not a declared resolver.", name),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Report { issues, coverage: cov, handled_commands: handled_commands.len() }
+}
+
+/// checkData: resolve a `type.$ref` then check the data against its schema (validate.ts §7 checkData).
+fn check_data_shape(model: &Model, issues: &mut Vec<Issue>, type_ref: &str, data: Option<&Value>, where_: &str) {
+    check_shape(model, issues, resolve_ref(model, type_ref, "tests.yaml"), data, where_);
+}
+
+fn map_of_keys(m: &serde_yaml::Mapping) -> BTreeSet<String> {
+    m.iter().filter_map(|(k, _)| k.as_str().map(|s| s.to_string())).collect()
 }
 
 fn arg_value(args: &[String], flag: &str) -> Option<String> {
@@ -3282,23 +4450,73 @@ fn main() {
         }
     };
 
-    let (errors, checked) = validate(&model);
+    let Report { issues, coverage, handled_commands } = validate(&model);
+    let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
+    let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
+
+    // Summary counts (mirrors cli.ts), derived from the model.
+    let n_actors = parse_actors(&model).len();
+    let n_commands = handled_commands; // cli.ts prints derived.handledCommands.size, not total defs
+    let n_events = map_keys(model.defs.get("events.yaml")).len();
+    let n_errdefs = map_keys(model.defs.get("errors.yaml")).len();
+    let n_personas = parse_stories(&model).len();
+    let n_activities: usize = parse_stories(&model).iter().map(|p| p.activities.len()).sum();
+    let n_fixtures = model
+        .defs
+        .get("tests.yaml")
+        .and_then(|t| t.get("fixtures"))
+        .and_then(|f| f.as_mapping())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let n_bcs = model
+        .defs
+        .get("architecture/c4-l2.yaml")
+        .and_then(|v| v.get("boundedContexts"))
+        .and_then(|x| x.as_mapping())
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    eprintln!("• specs:  {}", specs.display());
+    eprintln!("• model:  {} actors, {} commands, {} events, {} errors", n_actors, n_commands, n_events, n_errdefs);
+    let api_s = parse_api(&model);
+    eprintln!("• api:    {} mutations, {} queries, {} projections", api_s.mutations.len(), api_s.queries.len(), api_s.types.len());
+    eprintln!("• stories:{} personas, {} activities", n_personas, n_activities);
+    eprintln!("• views:  {} views, {} columns, {} fedBy links", coverage.views, coverage.view_columns, coverage.view_fed_by);
+    eprintln!("• tests:  {} behaviour tests, {} fixtures, {} business rules", coverage.test_cases, n_fixtures, coverage.rules);
+    eprintln!("• obs:    {} observability contracts · C4: {} bounded contexts", coverage.obs_contracts, n_bcs);
     eprintln!(
-        "• rust-codegen (stage 1): {} source files loaded, {} $refs checked",
-        SOURCE_FILES.len(),
-        checked
+        "• ui:     {} SDUI screens, {} API bindings, {} gaps · {} translation keys (en/fr)",
+        coverage.screens, coverage.screen_bindings, coverage.screen_gaps, coverage.translations
     );
+    eprintln!("• validated against specs:");
+    eprintln!("    - {} $refs resolve (scalars/entities/events/commands/errors/views/api)", coverage.refs);
+    eprintln!("    - actor wiring: messages→commands/events, emits→events, throws→errors");
+    eprintln!("    - api↔model: {} command links→commands, {} reads→views, roles→UserType", coverage.mutation_links, coverage.reads_links);
+    eprintln!("    - views: aggregate→actors, fedBy→events, column types→scalars, indexes→columns, fk→views");
+    eprintln!("    - stories: {} step→op links resolve, persona role authorized, every mutation/query reached by a story step", coverage.story_links);
+    eprintln!("    - tests: {} Given/When/Then cases — data fields, actor handles `when`, `then`⊆emits, `thrown`⊆throws; every message/event/error exercised", coverage.test_cases);
+    eprintln!("    - rules: {} business rules — every test asserts ≥1 rule, every rule asserted by ≥1 test (ADR-0032)", coverage.rules);
+    eprintln!("    - ui: {} SDUI screens — resolver/action bindings $ref real api ops (API-meets-UI), data_requirements resolve; {} translations (en+fr, params match)", coverage.screens, coverage.translations);
+    eprintln!("    - observability: {} workflow contracts — $ref bindings resolve, mandatory ids (correlation_id/trace_id), span kinds, success.required_spans ⊆ declared spans", coverage.obs_contracts);
+    eprintln!("    - c4: bounded-context↔actor mapping (no unmapped aggregate / phantom container ref)");
+
+    if !issues.is_empty() {
+        eprintln!("• checks: {} error(s), {} warning(s)", errors.len(), warnings.len());
+        for i in &issues {
+            let tag = if i.level == Level::Error { "error" } else { "warn " };
+            eprintln!("  [{}] {}  {}\n           {}", tag, i.rule, i.location, i.message);
+        }
+    } else {
+        eprintln!("• checks: all cross-references resolve, no warnings");
+    }
 
     if !errors.is_empty() {
-        for e in &errors {
-            eprintln!("{}", e);
-        }
-        eprintln!("\n✗ {} referential-integrity error(s).", errors.len());
+        eprintln!("\n✗ validation failed — fix the errors above before generating.");
         std::process::exit(1);
     }
-    eprintln!("✓ all {} $refs resolve (Rust codegen — referential integrity).", checked);
 
     if check {
+        eprintln!("\n✓ validation passed (--check: no files written).");
         return;
     }
 
