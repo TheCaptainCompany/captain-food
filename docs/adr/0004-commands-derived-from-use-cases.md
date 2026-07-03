@@ -8,7 +8,7 @@ A naive CQRS model mirrors one command per event. That produces anemic, mechanic
 real business intentions (a single intent may emit several events; some events have no command).
 
 ## Decision
-Commands are derived from **use cases** in the story map (`specs/stories.yaml`, `specs/story-map.md`).
+Commands are derived from **use cases** in the story map (`specs/stories.yaml`).
 A command may emit several events (e.g. `PlaceOrder` → `PaymentIntentCreated` → … → `OrderPlaced` +
 `CartCheckedOut`). Facts reported by external systems are recorded as **inbound integration events**
 (no command, through the ACL) — e.g. Stripe `PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`, HubRise

@@ -17,7 +17,6 @@ Read the relevant file before implementing or changing anything:
 - [specs/commands.yaml](specs/commands.yaml) — **command payload** catalog (CQRS write side): each command is just its input schema (description + type + properties + required), parallel to events.yaml. Emits/handler → actors.yaml; errors → errors.yaml; persona/use-case/slice → story-map.
 - [specs/errors.yaml](specs/errors.yaml) — **anticipated errors** (the old command invariants): each with typed `context` and default `messages.en`/`messages.fr`. Mapped per command in actors.yaml `throws`.
 - [specs/actors.yaml](specs/actors.yaml) — **actor-model catalog** (codegen source): aggregates & process managers, each with its inbox of `{ message → emits, throws }`, where every message/event/error is a `$ref` into commands.yaml/events.yaml/errors.yaml (checkable; the ref path encodes kind). Personas/authz live elsewhere (GraphQL `@auth`, story map).
-- [specs/story-map.md](specs/story-map.md) — Jeff Patton story map: backbone, actor×story×steps table, V0 walking skeleton, use cases → commands, open gaps.
 - [specs/stories.yaml](specs/stories.yaml) — the **executable story map** (codegen source): personas → activities → steps, each step a `$ref` into an api.yaml query/mutation. The validator enforces completeness BOTH ways: steps resolve + persona role authorized, AND every mutation/query is reached by ≥1 step (`op-uncovered-by-story`).
 - [specs/rules.yaml](specs/rules.yaml) — **business rules / invariants** (ADR-0032): each a readable guarantee. Every behaviour test links to ≥1 rule and every rule is asserted by ≥1 test (bidirectional, validator-enforced). Rules say WHAT we guarantee; [specs/tests.yaml](specs/tests.yaml) says HOW (Given/When/Then). A rule may span several tests.
 - [specs/customer_screens.yaml](specs/customer_screens.yaml) — **Spec-Driven SDUI** customer web app (ADR-0033): screens + component registry + a **`resolvers`** allowlist (reads → `api.yaml` queries by `$ref`) + an **`actions`** allowlist (writes → `api.yaml` mutations by `$ref`). The validator proves the **API answers the UI** (a screen op that doesn't exist fails); UI needs the API lacks are explicit `gaps`; `sdui: false` marks non-SDUI screens (checkout/confirmation/auth). Runtime (renderer/registry/Supabase) is a deferred contract.
@@ -35,7 +34,7 @@ generator and read [specs/generated/documentation.generated.md](specs/generated/
 Commands are **derived from use cases** (business intentions from the story map), **not** from events.
 Do NOT mechanically generate one command per event: a command may emit **several events**
 (e.g. `PlaceOrder` → `OrderPlaced` + payment), and not all commands have a 1:1 counterpart.
-See [specs/story-map.md](specs/story-map.md) for the use case → command derivation.
+See [ADR-0004](docs/adr/0004-commands-derived-from-use-cases.md) and [specs/stories.yaml](specs/stories.yaml) for the use case → command derivation.
 
 ### Commands vs inbound (integration) events
 

@@ -99,5 +99,4 @@ Two modes, both going through the ACL:
 - **Inventory sync** (HubRise callback) → targeted `OfferStockUpdated` event, without rewriting the product.
 
 For the restaurant itself, the import feeds the `RegisterRestaurant` command
-(then manual contact completion). See the story map: import use case classified **V1**
-([../story-map.md](../story-map.md)).
+(then manual contact completion). The import use case is classified **V1**.

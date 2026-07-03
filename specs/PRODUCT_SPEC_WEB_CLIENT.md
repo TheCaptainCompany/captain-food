@@ -95,7 +95,7 @@ Constraints:
     The cart is session-scoped (a client-held `cartId` / cart token); `customerId` is bound at checkout.
   - Keep a small client cache for snappy UI, but the server cart is the source of truth and validates
     each line against the live catalog. (This replaces the earlier localStorage-only, no-server-call
-    approach — see the cart event-churn note in [story-map.md](story-map.md).)
+    approach; cart persistence/retention follows the `Cart` stream policy in [database.md](database.md).)
 
 ### 3.4 Checkout – contact details
 
@@ -124,7 +124,7 @@ Constraints:
   - Frontend uses **Stripe Elements** — the **Express Checkout Element** (Payment Request Button)
     surfaces **Apple Pay** when the device/browser supports it, falling back to the card Payment
     Element otherwise. A single PaymentIntent backs every method. (Google Pay rides the same element
-    and can be switched on as a fast-follow — see [story-map.md](story-map.md).)
+    and can be switched on as a fast-follow.)
   - On successful payment:
     - Stripe redirects to a “Thank you / order tracking” page.
     - Backend writes `PaymentCaptured` and `OrderPlaced` events.
@@ -139,8 +139,8 @@ Constraints:
 - Dependencies / setup:
   - Apple Pay requires a **verified Apple Pay domain** in the Stripe dashboard and serving the
     Apple domain-association file. Per-restaurant subdomains (`{slug}.captain.food`) must be
-    covered — same single-origin checkout decision as the passkey gap in
-    [story-map.md](story-map.md). Routing checkout through one origin (`captain.food`) covers both.
+    covered — same single-origin checkout decision as the passkey gap
+    ([ADR-0036](../docs/adr/0036-domain-topology-single-origin-identity.md)). Routing checkout through one origin (`captain.food`) covers both.
   - HTTPS is mandatory (already required).
 
 ### 3.6 Order confirmation and tracking

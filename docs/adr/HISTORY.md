@@ -185,7 +185,7 @@ In the same kDrive folder, kept as background (no decisions to integrate beyond 
 
 - **Story maps / QAs** — `20251105-captain_story_map.txt`, `20251105-captain_food_qas.txt`,
   `20251106-captain_{qas,story_map}_final_nov6.md`, `20251127-captain_food_{qas,story_mapping}_final.md`.
-  The repo's living version is [`specs/story-map.md`](../../specs/story-map.md).
+  The repo's living version is the generated product documentation (from `specs/stories.yaml`).
 - **Financial projections** — `20251112_19h26-*` (`final-ca-based-model`, `mvp-final-projections`,
   `pos-analysis`) + the `*.csv` and `Simulations.xlsx`. 📄 Context for the (now superseded) CA-based model.
 - **Expansion / recap** — `20251112-expansion-strategy-deferred.md`, `20251112_13h02_DECISIONS_RECAP.md`

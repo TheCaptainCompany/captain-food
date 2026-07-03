@@ -18,7 +18,7 @@ afterthought. It is mounted as project guidance (see `CLAUDE.md` and `docs/claud
 |---|---|---|
 | `/domain/*.yaml` DSL | `specs/*.yaml` (`scalars`, `entities`, `events`, `commands`, `errors`, `actors`, `views`, `api`, `stories`, `tests`) | ✅ |
 | `behaviour-tests.yaml` | `specs/tests.yaml` (Given/When/Then, codegen-validated incl. coverage) | ✅ |
-| `user-story-mapping.yaml` | `specs/stories.yaml` (+ `specs/story-map.md`) | ✅ |
+| `user-story-mapping.yaml` | `specs/stories.yaml` | ✅ |
 | `observability/*.yaml` | `specs/observability.yaml` (contracts, `$ref`-bound to the model) | ✅ |
 | `c4-l2.yaml` / `c4-l3.yaml` | `specs/architecture/c4-l2.yaml` / `c4-l3.yaml` (validated DSL) | ✅ |
 | `/schemas/*.schema.json` | **codegen referential validation** (`tools/codegen-rs`, Rust — ADR-0034) instead of JSON Schema (see ADR-0002) | ✅ |
@@ -69,7 +69,7 @@ specs/                         # the DSL — source of truth
   scalars.yaml entities.yaml events.yaml commands.yaml errors.yaml
   actors.yaml views.yaml api.yaml stories.yaml tests.yaml
   observability.yaml           # workflow observability contracts
-  story-map.md database.md     # narrative + (generated) schema section
+  database.md                  # narrative + (generated) schema section
   generated/                   # GENERATED (committed; CI verifies vs the specs): docs, views.sql, schema.graphql, c4
   architecture/
     c4-l2.yaml c4-l3.yaml       # C4 as source-managed DSL
