@@ -76,6 +76,11 @@ fn is_source_file(f: &str) -> bool {
     SOURCE_FILES.contains(&f)
 }
 
+/// The bare definition name a `$ref` denotes: the FIRST pointer segment (mirrors refs.ts `refName`).
+fn ref_name(r: &str) -> Option<String> {
+    parse_ref(r).and_then(|p| p.path.into_iter().next())
+}
+
 /// Mirrors refs.ts `resolveRef`: resolve `ref` (appearing in `ctx`) into the target file's Value tree.
 fn resolve_ref<'a>(model: &'a Model, r: &str, ctx: &str) -> Option<&'a Value> {
     let pr = parse_ref(r)?;
@@ -384,6 +389,493 @@ fn emit_views_sql(model: &Model) -> String {
     )
 }
 
+// ─── c4.generated.dsl + c4.generated.md (port of emit/c4.ts) ─────────────────────────────────────
+
+struct Actor {
+    name: String,
+    kind: String, // "aggregate" | "process-manager"
+    receives: Vec<Receive>,
+}
+struct Receive {
+    message_ref: String,
+    emits: Vec<String>, // raw $ref strings
+    effect: Option<String>,
+}
+struct Ctx {
+    id: String,
+    description: String,
+    aggregates: Vec<String>,
+    process_managers: Vec<String>,
+}
+struct Container {
+    id: String,
+    technology: String,
+    description: String,
+}
+struct External {
+    id: String,
+    description: String,
+}
+struct Rel {
+    from: String,
+    to: String,
+    description: String,
+}
+struct Comp {
+    id: String,
+    description: String,
+    instrumented: bool,
+}
+struct C4 {
+    system_name: String,
+    system_description: String,
+    contexts: Vec<Ctx>,
+    containers: Vec<Container>,
+    externals: Vec<External>,
+    relationships: Vec<Rel>,
+    components: Vec<Comp>,
+}
+
+const PIPELINE: &[(&str, &str, &str)] = &[
+    ("graphql-gateway", "command-bus", "dispatches command"),
+    ("command-bus", "command-handlers", "invokes handler"),
+    ("command-handlers", "event-store-adapter", "appends events"),
+    ("event-store-adapter", "event-publisher", "publishes appended"),
+    ("event-publisher", "message-consumers", "delivers events"),
+    ("message-consumers", "projection-updaters", "feeds projections"),
+    ("process-managers", "command-bus", "issues commands"),
+];
+
+/// `${prefix}${s.replace(/[^a-zA-Z0-9]+/g, '_')}` — runs of non-alphanumerics collapse to a single `_`.
+fn c4id(prefix: &str, s: &str) -> String {
+    let mut out = String::from(prefix);
+    let mut prev_us = false;
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            prev_us = false;
+        } else if !prev_us {
+            out.push('_');
+            prev_us = true;
+        }
+    }
+    out
+}
+
+/// `"${s.replace(/"/g,'\"').replace(/\s+/g,' ').trim()}"` — escape quotes, collapse whitespace, trim, wrap.
+fn q(s: &str) -> String {
+    let escaped = s.replace('"', "\\\"");
+    let mut collapsed = String::new();
+    let mut prev_ws = false;
+    for ch in escaped.chars() {
+        if ch.is_whitespace() {
+            if !prev_ws {
+                collapsed.push(' ');
+                prev_ws = true;
+            }
+        } else {
+            collapsed.push(ch);
+            prev_ws = false;
+        }
+    }
+    format!("\"{}\"", collapsed.trim())
+}
+
+fn ref_names(v: Option<&Value>) -> Vec<String> {
+    v.and_then(|x| x.as_sequence())
+        .map(|s| {
+            s.iter()
+                .filter_map(|it| it.get("$ref").and_then(|r| r.as_str()).and_then(ref_name))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_actors(model: &Model) -> Vec<Actor> {
+    let mut out = Vec::new();
+    if let Some(Value::Mapping(m)) = model.defs.get("actors.yaml") {
+        for (k, node) in m {
+            let name = match k.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            let kind = match node.get("type").and_then(|x| x.as_str()) {
+                Some(t @ ("aggregate" | "process-manager")) => t,
+                _ => continue,
+            };
+            let mut receives = Vec::new();
+            if let Some(seq) = node.get("receives").and_then(|x| x.as_sequence()) {
+                for e in seq {
+                    let message_ref = e
+                        .get("message")
+                        .and_then(|mm| mm.get("$ref"))
+                        .and_then(|r| r.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let emits = ref_strings(e.get("emits"));
+                    let effect = e.get("effect").and_then(|x| x.as_str()).map(|s| s.to_string());
+                    receives.push(Receive { message_ref, emits, effect });
+                }
+            }
+            out.push(Actor { name: name.to_string(), kind: kind.to_string(), receives });
+        }
+    }
+    out
+}
+
+/// Raw `$ref` strings of a ref-list (toRefList).
+fn ref_strings(v: Option<&Value>) -> Vec<String> {
+    v.and_then(|x| x.as_sequence())
+        .map(|s| {
+            s.iter()
+                .filter_map(|it| it.get("$ref").and_then(|r| r.as_str()).map(|x| x.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// (view name, fedBy event names) for every View_* (aggregate-fed or reference), in file order.
+fn views_fedby(model: &Model) -> Vec<(String, Vec<String>)> {
+    let mut out = Vec::new();
+    if let Some(Value::Mapping(m)) = model.defs.get("views.yaml") {
+        for (k, node) in m {
+            let name = match k.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            let is_ref = node.get("source").and_then(|x| x.as_str()) == Some("reference");
+            let has_agg = node.get("aggregate").and_then(|x| x.as_str()).is_some();
+            if !has_agg && !is_ref {
+                continue;
+            }
+            out.push((name.to_string(), ref_names(node.get("fedBy"))));
+        }
+    }
+    out
+}
+
+fn read_c4(model: &Model) -> C4 {
+    let l2 = model.defs.get("architecture/c4-l2.yaml");
+    let l3 = model.defs.get("architecture/c4-l3.yaml");
+    let l2get = |k: &str| l2.and_then(|v| v.get(k));
+    let system = l2get("system");
+    let sstr = |k: &str| system.and_then(|s| s.get(k)).and_then(|x| x.as_str());
+    let mut contexts = Vec::new();
+    if let Some(cm) = l2get("boundedContexts").and_then(|v| v.as_mapping()) {
+        for (k, bc) in cm {
+            if let Some(id) = k.as_str() {
+                contexts.push(Ctx {
+                    id: id.to_string(),
+                    description: bc.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    aggregates: ref_names(bc.get("aggregates")),
+                    process_managers: ref_names(bc.get("processManagers")),
+                });
+            }
+        }
+    }
+    let mut containers = Vec::new();
+    if let Some(cm) = l2get("containers").and_then(|v| v.as_mapping()) {
+        for (k, c) in cm {
+            if let Some(id) = k.as_str() {
+                containers.push(Container {
+                    id: id.to_string(),
+                    technology: c.get("technology").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    description: c.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                });
+            }
+        }
+    }
+    let mut externals = Vec::new();
+    if let Some(cm) = l2get("externalSystems").and_then(|v| v.as_mapping()) {
+        for (k, x) in cm {
+            if let Some(id) = k.as_str() {
+                externals.push(External {
+                    id: id.to_string(),
+                    description: x.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string(),
+                });
+            }
+        }
+    }
+    let mut relationships = Vec::new();
+    if let Some(seq) = l2get("relationships").and_then(|v| v.as_sequence()) {
+        for r in seq {
+            relationships.push(Rel {
+                from: r.get("from").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                to: r.get("to").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                description: r.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            });
+        }
+    }
+    let mut components = Vec::new();
+    if let Some(cm) = l3.and_then(|v| v.get("components")).and_then(|v| v.as_mapping()) {
+        for (k, c) in cm {
+            if let Some(id) = k.as_str() {
+                components.push(Comp {
+                    id: id.to_string(),
+                    description: c.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    instrumented: c.get("instrumented").and_then(|x| x.as_bool()) == Some(true),
+                });
+            }
+        }
+    }
+    C4 {
+        system_name: sstr("name").unwrap_or("Captain.Food").to_string(),
+        system_description: sstr("description").unwrap_or("").to_string(),
+        contexts,
+        containers,
+        externals,
+        relationships,
+        components,
+    }
+}
+
+fn push_view(l: &mut Vec<String>, decl: &str) {
+    l.push(format!("    {} {{", decl));
+    l.push("      include *".into());
+    l.push("      autolayout lr".into());
+    l.push("    }".into());
+}
+fn push_style(l: &mut Vec<String>, tag: &str, props: &[&str]) {
+    l.push(format!("      element \"{}\" {{", tag));
+    for p in props {
+        l.push(format!("        {}", p));
+    }
+    l.push("      }".into());
+}
+
+fn emit_structurizr(model: &Model) -> String {
+    let c4 = read_c4(model);
+    let comp_ids: std::collections::HashSet<&str> = c4.components.iter().map(|c| c.id.as_str()).collect();
+    let node_id = |key: &str| -> String {
+        if comp_ids.contains(key) {
+            c4id("c_", key)
+        } else if c4.containers.iter().any(|c| c.id == key) {
+            c4id("ct_", key)
+        } else if c4.externals.iter().any(|x| x.id == key) {
+            c4id("x_", key)
+        } else {
+            c4id("n_", key)
+        }
+    };
+    let mut l: Vec<String> = Vec::new();
+    l.push(format!("workspace {} {} {{", q(&c4.system_name), q(&c4.system_description)));
+    l.push("  model {".into());
+    l.push(format!("    ss = softwareSystem {} {} {{", q(&c4.system_name), q(&c4.system_description)));
+    for c in &c4.containers {
+        let open = format!(
+            "      {} = container {} {} {}",
+            c4id("ct_", &c.id), q(&c.id), q(&c.description), q(&c.technology)
+        );
+        if c.id != "api" {
+            l.push(open);
+            continue;
+        }
+        l.push(format!("{} {{", open));
+        for ctx in &c4.contexts {
+            let mut members: Vec<(&str, &str)> = Vec::new();
+            for a in &ctx.aggregates {
+                members.push((a.as_str(), "Aggregate"));
+            }
+            for p in &ctx.process_managers {
+                members.push((p.as_str(), "ProcessManager"));
+            }
+            if members.is_empty() {
+                continue;
+            }
+            l.push(format!("        group {} {{", q(&ctx.id)));
+            for (n, tag) in &members {
+                l.push(format!("          {} = component {} {} {}", c4id("a_", n), q(n), q(&ctx.description), q(tag)));
+            }
+            l.push("        }".into());
+        }
+        l.push("        group \"Infrastructure\" {".into());
+        for comp in &c4.components {
+            l.push(format!(
+                "          {} = component {} {} {}",
+                c4id("c_", &comp.id), q(&comp.id), q(&comp.description),
+                q(if comp.instrumented { "Instrumented" } else { "Domain" })
+            ));
+        }
+        l.push("        }".into());
+        l.push("      }".into());
+    }
+    l.push("    }".into());
+    for x in &c4.externals {
+        l.push(format!("    {} = softwareSystem {} {} \"External\"", c4id("x_", &x.id), q(&x.id), q(&x.description)));
+    }
+    l.push("".into());
+    for r in &c4.relationships {
+        l.push(format!("    {} -> {} {}", node_id(&r.from), node_id(&r.to), q(&r.description)));
+    }
+    for (from, to, desc) in PIPELINE {
+        if comp_ids.contains(from) && comp_ids.contains(to) {
+            l.push(format!("    {} -> {} {}", c4id("c_", from), c4id("c_", to), q(desc)));
+        }
+    }
+    if comp_ids.contains("projection-updaters") {
+        l.push(format!("    {} -> {} \"writes read models\"", c4id("c_", "projection-updaters"), c4id("ct_", "read-models")));
+    }
+    if comp_ids.contains("event-store-adapter") {
+        l.push(format!("    {} -> {} \"appends to domain_events\"", c4id("c_", "event-store-adapter"), c4id("ct_", "event-store")));
+    }
+    l.push("  }".into());
+    l.push("  views {".into());
+    push_view(&mut l, "systemContext ss \"SystemContext\"");
+    push_view(&mut l, "container ss \"Containers\"");
+    push_view(&mut l, &format!("component {} \"ApiComponents\"", c4id("ct_", "api")));
+    l.push("    styles {".into());
+    push_style(&mut l, "Element", &["color #ffffff"]);
+    push_style(&mut l, "Software System", &["background #2d4f4a"]);
+    push_style(&mut l, "Container", &["background #313335"]);
+    push_style(&mut l, "External", &["background #cc7832"]);
+    push_style(&mut l, "Aggregate", &["background #4ec9b0", "color #11201d"]);
+    push_style(&mut l, "ProcessManager", &["background #56a0c0"]);
+    push_style(&mut l, "Instrumented", &["background #c586c0"]);
+    push_style(&mut l, "Domain", &["background #313335"]);
+    l.push("    }".into());
+    l.push("  }".into());
+    l.push("}".into());
+    l.push("".into());
+    l.join("\n")
+}
+
+fn emit_mermaid(model: &Model) -> String {
+    let c4 = read_c4(model);
+    let actors = parse_actors(model);
+    let views = views_fedby(model);
+
+    // 1) Container diagram.
+    let mut container: Vec<String> = vec!["flowchart LR".into()];
+    container.push("  subgraph CaptainFood[\"Captain.Food\"]".into());
+    for c in &c4.containers {
+        container.push(format!("    {}[\"{}<br/><small>{}</small>\"]", c4id("n_", &c.id), c.id, c.technology));
+    }
+    container.push("  end".into());
+    for x in &c4.externals {
+        container.push(format!("  {}[/\"{}\"/]", c4id("n_", &x.id), x.id));
+    }
+    for r in &c4.relationships {
+        container.push(format!("  {} -->|\"{}\"| {}", c4id("n_", &r.from), r.description.replace('"', "'"), c4id("n_", &r.to)));
+    }
+
+    // 2) Domain diagram: contexts → aggregates → the read models they feed.
+    let mut evt_views: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for (vname, fedby) in &views {
+        for e in fedby {
+            evt_views.entry(e.clone()).or_default().push(vname.clone());
+        }
+    }
+    let emits_of = |a: &Actor| -> Vec<String> {
+        let mut v: Vec<String> = Vec::new();
+        for r in &a.receives {
+            for ev in &r.emits {
+                if let Some(n) = ref_name(ev) {
+                    if !v.contains(&n) {
+                        v.push(n);
+                    }
+                }
+            }
+        }
+        v
+    };
+    let mut domain: Vec<String> = vec!["flowchart LR".into()];
+    for ctx in &c4.contexts {
+        domain.push(format!("  subgraph {}[\"{}\"]", c4id("g_", &ctx.id), ctx.id));
+        for a in ctx.aggregates.iter().chain(ctx.process_managers.iter()) {
+            domain.push(format!("    {}[\"{}\"]", c4id("a_", a), a));
+        }
+        domain.push("  end".into());
+    }
+    let mut view_ids: Vec<String> = Vec::new();
+    let mut edges: Vec<String> = Vec::new();
+    for a in &actors {
+        let mut seen_v: Vec<String> = Vec::new();
+        for ev in emits_of(a) {
+            if let Some(vs) = evt_views.get(&ev) {
+                for v in vs {
+                    if !seen_v.contains(v) {
+                        seen_v.push(v.clone());
+                    }
+                }
+            }
+        }
+        for v in &seen_v {
+            if !view_ids.contains(v) {
+                view_ids.push(v.clone());
+            }
+            let edge = format!("  {} --> {}", c4id("a_", &a.name), c4id("v_", v));
+            if !edges.contains(&edge) {
+                edges.push(edge);
+            }
+        }
+    }
+    for v in &view_ids {
+        domain.push(format!("  {}[(\"{}\")]", c4id("v_", v), v));
+    }
+    domain.extend(edges);
+
+    // 3) Saga sequence diagrams.
+    let mut saga_blocks: Vec<String> = Vec::new();
+    for a in actors.iter().filter(|a| a.kind == "process-manager") {
+        let mut sl: Vec<String> = vec![
+            "sequenceDiagram".into(),
+            "  autonumber".into(),
+            "  participant C as Caller / inbound".into(),
+            format!("  participant P as {}", a.name),
+            "  participant S as Event store".into(),
+        ];
+        for e in &a.receives {
+            let msg = ref_name(&e.message_ref).unwrap_or_else(|| "?".to_string());
+            let kind = if e.message_ref.starts_with("commands.yaml#/") { "command" } else { "event" };
+            sl.push(format!("  C->>P: {} ({})", msg, kind));
+            let emits: Vec<String> = e.emits.iter().filter_map(|r| ref_name(r)).collect();
+            if !emits.is_empty() {
+                for ev in &emits {
+                    sl.push(format!("  P->>S: {}", ev));
+                }
+            } else {
+                let effect = e.effect.clone().unwrap_or_else(|| "no event emitted".to_string());
+                let cleaned: String = effect.replace('\n', " ").replace(':', " ").replace(';', " ");
+                let clipped: String = cleaned.chars().take(60).collect();
+                sl.push(format!("  Note over P: {}", clipped));
+            }
+        }
+        for line in [format!("### {}", a.name), String::new(), "```mermaid".into(), sl.join("\n"), "```".into(), String::new()] {
+            saga_blocks.push(line);
+        }
+    }
+
+    let mut out: Vec<String> = vec![
+        "<!-- GENERATED by tools/codegen — do not edit by hand. Source: specs/architecture/c4-*.yaml. -->".into(),
+        "# Captain.Food — C4 diagrams (Mermaid, generated)".into(),
+        "".into(),
+        "Rendered by any Mermaid-aware viewer (GitHub, VS Code, mermaid.live). The authoritative source is".into(),
+        "`specs/architecture/c4-l2.yaml` / `c4-l3.yaml`; regenerate with `npm run generate`.".into(),
+        "".into(),
+        "## L2 — Containers & external systems".into(),
+        "".into(),
+        "```mermaid".into(),
+        container.join("\n"),
+        "```".into(),
+        "".into(),
+        "## Domain — bounded contexts → aggregates → read models".into(),
+        "".into(),
+        "Each aggregate links to the `View_*` read models its emitted events project into.".into(),
+        "".into(),
+        "```mermaid".into(),
+        domain.join("\n"),
+        "```".into(),
+        "".into(),
+        "## Saga sequences — message → emitted events, in order".into(),
+        "".into(),
+        "Each process manager (saga) as a time-ordered sequence: the command/event it receives and the".into(),
+        "events it emits in response (derived from `actors.yaml`).".into(),
+        "".into(),
+    ];
+    out.extend(saga_blocks);
+    out.join("\n")
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let check = args.iter().any(|a| a == "--check");
@@ -429,9 +921,11 @@ fn main() {
         eprintln!("✗ create {}: {}", out_dir.display(), e);
         std::process::exit(1);
     }
-    let artifacts: [(&str, String); 2] = [
+    let artifacts: [(&str, String); 4] = [
         ("translations.generated.json", emit_translations_json(&model)),
         ("views.generated.sql", emit_views_sql(&model)),
+        ("c4.generated.dsl", emit_structurizr(&model)),
+        ("c4.generated.md", emit_mermaid(&model)),
     ];
     for (name, content) in &artifacts {
         let path = out_dir.join(name);

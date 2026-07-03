@@ -59,9 +59,11 @@ unaffected.
    runs build + test + validate + generate(+diff) locally, and the CI `rust-codegen` job runs the same —
    **validate + generate + git-diff**, so a spec↔generation mismatch fails the build (same guarantee as the
    TS job). The TypeScript `consistency` job stays the blocking gate until the Rust tool reaches parity.
-   Ported so far (byte-identical, verified by generate+diff): spec loading, `$ref` referential integrity, and
-   the `translations.generated.json` + `views.generated.sql` emitters. Remaining: the other validation gates +
-   emitters (GraphQL SDL, C4 DSL/Mermaid, the two docs, database.md injection), then flip CI to Rust and retire the TS codegen.
+   Ported so far (byte-identical, verified by generate+diff): spec loading, `$ref` referential integrity, the
+   actor + view models, and the emitters for `translations.generated.json`, `views.generated.sql`,
+   `c4.generated.dsl` + `c4.generated.md` (Structurizr + Mermaid). Remaining: the GraphQL SDL emitter, the two
+   documentation emitters, the `database.md` injection, then the other validation gates — then flip CI to Rust
+   and retire the TS codegen.
 3. **Generation targets**: what the codegen emits for Rust — `shared_types` (serde), Crux core skeletons from
    actors/commands/events, `async-graphql` schema, `sqlx` migrations from `views.yaml`, the Leptos SDUI
    registry from `customer_screens.yaml`. Currently it emits GraphQL SDL + SQL + C4 + docs (renderer-agnostic).
