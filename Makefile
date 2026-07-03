@@ -42,7 +42,7 @@ rust-validate:
 # … then generate the ported artifacts and fail if they drift from what's committed (spec↔generation).
 rust-generate:
 	cargo run --manifest-path $(CODEGEN_RS)/Cargo.toml -- --specs specs
-	@git diff --quiet --ignore-cr-at-eol specs/generated || { echo "rust-generate: generated artifacts drifted from the specs — commit the regenerated files."; git --no-pager diff --ignore-cr-at-eol --stat specs/generated; exit 1; }
+	@git diff --quiet --ignore-cr-at-eol specs || { echo "rust-generate: generated artifacts drifted from the specs — commit the regenerated files."; git --no-pager diff --ignore-cr-at-eol --stat specs; exit 1; }
 rust: rust-build rust-test rust-validate rust-generate
 	@echo "rust: build + test + validate + generate(+diff) OK"
 

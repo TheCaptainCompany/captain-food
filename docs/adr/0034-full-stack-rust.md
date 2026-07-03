@@ -63,8 +63,9 @@ unaffected.
    integrity, the actor + view + API models, and the emitters for `translations.generated.json`,
    `views.generated.sql`, `c4.generated.dsl` + `c4.generated.md` (Structurizr + Mermaid), and
    `schema.generated.graphql` (the full GraphQL SDL: scalars/enums, output types + FK-navigation, input types,
-   payloads, queries/mutations/subscriptions). Remaining: the two documentation emitters + the `database.md`
-   injection, then the other validation gates — then flip CI to Rust and retire the TS codegen.
+   payloads, queries/mutations/subscriptions), and the **`database.md`** §2 read-model injection (in-place,
+   between the GENERATED:views markers). Remaining: the two documentation emitters, then the other validation
+   gates — then flip CI to Rust and retire the TS codegen.
 3. **Generation targets**: what the codegen emits for Rust — `shared_types` (serde), Crux core skeletons from
    actors/commands/events, `async-graphql` schema, `sqlx` migrations from `views.yaml`, the Leptos SDUI
    registry from `customer_screens.yaml`. Currently it emits GraphQL SDL + SQL + C4 + docs (renderer-agnostic).
