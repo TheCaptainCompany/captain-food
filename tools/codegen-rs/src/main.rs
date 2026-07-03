@@ -1642,6 +1642,163 @@ fn emit_views_sql(model: &Model) -> String {
     )
 }
 
+// ─── schema.generated.sql (ADR-0037 — store DDL from database/tables.yaml + functions/*.sql + scalars enums) ──
+
+/// snake_case of a PascalCase type name, without a leading underscore (`OrderStatus` → `order_status`).
+fn snake_type(s: &str) -> String {
+    snake_field(s).trim_start_matches('_').to_string()
+}
+
+/// Map a tables.yaml SQL-primitive column type to its Postgres spelling. Infrastructure tables are
+/// deliberately decoupled from the domain scalars, so this is a closed map — an unknown type is a spec
+/// error, failed loudly rather than defaulted.
+fn table_sql_type(ty: &str) -> &'static str {
+    match ty {
+        "uuid" => "UUID",
+        "text" => "TEXT",
+        "integer" => "INTEGER",
+        "bigint" => "BIGINT",
+        "boolean" => "BOOLEAN",
+        "timestamptz" => "TIMESTAMPTZ",
+        "jsonb" => "JSONB",
+        "numeric" => "NUMERIC",
+        "interval" => "INTERVAL",
+        other => panic!("database/tables.yaml: unknown column type '{}' — extend table_sql_type", other),
+    }
+}
+
+/// Emit `schema.generated.sql` (ADR-0037): the full store DDL — enum reference tables from
+/// scalars.yaml, the real tables from database/tables.yaml, the raw SQL functions from
+/// database/functions/*.sql (sorted by filename), then the triggers declared on the tables
+/// (after the functions they execute).
+fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
+    let mut sections: Vec<String> = Vec::new();
+
+    // 1. Enum reference tables — one ref_<snake> lookup table per scalars.yaml enum, in file order.
+    if let Some(Value::Mapping(m)) = model.defs.get("scalars.yaml") {
+        for (k, node) in m {
+            let name = match k.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            let vals = match node.get("enum").and_then(|e| e.as_sequence()) {
+                Some(v) => v,
+                None => continue,
+            };
+            let table = format!("ref_{}", snake_type(name));
+            let values: Vec<String> = vals
+                .iter()
+                .enumerate()
+                .filter_map(|(i, v)| v.as_str().map(|s| format!("('{}',{})", s, i)))
+                .collect();
+            sections.push(format!(
+                "-- {}\nCREATE TABLE {}(value TEXT PRIMARY KEY, sort_order INT NOT NULL);\nINSERT INTO {} (value, sort_order) VALUES {};",
+                name,
+                table,
+                table,
+                values.join(",")
+            ));
+        }
+    }
+
+    // 2. Tables from database/tables.yaml, in file order. Triggers are collected and emitted after
+    // the functions they execute (step 4).
+    let mut triggers: Vec<String> = Vec::new();
+    if let Some(Value::Mapping(m)) = model.defs.get("database/tables.yaml") {
+        for (k, node) in m {
+            let name = match k.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            let cols = match node.get("columns").and_then(|c| c.as_mapping()) {
+                Some(c) => c,
+                None => continue,
+            };
+            let mut lines: Vec<String> = Vec::new();
+            for (ck, cv) in cols {
+                let cname = match ck.as_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let cty = cv.get("type").and_then(|t| t.as_str()).unwrap_or_else(|| {
+                    panic!("database/tables.yaml#/{}/columns/{}: missing type", name, cname)
+                });
+                let flag = |f: &str| cv.get(f).and_then(|x| x.as_bool()) == Some(true);
+                let mut line = format!("  {} {}", cname, table_sql_type(cty));
+                if flag("identity") {
+                    line.push_str(" GENERATED ALWAYS AS IDENTITY");
+                }
+                if flag("pk") {
+                    line.push_str(" PRIMARY KEY");
+                } else {
+                    line.push_str(if flag("nullable") { " NULL" } else { " NOT NULL" });
+                    if flag("unique") {
+                        line.push_str(" UNIQUE");
+                    }
+                }
+                lines.push(line);
+            }
+            if let Some(cs) = node.get("constraints").and_then(|c| c.as_sequence()) {
+                for c in cs {
+                    if let Some(u) = c.get("unique").and_then(|x| x.as_sequence()) {
+                        let cols: Vec<&str> = u.iter().filter_map(|v| v.as_str()).collect();
+                        lines.push(format!("  UNIQUE ({})", cols.join(", ")));
+                    }
+                }
+            }
+            let mut block = format!("CREATE TABLE {} (\n{}\n);", name, lines.join(",\n"));
+            if let Some(seq) = node.get("indexes").and_then(|x| x.as_sequence()) {
+                for ix in seq {
+                    if let Some(cols) = ix.as_sequence() {
+                        let cols: Vec<&str> = cols.iter().filter_map(|v| v.as_str()).collect();
+                        block.push_str(&format!("\nCREATE INDEX ON {} ({});", name, cols.join(", ")));
+                    }
+                }
+            }
+            sections.push(block);
+            if let Some(ts) = node.get("triggers").and_then(|t| t.as_sequence()) {
+                for t in ts {
+                    let get = |f: &str| {
+                        t.get(f).and_then(|x| x.as_str()).unwrap_or_else(|| {
+                            panic!("database/tables.yaml#/{}/triggers: missing {}", name, f)
+                        })
+                    };
+                    triggers.push(format!(
+                        "CREATE TRIGGER {} {} ON {} FOR EACH {} EXECUTE FUNCTION {}();",
+                        get("name"),
+                        get("timing"),
+                        name,
+                        get("for_each").to_uppercase(),
+                        get("function")
+                    ));
+                }
+            }
+        }
+    }
+
+    // 3. Functions — raw SQL bodies from database/functions/*.sql, sorted by filename. They reference
+    // domain_events/domain_stream, which now exist above.
+    let fn_dir = specs.join("database/functions");
+    let mut fn_files: Vec<PathBuf> = fs::read_dir(&fn_dir)
+        .unwrap_or_else(|e| panic!("read {}: {}", fn_dir.display(), e))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("sql"))
+        .collect();
+    fn_files.sort_by_key(|p| p.file_name().map(|n| n.to_os_string()));
+    for p in &fn_files {
+        let body = fs::read_to_string(p).unwrap_or_else(|e| panic!("read {}: {}", p.display(), e));
+        sections.push(body.replace("\r\n", "\n").trim().to_string());
+    }
+
+    // 4. Triggers — after the functions they execute.
+    sections.extend(triggers);
+
+    format!(
+        "-- GENERATED by the Captain.Food codegen from specs/database/ + scalars.yaml — do not edit by hand.\n\n{}\n",
+        sections.join("\n\n")
+    )
+}
+
 // ─── database.md §2 read-model tables (port of emit/database.ts `emitViewsMarkdown`) ────────────
 
 fn md_table(header: &[&str], rows: &[Vec<String>]) -> String {
@@ -4775,9 +4932,10 @@ fn main() {
         eprintln!("✗ create {}: {}", out_dir.display(), e);
         std::process::exit(1);
     }
-    let artifacts: [(&str, String); 7] = [
+    let artifacts: [(&str, String); 8] = [
         ("translations.generated.json", emit_translations_json(&model)),
         ("views.generated.sql", emit_views_sql(&model)),
+        ("schema.generated.sql", emit_schema_sql(&model, &specs)),
         ("c4.generated.dsl", emit_structurizr(&model)),
         ("c4.generated.md", emit_mermaid(&model)),
         ("schema.generated.graphql", emit_schema(&model)),
