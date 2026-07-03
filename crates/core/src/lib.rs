@@ -4,6 +4,7 @@
 //! (Http, Storage, Render…). It orchestrates the `domain` model and speaks `shared_types` DTOs, with no
 //! side effects of its own. Depends on `domain` + `shared_types`; referencing both proves those edges.
 
+use domain::generated::scalars::{CurrencyCode, MoneyCents};
 use domain::shared::value_objects::Money;
 use shared_types::HealthDto;
 
@@ -14,5 +15,5 @@ pub fn health() -> HealthDto {
 
 /// Placeholder using a domain value object — the real model will hold typed aggregate snapshots.
 pub fn zero_eur() -> Money {
-    Money { amount_cents: 0, currency: "EUR".to_string() }
+    Money { amount_cents: MoneyCents(0), currency: CurrencyCode("EUR".to_string()) }
 }

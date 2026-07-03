@@ -29,3 +29,33 @@ mod scalar_serde_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod entity_serde_tests {
+    //! The generated entity structs use `#[serde(rename_all = "camelCase")]` over transparent scalar
+    //! newtypes; assert the wire shape matches `entities.yaml` exactly (camelCase keys, scalars as bare
+    //! values) and that an optional array (`#[serde(default)]`) tolerates a missing key.
+    use crate::generated::entities::{CartLineItem, Money};
+    use crate::generated::scalars::{CurrencyCode, MoneyCents};
+
+    #[test]
+    fn money_roundtrips_camel_case_with_transparent_scalars() {
+        let money = Money { amount_cents: MoneyCents(980), currency: CurrencyCode("EUR".into()) };
+        let json = serde_json::json!({ "amountCents": 980, "currency": "EUR" });
+        assert_eq!(serde_json::to_value(&money).unwrap(), json);
+        assert_eq!(serde_json::from_value::<Money>(json).unwrap(), money);
+    }
+
+    #[test]
+    fn missing_optional_array_deserializes_to_empty() {
+        let nil = "00000000-0000-0000-0000-000000000000";
+        let line: CartLineItem = serde_json::from_value(serde_json::json!({
+            "cartLineId": nil,
+            "offerId": nil,
+            "quantity": 2,
+        }))
+        .unwrap();
+        assert_eq!(line.quantity, 2);
+        assert!(line.selected_option_ids.is_empty());
+    }
+}
