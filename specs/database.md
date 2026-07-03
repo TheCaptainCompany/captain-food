@@ -102,8 +102,8 @@ The read models below are the **source of truth in [views.yaml](views.yaml)** an
 is GENERATED from it (run `make generate`). Each view declares only what is
 intrinsic to the read model: its **source aggregate + events** ([events.yaml](events.yaml) /
 [actors.yaml](actors.yaml)), its **business filters/rules**, and its **columns**. The consumer mapping
-— which GraphQL query reads it — is declared in [api.yaml](api.yaml) via `@reads` and
-surfaced in [traceability.md](traceability.md) §2. Money is stored as integer minor units (`*_cents`
+— which GraphQL query reads it — is declared in [api.yaml](api.yaml) via `@reads`
+(rendered in the generated documentation). Money is stored as integer minor units (`*_cents`
 + `currency`), matching `Money`; `JSONB` is used where a whole sub-tree is fetched at once. The SQL
 DDL for these tables is generated to `specs/generated/views.generated.sql`.
 

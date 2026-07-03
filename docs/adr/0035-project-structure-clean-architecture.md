@@ -25,7 +25,7 @@ captain-food/
 │   ├── scalars/entities/events/commands/errors/actors/views/api/stories/rules/tests/
 │   │   translations/customer_screens/observability .yaml
 │   ├── architecture/c4-l2.yaml c4-l3.yaml
-│   ├── story-map.md database.md traceability.md   # narrative + injected/derived prose
+│   ├── database.md            # narrative + injected/derived read-model prose
 │   ├── integrations/hubrise.md supabase.md
 │   └── generated/             # GENERATED (committed; CI diffs): schema.graphql, views.generated.sql, c4.*, docs, translations.json
 ├── tools/codegen-rs/          # THE codegen (ADR-0034): validator §1–§11 + all emitters + the Rust generation targets
