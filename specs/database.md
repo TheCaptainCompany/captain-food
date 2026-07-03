@@ -24,7 +24,7 @@ unique), `stream_name` (`<Category>-<id>`, e.g. `Catalog-12345`; category = pref
 | `$ce-<category>` projection | `ce_events(category)` |
 | `$et-<type>` projection | `et_events(event_type)` |
 | `$all` global stream | `all_events()` — `ORDER BY position` |
-| Stream `$maxAge` / `$maxCount` | `domain_stream(category, max_age, max_count)` policy + `expired_at`; a trigger enforces `$maxCount`, a scheduled sweep enforces `$maxAge` |
+| Stream `$maxAge` / `$maxCount` | `domain_stream(stream_name, max_age, max_count)` policy + `expired_at`; a trigger enforces `$maxCount`, a scheduled sweep enforces `$maxAge` |
 
 - The category prefix is one of `Restaurant | Catalog | Customer | Cart | Order | DeliveryJob`
   (matches the aggregates in [actors.yaml](actors.yaml)); the `<id>` suffix is the instance id.
@@ -42,11 +42,11 @@ Bodies live in [`database/functions/*.sql`](database/functions/) and are assembl
 ### Stream retention — `$maxAge` / `$maxCount`
 
 The log is **append-only by default** — full history is what makes the `View_*` projections rebuildable, so
-most categories keep everything. Retention is **opt-in per stream category** via `domain_stream` and meant
-only for **ephemeral** streams (e.g. `Cart`). `$maxCount` is enforced synchronously by the
-`trg_domain_events_max_count` trigger (`enforce_max_count`), trimming a stream to its last N versions.
-**Only categories with a policy row are ever trimmed** — `Order`/`Restaurant`/`Customer` have none and keep
-full history, staying rebuildable (ADR-0005). `expired_at` is the per-event escape hatch.
+most streams keep everything. Retention is **opt-in per stream** (keyed by `stream_name`) via
+`domain_stream` and meant only for **ephemeral** streams (e.g. a `Cart-<id>`). `$maxCount` is enforced
+synchronously by the `trg_domain_events_max_count` trigger (`enforce_max_count`), trimming a stream to its
+last N versions. **Only streams with a policy row are ever trimmed** — everything else keeps full history,
+staying rebuildable (ADR-0005). `expired_at` is the per-event escape hatch.
 
 `$maxAge` is enforced by a scheduled sweep — **not part of the generated schema** (environment-specific): a
 `pg_cron` job, or a dedicated retention worker where `pg_cron` is unavailable (e.g. the managed tier):
@@ -54,9 +54,9 @@ full history, staying rebuildable (ADR-0005). `expired_at` is the per-event esca
 ```sql
 SELECT cron.schedule('domain_events_retention', '0 * * * *', $$
   DELETE FROM domain_events e USING domain_stream s
-  WHERE split_part(e.stream_name, '-', 1) = s.category
+  WHERE e.stream_name = s.stream_name
     AND (   (e.expired_at IS NOT NULL AND e.expired_at < now())          -- explicit per-event TTL
-         OR (s.max_age    IS NOT NULL AND e.occurred_at < now() - s.max_age) );  -- category $maxAge
+         OR (s.max_age    IS NOT NULL AND e.occurred_at < now() - s.max_age) );  -- stream $maxAge
 $$);
 ```
 

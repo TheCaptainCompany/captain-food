@@ -117,7 +117,7 @@ CREATE INDEX ON domain_events (event_type);
 CREATE INDEX ON domain_events (occurred_at);
 
 CREATE TABLE domain_stream (
-  category TEXT PRIMARY KEY,
+  stream_name TEXT PRIMARY KEY,
   max_age INTERVAL NULL,
   max_count INTEGER NULL
 );
@@ -144,12 +144,12 @@ LANGUAGE sql STABLE AS $$
 $$;
 
 -- enforce_max_count(): AFTER-INSERT trigger function backing domain_events' $maxCount. Trims the
--- inserted event's stream to the last N versions, where N is the category's domain_stream.max_count
+-- inserted event's stream to the last N versions, where N is that stream's domain_stream.max_count
 -- (no row / NULL = unbounded). Bound by trg_domain_events_max_count (see tables.yaml).
 CREATE FUNCTION enforce_max_count() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE cap INT;
 BEGIN
-  SELECT max_count INTO cap FROM domain_stream WHERE category = split_part(NEW.stream_name, '-', 1);
+  SELECT max_count INTO cap FROM domain_stream WHERE stream_name = NEW.stream_name;
   IF cap IS NOT NULL THEN
     DELETE FROM domain_events
     WHERE stream_name = NEW.stream_name

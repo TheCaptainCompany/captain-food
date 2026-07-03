@@ -16,7 +16,7 @@ domain_events:
     version:        { type: integer,                               note: "0-based event number within the stream" }
     user_id:        { type: uuid }
     user_type:      { type: integer }
-    correlation_id: { type: uuid }
+    correlation_id: { $ref: ../scalars.yaml#/CorrelationId }
     cause_id:       { type: uuid,        nullable: true }
     event_type:     { type: text,                                  note: "$et-<type>" }
     payload:        { type: jsonb }
@@ -34,9 +34,9 @@ domain_events:
 
 domain_stream:
   description: >
-    Opt-in per-category retention policy ($maxAge / $maxCount). Only ephemeral categories (e.g. Cart) get a
+    Opt-in per-stream retention policy ($maxAge / $maxCount). Only ephemeral streams (e.g. Cart) get a
     row; Order/Restaurant/Customer keep full history so their projections stay rebuildable (ADR-0005).
   columns:
-    category:  { type: text,     pk: true,       note: "stream category / aggregate type" }
+    stream_name:  { type: text,     pk: true,       note: "stream name '<Category>-<id>', e.g. 'Catalog-12345'" }
     max_age:   { type: interval, nullable: true, note: "$maxAge — events older than this are swept (NULL = keep forever)" }
-    max_count: { type: integer,  nullable: true, note: "$maxCount — keep at most N most-recent events per stream (NULL = unbounded)" }
+    max_count: { type: integer,  nullable: true, note: "$maxCount — keep at most N most-recent events (NULL = unbounded)" }
