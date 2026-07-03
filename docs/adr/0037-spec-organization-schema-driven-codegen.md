@@ -68,9 +68,17 @@ emitters converge onto the declarative model over time.
 - `views.yaml` move + rekey touches the codegen broadly (parse/validator/emitters) — do it in one pass.
 - Enum-table reconciliation must be careful with FKs (delete a value only after dependents migrate).
 ### Follow-up actions
-- Move `views.yaml` → `specs/database/`; add `tables.yaml`, `functions/*.sql`, the schema SQL emitter, and the enum-table emitter + migration reconciliation.
-- Generalize the screens model (`roles`/`appTypes`, glob) in the validator + docs.
-- Record test mode as ADR-0038 (referenced by screens/entities work).
+- ✅ Moved `views.yaml` → `specs/database/`; added `tables.yaml` (real tables, columns may be SQL primitives
+  or scalar `$ref`s), `functions/*.sql`, and the `schema.generated.sql` emitter (real tables + `ref_<enum>`
+  lookup tables + functions + `$maxCount` trigger). `database.md` §1 is now narrative referencing it.
+- ✅ Screens `roles` (⊆ UserType) + `app_types` (⊆ web/ios/android/windows): added to `customer_screens.yaml`
+  and validated; §11 is generic over `screens/*.yaml` (no hard-coded `customer_screens`).
+- ✅ Recorded test mode as ADR-0038.
+- ⬜ **Remaining**: generalize the two *docs emitters* (MD + HTML) to render all `screens/*.yaml` files
+  (deferred — only needed once a 2nd screens file exists; must stay byte-identical for the single-file case).
+- ⬜ Enum-table row **reconciliation** in the `sqlx` migration (insert/update/delete on enum change) — lands
+  with the migration generator (once `crates/` migrations exist).
+- ⬜ Realize ADR-0038 (test mode) in the domain specs.
 
 ## References
 Stripe test-mode/Sudo, HubRise sandbox, EventStoreDB stream metadata. Complements ADR-0005/0006/0034/0035.
