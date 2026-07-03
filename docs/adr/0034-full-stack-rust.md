@@ -62,10 +62,10 @@ unaffected.
    Ported so far (byte-identical, verified by generate+diff): spec loading + meta-strip, `$ref` referential
    integrity, the actor + view + API models, and the emitters for `translations.generated.json`,
    `views.generated.sql`, `c4.generated.dsl` + `c4.generated.md` (Structurizr + Mermaid), and
-   `schema.generated.graphql` (the full GraphQL SDL: scalars/enums, output types + FK-navigation, input types,
-   payloads, queries/mutations/subscriptions), and the **`database.md`** §2 read-model injection (in-place,
-   between the GENERATED:views markers). Remaining: the two documentation emitters, then the other validation
-   gates — then flip CI to Rust and retire the TS codegen.
+   `schema.generated.graphql` (the full GraphQL SDL), the **`database.md`** §2 read-model injection, and the
+   **`documentation.generated.md`** Markdown docs (the bounded-context engine `buildContextMap` + stories +
+   every kind rendered with cross-links, ~6.4k lines). Remaining: the HTML documentation emitter, then the
+   other validation gates — then flip CI to Rust and retire the TS codegen.
 3. **Generation targets**: what the codegen emits for Rust — `shared_types` (serde), Crux core skeletons from
    actors/commands/events, `async-graphql` schema, `sqlx` migrations from `views.yaml`, the Leptos SDUI
    registry from `customer_screens.yaml`. Currently it emits GraphQL SDL + SQL + C4 + docs (renderer-agnostic).
