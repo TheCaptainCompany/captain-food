@@ -35,8 +35,10 @@ generate:
 	cargo run --manifest-path $(CODEGEN_RS)/Cargo.toml -- --specs specs
 
 # Regenerate, then fail if the result drifts from what's committed (the CI drift gate, runnable locally).
+# Whole-tree diff (matches CI): generated output spans specs/generated + specs/database.md AND the
+# generated Rust under crates/**/generated. Run on a clean tree — it's the gate, not a mid-edit helper.
 check-drift: generate
-	@git diff --quiet --ignore-cr-at-eol specs || { echo "check-drift: generated artifacts drifted from the specs — commit the regenerated files."; git --no-pager diff --ignore-cr-at-eol --stat specs; exit 1; }
+	@git diff --quiet --ignore-cr-at-eol || { echo "check-drift: generated artifacts drifted — run 'make generate' and commit the regenerated files."; git --no-pager diff --ignore-cr-at-eol --stat; exit 1; }
 
 # --- Rust codegen build/test aliases (ADR-0034). ---
 rust-build:

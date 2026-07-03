@@ -13,13 +13,10 @@ pub mod value_objects {
 }
 
 pub mod identifiers {
-    use serde::{Deserialize, Serialize};
-    use uuid::Uuid;
-
-    /// A strongly-typed aggregate id (one dedicated type per aggregate — no ambiguous reuse). Client-
-    /// generated (ADR-0034), so creates are idempotent.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-    pub struct RestaurantId(pub Uuid);
+    //! Strongly-typed aggregate ids — one dedicated type per aggregate, client-generated (ADR-0034) so
+    //! creates are idempotent. The types are GENERATED from `scalars.yaml` (ADR-0034 #3) and re-exported
+    //! here so the stable `domain::shared::identifiers::…` path keeps resolving across the layers.
+    pub use crate::generated::scalars::RestaurantId;
 }
 
 pub mod errors {
