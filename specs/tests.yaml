@@ -1670,6 +1670,27 @@ tests:
       - { $ref: 'errors.yaml#/OutsideDeliveryArea' }
       - { $ref: 'errors.yaml#/PaymentDeclined' }
 
+  TestPlaceOrderRejectsTestRestaurantForLiveOrder:
+    name: "A production (LIVE) order against a TEST restaurant is rejected (test-mode isolation)"
+    rules: [{ $ref: 'rules.yaml#/OrderTestModeIsolation' }]
+    actor: { $ref: 'actors.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        mode: "LIVE"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "DELIVERY"
+        deliveryAddress: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }
+        paymentMethodId: "pm_123"
+    thrown:
+      - { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }
+
   TestPlaceOrderPaymentCapturedPlacesOrder:
     name: "On payment capture the saga materializes the order and closes the cart"
     rules: [{ $ref: 'rules.yaml#/OrderMaterializedOnPaymentCapture' }]

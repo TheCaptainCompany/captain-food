@@ -595,3 +595,13 @@ PaymentDeclined:
   messages:
     en: "Payment was declined."
     fr: "Le paiement a été refusé."
+
+CannotOrderTestRestaurant:
+  description: >
+    A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real
+    customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "This restaurant is not available."
+    fr: "Ce restaurant n'est pas disponible."

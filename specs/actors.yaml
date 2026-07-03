@@ -450,6 +450,7 @@ PlaceOrderProcess:
         - { $ref: 'errors.yaml#/InsufficientStock' }
         - { $ref: 'errors.yaml#/InvalidOptionSelection' }
         - { $ref: 'errors.yaml#/PaymentDeclined' }
+        - { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }
       effect: "Read & price the OPEN cart, create the Stripe PaymentIntent, then await the outcome."
     - message: { $ref: 'events.yaml#/PaymentCaptured' }
       emits: [{ $ref: 'events.yaml#/OrderPlaced' }, { $ref: 'events.yaml#/CartCheckedOut' }]

@@ -3012,7 +3012,7 @@ _⚙️ process manager_ — The PlaceOrder saga: reads the OPEN cart, re-valida
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotActive`](#error-restaurantnotactive), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `CartRestaurantMismatch`](#error-cartrestaurantmismatch), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `OfferUnavailable`](#error-offerunavailable), [⛔ `InsufficientStock`](#error-insufficientstock), [⛔ `InvalidOptionSelection`](#error-invalidoptionselection), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
+| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotActive`](#error-restaurantnotactive), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `CartRestaurantMismatch`](#error-cartrestaurantmismatch), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `OfferUnavailable`](#error-offerunavailable), [⛔ `InsufficientStock`](#error-insufficientstock), [⛔ `InvalidOptionSelection`](#error-invalidoptionselection), [⛔ `PaymentDeclined`](#error-paymentdeclined), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant) |
 | [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) | — |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | _Abort the saga; no OrderPlaced; the cart stays OPEN._ | — |
 
@@ -3152,7 +3152,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 
 - **Dispatched by**: [✏️ `placeOrder`](#mutation-placeorder) · **handled by** [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Emits**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotActive`](#error-restaurantnotactive), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `CartRestaurantMismatch`](#error-cartrestaurantmismatch), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `OfferUnavailable`](#error-offerunavailable), [⛔ `InsufficientStock`](#error-insufficientstock), [⛔ `InvalidOptionSelection`](#error-invalidoptionselection), [⛔ `PaymentDeclined`](#error-paymentdeclined)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotActive`](#error-restaurantnotactive), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `CartRestaurantMismatch`](#error-cartrestaurantmismatch), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `OfferUnavailable`](#error-offerunavailable), [⛔ `InsufficientStock`](#error-insufficientstock), [⛔ `InvalidOptionSelection`](#error-invalidoptionselection), [⛔ `PaymentDeclined`](#error-paymentdeclined), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3815,7 +3815,7 @@ An option chosen by the customer on a line item, priced at order time.
 | <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| CAPTURED \| FAILED \| REFUNDED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded). |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
 
-### ⛔ Errors _(18)_
+### ⛔ Errors _(19)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -3837,8 +3837,9 @@ An option chosen by the customer on a line item, priced at order time.
 | <a id="error-deliveryaddressrequired"></a>⛔ `DeliveryAddressRequired` | serviceType is DELIVERY but no delivery address was provided. | 🇬🇧 A delivery address is required for delivery. | 🇫🇷 Une adresse de livraison est requise pour la livraison. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-outsidedeliveryarea"></a>⛔ `OutsideDeliveryArea` | Delivery address is outside the restaurant's delivery area. | 🇬🇧 This address is outside the delivery area of '{restaurantName}'. | 🇫🇷 Cette adresse est en dehors de la zone de livraison de '{restaurantName}'. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-paymentdeclined"></a>⛔ `PaymentDeclined` | Stripe declined the payment synchronously at checkout (no order placed). | 🇬🇧 Payment was declined. | 🇫🇷 Le paiement a été refusé. | [📩 `PlaceOrder`](#command-placeorder) |
+| <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 
-### 📐 Business rules _(12)_
+### 📐 Business rules _(13)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -3895,6 +3896,13 @@ _A customer can request a refund for an order._
 _Checkout reads and prices the open cart and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment._
 
 - **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPlaceOrderIsRejected`](#test-testplaceorderisrejected)
+
+<a id="rule-ordertestmodeisolation"></a>
+#### 📐 Rule: `OrderTestModeIsolation`
+
+_Test-mode isolation (ADR-0038): a production (LIVE) order is rejected against a TEST restaurant, so real customers never reach test data; a TEST order MAY target a LIVE restaurant to validate the real receipt path, and TEST orders/deliveries are excluded from payouts and analytics._
+
+- **Verified by**: [🧪 `TestPlaceOrderRejectsTestRestaurantForLiveOrder`](#test-testplaceorderrejectstestrestaurantforliveorder)
 
 <a id="rule-ordermaterializedonpaymentcapture"></a>
 #### 📐 Rule: `OrderMaterializedOnPaymentCapture`
@@ -4171,6 +4179,16 @@ _Rejects checkout when the restaurant is paused, the cart is empty, the delivery
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Thrown**: [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartEmpty`](#error-cartempty), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PaymentDeclined`](#error-paymentdeclined)
 - **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+
+<a id="test-testplaceorderrejectstestrestaurantforliveorder"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsTestRestaurantForLiveOrder`
+
+_A production (LIVE) order against a TEST restaurant is rejected (test-mode isolation)_
+
+- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant)
+- **Verifies**: [📐 `OrderTestModeIsolation`](#rule-ordertestmodeisolation)
 
 <a id="test-testplaceorderpaymentcapturedplacesorder"></a>
 #### 🧪 Test: `TestPlaceOrderPaymentCapturedPlacesOrder`

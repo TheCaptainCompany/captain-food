@@ -103,6 +103,8 @@ RefundRequestByCustomer:
 # --- PlaceOrderProcess (checkout saga) ---
 CheckoutPricesCartCreatesPaymentIntent:
   description: "Checkout reads and prices the open cart and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment."
+OrderTestModeIsolation:
+  description: "Test-mode isolation (ADR-0038): a production (LIVE) order is rejected against a TEST restaurant, so real customers never reach test data; a TEST order MAY target a LIVE restaurant to validate the real receipt path, and TEST orders/deliveries are excluded from payouts and analytics."
 OrderMaterializedOnPaymentCapture:
   description: "On payment capture the order is materialized and the cart is closed."
 CheckoutAbortsOnPaymentFailure:
