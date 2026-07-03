@@ -59,3 +59,20 @@ jobs:
             exit 1
           fi
           echo "✓ generated artifacts match the specs"
+
+  # The Rust codegen (ADR-0034) is being ported incrementally; CI is its compiler/verifier since there is
+  # no local Rust toolchain. This job builds + tests + runs it against the specs. The `consistency` job
+  # above remains the blocking spec gate until the Rust tool reaches parity.
+  rust-codegen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the Rust codegen
+        working-directory: tools/codegen-rs
+        run: cargo build --verbose
+      - name: Unit tests
+        working-directory: tools/codegen-rs
+        run: cargo test --verbose
+      - name: Referential-integrity gate (stage 1) against the specs
+        run: cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --check --specs specs
