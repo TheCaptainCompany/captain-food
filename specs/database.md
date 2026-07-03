@@ -37,7 +37,8 @@ sequence of one aggregate instance; it maps 1:1 to a domain aggregate (`actors.y
 | Event type | `event_type` |
 | `$ce-<category>` projection | `ce_events(category)` (below) |
 | `$et-<type>` projection | `et_events(event_type)` (below) |
-| Stream `$maxAge` / `$maxCount` | `expired_at` (simplified to a per-event TTL) |
+| `$all` global stream | `all_events()` (below) — `ORDER BY position` |
+| Stream `$maxAge` / `$maxCount` | `domain_stream(category, max_age, max_count)` policy + `expired_at`; a trigger enforces `$maxCount`, a scheduled sweep enforces `$maxAge` (below) |
 
 - The category prefix is one of `Restaurant | Catalog | Customer | Cart | Order | DeliveryJob`
   (matches the aggregates in [actors.yaml](actors.yaml)); the `<id>` suffix is the instance id.
@@ -90,6 +91,83 @@ $$;
 - `event_type` is an event name from [events.yaml](events.yaml), e.g. `'RestaurantRegistered'`.
 - Backed by the `(event_type)` index.
 - Ordered by `position` (the `$all` global order), since the result spans many streams.
+
+### Helper — the global log (`$all`)
+
+`all_events()` returns the entire log in global order — the SQL equivalent of EventStoreDB's `$all`
+stream. Inspection/replay only (projections track a checkpoint on `position`); never a read path.
+
+```sql
+-- all_events()  ==  SELECT * FROM domain_events ORDER BY position
+CREATE FUNCTION all_events()
+RETURNS SETOF domain_events
+LANGUAGE sql STABLE AS $$
+  SELECT * FROM domain_events ORDER BY position;
+$$;
+```
+
+### Stream retention — `$maxAge` / `$maxCount`
+
+The log is **append-only by default** — full history is what makes the `View_*` projections rebuildable,
+so most categories keep everything. Retention is **opt-in per stream category** and meant only for
+**ephemeral** streams (e.g. `Cart`, which is never abandoned but need not be kept forever). A tiny config
+table holds the policy — the SQL equivalent of EventStoreDB's per-stream `$maxAge` / `$maxCount` metadata:
+
+```sql
+CREATE TABLE domain_stream (
+  category   TEXT PRIMARY KEY,   -- stream category (aggregate type): Restaurant | Catalog | Customer | Cart | Order | DeliveryJob
+  max_age    INTERVAL NULL,      -- $maxAge: events older than this are swept (NULL = keep forever)
+  max_count  INT      NULL       -- $maxCount: keep at most N most-recent events PER STREAM in the category (NULL = unbounded)
+);
+-- Example: only Cart is truncated; the order/restaurant history stays complete.
+-- INSERT INTO domain_stream (category, max_age, max_count) VALUES ('Cart', INTERVAL '90 days', 500);
+```
+
+**`$maxCount` — enforced synchronously by a trigger.** After each append, the oldest events of *that
+stream* beyond the category's `max_count` are trimmed (keeping the last N versions):
+
+```sql
+CREATE FUNCTION enforce_max_count() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE cap INT;
+BEGIN
+  SELECT max_count INTO cap FROM domain_stream WHERE category = split_part(NEW.stream_name, '-', 1);
+  IF cap IS NOT NULL THEN
+    DELETE FROM domain_events
+    WHERE stream_name = NEW.stream_name
+      AND version <= NEW.version - cap;   -- keep only the last `cap` versions of this stream
+  END IF;
+  RETURN NULL;                            -- AFTER ROW trigger
+END;
+$$;
+CREATE TRIGGER trg_domain_events_max_count
+AFTER INSERT ON domain_events
+FOR EACH ROW EXECUTE FUNCTION enforce_max_count();
+```
+
+**`$maxAge` / `expired_at` — enforced by a scheduled sweep.** An event is dropped when its explicit
+per-event `expired_at` has passed, OR when it is older than its category's `max_age`. Run as a
+`pg_cron` job when the managed Postgres offers it; otherwise the same statement is executed on a schedule
+by a **dedicated retention app** (a small worker):
+
+```sql
+-- pg_cron (hourly). If pg_cron is unavailable (e.g. on the managed tier), a dedicated worker runs the
+-- identical DELETE on the same cadence.
+SELECT cron.schedule('domain_events_retention', '0 * * * *', $$
+  DELETE FROM domain_events e
+  USING domain_stream s
+  WHERE split_part(e.stream_name, '-', 1) = s.category
+    AND (
+         (e.expired_at IS NOT NULL AND e.expired_at < now())      -- explicit per-event TTL
+      OR (s.max_age    IS NOT NULL AND e.occurred_at < now() - s.max_age)  -- category $maxAge
+    );
+$$);
+```
+
+- **Only categories present in `domain_stream` (with a non-NULL policy) are ever trimmed** — `Order`,
+  `Restaurant`, `Customer`, etc. have no row (or NULLs) and keep full history, so their projections stay
+  rebuildable. Configure retention only where losing old events is acceptable.
+- `expired_at` stays the per-event escape hatch (a specific event given an explicit TTL on append),
+  independent of the category policy.
 
 ## 2. Read models — projection views (`View_*`)
 
