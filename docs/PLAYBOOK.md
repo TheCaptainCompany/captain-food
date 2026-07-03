@@ -74,9 +74,10 @@ specs/                         # the DSL — source of truth
   architecture/
     c4-l2.yaml c4-l3.yaml       # C4 as source-managed DSL
 
-tools/codegen/                 # the generator + validator (TypeScript, tsx)
+tools/codegen/                 # the generator + validator (TypeScript, tsx) — the blocking gate
   src/{load,validate,refs,model}.ts  src/emit/*
   out/                         # ephemeral build scratch (gitignored): Structurizr .mmd exports, etc.
+tools/codegen-rs/              # the Rust port at parity (ADR-0034); `make rust`. Kept in lockstep with the TS codegen.
 
 docs/
   PLAYBOOK.md                  # this file

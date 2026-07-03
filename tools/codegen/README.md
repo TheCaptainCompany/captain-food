@@ -4,6 +4,11 @@ Deterministic generator: reads the `specs/*.yaml` model, **validates** its refer
 and **emits** derived artifacts. The yaml specs are the source of truth; edit them, re-run, and the
 outputs follow — no LLM in the loop. (Claude is used only to author/extend the emitter templates.)
 
+> **Rust port (ADR-0034):** [`../codegen-rs`](../codegen-rs) is a faithful re-implementation at **parity** —
+> the same full validator and emitters, producing all artifacts byte-identical and the same validation
+> issue set (both CI-verified; run `make rust`). It stays in lockstep with this TypeScript codegen, which
+> remains the **blocking** gate until it is retired. Any change here must be mirrored in `codegen-rs`.
+
 ## Usage
 
 ```bash
@@ -126,4 +131,8 @@ from the API or its ACL. It emits a **persona → activity → operation** matri
    - **Input curation**: server-derived fields are marked `readOnly: true` in entities.yaml (e.g.
      `Stock.status`) and the input emitter skips them — so input types stay intent-only.
 5. ✅ Hand-written `schema.graphql` removed — `specs/generated/schema.generated.graphql` is the single SDL.
-6. ⬜ `packages/types` TypeScript types; then aggregate / process-manager handler scaffolds from `actors.yaml`.
+6. ✅ Rust port at parity (ADR-0034): [`tools/codegen-rs`](../codegen-rs) runs the full validator (§1–§11)
+   + every emitter, byte-identical output + same issue set, CI-verified (`rust-codegen` job). Next: flip CI
+   to make it the blocking gate and retire this TypeScript codegen.
+7. ⬜ Rust generation targets (once `crates/` exists): `shared_types`, Crux handler scaffolds from
+   `actors.yaml`, `sqlx` migrations, the Leptos SDUI registry.

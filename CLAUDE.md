@@ -126,5 +126,10 @@ The repo currently contains the **specs** ([specs/](specs/)), the **codegen** ge
 `.claude/agents`, `.claude/hooks`, `Makefile`). The Rust workspace (`crates/`) does **not** exist yet
 (ADR-0034), so the runtime layers of the playbook — the Crux core, Leptos/Axum apps, OpenTelemetry
 emission, Kubernetes probes, BAM projections, GraphQL operation observability — are specified as
-**contracts + ADRs** and deferred until then. The codegen (`tools/codegen`) is itself being **ported to
-Rust** (`scripts/generate.rs`, ADR-0034); until parity, the TypeScript codegen remains the validation gate.
+**contracts + ADRs** and deferred until then. The codegen has been **ported to Rust**
+([tools/codegen-rs/](tools/codegen-rs/), bin `generate`, ADR-0034): it now runs the full validator
+(validate.ts §1–§11) and every emitter, producing all 8 generated artifacts **byte-identical** to the
+TypeScript codegen and the **same validation issue set** — both verified in CI (the `rust-codegen` job:
+build + test + validate + generate + diff). Run it with `make rust` (needs a local Rust toolchain). The
+TypeScript `tools/codegen` stays the **blocking** gate (`cd tools/codegen && npm run validate`) until it is
+retired; both run in CI in parallel.

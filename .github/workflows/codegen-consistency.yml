@@ -74,7 +74,7 @@ jobs:
       - name: Unit tests
         working-directory: tools/codegen-rs
         run: cargo test --verbose
-      - name: Validate the specs (referential integrity — stage 1)
+      - name: Validate the specs (full validator §1–§11, parity with the TS gate)
         run: cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --check --specs specs
       - name: Regenerate the ported artifacts + fail on spec↔generation drift
         run: |

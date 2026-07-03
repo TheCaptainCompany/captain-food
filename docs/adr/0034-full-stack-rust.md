@@ -65,11 +65,13 @@ unaffected.
    `schema.generated.graphql` (the full GraphQL SDL), the **`database.md`** §2 read-model injection, the
    **`documentation.generated.md`** Markdown docs (the bounded-context engine `buildContextMap` + stories +
    every kind rendered with cross-links, ~6.4k lines), and the **`documentation.generated.html`** interactive
-   docs (theme + navigable breadcrumb/tooltip + drill-down C4 map). **All 8 generated artifacts are now
-   byte-identical between the two codegens** (CI `rust-codegen` job: build + test + generate + diff, green).
-   Remaining: port the other validation gates (actor wiring, api↔model, views, stories, tests, rules,
-   translation params, screens, observability, C4) so `--check` fully replaces the TS gate — then flip CI to
-   Rust and retire the TypeScript codegen.
+   docs (theme + navigable breadcrumb/tooltip + drill-down C4 map). The **full validator** (validate.ts
+   §1–§11: referential integrity, actor wiring, api↔model, views, stories, tests + rules coverage,
+   observability, C4, translations, SDUI screens) is also ported. **Parity reached:** all 8 generated
+   artifacts are byte-identical AND the validator emits the same `(rule, location)` issue set + coverage
+   summary — the latter verified by a differential harness that breaks each section and diffs both tools
+   (CI `rust-codegen` job: build + test + validate + generate + diff, green). Remaining: flip CI so the Rust
+   `rust-codegen` job is the blocking gate and retire the TypeScript `consistency` job (and `tools/codegen`).
 3. **Generation targets**: what the codegen emits for Rust — `shared_types` (serde), Crux core skeletons from
    actors/commands/events, `async-graphql` schema, `sqlx` migrations from `views.yaml`, the Leptos SDUI
    registry from `customer_screens.yaml`. Currently it emits GraphQL SDL + SQL + C4 + docs (renderer-agnostic).

@@ -16,6 +16,9 @@ no LLM in the generation loop.
   behaviour tests, observability contracts, and C4 (`specs/architecture/`).
 - **[`tools/codegen/`](tools/codegen/)** — a deterministic TypeScript generator/validator. It validates
   referential integrity + behaviour-test coverage + observability + C4 in one gate, then emits artifacts.
+- **[`tools/codegen-rs/`](tools/codegen-rs/)** — the Rust port of the codegen (ADR-0034), at **parity**:
+  same full validator + emitters, all artifacts byte-identical and the same issue set (CI-verified via
+  `make rust`). The TypeScript codegen stays the blocking gate until it is retired.
 - **[`specs/generated/`](specs/generated/)** — the committed generated artifacts: the GraphQL SDL, the
   `View_*` SQL DDL, the Structurizr/Mermaid C4, and the navigable product documentation
   (`documentation.generated.md` / `.html`). `tools/codegen/out/` is ephemeral build scratch.
@@ -28,7 +31,9 @@ npm run generate     # regenerate every artifact from the specs
 ```
 
 The **codegen-consistency** workflow (the badge above) runs `validate` + `generate` on every push/PR and
-fails if the committed artifacts drift from the specs — so `specs/generated/` is always in sync.
+fails if the committed artifacts drift from the specs — so `specs/generated/` is always in sync. It runs
+two jobs in parallel: `consistency` (TypeScript, the blocking gate) and `rust-codegen` (the Rust port —
+`cargo build`/`test` + validate + generate + diff), keeping the two implementations in lockstep.
 
 ## Operating model
 

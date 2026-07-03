@@ -3,11 +3,19 @@
 The generator/validator is TypeScript run via `tsx`. There is **no LLM in the generation loop** — it is
 deterministic.
 
+> **Rust port (ADR-0034):** [`tools/codegen-rs`](../../tools/codegen-rs) (bin `generate`) is a faithful
+> re-implementation at **parity** — the full validator (§1–§11) + every emitter, producing all 8 artifacts
+> byte-identical and the same issue set (both CI-verified). Run it with `make rust` (build + test + validate
+> + generate + diff). The **TypeScript codegen below stays the blocking gate** until it is retired; keep the
+> two in lockstep — a change to an emitter or validation rule must be made in **both** (or the diff/issue
+> parity CI fails). When you touch `src/*.ts` here, mirror it in `tools/codegen-rs/src/main.rs`.
+
 ## Commands
 
 - `npm run typecheck` — `tsc --noEmit`.
 - `npm run validate` — `tsx src/cli.ts --check` (validate only, writes nothing).
 - `npm run generate` — `tsx src/cli.ts` (validate + write artifacts).
+- `make rust` — the Rust port: `cargo build` + `cargo test` + `--check` + generate + `git diff` (parity gate).
 
 ## Layout
 
