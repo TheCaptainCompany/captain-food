@@ -74,5 +74,16 @@ jobs:
       - name: Unit tests
         working-directory: tools/codegen-rs
         run: cargo test --verbose
-      - name: Referential-integrity gate (stage 1) against the specs
+      - name: Validate the specs (referential integrity — stage 1)
         run: cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --check --specs specs
+      - name: Regenerate the ported artifacts + fail on spec↔generation drift
+        run: |
+          # Same guarantee as the TypeScript `consistency` job, for the artifacts the Rust codegen has
+          # ported so far: regenerate, then fail if the result differs from what's committed (EOL-tolerant:
+          # repo is CRLF, CI is LF). As more emitters land here, this covers more of specs/generated.
+          cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --specs specs
+          if ! git diff --quiet --ignore-cr-at-eol; then
+            echo "::error::Rust codegen output drifted from the committed specs/generated — run 'make rust-generate' and commit."
+            git --no-pager diff --ignore-cr-at-eol --stat
+            exit 1
+          fi

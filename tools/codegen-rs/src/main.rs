@@ -143,6 +143,36 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
     args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1).cloned())
 }
 
+/// Emit the single i18n bundle from translations.yaml (ADR-0033) — the first ported emitter. Must be
+/// BYTE-IDENTICAL to the TypeScript `emitTranslationsJson` output (keys sorted; `{ "<key>": { en, fr } }`;
+/// 2-space pretty JSON + trailing newline) so the CI generate+diff gate stays clean during the migration.
+fn emit_translations_json(model: &Model) -> String {
+    let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    if let Some(Value::Mapping(m)) = model.defs.get("translations.yaml") {
+        for (k, v) in m {
+            let key = match k.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            // skip file-level meta (version/description) — only real translation entries have `messages`.
+            let messages = match v.get("messages").and_then(|x| x.as_mapping()) {
+                Some(mm) => mm,
+                None => continue,
+            };
+            let mut locales = BTreeMap::new();
+            for (lk, lv) in messages {
+                if let (Some(l), Some(t)) = (lk.as_str(), lv.as_str()) {
+                    locales.insert(l.to_string(), t.to_string());
+                }
+            }
+            out.insert(key.to_string(), locales);
+        }
+    }
+    let mut s = serde_json::to_string_pretty(&out).expect("serialize translations");
+    s.push('\n');
+    s
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let check = args.iter().any(|a| a == "--check");
@@ -177,9 +207,24 @@ fn main() {
     if check {
         return;
     }
-    eprintln!(
-        "(generation not yet ported — the TypeScript codegen remains the generator until parity, ADR-0034)"
-    );
+
+    // Generation (ported incrementally). Emitters not yet ported are still produced by the TypeScript
+    // codegen; the Rust tool must only (re)write artifacts it emits byte-identically, so the CI
+    // generate+diff gate stays clean. Ported so far: translations.generated.json.
+    let out_dir = arg_value(&args, "--out")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| specs.join("generated"));
+    if let Err(e) = fs::create_dir_all(&out_dir) {
+        eprintln!("✗ create {}: {}", out_dir.display(), e);
+        std::process::exit(1);
+    }
+    let i18n = out_dir.join("translations.generated.json");
+    if let Err(e) = fs::write(&i18n, emit_translations_json(&model)) {
+        eprintln!("✗ write {}: {}", i18n.display(), e);
+        std::process::exit(1);
+    }
+    eprintln!("✓ wrote {}", i18n.display());
+    eprintln!("(other emitters still produced by the TypeScript codegen until parity — ADR-0034)");
 }
 
 #[cfg(test)]

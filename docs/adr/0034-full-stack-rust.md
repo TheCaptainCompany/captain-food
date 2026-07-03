@@ -54,8 +54,13 @@ unaffected.
 1. **Update tech references in the specs** to the Rust stack: `c4-l2.yaml` container technologies + relationships,
    `CLAUDE.md` architecture summary, `customer_screens.yaml` tech header, ADR-0033 deferred-runtime note
    (renderer → Leptos). Domain specs unchanged.
-2. **Codegen language decision**: keep `tools/codegen` (TypeScript) as the build-time spec validator/generator,
-   or rewrite it in Rust. (Dev tooling, not shipped product — arguably exempt from the Rust-only rule.)
+2. **Codegen language decision** (DECIDED): rewrite the codegen in Rust (`tools/codegen-rs`, bin `generate`),
+   ported incrementally to parity. Local toolchain via `rustup` (pinned `rust-toolchain.toml`); `make rust`
+   runs build + test + validate + generate(+diff) locally, and the CI `rust-codegen` job runs the same —
+   **validate + generate + git-diff**, so a spec↔generation mismatch fails the build (same guarantee as the
+   TS job). The TypeScript `consistency` job stays the blocking gate until the Rust tool reaches parity.
+   Ported so far: spec loading, `$ref` referential integrity, and the `translations.generated.json` emitter
+   (byte-identical). Remaining: the other validation gates + emitters, then flip CI to Rust and retire the TS codegen.
 3. **Generation targets**: what the codegen emits for Rust — `shared_types` (serde), Crux core skeletons from
    actors/commands/events, `async-graphql` schema, `sqlx` migrations from `views.yaml`, the Leptos SDUI
    registry from `customer_screens.yaml`. Currently it emits GraphQL SDL + SQL + C4 + docs (renderer-agnostic).

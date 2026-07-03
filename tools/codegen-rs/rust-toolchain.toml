@@ -1,0 +1,4 @@
+# Pin the Rust toolchain so local dev and CI use the same compiler (ADR-0034).
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

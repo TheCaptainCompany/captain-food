@@ -4,14 +4,16 @@
 # separate targets so the loop reads like the playbook, but they currently delegate to `validate`.
 
 CODEGEN = tools/codegen
+CODEGEN_RS = tools/codegen-rs
 
-.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate generate review gate night-loop budget-check budgeted-loop docs c4-export c4-render help
+.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate generate review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test rust-validate rust-generate
 
 help:
 	@echo "targets: validate generate typecheck review gate night-loop budgeted-loop budget-check docs"
 	@echo "         c4-render (Structurizr Lite + docs/ADRs) · c4-export (validate/export DSL)"
 	@echo "         (validate-schema test-behaviour test-observability c4-validate -> all fold into 'validate')"
 	@echo "         budgeted-loop runs the night loop under a 30-min/week budget (.claude/loop-budget.json)"
+	@echo "         rust (build+test+validate+generate/diff) — the Rust codegen port (ADR-0034); needs cargo"
 
 typecheck:
 	cd $(CODEGEN) && npm run typecheck
@@ -28,6 +30,21 @@ validate: typecheck validate-schema
 
 generate:
 	cd $(CODEGEN) && npm run generate
+
+# --- Rust codegen (ADR-0034) — being ported to parity; run these locally (needs a Rust toolchain). ---
+rust-build:
+	cd $(CODEGEN_RS) && cargo build
+rust-test:
+	cd $(CODEGEN_RS) && cargo test
+# The Rust gate mirrors the TS one: validate (referential integrity, more gates as they land) …
+rust-validate:
+	cargo run --manifest-path $(CODEGEN_RS)/Cargo.toml -- --check --specs specs
+# … then generate the ported artifacts and fail if they drift from what's committed (spec↔generation).
+rust-generate:
+	cargo run --manifest-path $(CODEGEN_RS)/Cargo.toml -- --specs specs
+	@git diff --quiet --ignore-cr-at-eol specs/generated || { echo "rust-generate: generated artifacts drifted from the specs — commit the regenerated files."; git --no-pager diff --ignore-cr-at-eol --stat specs/generated; exit 1; }
+rust: rust-build rust-test rust-validate rust-generate
+	@echo "rust: build + test + validate + generate(+diff) OK"
 
 # Independent review: regenerate, then confirm the generated artifacts are in step with the DSL.
 review: validate generate
