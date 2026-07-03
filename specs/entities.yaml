@@ -281,6 +281,7 @@ Restaurant:
   type: object
   description: "A single restaurant location (HubRise: location); belongs to a RestaurantAccount."
   properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     id:
       $ref: 'scalars.yaml#/RestaurantId'
     accountId:
@@ -643,6 +644,7 @@ OrderLineItem:
 Order:
   type: object
   properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     id:
       $ref: 'scalars.yaml#/OrderId'
     ref:

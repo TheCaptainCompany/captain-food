@@ -538,6 +538,17 @@ RestaurantListKey:
     resolves the actual member restaurants (editorial rules / customer history); the client just
     asks for a list by key.
 
+# --- Test mode (ADR-0038) ---
+
+Mode:
+  type: string
+  enum: [LIVE, TEST]
+  description: >
+    Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod
+    (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated
+    from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate
+    the real receipt path.
+
 # --- Caller persona / user type ---
 
 # Caller user type (a.k.a. persona / role). Established by the GraphQL path: the master

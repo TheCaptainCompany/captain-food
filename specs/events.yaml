@@ -88,6 +88,7 @@ RestaurantRegistered:
     (no accountId). The listingStatus and externalIdentifiers distinguish them.
   type: object
   properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     restaurantId:
       $ref: 'scalars.yaml#/RestaurantId'
     accountId:
@@ -635,6 +636,7 @@ CustomerRegistered:
     identity managed by the auth provider). Phone number is the primary identifier.
   type: object
   properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
     authRef:
@@ -878,6 +880,7 @@ OrderPlaced:
   description: "A customer has placed an order and payment was successfully authorized/captured."
   type: object
   properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     orderId:
       $ref: 'scalars.yaml#/OrderId'
     ref:
@@ -1209,6 +1212,7 @@ DeliveryRequested:
     partner and/or made available to independent riders). Emitted by DeliveryDispatchProcess.
   type: object
   properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     deliveryJobId:
       $ref: 'scalars.yaml#/DeliveryJobId'
     orderId:

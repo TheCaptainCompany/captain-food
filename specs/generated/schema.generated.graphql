@@ -226,6 +226,11 @@ enum RestaurantListKey {
   GREEN_PACKAGING
 }
 
+enum Mode {
+  LIVE
+  TEST
+}
+
 enum UserType {
   PUBLIC
   CUSTOMER
@@ -641,6 +646,7 @@ input DeleteRestaurantAccountInput {
 }
 
 input RegisterRestaurantInput {
+  mode: Mode
   restaurantId: RestaurantId!
   accountId: RestaurantAccountId
   listingStatus: RestaurantListingStatus
@@ -923,6 +929,7 @@ input SetCustomerPaymentMethodInput {
 }
 
 input PlaceOrderInput {
+  mode: Mode
   orderId: OrderId!
   restaurantId: RestaurantId!
   cartId: CartId!

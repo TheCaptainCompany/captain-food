@@ -581,6 +581,7 @@ The single, generic way to register a restaurant LOCATION. Used by an owner/admi
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="command-registerrestaurant--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="command-registerrestaurant--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ | Client/ACL-generated id for the new location. |
 | <a id="command-registerrestaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ | The owning account (must already exist) — omitted for a non-partner public listing. |
 | <a id="command-registerrestaurant--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ⬜ | Partnership funnel; defaults to NON_PARTNER when omitted (e.g. sync-seeded listing). |
@@ -892,6 +893,7 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="event-restaurantregistered--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="event-restaurantregistered--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-restaurantregistered--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ |  |
 | <a id="event-restaurantregistered--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ |  |
@@ -1220,6 +1222,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="entity-restaurant--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="entity-restaurant--id"></a>`id` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="entity-restaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ | The owning RestaurantAccount; NULL for a non-partner listing (no account yet), set on claim/conversion. |
 | <a id="entity-restaurant--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ | Partnership funnel: NON_PARTNER (seeded from open data) → PASSIVE_PARTNER → ACTIVE_PARTNER. |
@@ -3153,6 +3156,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="command-placeorder--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="command-placeorder--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | Client-generated id for the order the saga will materialize on payment capture. |
 | <a id="command-placeorder--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-placeorder--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ | The OPEN cart to check out; its lines become the order's line items. |
@@ -3412,6 +3416,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="event-orderplaced--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="event-orderplaced--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-orderplaced--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="event-orderplaced--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
@@ -3775,6 +3780,7 @@ An option chosen by the customer on a line item, priced at order time.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="entity-order--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="entity-order--id"></a>`id` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="entity-order--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="entity-order--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
@@ -4795,6 +4801,7 @@ A customer account was created on first phone verification (passwordless OTP, id
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="event-customerregistered--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="event-customerregistered--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 | <a id="event-customerregistered--authref"></a>`authRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ | Auth provider user id (e.g. Supabase Auth), linking identity to this Customer. |
 | <a id="event-customerregistered--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ✅ |  |
@@ -5522,6 +5529,7 @@ A delivery job has been created for a ready DELIVERY order and offered for fulfi
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <a id="event-deliveryrequested--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="event-deliveryrequested--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="event-deliveryrequested--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-deliveryrequested--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
@@ -6130,7 +6138,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(28)_
+### 🔤 Scalars _(29)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -6161,6 +6169,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-servicetype"></a>🔤 `ServiceType` | enum (DELIVERY \| COLLECTION) | Aligned with HubRise service types. COLLECTION == customer pickup. (EAT_IN is not offered by Captain.Food but is kept in TaxRate for catalog fidelity.)  |
 | <a id="scalar-deliverystatus"></a>🔤 `DeliveryStatus` | enum (PENDING \| ASSIGNED \| PICKED_UP \| OUT_FOR_DELIVERY \| DELIVERED \| FAILED \| CANCELLED) | Status of one delivery, reported by the partner (inbound) or driven by an independent rider's commands. |
 | <a id="scalar-operationstatus"></a>🔤 `OperationStatus` | enum (PENDING \| SUCCEEDED \| REJECTED \| FAILED) | Live status of a command/operation streamed by the operationStatusChanged subscription: PENDING (accepted, in flight), SUCCEEDED, REJECTED (business invariant), FAILED (technical error)."  |
+| <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 
 ### ⛔ Errors _(10)_

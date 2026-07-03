@@ -92,6 +92,10 @@ INSERT INTO ref_comparison_basis (value, sort_order) VALUES ('ESTIMATED',0),('RE
 CREATE TABLE ref_restaurant_list_key(value TEXT PRIMARY KEY, sort_order INT NOT NULL);
 INSERT INTO ref_restaurant_list_key (value, sort_order) VALUES ('ORDER_AGAIN',0),('RECOMMENDED',1),('TOP_DEALS',2),('GREEN_PACKAGING',3);
 
+-- Mode
+CREATE TABLE ref_mode(value TEXT PRIMARY KEY, sort_order INT NOT NULL);
+INSERT INTO ref_mode (value, sort_order) VALUES ('LIVE',0),('TEST',1);
+
 -- UserType
 CREATE TABLE ref_user_type(value TEXT PRIMARY KEY, sort_order INT NOT NULL);
 INSERT INTO ref_user_type (value, sort_order) VALUES ('PUBLIC',0),('CUSTOMER',1),('RESTAURANT_ACCOUNT',2),('RESTAURANT',3),('RIDER',4),('ADMIN',5),('EXTERNAL',6);

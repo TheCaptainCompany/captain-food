@@ -118,6 +118,7 @@ RegisterRestaurant:
     owner (no accountId, listingStatus NON_PARTNER, externalIdentifiers from the source). Starts in DRAFT.
   type: object
   properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     restaurantId:
       $ref: 'scalars.yaml#/RestaurantId'
       description: "Client/ACL-generated id for the new location."
@@ -901,6 +902,7 @@ PlaceOrder:
     with a failure branch. Now that the customer has verified their phone, customerId is bound here.
   type: object
   properties:
+    mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
     orderId:
       $ref: 'scalars.yaml#/OrderId'
       description: "Client-generated id for the order the saga will materialize on payment capture."

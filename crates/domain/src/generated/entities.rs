@@ -151,6 +151,7 @@ pub struct RestaurantAccount {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Restaurant {
+    pub mode: Option<Mode>,
     pub id: RestaurantId,
     pub account_id: Option<RestaurantAccountId>,
     pub listing_status: RestaurantListingStatus,
@@ -313,6 +314,7 @@ pub struct OrderLineItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
+    pub mode: Option<Mode>,
     pub id: OrderId,
     pub r#ref: Option<ExternalReference>,
     pub restaurant_id: RestaurantId,

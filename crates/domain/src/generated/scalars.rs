@@ -451,6 +451,14 @@ pub enum RestaurantListKey {
     GREEN_PACKAGING,
 }
 
+/// Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum Mode {
+    LIVE,
+    TEST,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum UserType {
