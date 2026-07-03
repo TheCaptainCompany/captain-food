@@ -1,0 +1,42 @@
+version: 1
+description: >
+  Real (non-view) tables of the Captain.Food store — the append-only event log and its retention policy.
+  Their DDL is GENERATED from here (ADR-0037); do not hand-write it. Column types are SQL primitives:
+  this is infrastructure, deliberately decoupled from the domain scalars. The View_* read models live in
+  views.yaml (they are VIEWS over domain_events, not tables — ADR-0035).
+
+domain_events:
+  description: >
+    Append-only event log (EventStoreDB / SqlStreamStore in plain SQL). A stream is one aggregate
+    instance; its category is the stream_name prefix before the first '-'.
+  columns:
+    position:       { type: bigint,      identity: true, pk: true, note: "$all total order; projections checkpoint on it" }
+    id:             { type: uuid,        unique: true,             note: "event id — idempotency key, deduped on append" }
+    stream_name:    { type: text,                                  note: "'<Category>-<id>', e.g. 'Catalog-12345'" }
+    version:        { type: integer,                               note: "0-based event number within the stream" }
+    user_id:        { type: uuid }
+    user_type:      { type: integer }
+    correlation_id: { type: uuid }
+    cause_id:       { type: uuid,        nullable: true }
+    event_type:     { type: text,                                  note: "$et-<type>" }
+    payload:        { type: jsonb }
+    metadata:       { type: jsonb,       nullable: true }
+    occurred_at:    { type: timestamptz }
+    expired_at:     { type: timestamptz, nullable: true,           note: "per-event TTL (cf. domain_stream $maxAge/$maxCount)" }
+  constraints:
+    - unique: [stream_name, version]    # optimistic concurrency: one event per (stream, expected version)
+  indexes:
+    - [stream_name, version]            # read one stream in order; prefix-scannable per category
+    - [event_type]                      # $et-<type>
+    - [occurred_at]
+  triggers:
+    - { name: trg_domain_events_max_count, timing: AFTER INSERT, for_each: row, function: enforce_max_count }
+
+domain_stream:
+  description: >
+    Opt-in per-category retention policy ($maxAge / $maxCount). Only ephemeral categories (e.g. Cart) get a
+    row; Order/Restaurant/Customer keep full history so their projections stay rebuildable (ADR-0005).
+  columns:
+    category:  { type: text,     pk: true,       note: "stream category / aggregate type" }
+    max_age:   { type: interval, nullable: true, note: "$maxAge — events older than this are swept (NULL = keep forever)" }
+    max_count: { type: integer,  nullable: true, note: "$maxCount — keep at most N most-recent events per stream (NULL = unbounded)" }
