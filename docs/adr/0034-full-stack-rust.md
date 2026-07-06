@@ -73,9 +73,12 @@ unaffected.
    (CI `rust-codegen` job: build + test + validate + generate + diff, green). **DONE:** CI collapsed to a
    single `codegen` job running the Rust tool; the `Makefile` (`make validate`/`generate`) and the acceptance
    hooks (`stop-gate.sh`, `validate-generated.sh`) drive it; the TypeScript `tools/codegen` has been deleted.
-3. **Generation targets**: what the codegen emits for Rust — `shared_types` (serde), Crux core skeletons from
-   actors/commands/events, `async-graphql` schema, `sqlx` migrations from `views.yaml`, the Leptos SDUI
-   registry from `customer_screens.yaml`. Currently it emits GraphQL SDL + SQL + C4 + docs (renderer-agnostic).
+3. **Generation targets**: what the codegen emits for Rust — the pure **domain payload types** in
+   `crates/domain/src/generated/` (`scalars.rs` from scalars.yaml, `entities.rs` from entities.yaml,
+   `events.rs` from events.yaml, `commands.rs` from commands.yaml — serde `camelCase` structs over the
+   scalar newtypes, business payloads only), plus `shared_types` (serde), Crux core skeletons,
+   `async-graphql` schema, `sqlx` migrations, the Leptos SDUI registry. It also emits GraphQL SDL + SQL +
+   C4 + docs (renderer-agnostic).
 
 ## Influences
 Ports-and-Adaptors / Hexagonal (Crux). Same DDD/CQRS lineage as ADR-0033 (Evans, Young, Vernon, Beck, Patton).

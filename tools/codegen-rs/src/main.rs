@@ -5112,33 +5112,96 @@ const RUST_FIELD_KEYWORDS: &[&str] = &[
     "unsafe", "use", "where", "while", "yield",
 ];
 
-/// The Rust type of one entity property node, BEFORE optionality wrapping: `$ref` → the referenced
-/// type name (scalars are in scope via `use super::scalars::*`, local entity refs are same-module),
+/// The Rust type of one struct property node, BEFORE optionality wrapping: `$ref` → the referenced
+/// type name (scalars/entities are in scope via `use super::…::*`, same-module refs resolve directly),
 /// arrays → `Vec<Item>`, inline primitives → `String`/`i64`/`bool`/`f64` (`date-time` stays `String`).
-fn entity_field_type(entity: &str, prop: &str, node: &Value) -> String {
+/// `file` is the spec file the owning struct came from (for panic messages only).
+fn struct_field_type(file: &str, owner: &str, prop: &str, node: &Value) -> String {
     if let Some(rf) = node.get("$ref").and_then(|x| x.as_str()) {
         return ref_name(rf)
-            .unwrap_or_else(|| panic!("entities.yaml#/{}/{}: malformed $ref '{}'", entity, prop, rf));
+            .unwrap_or_else(|| panic!("{}#/{}/{}: malformed $ref '{}'", file, owner, prop, rf));
     }
     match node.get("type").and_then(|t| t.as_str()) {
         Some("array") => {
             let items = node
                 .get("items")
-                .unwrap_or_else(|| panic!("entities.yaml#/{}/{}: array without items", entity, prop));
-            format!("Vec<{}>", entity_field_type(entity, prop, items))
+                .unwrap_or_else(|| panic!("{}#/{}/{}: array without items", file, owner, prop));
+            format!("Vec<{}>", struct_field_type(file, owner, prop, items))
         }
         Some("string") => "String".to_string(),
         Some("integer") => "i64".to_string(),
         Some("boolean") => "bool".to_string(),
         Some("number") => "f64".to_string(),
-        other => panic!("entities.yaml#/{}/{}: unsupported inline type {:?}", entity, prop, other),
+        other => panic!("{}#/{}/{}: unsupported inline type {:?}", file, owner, prop, other),
     }
 }
 
+/// Emit one serde `camelCase` payload struct for a spec node with `properties`/`required` (shared by the
+/// entities, events and commands emitters — same shape). A field is optional (`Option<T>`) when
+/// `nullable: true` or absent from `required`; optional ARRAYS stay `Vec<T>` with `#[serde(default)]`
+/// (a missing array deserializes to empty, never `Option<Vec>`).
+fn push_struct(out: &mut String, file: &str, name: &str, node: &Value) {
+    out.push('\n');
+    out.push_str(&scalar_doc(node));
+    out.push_str("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n");
+    out.push_str("#[serde(rename_all = \"camelCase\")]\n");
+    out.push_str(&format!("pub struct {} {{\n", name));
+    let required: BTreeSet<&str> = node
+        .get("required")
+        .and_then(|r| r.as_sequence())
+        .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    if let Some(props) = node.get("properties").and_then(|p| p.as_mapping()) {
+        for (pk, pnode) in props {
+            let prop = match pk.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            let field = snake_field(prop);
+            // PROVE serde's camelCase rename restores the exact spec property name on the wire
+            // (raw `r#` prefixes are stripped before renaming, so `ref`/`default` stay as-is);
+            // fail loudly at generation rather than corrupt the wire.
+            assert_eq!(
+                serde_camel(&field),
+                prop,
+                "{}#/{}/{}: field '{}' does not round-trip through serde rename_all",
+                file,
+                name,
+                prop,
+                field
+            );
+            let ident = if RUST_FIELD_KEYWORDS.contains(&field.as_str()) {
+                format!("r#{}", field)
+            } else {
+                field
+            };
+            let ty = struct_field_type(file, name, prop, pnode);
+            let nullable = pnode.get("nullable").and_then(|x| x.as_bool()) == Some(true);
+            let optional = nullable || !required.contains(prop);
+            if ty.starts_with("Vec<") {
+                if optional {
+                    out.push_str("    #[serde(default)]\n");
+                }
+                out.push_str(&format!("    pub {}: {},\n", ident, ty));
+            } else if optional {
+                out.push_str(&format!("    pub {}: Option<{}>,\n", ident, ty));
+            } else {
+                out.push_str(&format!("    pub {}: {},\n", ident, ty));
+            }
+        }
+    }
+    out.push_str("}\n");
+}
+
+/// True for a spec node that defines a payload struct (an object with `properties`, or `type: object`) —
+/// distinguishes real definitions from a file's top-level `version`/`description` meta.
+fn is_struct_def(node: &Value) -> bool {
+    node.is_mapping()
+        && (node.get("properties").is_some() || node.get("type").and_then(|t| t.as_str()) == Some("object"))
+}
+
 /// Emit `crates/domain/src/generated/entities.rs` from entities.yaml: one serde `camelCase` struct per
-/// top-level entity, in file order. A field is optional (`Option<T>`) when `nullable: true` or absent
-/// from `required`. Optional ARRAYS stay `Vec<T>` with `#[serde(default)]` (a missing array deserializes
-/// to empty, never `Option<Vec>`). Type names may safely use the prelude `Option` — the
+/// top-level entity, in file order. Type names may safely use the prelude `Option` — the
 /// `rust-reserved-typename` validator gate forbids a spec type from colliding with it (resolve at root).
 fn emit_domain_entities(model: &Model) -> String {
     let mut out = String::from(
@@ -5146,59 +5209,47 @@ fn emit_domain_entities(model: &Model) -> String {
     );
     if let Some(Value::Mapping(m)) = model.defs.get("entities.yaml") {
         for (k, node) in m {
-            let name = match k.as_str() {
-                Some(s) => s,
-                None => continue,
-            };
-            out.push('\n');
-            out.push_str(&scalar_doc(node));
-            out.push_str("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n");
-            out.push_str("#[serde(rename_all = \"camelCase\")]\n");
-            out.push_str(&format!("pub struct {} {{\n", name));
-            let required: BTreeSet<&str> = node
-                .get("required")
-                .and_then(|r| r.as_sequence())
-                .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
-                .unwrap_or_default();
-            if let Some(props) = node.get("properties").and_then(|p| p.as_mapping()) {
-                for (pk, pnode) in props {
-                    let prop = match pk.as_str() {
-                        Some(s) => s,
-                        None => continue,
-                    };
-                    let field = snake_field(prop);
-                    // PROVE serde's camelCase rename restores the exact spec property name on the wire
-                    // (raw `r#` prefixes are stripped before renaming, so `ref`/`default` stay as-is);
-                    // fail loudly at generation rather than corrupt the wire.
-                    assert_eq!(
-                        serde_camel(&field),
-                        prop,
-                        "entities.yaml#/{}/{}: field '{}' does not round-trip through serde rename_all",
-                        name,
-                        prop,
-                        field
-                    );
-                    let ident = if RUST_FIELD_KEYWORDS.contains(&field.as_str()) {
-                        format!("r#{}", field)
-                    } else {
-                        field
-                    };
-                    let ty = entity_field_type(name, prop, pnode);
-                    let nullable = pnode.get("nullable").and_then(|x| x.as_bool()) == Some(true);
-                    let optional = nullable || !required.contains(prop);
-                    if ty.starts_with("Vec<") {
-                        if optional {
-                            out.push_str("    #[serde(default)]\n");
-                        }
-                        out.push_str(&format!("    pub {}: {},\n", ident, ty));
-                    } else if optional {
-                        out.push_str(&format!("    pub {}: Option<{}>,\n", ident, ty));
-                    } else {
-                        out.push_str(&format!("    pub {}: {},\n", ident, ty));
-                    }
+            if let Some(name) = k.as_str() {
+                push_struct(&mut out, "entities.yaml", name, node);
+            }
+        }
+    }
+    out
+}
+
+/// Emit `crates/domain/src/generated/events.rs` from events.yaml — one serde `camelCase` payload struct
+/// per business event (ADR-0034 #3). BUSINESS payloads only; the technical envelope (eventId, occurredAt,
+/// metadata…) is added by infrastructure, never here (CLAUDE.md). Events reference scalars + entities.
+fn emit_domain_events(model: &Model) -> String {
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/events.yaml — do not edit by hand.\n// BUSINESS event payloads only — the technical envelope is added by infrastructure.\n\nuse serde::{Deserialize, Serialize};\nuse super::scalars::*;\nuse super::entities::*;\n",
+    );
+    if let Some(Value::Mapping(m)) = model.defs.get("events.yaml") {
+        for (k, node) in m {
+            if let Some(name) = k.as_str() {
+                if is_struct_def(node) {
+                    push_struct(&mut out, "events.yaml", name, node);
                 }
             }
-            out.push_str("}\n");
+        }
+    }
+    out
+}
+
+/// Emit `crates/domain/src/generated/commands.rs` from commands.yaml — one serde `camelCase` payload
+/// struct per command (and command value object), the CQRS write-side input types (ADR-0034 #3). A
+/// command is a request the system may reject; its payload references scalars + entities.
+fn emit_domain_commands(model: &Model) -> String {
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/commands.yaml — do not edit by hand.\n// CQRS command (write-side) input payloads.\n\nuse serde::{Deserialize, Serialize};\nuse super::scalars::*;\nuse super::entities::*;\n",
+    );
+    if let Some(Value::Mapping(m)) = model.defs.get("commands.yaml") {
+        for (k, node) in m {
+            if let Some(name) = k.as_str() {
+                if is_struct_def(node) {
+                    push_struct(&mut out, "commands.yaml", name, node);
+                }
+            }
         }
     }
     out
@@ -5342,8 +5393,8 @@ fn main() {
             std::process::exit(1);
         }
     }
-    // crates/domain/src/generated/{scalars,entities}.rs: Rust domain types from scalars.yaml +
-    // entities.yaml (ADR-0034 #3 / 0035). mod.rs lists the modules in dependency order.
+    // crates/domain/src/generated/{scalars,entities,events,commands}.rs: Rust domain types from
+    // scalars.yaml + entities.yaml + events.yaml + commands.yaml (ADR-0034 #3 / 0035). mod.rs lists them.
     let gen_dir = repo_root(&specs).join("crates/domain/src/generated");
     if let Err(e) = fs::create_dir_all(&gen_dir) {
         eprintln!("✗ create {}: {}", gen_dir.display(), e);
@@ -5352,7 +5403,9 @@ fn main() {
     for (name, content) in [
         ("scalars.rs", emit_domain_scalars(&model)),
         ("entities.rs", emit_domain_entities(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod entities;\n".to_string()),
+        ("events.rs", emit_domain_events(&model)),
+        ("commands.rs", emit_domain_commands(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod entities;\npub mod events;\npub mod commands;\n".to_string()),
     ] {
         let path = gen_dir.join(name);
         if let Err(e) = fs::write(&path, content) {

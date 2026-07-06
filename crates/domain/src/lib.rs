@@ -60,3 +60,38 @@ mod entity_serde_tests {
         assert!(line.selected_option_ids.is_empty());
     }
 }
+
+#[cfg(test)]
+mod event_command_serde_tests {
+    //! The generated event/command payload structs (ADR-0034 #3) are what infrastructure (de)serializes
+    //! into the append-only `domain_events` log / across the write side. Assert their wire shape matches
+    //! the specs exactly: camelCase keys, scalar/enum values verbatim, and an omitted optional → `None`.
+    use crate::generated::commands::ChangeOrderAcceptanceMode;
+    use crate::generated::events::RestaurantAccountDeleted;
+    use crate::generated::scalars::{OrderAcceptanceMode, RestaurantAccountId, RestaurantId};
+
+    #[test]
+    fn event_payload_omits_optional_and_uses_camel_case() {
+        let nil = "00000000-0000-0000-0000-000000000000";
+        // Only the required field present → the optional `reason` deserializes to None.
+        let evt: RestaurantAccountDeleted =
+            serde_json::from_value(serde_json::json!({ "restaurantAccountId": nil })).unwrap();
+        assert!(evt.reason.is_none());
+        // Serialize back: the wire key is the exact camelCase spec property name.
+        let v = serde_json::to_value(&evt).unwrap();
+        assert_eq!(v["restaurantAccountId"], nil);
+    }
+
+    #[test]
+    fn command_payload_roundtrips_camel_case_with_enum() {
+        let nil = "00000000-0000-0000-0000-000000000000";
+        let cmd = ChangeOrderAcceptanceMode {
+            restaurant_id: RestaurantId(nil.parse().unwrap()),
+            mode: OrderAcceptanceMode::PAUSED,
+        };
+        let v = serde_json::to_value(&cmd).unwrap();
+        assert_eq!(v, serde_json::json!({ "restaurantId": nil, "mode": "PAUSED" }));
+        assert_eq!(serde_json::from_value::<ChangeOrderAcceptanceMode>(v).unwrap(), cmd);
+        let _ = RestaurantAccountId(nil.parse().unwrap()); // id types are in scope for events too
+    }
+}
