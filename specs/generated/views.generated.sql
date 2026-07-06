@@ -4,23 +4,20 @@
 
 CREATE OR REPLACE VIEW View_RestaurantAccount AS
 SELECT
-  (e.payload->>'restaurantAccountId')::uuid AS restaurant_account_id,
-  e.payload->>'ref'                         AS ref,
-  e.payload->>'legalName'                   AS legal_name,
-  e.payload->>'defaultCurrency'             AS default_currency,
-  e.payload->>'timezone'                    AS timezone,
-  e.occurred_at                             AS updated_at
-FROM (
-  SELECT DISTINCT ON (stream_name) *
-  FROM domain_events
-  WHERE split_part(stream_name, '-', 1) = 'RestaurantAccount'
-    AND event_type IN ('RestaurantAccountRegistered', 'RestaurantAccountUpdated')
-  ORDER BY stream_name, position DESC
-) e
-WHERE NOT EXISTS (
-  SELECT 1 FROM domain_events d
-  WHERE d.stream_name = e.stream_name AND d.event_type = 'RestaurantAccountDeleted'
-);
+  (reg.payload->>'restaurantAccountId')::uuid AS restaurant_account_id,
+  reg.payload->>'ref'                         AS ref,               -- set once at registration
+  reg.payload->>'defaultCurrency'             AS default_currency,  -- set once at registration
+  (SELECT u.payload->>'legalName' FROM domain_events u
+     WHERE u.stream_name = reg.stream_name AND u.payload ? 'legalName'
+     ORDER BY u.position DESC LIMIT 1)         AS legal_name,        -- latest carrying event
+  (SELECT u.payload->>'timezone' FROM domain_events u
+     WHERE u.stream_name = reg.stream_name AND u.payload ? 'timezone'
+     ORDER BY u.position DESC LIMIT 1)         AS timezone,
+  (SELECT max(w.occurred_at) FROM domain_events w WHERE w.stream_name = reg.stream_name) AS updated_at
+FROM domain_events reg
+WHERE reg.event_type = 'RestaurantAccountRegistered'
+  AND NOT EXISTS (SELECT 1 FROM domain_events d
+                  WHERE d.stream_name = reg.stream_name AND d.event_type = 'RestaurantAccountDeleted');
 
 CREATE TABLE View_Restaurant (
   restaurant_id UUID PRIMARY KEY,
