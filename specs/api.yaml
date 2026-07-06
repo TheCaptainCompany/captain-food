@@ -42,7 +42,7 @@ types:
 
   Restaurant:
     description: "A restaurant (public discovery + single-restaurant header). Navigates to its catalogs."
-    reads: [{ $ref: 'database/projection_views.yaml#/View_Restaurant' }]
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Restaurant' }]
     properties:
       id: { $ref: 'scalars.yaml#/RestaurantId' }
       accountId: { $ref: 'scalars.yaml#/RestaurantAccountId', nullable: true }   # null for a non-partner listing
@@ -70,19 +70,19 @@ types:
       updatedAt: { type: string, format: date-time }
   Catalog:
     description: "A restaurant's catalog (categories → products → offers + option lists)."
-    reads: [{ $ref: 'database/projection_views.yaml#/View_Catalog' }]
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Catalog' }]
     properties:
       id: { $ref: 'scalars.yaml#/CatalogId' }
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
       slug: { $ref: 'scalars.yaml#/Slug' }
       name: { $ref: 'scalars.yaml#/CatalogName' }
-      categories: { $ref: '#/types/CatalogCategory', array: true }   # assembled from View_Catalog.catalog
+      categories: { $ref: '#/types/CatalogCategory', array: true }   # assembled from Catalog.tree
       products: { $ref: '#/types/Product', array: true }
       optionLists: { $ref: '#/types/OptionList', array: true }
       updatedAt: { type: string, format: date-time }
   Cart:
     description: "A customer's in-progress selection for a single restaurant (priced by the projection)."
-    reads: [{ $ref: 'database/projection_views.yaml#/View_Cart' }]
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Cart' }]
     properties:
       id: { $ref: 'scalars.yaml#/CartId' }
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
@@ -95,7 +95,7 @@ types:
       updatedAt: { type: string, format: date-time }
   Order:
     description: "An order with its tracking status and payment state."
-    reads: [{ $ref: 'database/projection_views.yaml#/View_OrderTracking' }]
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }]
     properties:
       id: { $ref: 'scalars.yaml#/OrderId' }
       ref: { $ref: 'scalars.yaml#/ExternalReference' }
@@ -123,12 +123,12 @@ types:
       estimatedDropoffAt: { type: string, format: date-time, nullable: true }    # partner-reported ETA
       ratedAt: { type: string, format: date-time, nullable: true }
 
-  # Catalog sub-types — the read/API shape, assembled within View_Catalog.catalog. Dedicated API
+  # Catalog sub-types — the read/API shape, assembled within Catalog.tree. Dedicated API
   # types (NOT entities.yaml refs): the read shape carries presentation fields (images) and a DERIVED
   # stockStatus, whereas the write entity carries raw Stock and write-only internals.
   CatalogCategory:
     description: "A catalog category (tree via parentRef)."
-    reads: [{ $ref: 'database/projection_views.yaml#/View_Catalog' }]   # category tree is assembled from the catalog projection
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Catalog' }]   # category tree is assembled from the catalog projection
     properties:
       id: { $ref: 'scalars.yaml#/ProductCategoryId' }
       parentRef: { $ref: 'scalars.yaml#/ExternalReference', nullable: true }
@@ -182,7 +182,7 @@ types:
     description: >
       A customer's own profile (display name + contact). Backed by the identity read model; surfaced
       to the customer only (profile management is V1 — no V0 query yet).
-    reads: [{ $ref: 'database/projection_views.yaml#/View_Customer' }]
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/Customer' }]
     properties:
       customerId: { $ref: 'scalars.yaml#/CustomerId' }
       displayName: { $ref: 'scalars.yaml#/CustomerDisplayName', nullable: true }
@@ -236,7 +236,7 @@ types:
       deliveredAt: { type: string, format: date-time, nullable: true }
   Prospect:
     description: "A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline)."
-    reads: [{ $ref: 'database/projection_views.yaml#/View_ProspectionPipeline' }]
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/ProspectionPipeline' }]
     properties:
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
       score: { $ref: 'scalars.yaml#/ProspectionScore' }
@@ -298,12 +298,12 @@ queries:
     slice: V0
 
   me:
-    description: "The signed-in customer's own profile (resolves the session authRef → Customer via View_Customer)."
+    description: "The signed-in customer's own profile (resolves the session authRef → Customer via Customer)."
     returns: { $ref: '#/types/CustomerProfile', nullable: true }
     roles: [CUSTOMER]
     slice: V1
   favoriteRestaurants:
-    description: "The customer's favorited restaurants (View_Customer.favorite_restaurant_ids joined to View_Restaurant)."
+    description: "The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant)."
     args:
       customerId: { $ref: 'scalars.yaml#/CustomerId', required: true }
     returns: { $ref: '#/types/Restaurant', array: true }
@@ -313,7 +313,7 @@ queries:
   restaurants:
     description: >
       Discover: public list of restaurants. All args are optional filters resolved by the read side
-      (View_Restaurant); the query returns only matching restaurants. `list` selects a curated/
+      (Restaurant); the query returns only matching restaurants. `list` selects a curated/
       personalized shelf (the read model resolves its members).
     args:
       search: { type: string }                              # free-text name match
@@ -339,7 +339,7 @@ queries:
   categories:
     description: >
       The category tree of a restaurant's catalog (for filtering & product discovery). Derived from
-      View_Catalog.catalog — categories are not a separate aggregate, so there is no dedicated view.
+      Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
     args:
       restaurantId: { $ref: 'scalars.yaml#/RestaurantId', required: true }
     returns: { $ref: '#/types/CatalogCategory', array: true }

@@ -572,8 +572,12 @@ fn validate(model: &Model) -> Report {
         let at = format!("views.yaml/{}", view.name);
         cov.view_columns += view.columns.len();
         cov.view_fed_by += view.fedby.len();
-        if !view.name.starts_with("View_") {
-            issues.push(warn("view-naming", at.clone(), format!("Read table '{}' should be prefixed 'View_'.", view.name)));
+        // Naming convention (ADR-0039): a generated VIEW is `View_*`; a materialized TABLE has no prefix.
+        if !view.is_table && !view.name.starts_with("View_") {
+            issues.push(warn("view-naming", at.clone(), format!("Fold view '{}' should be prefixed 'View_'.", view.name)));
+        }
+        if view.is_table && view.name.starts_with("View_") {
+            issues.push(warn("view-naming", at.clone(), format!("Materialized table '{}' should NOT be prefixed 'View_'.", view.name)));
         }
         if !view.reference && !aggregate_names.contains(&view.aggregate) {
             issues.push(err(
@@ -713,32 +717,28 @@ fn validate(model: &Model) -> Report {
         }
     }
 
-    // 5b-bis. Per-view read-model strategy (ADR-0035 #2): a fold view must be generatable from its
-    // column lineage; a materialized view must say why it is projector-fed (not just unfinished).
+    // 5b-bis. Read-model form (ADR-0039): a fold VIEW (projection_views.yaml) must be generatable from its
+    // column lineage; a materialized TABLE (projection_tables.yaml) must declare its projector mechanism.
     for view in &views {
         if view.reference {
             continue;
         }
-        match view.strategy {
-            ViewStrategy::Fold => {
-                if view.definition.is_none() {
-                    if let Err(e) = generate_fold_sql(view, model) {
-                        issues.push(err(
-                            "view-fold-ungeneratable",
-                            format!("projection_views.yaml/{}", view.name),
-                            format!("strategy: fold but the SQL cannot be generated: {}", e),
-                        ));
-                    }
-                }
+        if view.is_table {
+            match view.projector.as_deref() {
+                Some("trigger") | Some("app") => {}
+                _ => issues.push(err(
+                    "projection-table-no-projector",
+                    format!("projection_tables.yaml/{}", view.name),
+                    "a materialized read-model table must declare `projector: trigger | app`.".into(),
+                )),
             }
-            ViewStrategy::Materialized => {
-                if view.materialized_reason.as_deref().unwrap_or("").trim().is_empty() {
-                    issues.push(warn(
-                        "view-materialized-no-reason",
-                        format!("projection_views.yaml/{}", view.name),
-                        "strategy: materialized should declare `materializedReason` (why it is projector-fed).".into(),
-                    ));
-                }
+        } else if view.definition.is_none() {
+            if let Err(e) = generate_fold_sql(view, model) {
+                issues.push(err(
+                    "view-fold-ungeneratable",
+                    format!("projection_views.yaml/{}", view.name),
+                    format!("fold view cannot be generated: {} (move it to projection_tables.yaml if computed).", e),
+                ));
             }
         }
     }
@@ -1519,16 +1519,6 @@ struct SqlColumn {
     /// equalities]) clause — e.g. delivered_at = when DeliveryCompleted OR DeliveryStatusUpdated=DELIVERED.
     occurred_when: Vec<(String, Vec<(String, String)>)>,
 }
-/// How a projection view's read model is produced (ADR-0035 #2 / ADR-0037).
-#[derive(Clone, PartialEq)]
-enum ViewStrategy {
-    /// A pure state fold over `domain_events` — the codegen emits a `CREATE OR REPLACE VIEW` from the
-    /// per-column `from` lineage + derivation modes (correct-by-construction).
-    Fold,
-    /// Computed by a projector (pricing/tree/score/…) or a fold not yet expressible — a materialized
-    /// `CREATE TABLE` fed by application code; `materialized_reason` says why.
-    Materialized,
-}
 struct SqlView {
     name: String,
     aggregate: String,
@@ -1541,9 +1531,11 @@ struct SqlView {
     fedby: Vec<String>,
     columns: Vec<SqlColumn>,
     indexes: Vec<Vec<String>>,
-    strategy: ViewStrategy,
-    /// Why the view is materialized (required when strategy = Materialized).
-    materialized_reason: Option<String>,
+    /// true → a materialized read-model TABLE (projection_tables.yaml, fed by a projector); false → a
+    /// generated fold VIEW (projection_views.yaml).
+    is_table: bool,
+    /// (table) how the table is maintained: "trigger" (generated SQL) | "app" (deferred Rust projector).
+    projector: Option<String>,
     /// Event type whose presence in the stream drops the row (soft-delete tombstone), if any.
     tombstone: Option<String>,
     /// Hand-written SQL override (escape hatch): when set, used verbatim instead of the generated fold.
@@ -1724,7 +1716,16 @@ fn parse_col(name: String, col: &Value, events: &Value) -> SqlColumn {
 fn parse_views(model: &Model) -> Vec<SqlView> {
     let mut out = Vec::new();
     let events = model.defs.get("events.yaml").cloned().unwrap_or(Value::Null);
-    if let Some(Value::Mapping(m)) = model.defs.get("database/projection_views.yaml") {
+    // Read models live in two files: projection_views.yaml (generated fold VIEWs) and
+    // tables/projection_tables.yaml (materialized TABLEs fed by a projector). Same metadata shape.
+    for (file, is_table) in [
+        ("database/projection_views.yaml", false),
+        ("database/tables/projection_tables.yaml", true),
+    ] {
+        let m = match model.defs.get(file) {
+            Some(Value::Mapping(m)) => m,
+            _ => continue,
+        };
         for (k, node) in m {
             let name = match k.as_str() {
                 Some(s) => s,
@@ -1759,10 +1760,6 @@ fn parse_views(model: &Model) -> Vec<SqlView> {
                 }
             }
             let aggregate = node.get("aggregate").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let strategy = match node.get("strategy").and_then(|x| x.as_str()) {
-                Some("materialized") => ViewStrategy::Materialized,
-                _ => ViewStrategy::Fold, // default: generate the fold from lineage
-            };
             let tombstone = node
                 .get("tombstone")
                 .and_then(|t| t.get("$ref").and_then(|r| r.as_str()))
@@ -1779,8 +1776,8 @@ fn parse_views(model: &Model) -> Vec<SqlView> {
                 fedby: ref_names(node.get("fedBy")),
                 columns,
                 indexes,
-                strategy,
-                materialized_reason: node.get("materializedReason").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                is_table,
+                projector: node.get("projector").and_then(|x| x.as_str()).map(|s| s.to_string()),
                 tombstone,
                 definition: node.get("definition").and_then(|x| x.as_str()).map(|s| s.trim_end().to_string()),
             });
@@ -1917,7 +1914,7 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
                 }
             } else {
                 return Err(format!(
-                    "column '{}' is not foldable (no property `from`, not a timestamp occurrence, no `derive`) — declare `strategy: materialized` or add a mode",
+                    "column '{}' is not foldable (no property `from`, not a timestamp occurrence, no `derive`) — move the view to projection_tables.yaml (materialized) or add a mode",
                     c.name
                 ));
             }
@@ -1938,49 +1935,64 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
 fn emit_views_sql(model: &Model) -> String {
     let mut blocks = Vec::new();
     for v in parse_views(model) {
-        // Fold views (ADR-0035 #2) → CREATE OR REPLACE VIEW over domain_events, from a hand-written
-        // `definition` override if present, else generated from the column `from` lineage. Materialized
-        // views (computed/projector-fed) and reference/seed views → CREATE TABLE.
-        if v.strategy == ViewStrategy::Fold {
-            let body = match &v.definition {
-                Some(def) => def.clone(),
-                None => generate_fold_sql(&v, model)
-                    .unwrap_or_else(|e| panic!("projection_views.yaml#/{}: cannot generate fold: {}", v.name, e)),
-            };
-            blocks.push(format!("CREATE OR REPLACE VIEW {} AS\n{};", v.name, body));
+        // Only fold VIEWs (projection_views.yaml) → CREATE OR REPLACE VIEW over domain_events, from a
+        // hand-written `definition` override if present, else generated from the column `from` lineage.
+        // Materialized read-model TABLEs (projection_tables.yaml) are emitted into schema.generated.sql.
+        if v.is_table {
             continue;
         }
-        let mut cols = Vec::new();
-        for c in &v.columns {
-            let mut bits = vec![format!("  {}", c.name), sql_type(&c.ty, model)];
-            if c.pk {
-                bits.push("PRIMARY KEY".into());
-            } else if c.unique {
-                bits.push(if c.nullable { "UNIQUE".into() } else { "NOT NULL UNIQUE".into() });
-            } else if !c.nullable {
-                bits.push("NOT NULL".into());
-            }
-            cols.push(bits.join(" "));
-        }
-        let ddl = format!("CREATE TABLE {} (\n{}\n);", v.name, cols.join(",\n"));
-        let mut idx: Vec<String> = Vec::new();
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for c in &v.columns {
-            if c.index && !c.pk && seen.insert(c.name.clone()) {
-                idx.push(format!("CREATE INDEX ON {} ({});", v.name, c.name));
-            }
-        }
-        for ix in &v.indexes {
-            if seen.insert(ix.join(",")) {
-                idx.push(format!("CREATE INDEX ON {} ({});", v.name, ix.join(", ")));
-            }
-        }
-        blocks.push(if idx.is_empty() { ddl } else { format!("{}\n{}", ddl, idx.join("\n")) });
+        let body = match &v.definition {
+            Some(def) => def.clone(),
+            None => generate_fold_sql(&v, model)
+                .unwrap_or_else(|e| panic!("projection_views.yaml#/{}: cannot generate fold: {}", v.name, e)),
+        };
+        blocks.push(format!("CREATE OR REPLACE VIEW {} AS\n{};", v.name, body));
     }
     format!(
-        "-- GENERATED by tools/codegen from specs/database/projection_views.yaml — do not edit by hand.\n-- Read models (View_*): `strategy: fold` → a CREATE OR REPLACE VIEW state-fold over domain_events,\n-- generated from each column's `from` lineage (ADR-0035 #2); `strategy: materialized` → a CREATE TABLE\n-- fed by a projector (computed columns: pricing/tree/score/…).\n\n{}\n",
+        "-- GENERATED by tools/codegen from specs/database/projection_views.yaml — do not edit by hand.\n-- Read models realized as SQL VIEWS: a `CREATE OR REPLACE VIEW` state-fold over domain_events, generated\n-- from each column's `from` lineage (ADR-0039). Read models whose columns are COMPUTED are materialized\n-- tables in tables/projection_tables.yaml (emitted into schema.generated.sql) instead.\n\n{}\n",
         blocks.join("\n\n")
     )
+}
+
+/// CREATE TABLE DDL (+ indexes) for a materialized read-model table, column types resolved from the
+/// per-column `from` lineage (unlike referential tables, whose columns carry an explicit `type`).
+fn view_table_ddl(v: &SqlView, model: &Model) -> String {
+    let mut cols = Vec::new();
+    for c in &v.columns {
+        let mut bits = vec![format!("  {}", c.name), sql_type(&c.ty, model)];
+        if c.pk {
+            bits.push("PRIMARY KEY".into());
+        } else if c.unique {
+            bits.push(if c.nullable { "UNIQUE".into() } else { "NOT NULL UNIQUE".into() });
+        } else if !c.nullable {
+            bits.push("NOT NULL".into());
+        }
+        cols.push(bits.join(" "));
+    }
+    let ddl = format!("CREATE TABLE {} (\n{}\n);", v.name, cols.join(",\n"));
+    let mut idx: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for c in &v.columns {
+        if c.index && !c.pk && seen.insert(c.name.clone()) {
+            idx.push(format!("CREATE INDEX ON {} ({});", v.name, c.name));
+        }
+    }
+    for ix in &v.indexes {
+        if seen.insert(ix.join(",")) {
+            idx.push(format!("CREATE INDEX ON {} ({});", v.name, ix.join(", ")));
+        }
+    }
+    if idx.is_empty() { ddl } else { format!("{}\n{}", ddl, idx.join("\n")) }
+}
+
+/// The materialized read-model TABLEs (projection_tables.yaml) as DDL, for inclusion in schema.generated.sql.
+fn emit_projection_tables_sql(model: &Model) -> String {
+    parse_views(model)
+        .iter()
+        .filter(|v| v.is_table)
+        .map(|v| view_table_ddl(v, model))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 // ─── schema.generated.sql (ADR-0037 — store DDL from database/tables.yaml + functions/*.sql + scalars enums) ──
@@ -2043,9 +2055,14 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
     }
 
     // 2. Tables from database/tables/*.yaml, in file order. Triggers are collected and emitted after
-    // the functions they execute (step 4).
+    // the functions they execute (step 4). projection_tables.yaml is handled separately (step 2b) — its
+    // columns derive their type from event lineage, not an explicit `type`.
     let mut triggers: Vec<String> = Vec::new();
-    for (_fkey, fval) in model.defs.iter().filter(|(k, _)| k.starts_with("database/tables/")) {
+    for (_fkey, fval) in model
+        .defs
+        .iter()
+        .filter(|(k, _)| k.starts_with("database/tables/") && k.as_str() != "database/tables/projection_tables.yaml")
+    {
         let m = match fval {
             Value::Mapping(m) => m,
             _ => continue,
@@ -2140,6 +2157,14 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
                 }
             }
         }
+    }
+
+    // 2b. Materialized read-model tables (database/tables/projection_tables.yaml) — column types resolved
+    // from event lineage. Fed by a projector (trigger/app); the projection trigger DDL is generated in a
+    // later stage. Emitted here so the read-model tables sit alongside the store tables.
+    let ptables = emit_projection_tables_sql(model);
+    if !ptables.trim().is_empty() {
+        sections.push(ptables);
     }
 
     // 3. Functions — raw SQL bodies from database/functions/*.sql, sorted by filename. They reference
@@ -2430,24 +2455,9 @@ fn ref_strings(v: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// (view name, fedBy event names) for every View_* (aggregate-fed or reference), in file order.
+/// (view name, fedBy event names) for every read model — fold views + materialized tables.
 fn views_fedby(model: &Model) -> Vec<(String, Vec<String>)> {
-    let mut out = Vec::new();
-    if let Some(Value::Mapping(m)) = model.defs.get("database/projection_views.yaml") {
-        for (k, node) in m {
-            let name = match k.as_str() {
-                Some(s) => s,
-                None => continue,
-            };
-            let is_ref = node.get("source").and_then(|x| x.as_str()) == Some("reference");
-            let has_agg = node.get("aggregate").and_then(|x| x.as_str()).is_some();
-            if !has_agg && !is_ref {
-                continue;
-            }
-            out.push((name.to_string(), ref_names(node.get("fedBy"))));
-        }
-    }
-    out
+    parse_views(model).iter().map(|v| (v.name.clone(), v.fedby.clone())).collect()
 }
 
 fn read_c4(model: &Model) -> C4 {
@@ -3838,7 +3848,7 @@ fn emit_documentation(model: &Model) -> String {
         let mut it = rf.splitn(2, "#/");
         let file = it.next().unwrap_or("");
         let name = it.next().unwrap_or("");
-        let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/projection_views.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
+        let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/projection_views.yaml" => "view", "database/tables/projection_tables.yaml" => "view", "database/tables/referential.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
         dlink(kind, name)
     }
     fn ref_list_links(v: Option<&Value>) -> String {
@@ -4172,7 +4182,7 @@ fn h_any_link(rf: &str) -> String {
     let mut it = rf.splitn(2, "#/");
     let file = it.next().unwrap_or("");
     let name = it.next().unwrap_or("");
-    let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/projection_views.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
+    let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/projection_views.yaml" => "view", "database/tables/projection_tables.yaml" => "view", "database/tables/referential.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
     h_link(kind, name)
 }
 fn h_ref_links(v: Option<&Value>) -> String {

@@ -235,7 +235,7 @@ customer-identification:
 
 # =====================================================================
 # prospection — B2B outreach to NON_PARTNER listings (ADR-0020)
-# The prospection-acl worker reads the COMPUTED score from View_ProspectionPipeline, applies the
+# The prospection-acl worker reads the COMPUTED score from ProspectionPipeline, applies the
 # schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact to record the fact.
 # The score is a read-model projection — never an input or an emitted event.
 # =====================================================================

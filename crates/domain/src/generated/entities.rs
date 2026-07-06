@@ -115,7 +115,7 @@ pub struct ExternalIdentifier {
     pub value: String,
 }
 
-/// Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020). Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the View_ProspectionPipeline projection, never stored. This holds only the outreach state.
+/// Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020). Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the ProspectionPipeline projection, never stored. This holds only the outreach state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Prospect {

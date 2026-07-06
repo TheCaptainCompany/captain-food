@@ -138,7 +138,7 @@ Prospect:
   type: aggregate
   description: >
     Sales/CRM state of a NON_PARTNER restaurant listing worked as a B2B prospect (ADR-0020); id = restaurantId.
-    The `prospection-acl` worker (EXTERNAL) reads the COMPUTED score from View_ProspectionPipeline + the
+    The `prospection-acl` worker (EXTERNAL) reads the COMPUTED score from ProspectionPipeline + the
     schedule, fires HubSpot/Resend/Slack, then records the contact fact here. The score is never an input or
     an emitted event. First RecordProspectContact is the prospect's birth; anti-spam invariants guard contacts.
   receives:
@@ -486,12 +486,12 @@ CartBindingProcess:
   description: >
     Binds a returning visitor's OPEN guest carts to their Customer. Reacts to the inbound
     CustomerIdentified fact (authRef → customerId, reported when the visitor signs in) so the
-    View_Cart projection stamps the customerId onto their carts — enabling cross-device carts to
+    Cart projection stamps the customerId onto their carts — enabling cross-device carts to
     converge and be merged at checkout.
   receives:
     - message: { $ref: 'events.yaml#/CustomerIdentified' }
       emits: []
-      effect: "Bind customerId onto the visitor's OPEN carts (View_Cart projection); no new event in V0."
+      effect: "Bind customerId onto the visitor's OPEN carts (Cart projection); no new event in V0."
 
 DeliveryDispatchProcess:
   type: process-manager

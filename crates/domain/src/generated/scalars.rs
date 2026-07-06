@@ -320,7 +320,7 @@ pub enum GbpLinkStatus {
     BROKEN,
 }
 
-/// B2B prospection priority (0–10), COMPUTED by the View_ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event.
+/// B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ProspectionScore(pub i64);
 

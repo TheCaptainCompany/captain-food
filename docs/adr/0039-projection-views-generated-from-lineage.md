@@ -47,9 +47,10 @@ drops the row.
   `View_DeliveryJob` (exercises `derive` + `occurredWhen`). The 4 genuinely computed views
   (`View_Cart`, `View_OrderTracking`, `View_Catalog`, `View_ProspectionPipeline`) → `materialized` with a
   reason; `View_Restaurant`/`View_Customer` → `materialized` pending the modes below.
-- **Stage B:** cross-stream lookup (e.g. `View_Restaurant.default_currency` from the account stream) →
-  fold `View_Restaurant`.
-- **Stage C:** jsonb accumulate (add/remove) → fold `View_Customer`.
+- **Stage B/C (superseded by ADR-0040):** `Restaurant` (cross-stream currency) and `Customer` (jsonb
+  accumulate) turned out cleaner as **incremental materialized tables** than as read-time views — so they
+  moved to `tables/projection_tables.yaml` with `projector: trigger` (generated write-time fold) rather
+  than extending the read-time fold generator. See ADR-0040.
 
 ## Alternatives considered
 - **Hand-write every fold**: rejected — repeats the set-once hazard once per view; the lineage already

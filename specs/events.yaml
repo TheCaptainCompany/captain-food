@@ -675,7 +675,7 @@ CustomerIdentified:
       $ref: 'scalars.yaml#/CustomerId'
     authRef:
       $ref: 'scalars.yaml#/ExternalReference'
-      description: "Auth provider user id that was matched to this Customer (via View_Customer.auth_ref)."
+      description: "Auth provider user id that was matched to this Customer (via Customer.auth_ref)."
   required:
     - customerId
     - authRef

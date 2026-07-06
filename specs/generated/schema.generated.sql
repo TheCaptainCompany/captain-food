@@ -159,6 +159,129 @@ CREATE TABLE UberSplitPolicy (
   effective_from TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE Restaurant (
+  restaurant_id UUID PRIMARY KEY,
+  restaurant_account_id UUID,
+  listing_status TEXT NOT NULL,
+  external_identifiers JSONB,
+  google_place_id TEXT,
+  slug TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  description TEXT,
+  tags JSONB,
+  margin_rate TEXT,
+  cuisine_category TEXT,
+  uber_prices_opt_in BOOLEAN,
+  website TEXT,
+  rating TEXT,
+  reviews_count INTEGER,
+  gbp_order_url TEXT,
+  gbp_link_status TEXT,
+  address JSONB NOT NULL,
+  location JSONB,
+  opening_hours JSONB NOT NULL,
+  status TEXT NOT NULL,
+  order_acceptance TEXT NOT NULL,
+  default_currency TEXT NOT NULL,
+  timezone TEXT,
+  preparation_time_minutes INTEGER,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON Restaurant (restaurant_account_id);
+CREATE INDEX ON Restaurant (listing_status);
+
+CREATE TABLE ProspectionPipeline (
+  restaurant_id UUID PRIMARY KEY,
+  score INTEGER NOT NULL,
+  pipeline_status TEXT NOT NULL,
+  contacts_count INTEGER NOT NULL,
+  last_contacted_at TIMESTAMPTZ,
+  replied_at TIMESTAMPTZ
+);
+CREATE INDEX ON ProspectionPipeline (score);
+CREATE INDEX ON ProspectionPipeline (pipeline_status);
+
+CREATE TABLE Customer (
+  customer_id UUID PRIMARY KEY,
+  phone TEXT NOT NULL UNIQUE,
+  auth_ref TEXT,
+  display_name TEXT,
+  email TEXT,
+  email_verified BOOLEAN NOT NULL,
+  locale TEXT,
+  timezone TEXT,
+  ratings JSONB NOT NULL,
+  favorite_restaurant_ids JSONB NOT NULL,
+  preferences JSONB,
+  addresses JSONB NOT NULL,
+  payment_method_id TEXT,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON Customer (auth_ref);
+
+CREATE TABLE Catalog (
+  catalog_id UUID PRIMARY KEY,
+  restaurant_id UUID NOT NULL,
+  slug TEXT NOT NULL,
+  name TEXT NOT NULL,
+  tree JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON Catalog (restaurant_id);
+
+CREATE TABLE Cart (
+  cart_id UUID PRIMARY KEY,
+  restaurant_id UUID NOT NULL,
+  customer_id UUID,
+  status TEXT NOT NULL,
+  lines JSONB NOT NULL,
+  total_amount_cents BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  estimated_breakdown JSONB,
+  uber_comparison JSONB,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE OrderTracking (
+  order_id UUID PRIMARY KEY,
+  ref TEXT NOT NULL,
+  restaurant_id UUID NOT NULL,
+  customer_id UUID,
+  status TEXT NOT NULL,
+  service_type TEXT NOT NULL,
+  items JSONB NOT NULL,
+  total_amount_cents BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  articles_cents BIGINT NOT NULL,
+  delivery_cents BIGINT NOT NULL,
+  service_fee_cents BIGINT NOT NULL,
+  restaurant_payout_cents BIGINT NOT NULL,
+  rider_payout_cents BIGINT NOT NULL,
+  captain_net_cents BIGINT NOT NULL,
+  uber_total_cents BIGINT,
+  uber_restaurant_cents BIGINT,
+  uber_rider_cents BIGINT,
+  uber_platform_cents BIGINT,
+  uber_basis TEXT,
+  delivery_address JSONB,
+  estimated_ready_at TIMESTAMPTZ,
+  placed_at TIMESTAMPTZ NOT NULL,
+  status_changed_at TIMESTAMPTZ NOT NULL,
+  payment_status TEXT NOT NULL,
+  restaurant_stars INTEGER,
+  rating_comment TEXT,
+  rider_thumb TEXT,
+  rider_tip_cents BIGINT,
+  restaurant_tip_cents BIGINT,
+  captain_tip_cents BIGINT,
+  rated_at TIMESTAMPTZ,
+  delivery_status TEXT,
+  courier JSONB,
+  estimated_dropoff_at TIMESTAMPTZ
+);
+CREATE INDEX ON OrderTracking (customer_id);
+CREATE INDEX ON OrderTracking (restaurant_id, status, placed_at);
+
 -- all_events(): the entire log in global order — the SQL equivalent of EventStoreDB's $all stream.
 -- Inspection/replay only (projections track a checkpoint on position); never a read path.
 -- all_events()  ==  SELECT * FROM domain_events ORDER BY position

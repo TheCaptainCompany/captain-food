@@ -54,12 +54,12 @@ components:
     instrumented: true
     updates:
       - { $ref: 'database/projection_views.yaml#/View_RestaurantAccount' }
-      - { $ref: 'database/projection_views.yaml#/View_Restaurant' }
-      - { $ref: 'database/projection_views.yaml#/View_Customer' }
-      - { $ref: 'database/projection_views.yaml#/View_Catalog' }
-      - { $ref: 'database/projection_views.yaml#/View_Cart' }
-      - { $ref: 'database/projection_views.yaml#/View_OrderTracking' }
-      - { $ref: 'database/projection_views.yaml#/View_ProspectionPipeline' }
+      - { $ref: 'database/tables/projection_tables.yaml#/Restaurant' }
+      - { $ref: 'database/tables/projection_tables.yaml#/Customer' }
+      - { $ref: 'database/tables/projection_tables.yaml#/Catalog' }
+      - { $ref: 'database/tables/projection_tables.yaml#/Cart' }
+      - { $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }
+      - { $ref: 'database/tables/projection_tables.yaml#/ProspectionPipeline' }
       - { $ref: 'database/projection_views.yaml#/View_DeliveryJob' }
   bam-projector:
     description: "Business Activity Monitoring projection (runs in the bam container); business_metrics only."
@@ -77,7 +77,7 @@ components:
     description: "Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate."
     instrumented: true
   prospection-acl:
-    description: "B2B prospection worker (ADR-0020): reads the COMPUTED score from View_ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back."
+    description: "B2B prospection worker (ADR-0020): reads the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back."
     instrumented: true
   avelo37-acl:
     description: "Anti-Corruption Layer for the delivery partner (Avelo37; ADR-0031): on DeliveryRequested, dispatches the job to the partner API; translates the partner's webhooks into the inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain; mirrors stripe-adapter."

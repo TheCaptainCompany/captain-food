@@ -93,7 +93,33 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `timezone` | `TimeZone` | `TEXT` | nullable |  |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
 
-### `View_Restaurant` · 🛶 V0 · source aggregate `Restaurant`
+### `View_DeliveryJob` · 🛶 V0 · source aggregate `DeliveryJob`
+
+- **Fed by**: `DeliveryRequested`, `DeliveryAcceptedByPartner`, `DeliveryRejectedByPartner`, `DeliveryStatusUpdated`, `DeliveryAcceptedByRider`, `DeliveryPickedUp`, `DeliveryCompleted`, `DeliveryCancelled`
+- **Rules**: `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
+- **Indexes**: `(restaurant_id, status)`, `(rider_id, status)`
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `delivery_job_id` | `DeliveryJobId` | `UUID` | PK |  |
+| `order_id` | `OrderId` | `UUID` | index |  |
+| `restaurant_id` | `RestaurantId` | `UUID` | — |  |
+| `status` | `DeliveryStatus` | `TEXT` | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status. |
+| `provider` | `DeliveryProvider` | `TEXT` | nullable | INDEPENDENT (rider accepted) or PARTNER (partner accepted); null while PENDING. |
+| `rider_id` | `RiderId` | `UUID` | nullable | Set for an independent-rider delivery; null for a partner delivery. |
+| `courier` | `jsonb` | `JSONB` | nullable | Courier { displayName, phone?, riderId? }; from the partner on acceptance (independent rider is in rider_id). |
+| `partner_ref` | `ExternalReference` | `TEXT` | nullable | Partner-side delivery id; idempotent key for inbound updates. |
+| `pickup_address` | `jsonb` | `JSONB` | — |  |
+| `dropoff_address` | `jsonb` | `JSONB` | — |  |
+| `estimated_pickup_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
+| `estimated_dropoff_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
+| `requested_at` | `timestamptz` | `TIMESTAMPTZ` | — | DeliveryRequested occurrence time. |
+| `picked_up_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
+| `delivered_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Set on DeliveryCompleted or DeliveryStatusUpdated=DELIVERED (conditional occurrence). |
+| `last_partner_rejection` | `text` | `TEXT` | nullable | Reason of the latest partner decline (the job stays PENDING and is re-offered); null if never rejected. |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
+
+### `Restaurant` · 🛶 V0 · source aggregate `Restaurant`
 
 - **Fed by**: `RestaurantRegistered`, `RestaurantUpdated`, `RestaurantActivated`, `RestaurantDeactivated`, `RestaurantAcceptanceModeChanged`, `RestaurantRemoved`, `RestaurantGoogleBusinessProfileUpdated`, `RestaurantListingClaimed`, `RestaurantListingOptedOut`, `RestaurantMarkedClosed`, `RestaurantListingStatusChanged`, `RestaurantGoogleBusinessProfileOrderLinkConfigured`, `RestaurantGoogleBusinessProfileOrderLinkVerified`, `RestaurantAccountRegistered`
 
@@ -109,7 +135,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `description` | `text` | `TEXT` | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
 | `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
 | `margin_rate` | `MarginPercent` | `TEXT` | nullable | Food margin %, input to the Captain service-fee split (ADR-0017); back-office only. |
-| `cuisine_category` | `CuisineCategory` | `TEXT` | nullable | Selects the Uber Eats price-estimate coefficient in View_UberEstimationPolicy (ADR-0024). |
+| `cuisine_category` | `CuisineCategory` | `TEXT` | nullable | Selects the Uber Eats price-estimate coefficient in UberEstimationPolicy (ADR-0024). |
 | `uber_prices_opt_in` | `boolean` | `BOOLEAN` | nullable | Restaurant authorized showing its real Uber prices via HubRise (ADR-0023). Gates REAL vs ESTIMATED basis. |
 | `website` | `WebUrl` | `TEXT` | nullable |  |
 | `rating` | `GoogleRating` | `TEXT` | nullable | GBP-specific metric (Google listing), independent of the restaurant's own info. |
@@ -126,7 +152,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `preparation_time_minutes` | `integer` | `INTEGER` | nullable |  |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
 
-### `View_ProspectionPipeline` · 🔭 V1 · source aggregate `Prospect`
+### `ProspectionPipeline` · 🔭 V1 · source aggregate `Prospect`
 
 - **Fed by**: `RestaurantRegistered`, `RestaurantGoogleBusinessProfileUpdated`, `RestaurantListingStatusChanged`, `ProspectContacted`, `ProspectMarkedCold`, `ProspectReplied`
 - **Filters**: Rows for NON_PARTNER / PASSIVE_PARTNER listings (active prospects); CONVERTED once ACTIVE_PARTNER.
@@ -142,10 +168,10 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `last_contacted_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
 | `replied_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
 
-### `View_Customer` · 🛶 V0 · source aggregate `Customer`
+### `Customer` · 🛶 V0 · source aggregate `Customer`
 
 - **Fed by**: `CustomerRegistered`, `RestaurantRated`, `RestaurantFavorited`, `RestaurantUnfavorited`, `CustomerInfoUpdated`, `CustomerEmailVerified`, `CustomerPhoneChanged`, `CustomerLanguageChanged`, `CustomerPreferencesSet`, `CustomerAddressSet`, `CustomerAddressRemoved`, `CustomerPaymentMethodSet`
-- **Rules**: `ratings` accumulates the customer's own restaurant ratings (from RestaurantRated) so they can see how they rated each restaurant. `favorite_restaurant_ids` is maintained from RestaurantFavorited/RestaurantUnfavorited; the favoriteRestaurants query joins it to View_Restaurant.
+- **Rules**: `ratings` accumulates the customer's own restaurant ratings (from RestaurantRated) so they can see how they rated each restaurant. `favorite_restaurant_ids` is maintained from RestaurantFavorited/RestaurantUnfavorited; the favoriteRestaurants query joins it to Restaurant.
 - **Note**: Identity/lookup read model: resolves a returning phone (or auth_ref) to an existing Customer, backs VerifyPhone idempotency + auth resolution, and serves the `me` query (CustomerProfile). Also bound when CustomerIdentified stamps carts. The stored `locale` localizes authenticated SMS/email sends.
 
 | Column | Type | SQL | Constraints | Notes |
@@ -165,10 +191,10 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `payment_method_id` | `PaymentMethodId` | `TEXT` | nullable |  |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
 
-### `View_Catalog` · 🛶 V0 · source aggregate `Catalog`
+### `Catalog` · 🛶 V0 · source aggregate `Catalog`
 
 - **Fed by**: `CatalogCreated`, `CatalogCategoryAdded`, `CatalogCategoryUpdated`, `CatalogCategoryRemoved`, `ProductAdded`, `ProductUpdated`, `ProductRemoved`, `OptionListAdded`, `OptionListUpdated`, `OptionListRemoved`, `OfferStockUpdated`, `CatalogImported`
-- **Rules**: `stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0. Could be normalized (one row per offer) if per-item querying is needed later. Each offer carries a derived `uberPrice` { amountCents, currency } + `uberPriceBasis` for the product-level comparison (ADR-0022): ESTIMATED = View_UberEstimationPolicy[restaurant.cuisine_category].price_coefficient × offer price (null when the restaurant has no cuisine_category); REAL = the restaurant's own Uber price when uber_prices_opt_in and a HubRise Uber menu is present (ingestion deferred — runtime). Always labelled.
+- **Rules**: `stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0. Could be normalized (one row per offer) if per-item querying is needed later. Each offer carries a derived `uberPrice` { amountCents, currency } + `uberPriceBasis` for the product-level comparison (ADR-0022): ESTIMATED = UberEstimationPolicy[restaurant.cuisine_category].price_coefficient × offer price (null when the restaurant has no cuisine_category); REAL = the restaurant's own Uber price when uber_prices_opt_in and a HubRise Uber menu is present (ingestion deferred — runtime). Always labelled.
 
 | Column | Type | SQL | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -176,13 +202,13 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `restaurant_id` | `RestaurantId` | `UUID` | index |  |
 | `slug` | `Slug` | `TEXT` | — | ⚠️ HOLE: CatalogCreated carries no slug — nothing populates this column (drop it or add slug to the event). |
 | `name` | `CatalogName` | `TEXT` | — |  |
-| `catalog` | `jsonb` | `JSONB` | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
+| `tree` | `jsonb` | `JSONB` | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
 
-### `View_Cart` · 🛶 V0 · source aggregate `Cart`
+### `Cart` · 🛶 V0 · source aggregate `Cart`
 
 - **Fed by**: `CartStarted`, `CartLineAdded`, `CartLineQuantityChanged`, `CartLineRemoved`, `CartCheckedOut`, `CustomerIdentified`
-- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout. `estimated_breakdown` applies View_PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown. `uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + View_UberEstimationPolicy[restaurant.cuisine_category] + View_UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred).
+- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout. `estimated_breakdown` applies PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown. `uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + UberEstimationPolicy[restaurant.cuisine_category] + UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred).
 - **Note**: Joined with the catalog for pricing (secondary source).
 
 | Column | Type | SQL | Constraints | Notes |
@@ -194,14 +220,14 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `lines` | `jsonb` | `JSONB` | — | Priced by the projection from the live catalog: [{ cart_line_id, offer_id, product_id, name, offer_name, quantity, unit_price_cents, selected_options, line_total_cents }]. |
 | `total_amount_cents` | `MoneyCents` | `BIGINT` | — | COMPUTED by the projection from the live catalog (never trusted from the client). |
 | `currency` | `CurrencyCode` | `TEXT` | — | From the catalog currency at pricing time (the restaurant's default_currency). |
-| `estimated_breakdown` | `jsonb` | `JSONB` | nullable | ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + View_PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order. |
+| `estimated_breakdown` | `jsonb` | `JSONB` | nullable | ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order. |
 | `uber_comparison` | `jsonb` | `JSONB` | nullable | UberComparison for the cart-level comparison (ADR-0022/0025), COMPUTED by the projection (see rules). Null when the restaurant has no cuisine_category. |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
 
-### `View_OrderTracking` · 🛶 V0 · source aggregate `Order`
+### `OrderTracking` · 🛶 V0 · source aggregate `Order`
 
 - **Fed by**: `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`, `PaymentCaptured`, `PaymentRefunded`, `OrderRated`, `RestaurantRated`, `OrderTipped`, `DeliveryAcceptedByPartner`, `DeliveryAcceptedByRider`, `DeliveryStatusUpdated`, `DeliveryCompleted`
-- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → View_UberEstimationPolicy.price_coefficient + View_UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
+- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
 - **Note**: The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status (back-office queue) — via the indexes below; there is no separate per-persona order projection.
 
 - **Indexes**: `(restaurant_id, status, placed_at)`
@@ -243,31 +269,5 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `delivery_status` | `DeliveryStatus` | `TEXT` | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. |
 | `courier` | `jsonb` | `JSONB` | nullable | Assigned Courier { displayName, phone?, riderId? } once accepted; null before. |
 | `estimated_dropoff_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Partner-reported ETA to the customer; null when unknown. |
-
-### `View_DeliveryJob` · 🛶 V0 · source aggregate `DeliveryJob`
-
-- **Fed by**: `DeliveryRequested`, `DeliveryAcceptedByPartner`, `DeliveryRejectedByPartner`, `DeliveryStatusUpdated`, `DeliveryAcceptedByRider`, `DeliveryPickedUp`, `DeliveryCompleted`, `DeliveryCancelled`
-- **Rules**: `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
-- **Indexes**: `(restaurant_id, status)`, `(rider_id, status)`
-
-| Column | Type | SQL | Constraints | Notes |
-| --- | --- | --- | --- | --- |
-| `delivery_job_id` | `DeliveryJobId` | `UUID` | PK |  |
-| `order_id` | `OrderId` | `UUID` | index |  |
-| `restaurant_id` | `RestaurantId` | `UUID` | — |  |
-| `status` | `DeliveryStatus` | `TEXT` | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status. |
-| `provider` | `DeliveryProvider` | `TEXT` | nullable | INDEPENDENT (rider accepted) or PARTNER (partner accepted); null while PENDING. |
-| `rider_id` | `RiderId` | `UUID` | nullable | Set for an independent-rider delivery; null for a partner delivery. |
-| `courier` | `jsonb` | `JSONB` | nullable | Courier { displayName, phone?, riderId? }; from the partner on acceptance (independent rider is in rider_id). |
-| `partner_ref` | `ExternalReference` | `TEXT` | nullable | Partner-side delivery id; idempotent key for inbound updates. |
-| `pickup_address` | `jsonb` | `JSONB` | — |  |
-| `dropoff_address` | `jsonb` | `JSONB` | — |  |
-| `estimated_pickup_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
-| `estimated_dropoff_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
-| `requested_at` | `timestamptz` | `TIMESTAMPTZ` | — | DeliveryRequested occurrence time. |
-| `picked_up_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
-| `delivered_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Set on DeliveryCompleted or DeliveryStatusUpdated=DELIVERED (conditional occurrence). |
-| `last_partner_rejection` | `text` | `TEXT` | nullable | Reason of the latest partner decline (the job stays PENDING and is re-offered); null if never rejected. |
-| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | Row write time, stamped on each event. |
 
 <!-- GENERATED:views END -->

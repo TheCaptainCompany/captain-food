@@ -408,11 +408,11 @@ type Restaurant {
   timezone: TimeZone
   preparationTimeMinutes: Int
   updatedAt: DateTime!
+  deliveryJobs: [DeliveryJob!]!
   prospects: [Prospect!]!
   catalogs: [Catalog!]!
   carts: [Cart!]!
   orders: [Order!]!
-  deliveryJobs: [DeliveryJob!]!
 }
 
 type Catalog {
@@ -466,8 +466,8 @@ type Order {
   courier: Courier
   estimatedDropoffAt: DateTime
   ratedAt: DateTime
-  restaurant: Restaurant!
   deliveryJobs: [DeliveryJob!]!
+  restaurant: Restaurant!
 }
 
 type CatalogCategory {
@@ -1496,21 +1496,21 @@ type CancelDeliveryPayload {
 type Query {
   phoneCountries: [PhoneCountry!]! @public @reads(views: ["PhoneCountry"])
   operation(input: OperationQueryInput!): Operation @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN])
-  me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["View_Customer"])
-  favoriteRestaurants(input: FavoriteRestaurantsQueryInput!): [Restaurant!]! @auth(requires: [CUSTOMER]) @reads(views: ["View_Restaurant"])
-  restaurants(input: RestaurantsQueryInput): [Restaurant!]! @public @reads(views: ["View_Restaurant"])
-  catalog(input: CatalogQueryInput!): Catalog @public @reads(views: ["View_Catalog"])
-  categories(input: CategoriesQueryInput!): [CatalogCategory!]! @public @reads(views: ["View_Catalog"])
-  restaurant(input: RestaurantQueryInput!): Restaurant @public @reads(views: ["View_Restaurant"])
-  carts(input: CartsQueryInput!): [Cart!]! @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["View_Cart"])
-  cart(input: CartQueryInput!): Cart @public @reads(views: ["View_Cart"])
-  orders(input: OrdersQueryInput): [Order!]! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_OrderTracking"])
-  order(input: OrderQueryInput!): Order @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_OrderTracking"])
+  me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["Customer"])
+  favoriteRestaurants(input: FavoriteRestaurantsQueryInput!): [Restaurant!]! @auth(requires: [CUSTOMER]) @reads(views: ["Restaurant"])
+  restaurants(input: RestaurantsQueryInput): [Restaurant!]! @public @reads(views: ["Restaurant"])
+  catalog(input: CatalogQueryInput!): Catalog @public @reads(views: ["Catalog"])
+  categories(input: CategoriesQueryInput!): [CatalogCategory!]! @public @reads(views: ["Catalog"])
+  restaurant(input: RestaurantQueryInput!): Restaurant @public @reads(views: ["Restaurant"])
+  carts(input: CartsQueryInput!): [Cart!]! @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["Cart"])
+  cart(input: CartQueryInput!): Cart @public @reads(views: ["Cart"])
+  orders(input: OrdersQueryInput): [Order!]! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["OrderTracking"])
+  order(input: OrderQueryInput!): Order @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["OrderTracking"])
   delivery(input: DeliveryQueryInput!): DeliveryJob @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["View_DeliveryJob"])
   myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
-  restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["View_Restaurant"])
-  prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["View_ProspectionPipeline"])
+  restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
+  prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
   pricingPolicy: [PricingPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["PricingPolicy"])
   uberEstimationPolicy: [UberEstimationPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["UberEstimationPolicy"])
   uberSplitPolicy: [UberSplitPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["UberSplitPolicy"])

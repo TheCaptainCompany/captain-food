@@ -432,7 +432,7 @@ ProspectionScore:
   type: integer
   minimum: 0
   maximum: 10
-  description: "B2B prospection priority (0–10), COMPUTED by the View_ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event."
+  description: "B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event."
 
 ProspectPipelineStatus:
   type: string

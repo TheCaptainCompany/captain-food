@@ -203,7 +203,7 @@ A restaurant's active delivery jobs (delivery board; ownership enforced server-s
 All restaurant locations under an account (back-office; ownership enforced server-side).
 
 - **Input**: 🧩 `RestaurantLocationsByAccountQueryInput!` — `accountId`: [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid)
-- **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `Restaurant`](#view-restaurant)
 - **Roles**: ADMIN, RESTAURANT_ACCOUNT · **slice** V1
 
 <a id="query-prospectionpipeline"></a>
@@ -212,7 +212,7 @@ All restaurant locations under an account (back-office; ownership enforced serve
 B2B prospection pipeline (admin): scored prospects, optionally filtered by minimum score / pipeline status.
 
 - **Input**: 🧩 `ProspectionPipelineQueryInput` — `minScore?`: [🔤 `ProspectionScore`](#scalar-prospectionscore), `status?`: [🔤 `ProspectPipelineStatus`](#scalar-prospectpipelinestatus)
-- **Returns**: [🧩 `Prospect`](#type-prospect) (list) · **reads** [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Returns**: [🧩 `Prospect`](#type-prospect) (list) · **reads** [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 - **Roles**: ADMIN · **slice** V1
 
 <a id="mutation-registerrestaurantaccount"></a>
@@ -355,7 +355,7 @@ B2B prospection pipeline (admin): scored prospects, optionally filtered by minim
 
 A restaurant (public discovery + single-restaurant header). Navigates to its catalogs.
 
-- **Read model**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Read model**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -389,7 +389,7 @@ A restaurant (public discovery + single-restaurant header). Navigates to its cat
 
 A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline).
 
-- **Read model**: [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Read model**: [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -438,7 +438,7 @@ _🧩 aggregate_ — A single restaurant location: profile, operational status (
 <a id="actor-prospect"></a>
 #### 🎭 Actor: `Prospect`
 
-_🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked as a B2B prospect (ADR-0020); id = restaurantId. The `prospection-acl` worker (EXTERNAL) reads the COMPUTED score from View_ProspectionPipeline + the schedule, fires HubSpot/Resend/Slack, then records the contact fact here. The score is never an input or an emitted event. First RecordProspectContact is the prospect's birth; anti-spam invariants guard contacts.
+_🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked as a B2B prospect (ADR-0020); id = restaurantId. The `prospection-acl` worker (EXTERNAL) reads the COMPUTED score from ProspectionPipeline + the schedule, fires HubSpot/Resend/Slack, then records the contact fact here. The score is never an input or an emitted event. First RecordProspectContact is the prospect's birth; anti-spam invariants guard contacts.
 
 
 | Receives | Emits → | Throws |
@@ -465,8 +465,8 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `timezone` | [🔤 `TimeZone`](#scalar-timezone) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`timezone`](#event-restaurantaccountregistered--timezone), [⚡ `RestaurantAccountUpdated`.`timezone`](#event-restaurantaccountupdated--timezone) | nullable |  |
 | `updated_at` | `timestamptz` | [⚡ `RestaurantAccountRegistered`](#event-restaurantaccountregistered), [⚡ `RestaurantAccountUpdated`](#event-restaurantaccountupdated) | — | Row write time, stamped on each event. |
 
-<a id="view-view_restaurant"></a>
-#### 🗄️ View: `View_Restaurant`
+<a id="view-restaurant"></a>
+#### 🗄️ View: `Restaurant`
 
 - **Source**: [🎭 `Restaurant`](#actor-restaurant) · 🛶 V0
 - **Fed by**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged), [⚡ `RestaurantRemoved`](#event-restaurantremoved), [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged), [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured), [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified), [⚡ `RestaurantAccountRegistered`](#event-restaurantaccountregistered)
@@ -483,7 +483,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `description` | `text` | ⚠️ _(none)_ | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
 | `tags` | `jsonb` | [⚡ `RestaurantRegistered`.`tags`](#event-restaurantregistered--tags), [⚡ `RestaurantUpdated`.`tags`](#event-restaurantupdated--tags) | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
 | `margin_rate` | [🔤 `MarginPercent`](#scalar-marginpercent) | [⚡ `RestaurantRegistered`.`marginRate`](#event-restaurantregistered--marginrate), [⚡ `RestaurantUpdated`.`marginRate`](#event-restaurantupdated--marginrate) | nullable | Food margin %, input to the Captain service-fee split (ADR-0017); back-office only. |
-| `cuisine_category` | [🔤 `CuisineCategory`](#scalar-cuisinecategory) | [⚡ `RestaurantRegistered`.`cuisineCategory`](#event-restaurantregistered--cuisinecategory), [⚡ `RestaurantUpdated`.`cuisineCategory`](#event-restaurantupdated--cuisinecategory) | nullable | Selects the Uber Eats price-estimate coefficient in View_UberEstimationPolicy (ADR-0024). |
+| `cuisine_category` | [🔤 `CuisineCategory`](#scalar-cuisinecategory) | [⚡ `RestaurantRegistered`.`cuisineCategory`](#event-restaurantregistered--cuisinecategory), [⚡ `RestaurantUpdated`.`cuisineCategory`](#event-restaurantupdated--cuisinecategory) | nullable | Selects the Uber Eats price-estimate coefficient in UberEstimationPolicy (ADR-0024). |
 | `uber_prices_opt_in` | `boolean` | [⚡ `RestaurantRegistered`.`uberPricesOptIn`](#event-restaurantregistered--uberpricesoptin), [⚡ `RestaurantUpdated`.`uberPricesOptIn`](#event-restaurantupdated--uberpricesoptin) | nullable | Restaurant authorized showing its real Uber prices via HubRise (ADR-0023). Gates REAL vs ESTIMATED basis. |
 | `website` | [🔤 `WebUrl`](#scalar-weburl) | [⚡ `RestaurantRegistered`.`website`](#event-restaurantregistered--website), [⚡ `RestaurantUpdated`.`website`](#event-restaurantupdated--website) | nullable |  |
 | `rating` | [🔤 `GoogleRating`](#scalar-googlerating) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`rating`](#event-restaurantgooglebusinessprofileupdated--rating) | nullable | GBP-specific metric (Google listing), independent of the restaurant's own info. |
@@ -500,8 +500,8 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `preparation_time_minutes` | `integer` _(derived)_ | [⚡ `RestaurantRegistered`.`preparationTimeMinutes`](#event-restaurantregistered--preparationtimeminutes), [⚡ `RestaurantUpdated`.`preparationTimeMinutes`](#event-restaurantupdated--preparationtimeminutes) | nullable |  |
 | `updated_at` | `timestamptz` | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged), [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged), [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured), [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified) | — | Row write time, stamped on each event. |
 
-<a id="view-view_prospectionpipeline"></a>
-#### 🗄️ View: `View_ProspectionPipeline`
+<a id="view-prospectionpipeline"></a>
+#### 🗄️ View: `ProspectionPipeline`
 
 - **Source**: [🎭 `Prospect`](#actor-prospect) · 🔭 V1
 - **Note**: B2B prospection pipeline (ADR-0020): one row per worked listing, with the COMPUTED score and outreach state. Read by the admin prospectionPipeline query.
@@ -511,7 +511,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
-| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `View_Restaurant`](#view-view_restaurant) | [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid) | PK |  |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid) | PK |  |
 | `score` | [🔤 `ProspectionScore`](#scalar-prospectionscore) | [⚡ `RestaurantRegistered`.`externalIdentifiers`](#event-restaurantregistered--externalidentifiers), [⚡ `RestaurantRegistered`.`website`](#event-restaurantregistered--website), [⚡ `RestaurantGoogleBusinessProfileUpdated`.`rating`](#event-restaurantgooglebusinessprofileupdated--rating), [⚡ `RestaurantGoogleBusinessProfileUpdated`.`reviewsCount`](#event-restaurantgooglebusinessprofileupdated--reviewscount) | index | Derived (see rules); not an event field. |
 | `pipeline_status` | [🔤 `ProspectPipelineStatus`](#scalar-prospectpipelinestatus) | [⚡ `ProspectContacted`](#event-prospectcontacted), [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold), [⚡ `ProspectReplied`](#event-prospectreplied), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged) | index | Derived from the prospect events + listingStatus (see rules). |
 | `contacts_count` | `integer` | [⚡ `ProspectContacted`](#event-prospectcontacted) | — | Count of ProspectContacted; drives the anti-spam ≤3 rule. |
@@ -837,7 +837,7 @@ A restaurant account (HubRise: restaurant) was created; it owns one or more loca
 
 - **Emitted by**: [🎭 `RestaurantAccount`](#actor-restaurantaccount)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -889,7 +889,7 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -921,7 +921,7 @@ One or more editable LOCATION fields of a restaurant have changed.
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -947,7 +947,7 @@ Restaurant is now visible and orderable by customers.
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -961,7 +961,7 @@ Restaurant can no longer receive orders.
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -975,7 +975,7 @@ Restaurant toggled its order acceptance mode (e.g. busy, paused).
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -990,7 +990,7 @@ A location was removed (delisted) from its account.
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1005,7 +1005,7 @@ GBP-SPECIFIC metrics for the restaurant's Google Business Profile (place id + Go
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1021,7 +1021,7 @@ An owner proved ownership of the listing (Google Business Profile verification) 
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1037,7 +1037,7 @@ An owner asked to edit/remove their public listing (opt-out), proven via GBP own
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1051,7 +1051,7 @@ The establishment was reported closed (e.g. Sirene closure); recorded via the sy
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1065,7 +1065,7 @@ The partnership funnel status changed (NON_PARTNER → PASSIVE_PARTNER → ACTIV
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1080,7 +1080,7 @@ The restaurant's GBP 'Order online' link was set to its {slug}.captain.food page
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1094,7 +1094,7 @@ The configured GBP 'Order online' link was pinged and its live status recorded (
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1108,7 +1108,7 @@ A B2B outreach contact was made to a prospect (NON_PARTNER listing) in the seque
 
 - **Emitted by**: [🎭 `Prospect`](#actor-prospect)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Projected into**: [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1123,7 +1123,7 @@ A prospect was marked cold (e.g. no reply by J+21); the outreach sequence stops.
 
 - **Emitted by**: [🎭 `Prospect`](#actor-prospect)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Projected into**: [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1137,7 +1137,7 @@ A prospect replied to outreach; the sequence stops pending human follow-up.
 
 - **Emitted by**: [🎭 `Prospect`](#actor-prospect)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline)
+- **Projected into**: [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1190,7 +1190,7 @@ A generic external identifier kept on a Restaurant listing, preserving the ORIGI
 <a id="entity-prospect"></a>
 #### 📦 Entity: `Prospect`
 
-Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020). Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the View_ProspectionPipeline projection, never stored. This holds only the outreach state.
+Sales/CRM state of a NON_PARTNER restaurant listing being worked as a B2B prospect (ADR-0020). Id is the restaurantId (1:1). The prospection SCORE is NOT here — it is computed by the ProspectionPipeline projection, never stored. This holds only the outreach state.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1266,7 +1266,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-restaurantstatus"></a>🔤 `RestaurantStatus` | enum (DRAFT \| ACTIVE \| INACTIVE) |  |
 | <a id="scalar-restaurantlistingstatus"></a>🔤 `RestaurantListingStatus` | enum (NON_PARTNER \| PASSIVE_PARTNER \| ACTIVE_PARTNER) | Partnership funnel of a restaurant LISTING, orthogonal to RestaurantStatus (the operational DRAFT/ACTIVE/INACTIVE state). Orderable ⇔ ACTIVE_PARTNER + RestaurantStatus ACTIVE + acceptance ≠ PAUSED.  |
 | <a id="scalar-gbplinkstatus"></a>🔤 `GbpLinkStatus` | enum (UNSET \| CONFIGURED \| VERIFIED \| BROKEN) | State of the restaurant's Google Business Profile 'Order online' link to {slug}.captain.food (ADR-0021; V1). |
-| <a id="scalar-prospectionscore"></a>🔤 `ProspectionScore` | integer | B2B prospection priority (0–10), COMPUTED by the View_ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event. |
+| <a id="scalar-prospectionscore"></a>🔤 `ProspectionScore` | integer | B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event. |
 | <a id="scalar-prospectpipelinestatus"></a>🔤 `ProspectPipelineStatus` | enum (NEW \| CONTACTED \| COLD \| REPLIED \| CONVERTED) | Prospect funnel stage, DERIVED in the pipeline projection: NEW (no contact) → CONTACTED → COLD (J+21) / REPLIED, and CONVERTED when the restaurant reaches ACTIVE_PARTNER. |
 | <a id="scalar-outreachchannel"></a>🔤 `OutreachChannel` | enum (EMAIL \| SLACK \| PHONE) | Channel of a prospection contact (email via Resend, Slack alert, or phone). |
 | <a id="scalar-orderacceptancemode"></a>🔤 `OrderAcceptanceMode` | enum (NORMAL \| BUSY \| PAUSED) | Current order acceptance mode of a restaurant (HubRise: order_acceptance). |
@@ -1894,7 +1894,7 @@ _Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise i
 
 A restaurant's catalog (categories → products → offers + option lists).
 
-- **Read model**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Read model**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -1912,7 +1912,7 @@ A restaurant's catalog (categories → products → offers + option lists).
 
 A catalog category (tree via parentRef).
 
-- **Read model**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Read model**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -1948,20 +1948,20 @@ _🧩 aggregate_ — A restaurant catalog: catalog, category tree, products, off
 
 ### 🗄️ Views (read models) _(1)_
 
-<a id="view-view_catalog"></a>
-#### 🗄️ View: `View_Catalog`
+<a id="view-catalog"></a>
+#### 🗄️ View: `Catalog`
 
 - **Source**: [🎭 `Catalog`](#actor-catalog) · 🛶 V0
-- **Rules**: `stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0. Could be normalized (one row per offer) if per-item querying is needed later. Each offer carries a derived `uberPrice` { amountCents, currency } + `uberPriceBasis` for the product-level comparison (ADR-0022): ESTIMATED = View_UberEstimationPolicy[restaurant.cuisine_category].price_coefficient × offer price (null when the restaurant has no cuisine_category); REAL = the restaurant's own Uber price when uber_prices_opt_in and a HubRise Uber menu is present (ingestion deferred — runtime). Always labelled.
+- **Rules**: `stock_status` is derived (quantity vs lowStockThreshold); orderable = AVAILABLE and stock > 0. Could be normalized (one row per offer) if per-item querying is needed later. Each offer carries a derived `uberPrice` { amountCents, currency } + `uberPriceBasis` for the product-level comparison (ADR-0022): ESTIMATED = UberEstimationPolicy[restaurant.cuisine_category].price_coefficient × offer price (null when the restaurant has no cuisine_category); REAL = the restaurant's own Uber price when uber_prices_opt_in and a HubRise Uber menu is present (ingestion deferred — runtime). Always labelled.
 - **Fed by**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded), [⚡ `CatalogCategoryUpdated`](#event-catalogcategoryupdated), [⚡ `CatalogCategoryRemoved`](#event-catalogcategoryremoved), [⚡ `ProductAdded`](#event-productadded), [⚡ `ProductUpdated`](#event-productupdated), [⚡ `ProductRemoved`](#event-productremoved), [⚡ `OptionListAdded`](#event-optionlistadded), [⚡ `OptionListUpdated`](#event-optionlistupdated), [⚡ `OptionListRemoved`](#event-optionlistremoved), [⚡ `OfferStockUpdated`](#event-offerstockupdated), [⚡ `CatalogImported`](#event-catalogimported)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `catalog_id` | [🔤 `CatalogId`](#scalar-catalogid) _(derived)_ | [⚡ `CatalogCreated`.`catalogId`](#event-catalogcreated--catalogid) | PK |  |
-| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `View_Restaurant`](#view-view_restaurant) | [⚡ `CatalogCreated`.`restaurantId`](#event-catalogcreated--restaurantid) | index |  |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `CatalogCreated`.`restaurantId`](#event-catalogcreated--restaurantid) | index |  |
 | `slug` | [🔤 `Slug`](#scalar-slug) | ⚠️ _(none)_ | — | ⚠️ HOLE: CatalogCreated carries no slug — nothing populates this column (drop it or add slug to the event). |
 | `name` | [🔤 `CatalogName`](#scalar-catalogname) _(derived)_ | [⚡ `CatalogCreated`.`name`](#event-catalogcreated--name) | — |  |
-| `catalog` | `jsonb` | [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded), [⚡ `CatalogCategoryUpdated`](#event-catalogcategoryupdated), [⚡ `CatalogCategoryRemoved`](#event-catalogcategoryremoved), [⚡ `ProductAdded`](#event-productadded), [⚡ `ProductUpdated`](#event-productupdated), [⚡ `ProductRemoved`](#event-productremoved), [⚡ `OptionListAdded`](#event-optionlistadded), [⚡ `OptionListUpdated`](#event-optionlistupdated), [⚡ `OptionListRemoved`](#event-optionlistremoved), [⚡ `OfferStockUpdated`](#event-offerstockupdated), [⚡ `CatalogImported`](#event-catalogimported) | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
+| `tree` | `jsonb` | [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded), [⚡ `CatalogCategoryUpdated`](#event-catalogcategoryupdated), [⚡ `CatalogCategoryRemoved`](#event-catalogcategoryremoved), [⚡ `ProductAdded`](#event-productadded), [⚡ `ProductUpdated`](#event-productupdated), [⚡ `ProductRemoved`](#event-productremoved), [⚡ `OptionListAdded`](#event-optionlistadded), [⚡ `OptionListUpdated`](#event-optionlistupdated), [⚡ `OptionListRemoved`](#event-optionlistremoved), [⚡ `OfferStockUpdated`](#event-offerstockupdated), [⚡ `CatalogImported`](#event-catalogimported) | — | Assembled tree: categories -> products -> offers { price_cents, currency, availability, stock_status, uberPrice?, uberPriceBasis? } + option lists. See rules for how uberPrice is derived (ADR-0022/0024). |
 | `updated_at` | `timestamptz` | [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CatalogImported`](#event-catalogimported) | — | Row write time, stamped on each event. |
 
 ### 📩 Commands _(12)_
@@ -2169,7 +2169,7 @@ A new catalog has been created for a restaurant.
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2185,7 +2185,7 @@ A category has been added to a catalog.
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2200,7 +2200,7 @@ An existing category has been updated (full replace).
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2215,7 +2215,7 @@ A category has been removed from a catalog.
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2230,7 +2230,7 @@ A new product (with its offers) has been added to a catalog.
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2245,7 +2245,7 @@ An existing product has been updated (full replace, including offers).
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2260,7 +2260,7 @@ A product has been removed from a catalog.
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2275,7 +2275,7 @@ An option list (modifier group) has been added to a catalog.
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2290,7 +2290,7 @@ An existing option list has been updated (full replace).
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2305,7 +2305,7 @@ An option list has been removed from a catalog.
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2320,7 +2320,7 @@ Inventory level of a offer changed (e.g. HubRise inventory sync).
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: [🎭 `Catalog`](#actor-catalog)
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2336,7 +2336,7 @@ A full catalog was imported/synced from an external source (e.g. HubRise), repla
 
 - **Emitted by**: [🎭 `Catalog`](#actor-catalog)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Catalog`](#view-view_catalog)
+- **Projected into**: [🗄️ `Catalog`](#view-catalog)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2790,7 +2790,7 @@ Orders, optionally scoped by customer and/or restaurant and filtered by status. 
 
 
 - **Input**: 🧩 `OrdersQueryInput` — `customerId?`: [🔤 `CustomerId`](#scalar-customerid), `restaurantId?`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `OrderStatus`](#scalar-orderstatus)
-- **Returns**: [🧩 `Order`](#type-order) (list) · **reads** [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Returns**: [🧩 `Order`](#type-order) (list) · **reads** [🗄️ `OrderTracking`](#view-ordertracking)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
 <a id="query-order"></a>
@@ -2799,7 +2799,7 @@ Orders, optionally scoped by customer and/or restaurant and filtered by status. 
 Order tracking by id; owning customer or the restaurant/admin. Ownership enforced server-side.
 
 - **Input**: 🧩 `OrderQueryInput!` — `id`: [🔤 `OrderId`](#scalar-orderid)
-- **Returns**: [🧩 `Order`](#type-order) · **reads** [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Returns**: [🧩 `Order`](#type-order) · **reads** [🗄️ `OrderTracking`](#view-ordertracking)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
 <a id="mutation-addcartline"></a>
@@ -2923,7 +2923,7 @@ Order status change events (for the owning customer or restaurant).
 
 A customer's in-progress selection for a single restaurant (priced by the projection).
 
-- **Read model**: [🗄️ `View_Cart`](#view-view_cart)
+- **Read model**: [🗄️ `Cart`](#view-cart)
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -2942,7 +2942,7 @@ A customer's in-progress selection for a single restaurant (priced by the projec
 
 An order with its tracking status and payment state.
 
-- **Read model**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Read model**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -3032,41 +3032,41 @@ _⚙️ process manager_ — Coordinates refunds. Reacts to an order reaching a 
 
 ### 🗄️ Views (read models) _(2)_
 
-<a id="view-view_cart"></a>
-#### 🗄️ View: `View_Cart`
+<a id="view-cart"></a>
+#### 🗄️ View: `Cart`
 
 - **Source**: [🎭 `Cart`](#actor-cart) · 🛶 V0
 - **Note**: Joined with the catalog for pricing (secondary source).
-- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout. `estimated_breakdown` applies View_PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown. `uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + View_UberEstimationPolicy[restaurant.cuisine_category] + View_UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred).
+- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout. `estimated_breakdown` applies PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown. `uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + UberEstimationPolicy[restaurant.cuisine_category] + UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred).
 - **Fed by**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved), [⚡ `CartCheckedOut`](#event-cartcheckedout), [⚡ `CustomerIdentified`](#event-customeridentified)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `cart_id` | [🔤 `CartId`](#scalar-cartid) _(derived)_ | [⚡ `CartStarted`.`cartId`](#event-cartstarted--cartid) | PK |  |
-| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `View_Restaurant`](#view-view_restaurant) | [⚡ `CartStarted`.`restaurantId`](#event-cartstarted--restaurantid) | — |  |
-| `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ → [🗄️ `View_Customer`](#view-view_customer) | [⚡ `CartStarted`.`customerId`](#event-cartstarted--customerid), [⚡ `CustomerIdentified`.`customerId`](#event-customeridentified--customerid) | nullable | NULL while guest; bound by CustomerIdentified or at checkout. |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `CartStarted`.`restaurantId`](#event-cartstarted--restaurantid) | — |  |
+| `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ → [🗄️ `Customer`](#view-customer) | [⚡ `CartStarted`.`customerId`](#event-cartstarted--customerid), [⚡ `CustomerIdentified`.`customerId`](#event-customeridentified--customerid) | nullable | NULL while guest; bound by CustomerIdentified or at checkout. |
 | `status` | [🔤 `CartStatus`](#scalar-cartstatus) | [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartCheckedOut`](#event-cartcheckedout) | — | Derived from event type: OPEN on CartStarted, CHECKED_OUT on CartCheckedOut. |
 | `lines` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | Priced by the projection from the live catalog: [{ cart_line_id, offer_id, product_id, name, offer_name, quantity, unit_price_cents, selected_options, line_total_cents }]. |
 | `total_amount_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | COMPUTED by the projection from the live catalog (never trusted from the client). |
 | `currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | [⚡ `CartLineAdded`](#event-cartlineadded) | — | From the catalog currency at pricing time (the restaurant's default_currency). |
-| `estimated_breakdown` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | nullable | ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + View_PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order. |
+| `estimated_breakdown` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | nullable | ESTIMATED PaymentBreakdown for the checkout display (ADR-0018), COMPUTED by the projection from the cart food total + PricingPolicy + the restaurant margin_rate. Same shape as OrderPlaced.breakdown; recomputed on the final order. |
 | `uber_comparison` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | nullable | UberComparison for the cart-level comparison (ADR-0022/0025), COMPUTED by the projection (see rules). Null when the restaurant has no cuisine_category. |
 | `updated_at` | `timestamptz` | [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved), [⚡ `CartCheckedOut`](#event-cartcheckedout) | — | Row write time, stamped on each event. |
 
-<a id="view-view_ordertracking"></a>
-#### 🗄️ View: `View_OrderTracking`
+<a id="view-ordertracking"></a>
+#### 🗄️ View: `OrderTracking`
 
 - **Source**: [🎭 `Order`](#actor-order) · 🛶 V0
 - **Note**: The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status (back-office queue) — via the indexes below; there is no separate per-persona order projection. 
-- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → View_UberEstimationPolicy.price_coefficient + View_UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
+- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
 - **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `order_id` | [🔤 `OrderId`](#scalar-orderid) _(derived)_ | [⚡ `OrderPlaced`.`orderId`](#event-orderplaced--orderid) | PK |  |
 | `ref` | [🔤 `ExternalReference`](#scalar-externalreference) _(derived)_ | [⚡ `OrderPlaced`.`ref`](#event-orderplaced--ref) | — |  |
-| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `View_Restaurant`](#view-view_restaurant) | [⚡ `OrderPlaced`.`restaurantId`](#event-orderplaced--restaurantid) | — |  |
-| `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ → [🗄️ `View_Customer`](#view-view_customer) | [⚡ `OrderPlaced`.`customerId`](#event-orderplaced--customerid) | index, nullable |  |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `OrderPlaced`.`restaurantId`](#event-orderplaced--restaurantid) | — |  |
+| `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ → [🗄️ `Customer`](#view-customer) | [⚡ `OrderPlaced`.`customerId`](#event-orderplaced--customerid) | index, nullable |  |
 | `status` | [🔤 `OrderStatus`](#scalar-orderstatus) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | — | Derived from the lifecycle event type. |
 | `service_type` | [🔤 `ServiceType`](#scalar-servicetype) _(derived)_ | [⚡ `OrderPlaced`.`serviceType`](#event-orderplaced--servicetype) | — |  |
 | `items` | `jsonb` _(derived)_ | [⚡ `OrderPlaced`.`items`](#event-orderplaced--items) | — |  |
@@ -3340,7 +3340,7 @@ A new cart was created for a restaurant (emitted with the first line added).
 
 - **Emitted by**: [🎭 `Cart`](#actor-cart)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Cart`](#view-view_cart)
+- **Projected into**: [🗄️ `Cart`](#view-cart)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3355,7 +3355,7 @@ A line was added to a cart.
 
 - **Emitted by**: [🎭 `Cart`](#actor-cart)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Cart`](#view-view_cart)
+- **Projected into**: [🗄️ `Cart`](#view-cart)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3369,7 +3369,7 @@ The quantity of an existing cart line changed.
 
 - **Emitted by**: [🎭 `Cart`](#actor-cart)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Cart`](#view-view_cart)
+- **Projected into**: [🗄️ `Cart`](#view-cart)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3384,7 +3384,7 @@ A line was removed from a cart.
 
 - **Emitted by**: [🎭 `Cart`](#actor-cart)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Cart`](#view-view_cart)
+- **Projected into**: [🗄️ `Cart`](#view-cart)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3398,7 +3398,7 @@ The cart was converted to an order at checkout and is now closed.
 
 - **Emitted by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Cart`](#view-view_cart)
+- **Projected into**: [🗄️ `Cart`](#view-cart)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3412,7 +3412,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 
 - **Emitted by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3437,7 +3437,7 @@ Restaurant has accepted to prepare the order.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3453,7 +3453,7 @@ Restaurant has started preparing an accepted order (status PREPARING).
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3467,7 +3467,7 @@ Restaurant has rejected the order.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3482,7 +3482,7 @@ Restaurant has marked the order as ready for pickup/delivery.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3496,7 +3496,7 @@ The order has been delivered to the customer.
 
 - **Emitted by**: [🎭 `Order`](#actor-order), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3510,7 +3510,7 @@ The customer cancelled the order.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3525,7 +3525,7 @@ The restaurant cancelled the order after initial acceptance.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3540,7 +3540,7 @@ The customer rated the delivery of a completed order (rider thumbs up/down).
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3556,7 +3556,7 @@ The customer rated the restaurant of a completed order (0–5 stars + optional c
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer), [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `Customer`](#view-customer), [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3573,7 +3573,7 @@ A tipper (customer or restaurant) added one or more tips (rider / restaurant / C
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3622,7 +3622,7 @@ Payment was successfully authorized/captured for an order.
 
 - **Emitted by**: _inbound / external_
 - **Consumed by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3653,7 +3653,7 @@ A captured payment was refunded (e.g. after rejection or cancellation).
 
 - **Emitted by**: _inbound / external_
 - **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4345,29 +4345,29 @@ Selectable phone countries for the dialing-code picker (static reference data; t
 <a id="query-me"></a>
 #### 🔎 Query: `me`
 
-The signed-in customer's own profile (resolves the session authRef → Customer via View_Customer).
+The signed-in customer's own profile (resolves the session authRef → Customer via Customer).
 
 - **Input**: _(none)_
-- **Returns**: [🧩 `CustomerProfile`](#type-customerprofile) · **reads** [🗄️ `View_Customer`](#view-view_customer)
+- **Returns**: [🧩 `CustomerProfile`](#type-customerprofile) · **reads** [🗄️ `Customer`](#view-customer)
 - **Roles**: CUSTOMER · **slice** V1
 
 <a id="query-favoriterestaurants"></a>
 #### 🔎 Query: `favoriteRestaurants`
 
-The customer's favorited restaurants (View_Customer.favorite_restaurant_ids joined to View_Restaurant).
+The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant).
 
 - **Input**: 🧩 `FavoriteRestaurantsQueryInput!` — `customerId`: [🔤 `CustomerId`](#scalar-customerid)
-- **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `Restaurant`](#view-restaurant)
 - **Roles**: CUSTOMER · **slice** V1
 
 <a id="query-restaurants"></a>
 #### 🔎 Query: `restaurants`
 
-Discover: public list of restaurants. All args are optional filters resolved by the read side (View_Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
+Discover: public list of restaurants. All args are optional filters resolved by the read side (Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
 
 
 - **Input**: 🧩 `RestaurantsQueryInput` — `search?`: `string`, `tags?`: [[🔤 `Tag`](#scalar-tag)], `serviceType?`: [🔤 `ServiceType`](#scalar-servicetype), `openNow?`: `boolean`, `city?`: [🔤 `CityName`](#scalar-cityname), `priceRange?`: [🔤 `PriceRange`](#scalar-pricerange), `list?`: [🔤 `RestaurantListKey`](#scalar-restaurantlistkey), `listingStatus?`: [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus), `orderableOnly?`: `boolean`
-- **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `Restaurant`](#view-restaurant)
 - **Roles**: PUBLIC · **slice** V0
 
 <a id="query-catalog"></a>
@@ -4376,17 +4376,17 @@ Discover: public list of restaurants. All args are optional filters resolved by 
 A restaurant's full catalog (categories → products → offers + option lists).
 
 - **Input**: 🧩 `CatalogQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid)
-- **Returns**: [🧩 `Catalog`](#type-catalog) · **reads** [🗄️ `View_Catalog`](#view-view_catalog)
+- **Returns**: [🧩 `Catalog`](#type-catalog) · **reads** [🗄️ `Catalog`](#view-catalog)
 - **Roles**: PUBLIC · **slice** V0
 
 <a id="query-categories"></a>
 #### 🔎 Query: `categories`
 
-The category tree of a restaurant's catalog (for filtering & product discovery). Derived from View_Catalog.catalog — categories are not a separate aggregate, so there is no dedicated view.
+The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
 
 
 - **Input**: 🧩 `CategoriesQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid)
-- **Returns**: [🧩 `CatalogCategory`](#type-catalogcategory) (list) · **reads** [🗄️ `View_Catalog`](#view-view_catalog)
+- **Returns**: [🧩 `CatalogCategory`](#type-catalogcategory) (list) · **reads** [🗄️ `Catalog`](#view-catalog)
 - **Roles**: PUBLIC · **slice** V0
 
 <a id="query-restaurant"></a>
@@ -4395,7 +4395,7 @@ The category tree of a restaurant's catalog (for filtering & product discovery).
 A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
 
 - **Input**: 🧩 `RestaurantQueryInput!` — `slug`: [🔤 `Slug`](#scalar-slug)
-- **Returns**: [🧩 `Restaurant`](#type-restaurant) · **reads** [🗄️ `View_Restaurant`](#view-view_restaurant)
+- **Returns**: [🧩 `Restaurant`](#type-restaurant) · **reads** [🗄️ `Restaurant`](#view-restaurant)
 - **Roles**: PUBLIC · **slice** V0
 
 <a id="query-carts"></a>
@@ -4404,7 +4404,7 @@ A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}
 A customer's carts (one OPEN cart per restaurant).
 
 - **Input**: 🧩 `CartsQueryInput!` — `customerId`: [🔤 `CustomerId`](#scalar-customerid)
-- **Returns**: [🧩 `Cart`](#type-cart) (list) · **reads** [🗄️ `View_Cart`](#view-view_cart)
+- **Returns**: [🧩 `Cart`](#type-cart) (list) · **reads** [🗄️ `Cart`](#view-cart)
 - **Roles**: CUSTOMER, ADMIN · **slice** V0
 
 <a id="query-cart"></a>
@@ -4413,7 +4413,7 @@ A customer's carts (one OPEN cart per restaurant).
 A single cart by id (session-scoped; readable by the guest/customer who owns it).
 
 - **Input**: 🧩 `CartQueryInput!` — `id`: [🔤 `CartId`](#scalar-cartid)
-- **Returns**: [🧩 `Cart`](#type-cart) · **reads** [🗄️ `View_Cart`](#view-view_cart)
+- **Returns**: [🧩 `Cart`](#type-cart) · **reads** [🗄️ `Cart`](#view-cart)
 - **Roles**: PUBLIC · **slice** V0
 
 <a id="mutation-requestphoneverification"></a>
@@ -4522,7 +4522,7 @@ A single cart by id (session-scoped; readable by the guest/customer who owns it)
 A customer's own profile (display name + contact). Backed by the identity read model; surfaced to the customer only (profile management is V1 — no V0 query yet).
 
 
-- **Read model**: [🗄️ `View_Customer`](#view-view_customer)
+- **Read model**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -4561,21 +4561,21 @@ _🧩 aggregate_ — A customer identity, keyed by phone number and linked to th
 <a id="actor-cartbindingprocess"></a>
 #### 🎭 Actor: `CartBindingProcess`
 
-_⚙️ process manager_ — Binds a returning visitor's OPEN guest carts to their Customer. Reacts to the inbound CustomerIdentified fact (authRef → customerId, reported when the visitor signs in) so the View_Cart projection stamps the customerId onto their carts — enabling cross-device carts to converge and be merged at checkout.
+_⚙️ process manager_ — Binds a returning visitor's OPEN guest carts to their Customer. Reacts to the inbound CustomerIdentified fact (authRef → customerId, reported when the visitor signs in) so the Cart projection stamps the customerId onto their carts — enabling cross-device carts to converge and be merged at checkout.
 
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [⚡ `CustomerIdentified`](#event-customeridentified) | _Bind customerId onto the visitor's OPEN carts (View_Cart projection); no new event in V0._ | — |
+| [⚡ `CustomerIdentified`](#event-customeridentified) | _Bind customerId onto the visitor's OPEN carts (Cart projection); no new event in V0._ | — |
 
 ### 🗄️ Views (read models) _(1)_
 
-<a id="view-view_customer"></a>
-#### 🗄️ View: `View_Customer`
+<a id="view-customer"></a>
+#### 🗄️ View: `Customer`
 
 - **Source**: [🎭 `Customer`](#actor-customer) · 🛶 V0
 - **Note**: Identity/lookup read model: resolves a returning phone (or auth_ref) to an existing Customer, backs VerifyPhone idempotency + auth resolution, and serves the `me` query (CustomerProfile). Also bound when CustomerIdentified stamps carts. The stored `locale` localizes authenticated SMS/email sends.
-- **Rules**: `ratings` accumulates the customer's own restaurant ratings (from RestaurantRated) so they can see how they rated each restaurant. `favorite_restaurant_ids` is maintained from RestaurantFavorited/RestaurantUnfavorited; the favoriteRestaurants query joins it to View_Restaurant.
+- **Rules**: `ratings` accumulates the customer's own restaurant ratings (from RestaurantRated) so they can see how they rated each restaurant. `favorite_restaurant_ids` is maintained from RestaurantFavorited/RestaurantUnfavorited; the favoriteRestaurants query joins it to Restaurant.
 - **Fed by**: [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `RestaurantFavorited`](#event-restaurantfavorited), [⚡ `RestaurantUnfavorited`](#event-restaurantunfavorited), [⚡ `CustomerInfoUpdated`](#event-customerinfoupdated), [⚡ `CustomerEmailVerified`](#event-customeremailverified), [⚡ `CustomerPhoneChanged`](#event-customerphonechanged), [⚡ `CustomerLanguageChanged`](#event-customerlanguagechanged), [⚡ `CustomerPreferencesSet`](#event-customerpreferencesset), [⚡ `CustomerAddressSet`](#event-customeraddressset), [⚡ `CustomerAddressRemoved`](#event-customeraddressremoved), [⚡ `CustomerPaymentMethodSet`](#event-customerpaymentmethodset)
 
 | Column | Type | Sourced from | Constraints | Notes |
@@ -4815,7 +4815,7 @@ A customer account was created on first phone verification (passwordless OTP, id
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4835,12 +4835,12 @@ A returning visitor signed in and was resolved to an existing Customer (authRef 
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: [🎭 `CartBindingProcess`](#actor-cartbindingprocess)
-- **Projected into**: [🗄️ `View_Cart`](#view-view_cart)
+- **Projected into**: [🗄️ `Cart`](#view-cart)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-customeridentified--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
-| <a id="event-customeridentified--authref"></a>`authRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ✅ | Auth provider user id that was matched to this Customer (via View_Customer.auth_ref). |
+| <a id="event-customeridentified--authref"></a>`authRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ✅ | Auth provider user id that was matched to this Customer (via Customer.auth_ref). |
 
 <a id="event-restaurantfavorited"></a>
 #### ⚡ Event: `RestaurantFavorited`
@@ -4849,7 +4849,7 @@ Customer marked a restaurant as a favorite.
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4863,7 +4863,7 @@ Customer removed a restaurant from their favorites.
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4877,7 +4877,7 @@ Customer updated their display name. (Email is verified-only — see CustomerEma
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4891,7 +4891,7 @@ An email was verified (Supabase magic link) and linked to the Customer — initi
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4905,7 +4905,7 @@ The Customer's phone was changed after re-verification (canonical E.164).
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4919,7 +4919,7 @@ The Customer's preferred language (locale) was set/changed; localizes later SMS/
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4933,7 +4933,7 @@ Customer set their discovery + i18n preferences (timezone, dietary restrictions,
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4949,7 +4949,7 @@ Customer added or updated a saved delivery address.
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4965,7 +4965,7 @@ Customer removed a saved address.
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4979,7 +4979,7 @@ Customer set or updated their preferred Stripe payment method.
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Customer`](#view-view_customer)
+- **Projected into**: [🗄️ `Customer`](#view-customer)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5459,8 +5459,8 @@ _⚙️ process manager_ — Dispatches and tracks deliveries (bounded context: 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `delivery_job_id` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) _(derived)_ | [⚡ `DeliveryRequested`.`deliveryJobId`](#event-deliveryrequested--deliveryjobid) | PK |  |
-| `order_id` | [🔤 `OrderId`](#scalar-orderid) _(derived)_ → [🗄️ `View_OrderTracking`](#view-view_ordertracking) | [⚡ `DeliveryRequested`.`orderId`](#event-deliveryrequested--orderid) | index |  |
-| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `View_Restaurant`](#view-view_restaurant) | [⚡ `DeliveryRequested`.`restaurantId`](#event-deliveryrequested--restaurantid) | — |  |
+| `order_id` | [🔤 `OrderId`](#scalar-orderid) _(derived)_ → [🗄️ `OrderTracking`](#view-ordertracking) | [⚡ `DeliveryRequested`.`orderId`](#event-deliveryrequested--orderid) | index |  |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `DeliveryRequested`.`restaurantId`](#event-deliveryrequested--restaurantid) | — |  |
 | `status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled) | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status. |
 | `provider` | [🔤 `DeliveryProvider`](#scalar-deliveryprovider) | [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | nullable | INDEPENDENT (rider accepted) or PARTNER (partner accepted); null while PENDING. |
 | `rider_id` | [🔤 `RiderId`](#scalar-riderid) | [⚡ `DeliveryAcceptedByRider`.`riderId`](#event-deliveryacceptedbyrider--riderid) | nullable | Set for an independent-rider delivery; null for a partner delivery. |
@@ -5562,7 +5562,7 @@ An independent Captain rider accepted the delivery job.
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5591,7 +5591,7 @@ The rider handed the order over to the customer (independent-rider delivery succ
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5620,7 +5620,7 @@ The delivery partner (e.g. Avelo37) accepted the job and assigned one of its cou
 
 - **Emitted by**: _inbound / external_
 - **Consumed by**: [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5652,7 +5652,7 @@ The delivery partner reported a status change for the job (inbound): PICKED_UP, 
 
 - **Emitted by**: _inbound / external_
 - **Consumed by**: [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
-- **Projected into**: [🗄️ `View_OrderTracking`](#view-view_ordertracking), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -6616,11 +6616,11 @@ aggregates; components bind the aggregates they handle and the read models they 
 | ⚙️ `event-store-adapter` | 📡 yes | Appends to domain_events; span 'event.store.append' with business.event_type/stream_id. | — |
 | ⚙️ `event-publisher` | 📡 yes | Publishes appended events to the bus; span 'event.publish' (PRODUCER). | — |
 | ⚙️ `message-consumers` | 📡 yes | Consume domain + inbound integration events; span 'event.consume.*' (CONSUMER). | — |
-| ⚙️ `projection-updaters` | 📡 yes | Update the View_* read models from events; span 'event.consume.projection'. | updates [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `View_Restaurant`](#view-view_restaurant), [🗄️ `View_Customer`](#view-view_customer), [🗄️ `View_Catalog`](#view-view_catalog), [🗄️ `View_Cart`](#view-view_cart), [🗄️ `View_OrderTracking`](#view-view_ordertracking), [🗄️ `View_ProspectionPipeline`](#view-view_prospectionpipeline), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob) |
+| ⚙️ `projection-updaters` | 📡 yes | Update the View_* read models from events; span 'event.consume.projection'. | updates [🗄️ `View_RestaurantAccount`](#view-view_restaurantaccount), [🗄️ `Restaurant`](#view-restaurant), [🗄️ `Customer`](#view-customer), [🗄️ `Catalog`](#view-catalog), [🗄️ `Cart`](#view-cart), [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob) |
 | ⚙️ `bam-projector` | 📡 yes | Business Activity Monitoring projection (runs in the bam container); business_metrics only. | — |
 | ⚙️ `hubrise-acl` | 📡 yes | Anti-Corruption Layer translating HubRise payloads (SKU/option_list/'9.80 EUR') into the domain. | — |
 | ⚙️ `stripe-adapter` | 📡 yes | Stripe Connect (Separate Charges & Transfers, transfer_group=ORDER_{id}; Captain = merchant of record): creates the PaymentIntent for the buyer total, then after capture transfers restaurantPayout/riderPayout to the connected accounts (3-way split, ADR-0017), keeping captainNet on the platform; refunds reverse the transfers. Records inbound webhook facts (PaymentCaptured/Failed/Refunded). | — |
 | ⚙️ `supabase-acl` | 📡 yes | Anti-Corruption Layer wrapping Supabase Auth (ADR-0015): sends/verifies phone OTP (Twilio; mock in dev) and email magic links SYNCHRONOUSLY, validates tokens server-side, and translates the Supabase user (id/phone/email) into the domain (authRef). Keeps the Supabase SDK out of the aggregates. | — |
 | ⚙️ `sirene-google-acl` | 📡 yes | Anti-Corruption Layer translating INSEE Sirene + Google Maps data into Restaurant commands (RegisterRestaurant / UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed) as the owner, and validating Google Business Profile ownership proofs for claim/opt-out (ADR-0019/0021). Keeps Sirene/Google SDKs out of the aggregate. | — |
-| ⚙️ `prospection-acl` | 📡 yes | B2B prospection worker (ADR-0020): reads the COMPUTED score from View_ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. | — |
+| ⚙️ `prospection-acl` | 📡 yes | B2B prospection worker (ADR-0020): reads the COMPUTED score from ProspectionPipeline, applies the J+0/J+7/J+21 schedule + anti-spam, fires HubSpot/Resend/Slack, then issues RecordProspectContact / MarkProspectCold to record the facts. The score is never an input it stores back. | — |
 | ⚙️ `avelo37-acl` | 📡 yes | Anti-Corruption Layer for the delivery partner (Avelo37; ADR-0031): on DeliveryRequested, dispatches the job to the partner API; translates the partner's webhooks into the inbound facts DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated (idempotent on partnerRef). Keeps the partner SDK out of the domain; mirrors stripe-adapter. | — |
