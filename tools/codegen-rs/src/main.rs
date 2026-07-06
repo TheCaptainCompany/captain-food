@@ -22,8 +22,7 @@ const SOURCE_FILES: &[&str] = &[
     "commands.yaml",
     "errors.yaml",
     "actors.yaml",
-    "database/tables.yaml",
-    "database/views.yaml",
+    "database/projection_views.yaml",
     "api.yaml",
     "stories.yaml",
     "rules.yaml",
@@ -40,28 +39,50 @@ struct Model {
     defs: BTreeMap<String, Value>,
 }
 
+/// Strip file-level meta (version/description) like load.ts META_KEYS, preserving key order.
+fn strip_meta(parsed: Value) -> Value {
+    match parsed {
+        Value::Mapping(m) => {
+            let mut nm = serde_yaml::Mapping::new();
+            for (k, val) in m {
+                if matches!(k.as_str(), Some("version") | Some("description")) {
+                    continue;
+                }
+                nm.insert(k, val);
+            }
+            Value::Mapping(nm)
+        }
+        other => other,
+    }
+}
+
 fn load_model(specs: &PathBuf) -> Result<Model, String> {
     let mut defs = BTreeMap::new();
+    let mut load = |key: String, p: &std::path::Path| -> Result<(), String> {
+        let s = fs::read_to_string(p).map_err(|e| format!("read {}: {}", p.display(), e))?;
+        let parsed: Value = serde_yaml::from_str(&s).map_err(|e| format!("parse {}: {}", key, e))?;
+        defs.insert(key, strip_meta(parsed));
+        Ok(())
+    };
     for &f in SOURCE_FILES {
-        let p = specs.join(f);
-        let s = fs::read_to_string(&p).map_err(|e| format!("read {}: {}", p.display(), e))?;
-        let parsed: Value = serde_yaml::from_str(&s).map_err(|e| format!("parse {}: {}", f, e))?;
-        // Strip file-level meta (version/description) exactly like load.ts META_KEYS, preserving key order,
-        // so scalar/enum/type iteration matches the TypeScript codegen.
-        let v = match parsed {
-            Value::Mapping(m) => {
-                let mut nm = serde_yaml::Mapping::new();
-                for (k, val) in m {
-                    if matches!(k.as_str(), Some("version") | Some("description")) {
-                        continue;
-                    }
-                    nm.insert(k, val);
-                }
-                Value::Mapping(nm)
-            }
-            other => other,
-        };
-        defs.insert(f.to_string(), v);
+        load(f.to_string(), &specs.join(f))?;
+    }
+    // Generic: every `specs/database/tables/*.yaml` is a real-table spec (ADR-0037), keyed by its path —
+    // drop a file in and it's picked up (eventstore.yaml, referential.yaml, …). Sorted for determinism.
+    let tdir = specs.join("database/tables");
+    if let Ok(rd) = fs::read_dir(&tdir) {
+        let mut paths: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("yaml"))
+            .collect();
+        paths.sort();
+        for p in paths {
+            let name = match p.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            load(format!("database/tables/{}", name), &p)?;
+        }
     }
     Ok(Model { defs })
 }
@@ -90,7 +111,7 @@ fn parse_ref(r: &str) -> Option<ParsedRef> {
 }
 
 fn is_source_file(f: &str) -> bool {
-    SOURCE_FILES.contains(&f)
+    SOURCE_FILES.contains(&f) || (f.starts_with("database/tables/") && f.ends_with(".yaml"))
 }
 
 /// The bare definition name a `$ref` denotes: the FIRST pointer segment (mirrors refs.ts `refName`).
@@ -321,8 +342,10 @@ fn validate(model: &Model) -> Report {
     let mut cov = Coverage::default();
 
     // --- 1. Referential integrity: every `$ref` anywhere must resolve ---------------------------
-    for &f in SOURCE_FILES {
-        if let Some(v) = model.defs.get(f) {
+    // Iterate every loaded file (incl. globbed database/tables/*.yaml), not just the fixed SOURCE_FILES.
+    for (f, v) in &model.defs {
+        {
+            let f = f.as_str();
             let mut refs = Vec::new();
             collect_refs(v, f, &mut refs);
             for (loc, r) in refs {
@@ -388,8 +411,9 @@ fn validate(model: &Model) -> Report {
 
     // --- 3. Coverage: derive value-objects vs commands, and orphan events ------------------------
     let mut refd_from_properties: BTreeSet<String> = BTreeSet::new();
-    for &f in SOURCE_FILES {
-        if let Some(v) = model.defs.get(f) {
+    for (f, v) in &model.defs {
+        {
+            let f = f.as_str();
             let mut refs = Vec::new();
             collect_refs(v, f, &mut refs);
             for (loc, r) in refs {
@@ -671,7 +695,7 @@ fn validate(model: &Model) -> Report {
     // 5b. every emitted event should be projected into a view, unless declared non-projected.
     let non_projected: BTreeSet<String> = model
         .defs
-        .get("database/views.yaml")
+        .get("database/projection_views.yaml")
         .and_then(|v| v.get("nonProjectedEvents"))
         .and_then(|x| x.as_sequence())
         .map(|s| s.iter().filter_map(|r| r.get("$ref").and_then(|x| x.as_str()).and_then(ref_name)).collect())
@@ -1593,7 +1617,7 @@ fn parse_col(name: String, col: &Value, events: &Value) -> SqlColumn {
 fn parse_views(model: &Model) -> Vec<SqlView> {
     let mut out = Vec::new();
     let events = model.defs.get("events.yaml").cloned().unwrap_or(Value::Null);
-    if let Some(Value::Mapping(m)) = model.defs.get("database/views.yaml") {
+    if let Some(Value::Mapping(m)) = model.defs.get("database/projection_views.yaml") {
         for (k, node) in m {
             let name = match k.as_str() {
                 Some(s) => s,
@@ -1685,7 +1709,7 @@ fn emit_views_sql(model: &Model) -> String {
         blocks.push(if idx.is_empty() { ddl } else { format!("{}\n{}", ddl, idx.join("\n")) });
     }
     format!(
-        "-- GENERATED by tools/codegen from specs/database/views.yaml — do not edit by hand.\n-- Read models (View_*): SQL VIEWS over domain_events where a `definition` is declared (ADR-0035 #2);\n-- reference/seed views and not-yet-defined ones are CREATE TABLE (materialized, projector-fed).\n\n{}\n",
+        "-- GENERATED by tools/codegen from specs/database/projection_views.yaml — do not edit by hand.\n-- Read models (View_*): SQL VIEWS over domain_events where a `definition` is declared (ADR-0035 #2);\n-- reference/seed views and not-yet-defined ones are CREATE TABLE (materialized, projector-fed).\n\n{}\n",
         blocks.join("\n\n")
     )
 }
@@ -1749,10 +1773,14 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
         }
     }
 
-    // 2. Tables from database/tables.yaml, in file order. Triggers are collected and emitted after
+    // 2. Tables from database/tables/*.yaml, in file order. Triggers are collected and emitted after
     // the functions they execute (step 4).
     let mut triggers: Vec<String> = Vec::new();
-    if let Some(Value::Mapping(m)) = model.defs.get("database/tables.yaml") {
+    for (_fkey, fval) in model.defs.iter().filter(|(k, _)| k.starts_with("database/tables/")) {
+        let m = match fval {
+            Value::Mapping(m) => m,
+            _ => continue,
+        };
         for (k, node) in m {
             let name = match k.as_str() {
                 Some(s) => s,
@@ -2127,7 +2155,7 @@ fn ref_strings(v: Option<&Value>) -> Vec<String> {
 /// (view name, fedBy event names) for every View_* (aggregate-fed or reference), in file order.
 fn views_fedby(model: &Model) -> Vec<(String, Vec<String>)> {
     let mut out = Vec::new();
-    if let Some(Value::Mapping(m)) = model.defs.get("database/views.yaml") {
+    if let Some(Value::Mapping(m)) = model.defs.get("database/projection_views.yaml") {
         for (k, node) in m {
             let name = match k.as_str() {
                 Some(s) => s,
@@ -3416,7 +3444,7 @@ fn emit_documentation(model: &Model) -> String {
     }).collect();
 
     // 6. EVENTS
-    let non_projected: HashSet<String> = ref_names(model.defs.get("database/views.yaml").and_then(|v| v.get("nonProjectedEvents"))).into_iter().collect();
+    let non_projected: HashSet<String> = ref_names(model.defs.get("database/projection_views.yaml").and_then(|v| v.get("nonProjectedEvents"))).into_iter().collect();
     let evt_map = model.defs.get("events.yaml").and_then(|v| v.as_mapping());
     let event_docs: Vec<Doc> = evt_map.map(|m| m.iter().filter_map(|(k, _)| k.as_str()).map(|ev| {
         let def = evt_map.and_then(|m| m.get(ev)).cloned().unwrap_or(Value::Null);
@@ -3532,7 +3560,7 @@ fn emit_documentation(model: &Model) -> String {
         let mut it = rf.splitn(2, "#/");
         let file = it.next().unwrap_or("");
         let name = it.next().unwrap_or("");
-        let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/views.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
+        let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/projection_views.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
         dlink(kind, name)
     }
     fn ref_list_links(v: Option<&Value>) -> String {
@@ -3866,7 +3894,7 @@ fn h_any_link(rf: &str) -> String {
     let mut it = rf.splitn(2, "#/");
     let file = it.next().unwrap_or("");
     let name = it.next().unwrap_or("");
-    let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/views.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
+    let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/projection_views.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
     h_link(kind, name)
 }
 fn h_ref_links(v: Option<&Value>) -> String {
@@ -4023,7 +4051,7 @@ fn emit_documentation_html(model: &Model) -> String {
     }).collect()).unwrap_or_default();
 
     // 6. Events
-    let non_projected: HashSet<String> = ref_names(model.defs.get("database/views.yaml").and_then(|v| v.get("nonProjectedEvents"))).into_iter().collect();
+    let non_projected: HashSet<String> = ref_names(model.defs.get("database/projection_views.yaml").and_then(|v| v.get("nonProjectedEvents"))).into_iter().collect();
     let evt_map = model.defs.get("events.yaml").and_then(|v| v.as_mapping());
     let event_docs: Vec<HDoc> = evt_map.map(|m| m.iter().filter_map(|(k, _)| k.as_str()).map(|ev| {
         let def = evt_map.and_then(|m| m.get(ev)).cloned().unwrap_or(Value::Null);

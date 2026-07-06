@@ -67,7 +67,7 @@ consume events. These read tables are **"fake" tables** (denormalized, query-sha
 from the log) — to avoid any confusion with a real/normalized table, every one is prefixed
 **`View_`** (`View_{TableName}`).
 
-The read models below are the **source of truth in [views.yaml](database/views.yaml)** and the per-view detail
+The read models below are the **source of truth in [views.yaml](database/projection_views.yaml)** and the per-view detail
 is GENERATED from it (run `make generate`). Each view declares only what is
 intrinsic to the read model: its **source aggregate + events** ([events.yaml](events.yaml) /
 [actors.yaml](actors.yaml)), its **business filters/rules**, and its **columns**. The consumer mapping
@@ -76,7 +76,7 @@ intrinsic to the read model: its **source aggregate + events** ([events.yaml](ev
 + `currency`), matching `Money`; `JSONB` is used where a whole sub-tree is fetched at once. The SQL
 DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
-<!-- GENERATED:views START — source: specs/database/views.yaml; run `make generate`. Do not edit between the markers. -->
+<!-- GENERATED:views START — source: specs/database/projection_views.yaml; run `make generate`. Do not edit between the markers. -->
 
 ### `View_RestaurantAccount` · 🛶 V0 · 🔒 internal · source aggregate `RestaurantAccount`
 
