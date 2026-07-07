@@ -1,11 +1,13 @@
 version: 2
 description: >
   Captain.Food domain model and business events spec.
-  Technical envelope fields (eventId, aggregateType, aggregateId, occurredAt, metadata...)
-  will be added later by infrastructure and MUST NOT be mixed with these payloads.
+  Technical envelope fields (eventId, aggregateType, aggregateId, occurredAt, the ACTING USER
+  (user_id/user_type), metadata...) are added by infrastructure and MUST NOT be mixed with these payloads.
   NOTE:
   - These are BUSINESS event payloads only.
-  - No aggregateType, eventId or metadata here.
+  - No aggregateType, eventId, occurredAt or metadata here — and NO actor/user id (createdBy/updatedBy/
+    changedBy/…): WHO performed the event is envelope metadata, recorded on domain_events.user_id (ADR-0041),
+    never duplicated into every payload. (A business ROLE that changes semantics — e.g. Tipper — stays.)
   - Each event MUST be strictly typed and reference scalars/entities above.
   - Catalog is aligned with HubRise (Product/Offer/OptionList). "Updated" events
     carry the FULL updated entity (replace semantics), not a partial diff.
@@ -35,14 +37,11 @@ RestaurantAccountRegistered:
     timezone:
       $ref: 'scalars.yaml#/TimeZone'
       nullable: true
-    createdBy:
-      $ref: 'scalars.yaml#/UserId'
   required:
     - restaurantAccountId
     - legalName
     - defaultCurrency
     - defaultTaxRate
-    - createdBy
 
 RestaurantAccountUpdated:
   description: "One or more account-level fields changed (legal name, contact, default tax, timezone)."
@@ -62,11 +61,8 @@ RestaurantAccountUpdated:
     timezone:
       $ref: 'scalars.yaml#/TimeZone'
       nullable: true
-    updatedBy:
-      $ref: 'scalars.yaml#/UserId'
   required:
     - restaurantAccountId
-    - updatedBy
 
 RestaurantAccountDeleted:
   description: "A restaurant account was closed/deleted."
@@ -142,15 +138,12 @@ RestaurantRegistered:
       type: array
       items:
         $ref: 'entities.yaml#/OpeningHoursSlot'
-    createdBy:
-      $ref: 'scalars.yaml#/UserId'
   required:
     - restaurantId
     - listingStatus
     - slug
     - displayName
     - address
-    - createdBy
 
 RestaurantUpdated:
   description: "One or more editable LOCATION fields of a restaurant have changed."
@@ -199,11 +192,8 @@ RestaurantUpdated:
       items:
         $ref: 'entities.yaml#/OpeningHoursSlot'
       nullable: true
-    updatedBy:
-      $ref: 'scalars.yaml#/UserId'
   required:
     - restaurantId
-    - updatedBy
 
 RestaurantActivated:
   description: "Restaurant is now visible and orderable by customers."
@@ -239,12 +229,9 @@ RestaurantAcceptanceModeChanged:
       $ref: 'scalars.yaml#/RestaurantId'
     mode:
       $ref: 'scalars.yaml#/OrderAcceptanceMode'
-    changedBy:
-      $ref: 'scalars.yaml#/UserId'
   required:
     - restaurantId
     - mode
-    - changedBy
 
 RestaurantRemoved:
   description: "A location was removed (delisted) from its account."
@@ -294,15 +281,12 @@ RestaurantListingClaimed:
     accountId:
       $ref: 'scalars.yaml#/RestaurantAccountId'
       nullable: true
-    claimedBy:
-      $ref: 'scalars.yaml#/UserId'
     proof:
       type: string
       maxLength: 255
       description: "Reference to the accepted Google ownership proof (audit; the token itself is not stored)."
   required:
     - restaurantId
-    - claimedBy
 
 RestaurantListingOptedOut:
   description: "An owner asked to edit/remove their public listing (opt-out), proven via GBP ownership."
@@ -931,8 +915,6 @@ OrderAcceptedByRestaurant:
       $ref: 'scalars.yaml#/OrderId'
     restaurantId:
       $ref: 'scalars.yaml#/RestaurantId'
-    acceptedBy:
-      $ref: 'scalars.yaml#/UserId'
     estimatedReadyAt:
       type: string
       format: date-time
@@ -940,7 +922,6 @@ OrderAcceptedByRestaurant:
   required:
     - orderId
     - restaurantId
-    - acceptedBy
 
 OrderPreparationStarted:
   description: "Restaurant has started preparing an accepted order (status PREPARING)."
@@ -1275,8 +1256,6 @@ DeliveryCancelled:
       type: string
       maxLength: 500
       nullable: true
-    cancelledBy:
-      $ref: 'scalars.yaml#/UserId'
   required: [deliveryJobId]
 
 # NOTE: DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated are INBOUND

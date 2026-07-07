@@ -72,7 +72,7 @@ validation. In the story map, inbound events are marked 📥.
 ## Important conventions
 
 - **Language**: all repository content — docs, code, comments, commit messages, identifiers — is written in **English**. No French.
-- **Event payloads** = business only. **Never** mix in the technical envelope (`eventId`, `aggregateType`, `aggregateId`, `occurredAt`, `metadata`) — it is added by infrastructure.
+- **Event payloads** = business only. **Never** mix in the technical envelope (`eventId`, `aggregateType`, `aggregateId`, `occurredAt`, the **acting user** `user_id`/`user_type`, `metadata`) — it is added by infrastructure. In particular the actor/user who performed an event (`createdBy`/`updatedBy`/`changedBy`/…) is **envelope metadata** recorded on `domain_events.user_id` (ADR-0041), not a payload field — just like `occurredAt`. (A business ROLE that changes semantics — e.g. `Tipper` = CUSTOMER|RESTAURANT — is business data and stays.)
 - Types are **strongly typed** and reference scalars/entities via `$ref`; no ambiguous type reuse (one name = one dedicated scalar).
 - **Money**: value object `Money` = `{ amountCents, currency }`. Keep this strong typing internally; convert to/from the HubRise string format (`"9.80 EUR"`) **only at the integration boundary**.
 - **Availability ≠ stock** (two orthogonal concepts): `CatalogItemAvailability` (`AVAILABLE`/`UNAVAILABLE`, manual UI flag) vs derived `StockStatus` (`IN_STOCK`/`LOW_STOCK`/`OUT_OF_STOCK`). Orderable = `AVAILABLE` **and** stock > 0.

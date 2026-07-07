@@ -513,7 +513,6 @@ pub struct PlaceOrder {
 pub struct AcceptOrder {
     pub order_id: OrderId,
     pub restaurant_id: RestaurantId,
-    pub accepted_by: UserId,
     pub estimated_ready_at: Option<String>,
 }
 

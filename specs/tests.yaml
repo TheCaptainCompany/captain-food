@@ -66,22 +66,22 @@ fixtures:
   # --- Restaurant account & location ---
   restaurantAccountRegistered:
     type: { $ref: 'events.yaml#/RestaurantAccountRegistered' }
-    data: { restaurantAccountId: "acct-1", legalName: "SARL Chez Marco", defaultCurrency: "EUR", defaultTaxRate: { delivery: 10.0 }, timezone: "Europe/Paris", createdBy: "user-1" }
+    data: { restaurantAccountId: "acct-1", legalName: "SARL Chez Marco", defaultCurrency: "EUR", defaultTaxRate: { delivery: 10.0 }, timezone: "Europe/Paris" }
   restaurantAccountUpdated:
     type: { $ref: 'events.yaml#/RestaurantAccountUpdated' }
-    data: { restaurantAccountId: "acct-1", legalName: "SARL Chez Marco II", updatedBy: "user-1" }
+    data: { restaurantAccountId: "acct-1", legalName: "SARL Chez Marco II" }
   restaurantAccountDeleted:
     type: { $ref: 'events.yaml#/RestaurantAccountDeleted' }
     data: { restaurantAccountId: "acct-1", reason: "Closed business" }
   restaurantRegistered:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris", createdBy: "user-1" }
+    data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
   restaurantSeeded:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], cuisineCategory: "BISTRONOMIC", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }], createdBy: "sync-1" }
+    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], cuisineCategory: "BISTRONOMIC", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
   restaurantUpdated:
     type: { $ref: 'events.yaml#/RestaurantUpdated' }
-    data: { restaurantId: "resto-1", displayName: "Chez Marco — Centre", updatedBy: "user-1" }
+    data: { restaurantId: "resto-1", displayName: "Chez Marco — Centre" }
   restaurantActivated:
     type: { $ref: 'events.yaml#/RestaurantActivated' }
     data: { restaurantId: "resto-1" }
@@ -90,7 +90,7 @@ fixtures:
     data: { restaurantId: "resto-1", reason: "Holidays" }
   restaurantAcceptanceModeChanged:
     type: { $ref: 'events.yaml#/RestaurantAcceptanceModeChanged' }
-    data: { restaurantId: "resto-1", mode: "BUSY", changedBy: "user-1" }
+    data: { restaurantId: "resto-1", mode: "BUSY" }
   restaurantRemoved:
     type: { $ref: 'events.yaml#/RestaurantRemoved' }
     data: { restaurantId: "resto-1", accountId: "acct-1", reason: "Delisted" }
@@ -99,7 +99,7 @@ fixtures:
     data: { restaurantId: "resto-2", googlePlaceId: "ChIJxyz", rating: 4.4, reviewsCount: 18 }
   restaurantListingClaimed:
     type: { $ref: 'events.yaml#/RestaurantListingClaimed' }
-    data: { restaurantId: "resto-2", accountId: "acct-9", claimedBy: "user-9", proof: "gbp-proof-ref-1" }
+    data: { restaurantId: "resto-2", accountId: "acct-9", proof: "gbp-proof-ref-1" }
   restaurantListingOptedOut:
     type: { $ref: 'events.yaml#/RestaurantListingOptedOut' }
     data: { restaurantId: "resto-2", reason: "Please remove my listing" }
@@ -249,7 +249,7 @@ fixtures:
       paymentIntentId: "pi_123"
   orderAcceptedByRestaurant:
     type: { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }
-    data: { orderId: "order-1", restaurantId: "resto-1", acceptedBy: "user-1" }
+    data: { orderId: "order-1", restaurantId: "resto-1" }
   orderPreparationStarted:
     type: { $ref: 'events.yaml#/OrderPreparationStarted' }
     data: { orderId: "order-1", restaurantId: "resto-1" }
@@ -309,7 +309,7 @@ fixtures:
     data: { deliveryJobId: "deliv-1" }
   deliveryCancelled:
     type: { $ref: 'events.yaml#/DeliveryCancelled' }
-    data: { deliveryJobId: "deliv-1", reason: "Restaurant closed", cancelledBy: "user-1" }
+    data: { deliveryJobId: "deliv-1", reason: "Restaurant closed" }
   deliveryAcceptedByPartner:
     type: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
     data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", courier: { displayName: "Léa", phone: "+33611223344" } }
@@ -1429,7 +1429,7 @@ tests:
       - { $ref: '#/fixtures/orderPlaced' }
     when:
       type: { $ref: 'commands.yaml#/AcceptOrder' }
-      data: { orderId: "order-1", restaurantId: "resto-1", acceptedBy: "user-1" }
+      data: { orderId: "order-1", restaurantId: "resto-1" }
     then:
       - { $ref: '#/fixtures/orderAcceptedByRestaurant' }
 
@@ -1440,7 +1440,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/AcceptOrder' }
-      data: { orderId: "order-missing", restaurantId: "resto-1", acceptedBy: "user-1" }
+      data: { orderId: "order-missing", restaurantId: "resto-1" }
     thrown:
       - { $ref: 'errors.yaml#/OrderNotFound' }
       - { $ref: 'errors.yaml#/InvalidOrderStatus' }

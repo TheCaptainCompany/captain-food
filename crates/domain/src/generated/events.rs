@@ -16,7 +16,6 @@ pub struct RestaurantAccountRegistered {
     pub default_currency: CurrencyCode,
     pub default_tax_rate: TaxRate,
     pub timezone: Option<TimeZone>,
-    pub created_by: UserId,
 }
 
 /// One or more account-level fields changed (legal name, contact, default tax, timezone).
@@ -28,7 +27,6 @@ pub struct RestaurantAccountUpdated {
     pub contact: Option<RestaurantContact>,
     pub default_tax_rate: Option<TaxRate>,
     pub timezone: Option<TimeZone>,
-    pub updated_by: UserId,
 }
 
 /// A restaurant account was closed/deleted.
@@ -65,7 +63,6 @@ pub struct RestaurantRegistered {
     pub preparation_time_minutes: Option<i64>,
     #[serde(default)]
     pub opening_hours: Vec<OpeningHoursSlot>,
-    pub created_by: UserId,
 }
 
 /// One or more editable LOCATION fields of a restaurant have changed.
@@ -87,7 +84,6 @@ pub struct RestaurantUpdated {
     pub preparation_time_minutes: Option<i64>,
     #[serde(default)]
     pub opening_hours: Vec<OpeningHoursSlot>,
-    pub updated_by: UserId,
 }
 
 /// Restaurant is now visible and orderable by customers.
@@ -112,7 +108,6 @@ pub struct RestaurantDeactivated {
 pub struct RestaurantAcceptanceModeChanged {
     pub restaurant_id: RestaurantId,
     pub mode: OrderAcceptanceMode,
-    pub changed_by: UserId,
 }
 
 /// A location was removed (delisted) from its account.
@@ -140,7 +135,6 @@ pub struct RestaurantGoogleBusinessProfileUpdated {
 pub struct RestaurantListingClaimed {
     pub restaurant_id: RestaurantId,
     pub account_id: Option<RestaurantAccountId>,
-    pub claimed_by: UserId,
     pub proof: Option<String>,
 }
 
@@ -498,7 +492,6 @@ pub struct OrderPlaced {
 pub struct OrderAcceptedByRestaurant {
     pub order_id: OrderId,
     pub restaurant_id: RestaurantId,
-    pub accepted_by: UserId,
     pub estimated_ready_at: Option<String>,
 }
 
@@ -680,7 +673,6 @@ pub struct DeliveryCompleted {
 pub struct DeliveryCancelled {
     pub delivery_job_id: DeliveryJobId,
     pub reason: Option<String>,
-    pub cancelled_by: Option<UserId>,
 }
 
 /// The delivery partner (e.g. Avelo37) accepted the job and assigned one of its couriers (inbound).

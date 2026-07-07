@@ -944,7 +944,6 @@ input PlaceOrderInput {
 input AcceptOrderInput {
   orderId: OrderId!
   restaurantId: RestaurantId!
-  acceptedBy: UserId!
   estimatedReadyAt: DateTime
 }
 

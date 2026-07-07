@@ -848,7 +848,6 @@ A restaurant account (HubRise: restaurant) was created; it owns one or more loca
 | <a id="event-restaurantaccountregistered--defaultcurrency"></a>`defaultCurrency` | [🔤 `CurrencyCode`](#scalar-currencycode) | ✅ |  |
 | <a id="event-restaurantaccountregistered--defaulttaxrate"></a>`defaultTaxRate` | [📦 `TaxRate`](#entity-taxrate) | ✅ |  |
 | <a id="event-restaurantaccountregistered--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
-| <a id="event-restaurantaccountregistered--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 
 <a id="event-restaurantaccountupdated"></a>
 #### ⚡ Event: `RestaurantAccountUpdated`
@@ -866,7 +865,6 @@ One or more account-level fields changed (legal name, contact, default tax, time
 | <a id="event-restaurantaccountupdated--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
 | <a id="event-restaurantaccountupdated--defaulttaxrate"></a>`defaultTaxRate` | [📦 `TaxRate`](#entity-taxrate) | ⬜ |  |
 | <a id="event-restaurantaccountupdated--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
-| <a id="event-restaurantaccountupdated--updatedby"></a>`updatedBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 
 <a id="event-restaurantaccountdeleted"></a>
 #### ⚡ Event: `RestaurantAccountDeleted`
@@ -912,7 +910,6 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 | <a id="event-restaurantregistered--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="event-restaurantregistered--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
 | <a id="event-restaurantregistered--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
-| <a id="event-restaurantregistered--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 
 <a id="event-restaurantupdated"></a>
 #### ⚡ Event: `RestaurantUpdated`
@@ -938,7 +935,6 @@ One or more editable LOCATION fields of a restaurant have changed.
 | <a id="event-restaurantupdated--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="event-restaurantupdated--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
 | <a id="event-restaurantupdated--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
-| <a id="event-restaurantupdated--updatedby"></a>`updatedBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 
 <a id="event-restaurantactivated"></a>
 #### ⚡ Event: `RestaurantActivated`
@@ -981,7 +977,6 @@ Restaurant toggled its order acceptance mode (e.g. busy, paused).
 | --- | --- | --- | --- |
 | <a id="event-restaurantacceptancemodechanged--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-restaurantacceptancemodechanged--mode"></a>`mode` | [🔤 `OrderAcceptanceMode`](#scalar-orderacceptancemode) | ✅ |  |
-| <a id="event-restaurantacceptancemodechanged--changedby"></a>`changedBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 
 <a id="event-restaurantremoved"></a>
 #### ⚡ Event: `RestaurantRemoved`
@@ -1027,7 +1022,6 @@ An owner proved ownership of the listing (Google Business Profile verification) 
 | --- | --- | --- | --- |
 | <a id="event-restaurantlistingclaimed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-restaurantlistingclaimed--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ |  |
-| <a id="event-restaurantlistingclaimed--claimedby"></a>`claimedBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="event-restaurantlistingclaimed--proof"></a>`proof` | `string` | ⬜ | Reference to the accepted Google ownership proof (audit; the token itself is not stored). |
 
 <a id="event-restaurantlistingoptedout"></a>
@@ -1247,11 +1241,12 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(22)_
+### 🔤 Scalars _(23)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-restaurantaccountid"></a>🔤 `RestaurantAccountId` | string _uuid_ | Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations. |
+| <a id="scalar-userid"></a>🔤 `UserId` | string _uuid_ |  |
 | <a id="scalar-externalidentifierkey"></a>🔤 `ExternalIdentifierKey` | string | Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).  |
 | <a id="scalar-googleplaceid"></a>🔤 `GooglePlaceId` | string | Google Maps Place id identifying the establishment (enrichment / Business Profile). |
 | <a id="scalar-latitude"></a>🔤 `Latitude` | number | WGS84 latitude in decimal degrees. |
@@ -3180,7 +3175,6 @@ Restaurant accepts an order and commits to preparing it.
 | --- | --- | --- | --- |
 | <a id="command-acceptorder--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="command-acceptorder--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="command-acceptorder--acceptedby"></a>`acceptedBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="command-acceptorder--estimatedreadyat"></a>`estimatedReadyAt` | `string` _date-time_ | ⬜ |  |
 
 <a id="command-rejectorder"></a>
@@ -3443,7 +3437,6 @@ Restaurant has accepted to prepare the order.
 | --- | --- | --- | --- |
 | <a id="event-orderacceptedbyrestaurant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-orderacceptedbyrestaurant--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-orderacceptedbyrestaurant--acceptedby"></a>`acceptedBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="event-orderacceptedbyrestaurant--estimatedreadyat"></a>`estimatedReadyAt` | `string` _date-time_ | ⬜ |  |
 
 <a id="event-orderpreparationstarted"></a>
@@ -5611,7 +5604,6 @@ A delivery job was cancelled before delivery (e.g. by the restaurant or admin).
 | --- | --- | --- | --- |
 | <a id="event-deliverycancelled--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="event-deliverycancelled--reason"></a>`reason` | `string` | ⬜ |  |
-| <a id="event-deliverycancelled--cancelledby"></a>`cancelledBy` | [🔤 `UserId`](#scalar-userid) | ⬜ |  |
 
 <a id="event-deliveryacceptedbypartner"></a>
 #### ⚡ Event: `DeliveryAcceptedByPartner`
@@ -6091,7 +6083,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(29)_
+### 🔤 Scalars _(28)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -6101,7 +6093,6 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-orderid"></a>🔤 `OrderId` | string _uuid_ |  |
 | <a id="scalar-customerid"></a>🔤 `CustomerId` | string _uuid_ |  |
 | <a id="scalar-causeid"></a>🔤 `CauseId` | string _uuid_ | Causation id: the id of the message/event that directly caused this one (matches domain_events.cause_id). Threads a cause→effect chain through the log; null for a root command.  |
-| <a id="scalar-userid"></a>🔤 `UserId` | string _uuid_ |  |
 | <a id="scalar-externalreference"></a>🔤 `ExternalReference` | string | External reference code (HubRise `ref`), unique within its scope. Used for idempotent import/sync and as a stable reference inside orders. Example: 'MARGHERITA', 'CAT-PIZZAS'.  |
 | <a id="scalar-slug"></a>🔤 `Slug` | string `^[a-z0-9]+(?:-[a-z0-9]+)*$` | URL-safe identifier for restaurants. Lowercase, dash-separated. Example: 'chez-marco', 'tokyo-sushi'.  |
 | <a id="scalar-restaurantdisplayname"></a>🔤 `RestaurantDisplayName` | string | Public label shown to customers. Can be short and brand-oriented. Example: 'Chez Marco', 'Tokyo Sushi'.  |

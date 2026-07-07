@@ -946,13 +946,11 @@ AcceptOrder:
       $ref: 'scalars.yaml#/OrderId'
     restaurantId:
       $ref: 'scalars.yaml#/RestaurantId'
-    acceptedBy:
-      $ref: 'scalars.yaml#/UserId'
     estimatedReadyAt:
       type: string
       format: date-time
       nullable: true
-  required: [orderId, restaurantId, acceptedBy]
+  required: [orderId, restaurantId]
 
 RejectOrder:
   description: "Restaurant rejects a placed order; the captured payment is refunded."
