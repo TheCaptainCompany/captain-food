@@ -104,8 +104,8 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `delivery_job_id` | `DeliveryJobId` | `UUID` | PK |  |
 | `order_id` | `OrderId` | `UUID` | index |  |
 | `restaurant_id` | `RestaurantId` | `UUID` | — |  |
-| `status` | `DeliveryStatus` | `TEXT` | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status. |
-| `provider` | `DeliveryProvider` | `TEXT` | nullable | INDEPENDENT (rider accepted) or PARTNER (partner accepted); null while PENDING. |
+| `status` | `DeliveryStatus` | `INTEGER` | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status. |
+| `provider` | `DeliveryProvider` | `INTEGER` | nullable | INDEPENDENT (rider accepted) or PARTNER (partner accepted); null while PENDING. |
 | `rider_id` | `RiderId` | `UUID` | nullable | Set for an independent-rider delivery; null for a partner delivery. |
 | `courier` | `jsonb` | `JSONB` | nullable | Courier { displayName, phone?, riderId? }; from the partner on acceptance (independent rider is in rider_id). |
 | `partner_ref` | `ExternalReference` | `TEXT` | nullable | Partner-side delivery id; idempotent key for inbound updates. |
@@ -127,7 +127,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | --- | --- | --- | --- | --- |
 | `restaurant_id` | `RestaurantId` | `UUID` | PK |  |
 | `restaurant_account_id` | `RestaurantAccountId` | `UUID` | index, nullable | NULL for a non-partner public listing; set on claim/conversion. |
-| `listing_status` | `RestaurantListingStatus` | `TEXT` | index |  |
+| `listing_status` | `RestaurantListingStatus` | `INTEGER` | index |  |
 | `external_identifiers` | `jsonb` | `JSONB` | nullable | Source-agnostic [{key,value}] (siret/naf/google_place_id…); not unique. |
 | `google_place_id` | `GooglePlaceId` | `TEXT` | nullable |  |
 | `slug` | `Slug` | `TEXT` | unique |  |
@@ -135,18 +135,18 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `description` | `text` | `TEXT` | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
 | `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
 | `margin_rate` | `MarginPercent` | `TEXT` | nullable | Food margin %, input to the Captain service-fee split (ADR-0017); back-office only. |
-| `cuisine_category` | `CuisineCategory` | `TEXT` | nullable | Selects the Uber Eats price-estimate coefficient in UberEstimationPolicy (ADR-0024). |
+| `cuisine_category` | `CuisineCategory` | `INTEGER` | nullable | Selects the Uber Eats price-estimate coefficient in UberEstimationPolicy (ADR-0024). |
 | `uber_prices_opt_in` | `boolean` | `BOOLEAN` | nullable | Restaurant authorized showing its real Uber prices via HubRise (ADR-0023). Gates REAL vs ESTIMATED basis. |
 | `website` | `WebUrl` | `TEXT` | nullable |  |
 | `rating` | `GoogleRating` | `TEXT` | nullable | GBP-specific metric (Google listing), independent of the restaurant's own info. |
 | `reviews_count` | `integer` | `INTEGER` | nullable |  |
 | `gbp_order_url` | `WebUrl` | `TEXT` | nullable |  |
-| `gbp_link_status` | `GbpLinkStatus` | `TEXT` | nullable |  |
+| `gbp_link_status` | `GbpLinkStatus` | `INTEGER` | nullable |  |
 | `address` | `jsonb` | `JSONB` | — |  |
 | `location` | `jsonb` | `JSONB` | nullable | Geo coordinates {latitude, longitude}; typically from the Google Maps sync. |
 | `opening_hours` | `jsonb` | `JSONB` | — |  |
-| `status` | `RestaurantStatus` | `TEXT` | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure. |
-| `order_acceptance` | `OrderAcceptanceMode` | `TEXT` | — |  |
+| `status` | `RestaurantStatus` | `INTEGER` | — | Derived from the lifecycle event type: DRAFT on register, ACTIVE/INACTIVE on (de)activation, INACTIVE on closure. |
+| `order_acceptance` | `OrderAcceptanceMode` | `INTEGER` | — |  |
 | `default_currency` | `CurrencyCode` | `TEXT` | — |  |
 | `timezone` | `TimeZone` | `TEXT` | nullable | Location timezone; falls back to the account's when null. |
 | `preparation_time_minutes` | `integer` | `INTEGER` | nullable |  |
@@ -163,7 +163,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | --- | --- | --- | --- | --- |
 | `restaurant_id` | `RestaurantId` | `UUID` | PK |  |
 | `score` | `ProspectionScore` | `INTEGER` | index | Derived (see rules); not an event field. |
-| `pipeline_status` | `ProspectPipelineStatus` | `TEXT` | index | Derived from the prospect events + listingStatus (see rules). |
+| `pipeline_status` | `ProspectPipelineStatus` | `INTEGER` | index | Derived from the prospect events + listingStatus (see rules). |
 | `contacts_count` | `integer` | `INTEGER` | — | Count of ProspectContacted; drives the anti-spam ≤3 rule. |
 | `last_contacted_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
 | `replied_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
@@ -216,7 +216,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `cart_id` | `CartId` | `UUID` | PK |  |
 | `restaurant_id` | `RestaurantId` | `UUID` | — |  |
 | `customer_id` | `CustomerId` | `UUID` | nullable | NULL while guest; bound by CustomerIdentified or at checkout. |
-| `status` | `CartStatus` | `TEXT` | — | Derived from event type: OPEN on CartStarted, CHECKED_OUT on CartCheckedOut. |
+| `status` | `CartStatus` | `INTEGER` | — | Derived from event type: OPEN on CartStarted, CHECKED_OUT on CartCheckedOut. |
 | `lines` | `jsonb` | `JSONB` | — | Priced by the projection from the live catalog: [{ cart_line_id, offer_id, product_id, name, offer_name, quantity, unit_price_cents, selected_options, line_total_cents }]. |
 | `total_amount_cents` | `MoneyCents` | `BIGINT` | — | COMPUTED by the projection from the live catalog (never trusted from the client). |
 | `currency` | `CurrencyCode` | `TEXT` | — | From the catalog currency at pricing time (the restaurant's default_currency). |
@@ -238,8 +238,8 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `ref` | `ExternalReference` | `TEXT` | — |  |
 | `restaurant_id` | `RestaurantId` | `UUID` | — |  |
 | `customer_id` | `CustomerId` | `UUID` | index, nullable |  |
-| `status` | `OrderStatus` | `TEXT` | — | Derived from the lifecycle event type. |
-| `service_type` | `ServiceType` | `TEXT` | — |  |
+| `status` | `OrderStatus` | `INTEGER` | — | Derived from the lifecycle event type. |
+| `service_type` | `ServiceType` | `INTEGER` | — |  |
 | `items` | `jsonb` | `JSONB` | — |  |
 | `total_amount_cents` | `MoneyCents` | `BIGINT` | — | amountCents of OrderPlaced.totalAmount (Money). |
 | `currency` | `CurrencyCode` | `TEXT` | — | currency of OrderPlaced.totalAmount (Money). |
@@ -253,7 +253,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `uber_restaurant_cents` | `MoneyCents` | `BIGINT` | nullable | DERIVED estimated Uber restaurant net (after ~30% commission; see rules). |
 | `uber_rider_cents` | `MoneyCents` | `BIGINT` | nullable | DERIVED estimated Uber courier earning (base; per-km not modelled in V0; see rules). |
 | `uber_platform_cents` | `MoneyCents` | `BIGINT` | nullable | DERIVED estimated Uber platform take = uber_total − uber_restaurant − uber_rider. |
-| `uber_basis` | `ComparisonBasis` | `TEXT` | nullable | ESTIMATED (V0) or REAL (opted-in + HubRise Uber prices; deferred). Null if no comparison. |
+| `uber_basis` | `ComparisonBasis` | `INTEGER` | nullable | ESTIMATED (V0) or REAL (opted-in + HubRise Uber prices; deferred). Null if no comparison. |
 | `delivery_address` | `jsonb` | `JSONB` | nullable |  |
 | `estimated_ready_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
 | `placed_at` | `timestamptz` | `TIMESTAMPTZ` | — | OrderPlaced occurrence time. |
@@ -261,12 +261,12 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `payment_status` | `text` | `TEXT` | — | Folded from Stripe facts; candidate for a PaymentStatus enum. |
 | `restaurant_stars` | `StarRating` | `INTEGER` | nullable | Customer's 0–5 rating of the restaurant; null until rated. |
 | `rating_comment` | `RatingComment` | `TEXT` | nullable |  |
-| `rider_thumb` | `ThumbRating` | `TEXT` | nullable |  |
+| `rider_thumb` | `ThumbRating` | `INTEGER` | nullable |  |
 | `rider_tip_cents` | `MoneyCents` | `BIGINT` | nullable | Σ OrderTipped.tips[recipient==RIDER].amount (all tippers); null if none. |
 | `restaurant_tip_cents` | `MoneyCents` | `BIGINT` | nullable | Σ OrderTipped.tips[recipient==RESTAURANT].amount; null if none. |
 | `captain_tip_cents` | `MoneyCents` | `BIGINT` | nullable | Σ OrderTipped.tips[recipient==CAPTAIN].amount; null if none. |
 | `rated_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Occurrence time of the latest rating/tip event. |
-| `delivery_status` | `DeliveryStatus` | `TEXT` | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. |
+| `delivery_status` | `DeliveryStatus` | `INTEGER` | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. |
 | `courier` | `jsonb` | `JSONB` | nullable | Assigned Courier { displayName, phone?, riderId? } once accepted; null before. |
 | `estimated_dropoff_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Partner-reported ETA to the customer; null when unknown. |
 

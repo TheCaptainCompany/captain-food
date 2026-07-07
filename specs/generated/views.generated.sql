@@ -26,10 +26,10 @@ SELECT
   (c.payload->>'deliveryJobId')::uuid AS delivery_job_id,
   (c.payload->>'orderId')::uuid AS order_id,
   (c.payload->>'restaurantId')::uuid AS restaurant_id,
-  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 'PENDING' WHEN 'DeliveryAcceptedByRider' THEN 'ASSIGNED' WHEN 'DeliveryAcceptedByPartner' THEN 'ASSIGNED' WHEN 'DeliveryPickedUp' THEN 'PICKED_UP' WHEN 'DeliveryStatusUpdated' THEN e.payload->>'status' WHEN 'DeliveryCompleted' THEN 'DELIVERED' WHEN 'DeliveryCancelled' THEN 'CANCELLED' END FROM domain_events e
+  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 0 WHEN 'DeliveryAcceptedByRider' THEN 1 WHEN 'DeliveryAcceptedByPartner' THEN 1 WHEN 'DeliveryPickedUp' THEN 2 WHEN 'DeliveryStatusUpdated' THEN (CASE e.payload->>'status' WHEN 'PENDING' THEN 0 WHEN 'ASSIGNED' THEN 1 WHEN 'PICKED_UP' THEN 2 WHEN 'OUT_FOR_DELIVERY' THEN 3 WHEN 'DELIVERED' THEN 4 WHEN 'FAILED' THEN 5 WHEN 'CANCELLED' THEN 6 END) WHEN 'DeliveryCompleted' THEN 4 WHEN 'DeliveryCancelled' THEN 6 END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryPickedUp', 'DeliveryStatusUpdated', 'DeliveryCompleted', 'DeliveryCancelled')
      ORDER BY e.position DESC LIMIT 1) AS status,
-  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 'INDEPENDENT' WHEN 'DeliveryAcceptedByPartner' THEN 'PARTNER' END FROM domain_events e
+  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 1 WHEN 'DeliveryAcceptedByPartner' THEN 0 END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner')
      ORDER BY e.position DESC LIMIT 1) AS provider,
   (SELECT (e.payload->>'riderId')::uuid FROM domain_events e

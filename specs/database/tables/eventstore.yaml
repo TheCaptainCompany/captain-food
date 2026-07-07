@@ -16,7 +16,7 @@ domain_events:
     stream_name:    { type: text,                                  note: "'<Category>-<id>', e.g. 'Catalog-12345'" }
     version:        { type: integer,                               note: "0-based event number within the stream" }
     user_id:        { type: { $ref: 'scalars.yaml#/UserId' },       note: "the acting user — envelope metadata, ADR-0041 (not in payloads)" }
-    user_type:      { type: { $ref: 'scalars.yaml#/UserType' },     note: "role of the acting user (or a system/integration principal for inbound events)" }
+    user_type:      { type: { $ref: 'scalars.yaml#/UserType' },     note: "role of the acting user; enum → stored as the compact UserType ordinal (ref_user_type.sort_order)" }
     correlation_id: { type: { $ref: 'scalars.yaml#/CorrelationId' } }
     cause_id:       { type: { $ref: 'scalars.yaml#/CauseId' },         nullable: true }
     event_type:     { type: text,                                  note: "$et-<type>" }

@@ -1636,7 +1636,9 @@ fn sql_type(ty: &str, model: &Model) -> String {
     }
     if let Some(scalar) = model.defs.get("scalars.yaml").and_then(|s| s.get(ty)) {
         if scalar.get("enum").map(|e| e.is_sequence()).unwrap_or(false) {
-            return "TEXT".into();
+            // Enums are stored as their compact INTEGER ordinal (the sort_order in the generated
+            // ref_<enum> lookup) — by principle, since a ref table always exists for the enum (ADR-0037).
+            return "INTEGER".into();
         }
         if scalar.get("format").and_then(|x| x.as_str()) == Some("uuid") {
             return "UUID".into();
@@ -1822,6 +1824,25 @@ fn payload_extract(alias: &str, prop: &str, pgty: &str) -> String {
     }
 }
 
+/// The values of a scalars.yaml enum, in declared (ordinal) order — `Some` only for an enum scalar.
+fn enum_values(model: &Model, ty: &str) -> Option<Vec<String>> {
+    model
+        .defs
+        .get("scalars.yaml")?
+        .get(ty)?
+        .get("enum")?
+        .as_sequence()
+        .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect())
+}
+
+/// SQL mapping a text-enum expression to its INTEGER ordinal (`ref_<enum>.sort_order`) via a CASE over the
+/// enum's values — the event payload stores the enum's TEXT value, but read models store the ordinal.
+fn enum_ordinal_case(expr: &str, values: &[String]) -> String {
+    let arms: Vec<String> =
+        values.iter().enumerate().map(|(i, v)| format!("WHEN '{}' THEN {}", v, i)).collect();
+    format!("(CASE {} {} END)", expr, arms.join(" "))
+}
+
 /// Generate a `SELECT … FROM domain_events` state-fold body for a foldable view (ADR-0035 #2), sourcing
 /// each column from its declared `from` lineage + derivation mode. Correct-by-construction: set-once
 /// fields fall out of the per-column "latest carrying event" rule, so there is no latest-wins hazard.
@@ -1838,6 +1859,9 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
     let mut selects: Vec<String> = Vec::new();
     for c in &v.columns {
         let pgty = sql_type(&c.ty, model);
+        // Enum columns are stored as their INTEGER ordinal (by principle) — the payload holds the TEXT
+        // value, so enum expressions are wrapped in a value→ordinal CASE.
+        let enum_vals = enum_values(model, &c.ty);
         let expr = if !c.occurred_when.is_empty() {
             // conditional occurrence: max(occurred_at) over events matching any (type [+ payload =]) clause.
             let clauses: Vec<String> = c
@@ -1860,9 +1884,22 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
             let arms: Vec<String> = c
                 .derive
                 .iter()
-                .map(|(evt, val)| match val {
-                    DeriveVal::Lit(s) => format!("WHEN '{}' THEN '{}'", evt, s),
-                    DeriveVal::Payload(p) => format!("WHEN '{}' THEN e.payload->>'{}'", evt, p),
+                .map(|(evt, val)| {
+                    let then = match val {
+                        DeriveVal::Lit(s) => match &enum_vals {
+                            Some(vals) => vals
+                                .iter()
+                                .position(|v| v == s)
+                                .unwrap_or_else(|| panic!("derive value '{}' not in enum {}", s, c.ty))
+                                .to_string(),
+                            None => format!("'{}'", s),
+                        },
+                        DeriveVal::Payload(p) => match &enum_vals {
+                            Some(vals) => enum_ordinal_case(&format!("e.payload->>'{}'", p), vals),
+                            None => format!("e.payload->>'{}'", p),
+                        },
+                    };
+                    format!("WHEN '{}' THEN {}", evt, then)
                 })
                 .collect();
             let types: Vec<String> = c.derive.iter().map(|(e, _)| format!("'{}'", e)).collect();
@@ -1892,9 +1929,14 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
                 }
             } else if let Some((_, prop)) = carrying.first() {
                 // scalar "latest carrying event": the newest event whose payload holds this property.
+                // An enum column stores the ordinal (value→ordinal CASE); others extract+cast by type.
+                let val_expr = |alias: &str| match &enum_vals {
+                    Some(vals) => enum_ordinal_case(&format!("{}.payload->>'{}'", alias, prop), vals),
+                    None => payload_extract(alias, prop, &pgty),
+                };
                 let only_creation = carrying.iter().all(|(e, _)| e == &creation);
                 if only_creation {
-                    payload_extract("c", prop, &pgty)
+                    val_expr("c")
                 } else {
                     // Scope by the declared carrying event types AND the property key — so a JSON key shared
                     // by an unrelated event type can never win over the intended source.
@@ -1907,7 +1949,7 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
                     }
                     format!(
                         "(SELECT {} FROM domain_events e\n     WHERE e.stream_name = c.stream_name AND e.event_type IN ({}) AND e.payload ? '{}'\n     ORDER BY e.position DESC LIMIT 1)",
-                        payload_extract("e", prop, &pgty),
+                        val_expr("e"),
                         types.join(", "),
                         prop
                     )
@@ -2045,7 +2087,7 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
                 .filter_map(|(i, v)| v.as_str().map(|s| format!("('{}',{})", s, i)))
                 .collect();
             sections.push(format!(
-                "-- {}\nCREATE TABLE {}(value TEXT PRIMARY KEY, sort_order INT NOT NULL);\nINSERT INTO {} (value, sort_order) VALUES {};",
+                "-- {}\nCREATE TABLE {}(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);\nINSERT INTO {} (value, sort_order) VALUES {};",
                 name,
                 table,
                 table,
@@ -2093,7 +2135,7 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
                     let scalar = ref_name(rf).unwrap_or_else(|| {
                         panic!("database/tables.yaml#/{}/columns/{}: malformed $ref '{}'", name, cname, rf)
                     });
-                    sql_type(&scalar, model)
+                    sql_type(&scalar, model) // an enum scalar → INTEGER ordinal (ref_<enum>), by principle
                 } else {
                     panic!("database/tables.yaml#/{}/columns/{}: type must be a SQL primitive or a $ref", name, cname)
                 };

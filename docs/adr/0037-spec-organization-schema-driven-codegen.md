@@ -44,12 +44,19 @@ views (columns with type/pk/unique/nullable/index, explicit indexes, optional `t
 types validate against `scalars.yaml`. Referential `View_*` tables are valid `reads` targets: the validator's
 read-binding check accepts a `View_*` from either `projection_views.yaml` or `tables/*.yaml`.
 
-### 3. Enum-as-table
-For each `scalars.yaml` enum, generate a lookup table `ref_<enum_snake>(value TEXT PRIMARY KEY, sort_order
-INT NOT NULL)` seeded with one row per value — `value` is the verbatim SCREAMING_SNAKE spec value (ADR: enum
-1:1 correspondence). `View_*`/tables may FK to these for referential integrity. The Rust `sqlx` migration
-**reconciles** rows to the spec on each run (insert new, delete removed, keep `sort_order`) — no manual data
-migration when an enum changes.
+### 3. Enum-as-table — integer-keyed, enums stored as their ordinal
+For each `scalars.yaml` enum, generate an **integer-keyed** lookup table
+`ref_<enum_snake>(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE)` seeded with one row per value —
+`value` is the verbatim SCREAMING_SNAKE spec value (ADR: enum 1:1 correspondence), `sort_order` is its
+declaration ordinal. **By principle, an enum column is ALWAYS stored as its `INTEGER` ordinal** (that
+`sort_order`), never the TEXT value — a ref table always exists to resolve it, so `sql_type(<enum>)` →
+`INTEGER` uniformly (tables and fold views alike; a fold view maps the payload's TEXT enum to its ordinal
+via a generated `CASE`). No FK constraint is emitted (kept lean; the ref table is available for joins/UI).
+Because the ordinal is **persisted** (incl. in the append-only `domain_events` log, e.g. `user_type`), enum
+values must stay **append-only** — never reordered/renumbered. The Rust `sqlx` migration **reconciles**
+rows to the spec on each run (insert new, delete removed, keep each value's `sort_order` stable) — no manual
+data migration when an enum grows. (Read-model Rust row types keep the enum newtype; the INTEGER↔enum
+mapping is a deferred `sqlx` concern.)
 
 ### 4. Screens are role-tagged, admin uses impersonation
 Each screen declares `roles: [...]` ⊆ {PUBLIC, CUSTOMER, RESTAURANT, RIDER} and `appTypes: [web, ios,
