@@ -5371,46 +5371,273 @@ fn emit_projection_rows(model: &Model) -> String {
     out
 }
 
-/// Emit `crates/application/src/generated/projectors.rs` — the WIRING for each read-model projector
-/// (ADR-0040, option A): per table, a `<Table>Handlers` trait with one `on_<event>` method per `fedBy`
-/// event, and a `project_<table>` dispatch that routes an `Envelope` to the right handler (events not fed
-/// to the table pass through unchanged). The fold LOGIC is hand-written in the trait impl (tested app
-/// code); the generator owns only the dispatch, which stays exhaustive/in-sync with `fedBy`. Convenience:
-/// a surviving row's `updated_at` is stamped with the event time; a declared `tombstone` event → `None`.
+/// An event property's node in events.yaml (`events.yaml#/<event>/properties/<prop>`), if present.
+fn event_prop_node<'a>(model: &'a Model, event: &str, prop: &str) -> Option<&'a Value> {
+    model.defs.get("events.yaml")?.get(event)?.get("properties")?.get(prop)
+}
+
+/// Whether an event carries a property at all (used as the same-stream test: an event is same-stream for a
+/// table iff it carries the table's PK property).
+fn event_has_prop(model: &Model, event: &str, prop: &str) -> bool {
+    event_prop_node(model, event, prop).is_some()
+}
+
+/// Whether an event property is optional on the wire (nullable, or absent from the event's `required`).
+fn event_prop_optional(model: &Model, event: &str, prop: &str) -> bool {
+    let ev = model.defs.get("events.yaml").and_then(|e| e.get(event));
+    let required = ev
+        .and_then(|e| e.get("required"))
+        .and_then(|r| r.as_sequence())
+        .map(|s| s.iter().any(|v| v.as_str() == Some(prop)))
+        .unwrap_or(false);
+    let nullable = event_prop_node(model, event, prop)
+        .and_then(|p| p.get("nullable"))
+        .and_then(|b| b.as_bool())
+        == Some(true);
+    nullable || !required
+}
+
+/// Snake_case Rust field ident for a column/property, raw-escaped if it collides with a keyword.
+fn rust_ident(name: &str) -> String {
+    if RUST_FIELD_KEYWORDS.contains(&name) {
+        format!("r#{}", name)
+    } else {
+        name.to_string()
+    }
+}
+
+/// How a projection-table column is populated — classified from its lineage (mirrors the fold modes).
+enum ColMode {
+    /// Implicit technical timestamp — stamped by the dispatch wrapper, not per event.
+    Timestamp,
+    /// Flat same-stream scalar copy: each carrying event holds `prop` and its type equals the column's.
+    ScalarLatest { prop: String, events: Vec<String> },
+    /// Status-from-event-type: `derive` map (literal enum value or payload-extracted).
+    Derive,
+    /// `max(occurred_at)` over whole-event `from` → set to the event time on those events.
+    Occurrence { events: Vec<String> },
+    /// Computed / cross-stream / accumulate / composite — a hand-written `Compute` hook (typed via the event).
+    Complex,
+}
+
+/// Classify a projection-table column. `pk_prop` = the creation-anchoring property (same-stream test);
+/// `creation` = the creation event. A non-nullable flat column the creation event does NOT carry can't be
+/// initialized mechanically → it becomes a `Complex` hook (which supplies the initial value too).
+fn classify_column(model: &Model, c: &SqlColumn, pk_prop: &str, creation: &str) -> ColMode {
+    if c.name == "created_at" || c.name == "updated_at" {
+        return ColMode::Timestamp;
+    }
+    if !c.derive.is_empty() {
+        return ColMode::Derive;
+    }
+    let carrying: Vec<(String, String)> =
+        c.from.iter().filter_map(|r| { let (e, p) = event_and_prop(r); p.map(|p| (e, p)) }).collect();
+    let whole: Vec<String> =
+        c.from.iter().filter_map(|r| { let (e, p) = event_and_prop(r); if p.is_none() { Some(e) } else { None } }).collect();
+    if c.ty == "timestamptz" && carrying.is_empty() && !whole.is_empty() {
+        return ColMode::Occurrence { events: whole };
+    }
+    // Flat scalar-latest iff every carrying event is same-stream (carries the PK prop) AND its property's
+    // type equals the column type (a composite like `breakdown`/`totalAmount` fails this → Complex). A
+    // timestamptz VALUE column (date-time string in the payload → DateTime) needs parsing → Complex.
+    if !carrying.is_empty() && c.occurred_when.is_empty() && c.ty != "timestamptz" {
+        let flat = carrying.iter().all(|(ev, prop)| {
+            event_has_prop(model, ev, pk_prop)
+                && event_prop_node(model, ev, prop).map(schema_node_to_column_type).as_deref() == Some(c.ty.as_str())
+        });
+        let opt = c.nullable && !c.pk;
+        let on_creation = carrying.iter().any(|(e, _)| e == creation);
+        if flat && (opt || on_creation) {
+            let mut events: Vec<String> = Vec::new();
+            for (e, _) in &carrying {
+                if !events.contains(e) {
+                    events.push(e.clone());
+                }
+            }
+            let prop = carrying[0].1.clone();
+            return ColMode::ScalarLatest { prop, events };
+        }
+    }
+    ColMode::Complex
+}
+
+/// Emit `crates/application/src/generated/projectors.rs` — the HYBRID projector per read-model table
+/// (ADR-0040): the generator maps the MECHANICAL columns inline from the `from` lineage (flat same-stream
+/// scalar-latest, `derive` status, occurrence timestamps, the implicit created_at/updated_at), and for each
+/// COMPLEX column (computed / cross-stream / accumulate / composite) generates a typed hook on a
+/// `<Table>Compute` trait — `fn <col>(&self, prev, env) -> <ColType>` — implemented by hand (business logic
+/// stays tested + out of generated code). The dispatch routes each `fedBy` event; a `tombstone` → `None`.
 fn emit_projectors(model: &Model) -> String {
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/database/tables/projection_tables.yaml — do not edit by hand.\n// Projector WIRING (ADR-0040, option A): dispatch + per-event handler traits; the fold logic is the\n// hand-written trait impl in the application layer. Row-write time (`updated_at`) is stamped here.\n\nuse super::rows::*;\nuse crate::projections::Envelope;\nuse domain::generated::events::*;\n",
+        "// GENERATED by the Captain.Food codegen from specs/database/tables/projection_tables.yaml — do not edit by hand.\n// HYBRID projector (ADR-0040): mechanical columns (flat same-stream scalar-latest, derive, occurrence,\n// created_at/updated_at) are mapped inline from the `from` lineage; COMPLEX columns call a typed hook on\n// the per-table `…Compute` trait (implemented by hand). The dispatch routes each fedBy event.\n#![allow(unused_variables)]\n\nuse super::rows::*;\nuse crate::projections::Envelope;\nuse domain::generated::events::*;\nuse domain::generated::scalars::*;\n",
     );
+    // Rust type of a column (Option<…> when nullable & not pk) — mirrors emit_projection_rows.
+    let col_ty = |c: &SqlColumn| -> String {
+        let rt = projection_rust_type(&c.ty);
+        if c.nullable && !c.pk { format!("Option<{}>", rt) } else { rt }
+    };
     for v in parse_views(model).iter().filter(|v| v.is_table) {
         let row = format!("{}Row", v.name);
         let fnname = snake_type(&v.name);
-        // Handler trait: one method per fed event (skip the tombstone event — the dispatch deletes on it).
+        let pk = match v.columns.iter().find(|c| c.pk) {
+            Some(p) => p,
+            None => continue,
+        };
+        let (creation, pk_prop) = match pk.from.iter().filter_map(|r| { let (e, p) = event_and_prop(r); p.map(|p| (e, p)) }).next() {
+            Some(x) => x,
+            None => continue,
+        };
+        let modes: Vec<(&SqlColumn, ColMode)> =
+            v.columns.iter().map(|c| (c, classify_column(model, c, &pk_prop, &creation))).collect();
+        let complex: Vec<&SqlColumn> =
+            modes.iter().filter(|(_, m)| matches!(m, ColMode::Complex)).map(|(c, _)| *c).collect();
+
+        // Compute trait — a typed hook per complex column (business logic, hand-written).
         out.push_str(&format!(
-            "\n/// Hand-written fold for `{}` — implement each event's effect on the read-model row.\npub trait {}Handlers {{\n",
+            "\n/// Hand-written business logic for `{}`'s computed / cross-stream / accumulate columns\n/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.\npub trait {}Compute {{\n",
             v.name, v.name
         ));
-        for ev in &v.fedby {
-            if v.tombstone.as_deref() == Some(ev.as_str()) {
-                continue;
-            }
+        for c in &complex {
             out.push_str(&format!(
-                "    fn on_{}(&self, state: Option<{}>, e: &{}, env: &Envelope) -> Option<{}>;\n",
-                snake_type(ev), row, ev, row
+                "    fn {}(&self, prev: Option<&{}>, env: &Envelope) -> {};\n",
+                rust_ident(&c.name), row, col_ty(c)
             ));
         }
         out.push_str("}\n");
-        // Dispatch: route the envelope's event to the handler; unrelated events leave the row untouched.
-        // The implicit technical timestamps are stamped here, not by the hand-written handler: created_at
-        // is preserved once set (or the event time on the first event), updated_at is always the event time.
+
+        // The value expression for a column on the CREATION event (building a fresh row).
+        let creation_value = |c: &SqlColumn, m: &ColMode| -> String {
+            let opt = c.nullable && !c.pk;
+            match m {
+                ColMode::Timestamp => "env.occurred_at".to_string(),
+                ColMode::Complex => format!("c.{}(None, env)", rust_ident(&c.name)),
+                ColMode::Occurrence { events } => {
+                    if events.iter().any(|e| e == &creation) || !opt {
+                        if opt { "Some(env.occurred_at)".to_string() } else { "env.occurred_at".to_string() }
+                    } else {
+                        "None".to_string()
+                    }
+                }
+                ColMode::Derive => {
+                    let arm = c.derive.iter().find(|(e, _)| e == &creation);
+                    match arm {
+                        Some((_, DeriveVal::Lit(s))) => {
+                            let inner = format!("{}::{}", c.ty, s);
+                            if opt { format!("Some({})", inner) } else { inner }
+                        }
+                        Some((_, DeriveVal::Payload(p))) => {
+                            let inner = format!("e.{}.clone()", rust_ident(&snake_field(p)));
+                            if opt { format!("Some({})", inner) } else { inner }
+                        }
+                        None => {
+                            if opt { "None".to_string() }
+                            else { panic!("projection {}: non-nullable derive column '{}' but creation event '{}' is not in its derive map", v.name, c.name, creation) }
+                        }
+                    }
+                }
+                ColMode::ScalarLatest { prop, events } => {
+                    if events.iter().any(|e| e == &creation) {
+                        let field = rust_ident(&snake_field(prop));
+                        if c.ty == "jsonb" {
+                            // typed event field → jsonb column: serialize (works for structs/arrays/optionals).
+                            let base = format!("serde_json::to_value(&e.{}).unwrap_or(serde_json::Value::Null)", field);
+                            if opt { format!("Some({})", base) } else { base }
+                        } else {
+                            let ev_opt = event_prop_optional(model, &creation, prop);
+                            match (ev_opt, opt) {
+                                (true, true) => format!("e.{}.clone()", field),
+                                (true, false) => format!("e.{}.clone().expect(\"{} required on {}\")", field, c.name, creation),
+                                (false, true) => format!("Some(e.{}.clone())", field),
+                                (false, false) => format!("e.{}.clone()", field),
+                            }
+                        }
+                    } else {
+                        "None".to_string() // classify downgraded non-nullable-uncarried to Complex
+                    }
+                }
+            }
+        };
+
+        // Dispatch — build on creation, mutate on updates, delete on tombstone; timestamps stamped after.
         out.push_str(&format!(
-            "\npub fn project_{}<H: {}Handlers>(h: &H, state: Option<{}>, env: &Envelope) -> Option<{}> {{\n    let created = state.as_ref().map(|r| r.created_at);\n    let next = match &env.event {{\n",
+            "\npub fn project_{}<C: {}Compute>(c: &C, state: Option<{}>, env: &Envelope) -> Option<{}> {{\n",
             fnname, v.name, row, row
         ));
+        if complex.is_empty() {
+            out.push_str("    let _ = c;\n");
+        }
+        out.push_str("    let created = state.as_ref().map(|r| r.created_at);\n    let next = match &env.event {\n");
         for ev in &v.fedby {
             if v.tombstone.as_deref() == Some(ev.as_str()) {
                 out.push_str(&format!("        DomainEvent::{}(_) => None,\n", ev));
+                continue;
+            }
+            if ev == &creation {
+                out.push_str(&format!("        DomainEvent::{}(e) => Some({} {{\n", ev, row));
+                for (c, m) in &modes {
+                    out.push_str(&format!("            {}: {},\n", rust_ident(&c.name), creation_value(c, m)));
+                }
+                out.push_str("        }),\n");
+                continue;
+            }
+            // Update arm: set the columns this event feeds. Mechanical first, then complex (reads the row).
+            let mut mech: Vec<String> = Vec::new();
+            let mut cplx: Vec<String> = Vec::new();
+            let mut uses_e = false;
+            for (c, m) in &modes {
+                let opt = c.nullable && !c.pk;
+                let cid = rust_ident(&c.name);
+                match m {
+                    ColMode::ScalarLatest { prop, events } if events.iter().any(|e| e == ev) => {
+                        uses_e = true;
+                        let field = rust_ident(&snake_field(prop));
+                        if c.ty == "jsonb" {
+                            let base = format!("serde_json::to_value(&e.{}).unwrap_or(serde_json::Value::Null)", field);
+                            mech.push(if opt {
+                                format!("row.{} = Some({});", cid, base)
+                            } else {
+                                format!("row.{} = {};", cid, base)
+                            });
+                        } else {
+                            let ev_opt = event_prop_optional(model, ev, prop);
+                            mech.push(match (ev_opt, opt) {
+                                (true, true) => format!("row.{} = e.{}.clone();", cid, field),
+                                (true, false) => format!("if let Some(v) = &e.{} {{ row.{} = v.clone(); }}", field, cid),
+                                (false, true) => format!("row.{} = Some(e.{}.clone());", cid, field),
+                                (false, false) => format!("row.{} = e.{}.clone();", cid, field),
+                            });
+                        }
+                    }
+                    ColMode::Derive => {
+                        if let Some((_, dv)) = c.derive.iter().find(|(e, _)| e == ev) {
+                            let inner = match dv {
+                                DeriveVal::Lit(s) => format!("{}::{}", c.ty, s),
+                                DeriveVal::Payload(p) => { uses_e = true; format!("e.{}.clone()", rust_ident(&snake_field(p))) }
+                            };
+                            let val = if opt { format!("Some({})", inner) } else { inner };
+                            mech.push(format!("row.{} = {};", cid, val));
+                        }
+                    }
+                    ColMode::Occurrence { events } if events.iter().any(|e| e == ev) => {
+                        let val = if opt { "Some(env.occurred_at)".to_string() } else { "env.occurred_at".to_string() };
+                        mech.push(format!("row.{} = {};", cid, val));
+                    }
+                    ColMode::Complex if c.from.iter().any(|r| &event_and_prop(r).0 == ev) => {
+                        cplx.push(format!("let v = c.{}(Some(&row), env); row.{} = v;", cid, cid));
+                    }
+                    _ => {}
+                }
+            }
+            let mut stmts = mech;
+            stmts.extend(cplx);
+            let bind = if uses_e { "e" } else { "_" };
+            if stmts.is_empty() {
+                out.push_str(&format!("        DomainEvent::{}(_) => state,\n", ev));
             } else {
-                out.push_str(&format!("        DomainEvent::{}(e) => h.on_{}(state, e, env),\n", ev, snake_type(ev)));
+                out.push_str(&format!(
+                    "        DomainEvent::{}({}) => {{ let mut row = state?; {} Some(row) }},\n",
+                    ev, bind, stmts.join(" ")
+                ));
             }
         }
         out.push_str("        _ => return state,\n    };\n");

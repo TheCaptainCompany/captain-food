@@ -77,16 +77,20 @@ The projectors are themselves generated from the specs (spec-driven), landing in
   tagged `{eventType, payload}`) for dispatch, and the `<Table>Row` structs in
   `crates/application/src/generated/rows.rs` (one per projection table; scalars → newtypes, jsonb/entity
   columns → `serde_json::Value`, timestamps → `chrono`).
-- **Slice 2 (done — option A):** the projector **wiring** is generated in
-  `crates/application/src/generated/projectors.rs` — per table a `<Table>Handlers` trait (one
-  `on_<event>` method per `fedBy` event) and a `project_<table>(h, state, &Envelope)` dispatch that routes
-  each event to its handler, stays exhaustive/in-sync with `fedBy`, stamps `updated_at` from the event
-  time, deletes on a declared `tombstone`, and passes unrelated events through untouched. The fold LOGIC
-  is the hand-written `…Handlers` impl (tested app code) — generation owns only the structure, keeping
-  projection/business logic out of generated code (consistent with §2). `Envelope` is hand-written glue
-  in `crates/application/src/projections.rs`. All 6 tables wired; dispatch usability is unit-tested.
-  Considered and rejected: auto-generating the mechanical folds (option B) — it would re-introduce
-  projection logic into generated code and needs several new column modes for modest gain.
+- **Slice 2 (done — HYBRID):** `crates/application/src/generated/projectors.rs`. Per table, the generator
+  maps the **mechanical** columns inline from the `from` lineage — flat same-stream scalar copies
+  (`row.col = e.field`, optionality matched from the event's `required`/`nullable`; typed→jsonb via
+  `serde_json::to_value`), `derive` status, occurrence timestamps, and the implicit created_at/updated_at —
+  and for each **complex** column (computed / cross-stream / accumulate / composite / date-time-parse)
+  generates a typed hook on a `<Table>Compute` trait: `fn <col>(&self, prev, env) -> <ColType>`
+  (`env.event` is the declared, typed `DomainEvent`), implemented by hand. `project_<table>(c, state, env)`
+  builds the row on the creation event, mutates on updates, deletes on `tombstone`, passes unrelated events
+  through. So business logic stays hand-written/tested (consistent with §2) while the boilerplate mapping is
+  generated: Restaurant 21/27 columns generated, Customer 8/15; the computed tables (Cart/OrderTracking/
+  Catalog/ProspectionPipeline) are mostly hooks, as expected. `Envelope` is hand-written glue in
+  `crates/application/src/projections.rs`; usability is unit-tested. A column becomes mechanical (not a
+  hook) as soon as its lineage makes it derivable — e.g. adding a `derive` map moves `status` from hook to
+  generated.
 
 ## References
 Extends ADR-0039; refines ADR-0005/0035 #2. Builds on the `tables/` folder from ADR-0037.

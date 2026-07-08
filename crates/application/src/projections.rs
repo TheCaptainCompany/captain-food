@@ -26,66 +26,49 @@ pub use crate::generated::rows::*;
 
 #[cfg(test)]
 mod projector_dispatch_tests {
-    //! Prove the GENERATED projector wiring is usable end-to-end: a hand-written `Handlers` impl folds
-    //! events into rows, the dispatch routes each event to the right method, stamps `updated_at` from the
-    //! envelope, and leaves the row untouched for events the table is not fed.
+    //! Prove the GENERATED hybrid projector is usable end-to-end: the generator builds the row on the
+    //! creation event (mechanical columns inline + `Compute` hooks for the complex ones), routes each
+    //! event, stamps created_at/updated_at from the envelope, and leaves the row untouched for events the
+    //! table is not fed. The hand-written part is just the small `…Compute` impl.
     use super::*;
-    use domain::generated::events::{
-        CartCheckedOut, CartLineAdded, CartLineQuantityChanged, CartLineRemoved, CartStarted,
-        CustomerIdentified, DomainEvent, RestaurantAccountDeleted,
-    };
+    use domain::generated::events::{CartStarted, DomainEvent, RestaurantAccountDeleted};
     use domain::generated::scalars::{
-        CartId, CartStatus, CurrencyCode, MoneyCents, RestaurantAccountId, RestaurantId,
+        CartId, CartStatus, CurrencyCode, CustomerId, MoneyCents, RestaurantAccountId, RestaurantId,
     };
 
     const NIL: &str = "00000000-0000-0000-0000-000000000000";
     fn ts(secs: i64) -> chrono::DateTime<chrono::Utc> {
         chrono::DateTime::from_timestamp(secs, 0).unwrap()
     }
-    fn sample_row() -> CartRow {
-        CartRow {
-            cart_id: CartId(NIL.parse().unwrap()),
-            restaurant_id: RestaurantId(NIL.parse().unwrap()),
-            customer_id: None,
-            status: CartStatus::OPEN,
-            lines: serde_json::json!([]),
-            total_amount_cents: MoneyCents(0),
-            currency: CurrencyCode("EUR".into()),
-            estimated_breakdown: None,
-            uber_comparison: None,
-            created_at: ts(0), // placeholder — the dispatch manages the technical timestamps
-            updated_at: ts(0),
-        }
-    }
     fn env(event: DomainEvent, at: i64) -> Envelope {
         Envelope { stream_name: "cart-1".into(), position: 1, occurred_at: ts(at), event }
     }
 
-    // A minimal hand-written fold: build the row on CartStarted, pass through otherwise.
-    struct Handlers;
-    impl CartHandlers for Handlers {
-        fn on_cart_started(&self, _s: Option<CartRow>, _e: &CartStarted, _env: &Envelope) -> Option<CartRow> {
-            Some(sample_row())
-        }
-        fn on_cart_line_added(&self, s: Option<CartRow>, _e: &CartLineAdded, _env: &Envelope) -> Option<CartRow> { s }
-        fn on_cart_line_quantity_changed(&self, s: Option<CartRow>, _e: &CartLineQuantityChanged, _env: &Envelope) -> Option<CartRow> { s }
-        fn on_cart_line_removed(&self, s: Option<CartRow>, _e: &CartLineRemoved, _env: &Envelope) -> Option<CartRow> { s }
-        fn on_cart_checked_out(&self, s: Option<CartRow>, _e: &CartCheckedOut, _env: &Envelope) -> Option<CartRow> { s }
-        fn on_customer_identified(&self, s: Option<CartRow>, _e: &CustomerIdentified, _env: &Envelope) -> Option<CartRow> { s }
+    // The hand-written business logic — only Cart's complex columns; the mechanical ones are generated.
+    struct Compute;
+    impl CartCompute for Compute {
+        fn customer_id(&self, _p: Option<&CartRow>, _e: &Envelope) -> Option<CustomerId> { None }
+        fn status(&self, _p: Option<&CartRow>, _e: &Envelope) -> CartStatus { CartStatus::OPEN }
+        fn lines(&self, _p: Option<&CartRow>, _e: &Envelope) -> serde_json::Value { serde_json::json!([]) }
+        fn total_amount_cents(&self, _p: Option<&CartRow>, _e: &Envelope) -> MoneyCents { MoneyCents(0) }
+        fn currency(&self, _p: Option<&CartRow>, _e: &Envelope) -> CurrencyCode { CurrencyCode("EUR".into()) }
+        fn estimated_breakdown(&self, _p: Option<&CartRow>, _e: &Envelope) -> Option<serde_json::Value> { None }
+        fn uber_comparison(&self, _p: Option<&CartRow>, _e: &Envelope) -> Option<serde_json::Value> { None }
     }
 
     #[test]
-    fn dispatch_routes_to_handler_and_stamps_updated_at() {
+    fn creation_event_builds_row_and_stamps_timestamps() {
         let started = DomainEvent::CartStarted(CartStarted {
             cart_id: CartId(NIL.parse().unwrap()),
             restaurant_id: RestaurantId(NIL.parse().unwrap()),
             customer_id: None,
         });
-        let out = project_cart(&Handlers, None, &env(started, 1_700_000_000)).unwrap();
-        // routed to on_cart_started (row built); both technical timestamps stamped from the envelope
-        // (first event → created_at = updated_at = occurred_at), not the placeholder.
-        assert_eq!(out.updated_at, ts(1_700_000_000));
+        let out = project_cart(&Compute, None, &env(started, 1_700_000_000)).unwrap();
+        // mechanical column mapped from the event by the generator:
+        assert_eq!(out.restaurant_id, RestaurantId(NIL.parse().unwrap()));
+        // both technical timestamps stamped from the envelope (first event → created = updated = occurred):
         assert_eq!(out.created_at, ts(1_700_000_000));
+        assert_eq!(out.updated_at, ts(1_700_000_000));
     }
 
     #[test]
@@ -95,9 +78,14 @@ mod projector_dispatch_tests {
             restaurant_account_id: RestaurantAccountId(NIL.parse().unwrap()),
             reason: None,
         });
-        let mut r = sample_row();
-        r.updated_at = ts(42);
-        let out = project_cart(&Handlers, Some(r), &env(unrelated, 1_700_000_000)).unwrap();
+        let started = DomainEvent::CartStarted(CartStarted {
+            cart_id: CartId(NIL.parse().unwrap()),
+            restaurant_id: RestaurantId(NIL.parse().unwrap()),
+            customer_id: None,
+        });
+        let row = project_cart(&Compute, None, &env(started, 42)).unwrap();
+        let out = project_cart(&Compute, Some(row), &env(unrelated, 1_700_000_000)).unwrap();
         assert_eq!(out.updated_at, ts(42)); // unchanged — the `_ => state` arm skips stamping
+        assert_eq!(out.created_at, ts(42));
     }
 }
