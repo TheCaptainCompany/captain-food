@@ -39,3 +39,12 @@ executable & blocking. See **[`docs/PLAYBOOK.md`](docs/PLAYBOOK.md)**, the topic
 Nov 2025 – Jun 2026 history in [`docs/adr/HISTORY.md`](docs/adr/HISTORY.md)).
 
 > Repository convention: all content is written in **English**.
+
+## License
+
+Captain.Food is released under the **Captain.Food Coopyleft License** — a copyleft license
+inspired by [CoopCycle's Coopyleft](https://wiki.coopcycle.org/en:license). It adopts the
+GNU Affero General Public License v3 for study, execution, modification and redistribution,
+but **reserves commercial use to cooperatives, non-profit and limited-profit organizations**
+of the social and solidarity economy. See [`LICENSE.md`](LICENSE.md) for the full terms and
+[`LICENSES/AGPL-3.0.txt`](LICENSES/AGPL-3.0.txt) for the AGPL v3 text.
