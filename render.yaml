@@ -1,0 +1,31 @@
+# Render Blueprint (Infrastructure-as-Code) — Captain.Food BFF (ADR-0042).
+#
+# Hosted in Frankfurt, co-located with Supabase (eu-central-1) for low app<->DB latency, both in the EU.
+# Only `-p server` is built: the workspace also contains `web` (Leptos/WASM) and `desktop` (Tauri), which
+# need other targets/system libs and must NOT be built here.
+#
+# Secrets (`sync: false`) are entered in the Render dashboard, never committed:
+#   DATABASE_URL  -> Supabase *Session pooler* string (IPv4), port 5432, with ?sslmode=require.
+#                    Do NOT use the direct db.<ref>.supabase.co host — it is IPv6-only and unreachable from Render.
+services:
+  - type: web
+    name: captain-food
+    runtime: rust
+    region: frankfurt
+    plan: free
+    branch: main
+    buildCommand: cargo build --release -p server
+    startCommand: ./target/release/server
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_JWKS_URL
+        sync: false

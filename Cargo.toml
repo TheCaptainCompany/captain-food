@@ -32,3 +32,10 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 async-trait = "0.1"
+
+# HTTP/DB runtime — landed with the `server` crate's real surface (ADR-0035). native-tls is used for
+# sqlx TLS deliberately: it maps to SChannel on Windows dev boxes (no C compiler needed) and OpenSSL on
+# Render's Linux build image, whereas rustls would require building `ring` (needs a C toolchain).
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-native-tls", "postgres"] }
