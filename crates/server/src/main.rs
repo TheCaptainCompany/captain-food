@@ -8,6 +8,13 @@ async fn main() {
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let addr = format!("0.0.0.0:{port}");
 
+    // Free tier has no Pre-Deploy step, so apply migrations at startup (ADR-0043). Serve regardless of the
+    // outcome — /health reports the true schema state, so a failed migration is held back by Render's health
+    // check rather than crash-looping the process.
+    if let Err(e) = server::run_migrations_if_enabled().await {
+        eprintln!("startup migrations FAILED (serving anyway; /health reports the schema state): {e}");
+    }
+
     let app = server::router();
 
     let listener = tokio::net::TcpListener::bind(&addr)

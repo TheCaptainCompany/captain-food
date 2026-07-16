@@ -30,6 +30,34 @@ use shared_types::HealthDto;
 /// (ADR-0043). Shared with the `migrate` bin so there is a single source of truth for what must be applied.
 pub static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 
+/// Apply pending migrations at startup — the interim path while Render's Pre-Deploy step is unavailable
+/// (free tier, ADR-0043). sqlx's migrator takes a Postgres advisory lock, so this is safe even with
+/// multiple instances; Pre-Deploy is still preferred once available (faster boots, failures caught before
+/// promotion). Set `MIGRATE_ON_START=false` to disable (i.e. once Pre-Deploy runs the `migrate` bin).
+pub async fn run_migrations_if_enabled() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var("MIGRATE_ON_START").map(|v| v == "false").unwrap_or(false) {
+        println!("MIGRATE_ON_START=false — skipping startup migrations (expecting Pre-Deploy)");
+        return Ok(());
+    }
+    let url = match std::env::var("DATABASE_URL") {
+        Ok(u) if !u.is_empty() => u,
+        _ => {
+            eprintln!("DATABASE_URL not set — skipping startup migrations");
+            return Ok(());
+        }
+    };
+    // Bound the connect so an unreachable DB delays port-binding by seconds, not the 30s default.
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(15))
+        .connect(&url)
+        .await?;
+    MIGRATOR.run(&pool).await?;
+    pool.close().await;
+    println!("startup migrations: OK");
+    Ok(())
+}
+
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
     pub const NOT_CONFIGURED: u8 = 0; // DATABASE_URL unset

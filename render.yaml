@@ -7,6 +7,11 @@
 # Secrets (`sync: false`) are entered in the Render dashboard, never committed:
 #   DATABASE_URL  -> Supabase *Session pooler* string (IPv4), port 5432, with ?sslmode=require.
 #                    Do NOT use the direct db.<ref>.supabase.co host — it is IPv6-only and unreachable from Render.
+#
+# Migrations (ADR-0043): the free tier has no Pre-Deploy step, so the server applies migrations at startup
+# (MIGRATE_ON_START, default on). On a paid instance, add
+#   preDeployCommand: ./target/release/migrate
+# and set MIGRATE_ON_START=false so migrations run once before start instead of per-boot.
 services:
   - type: web
     name: captain-food

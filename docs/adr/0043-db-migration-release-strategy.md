@@ -29,6 +29,12 @@ sqlx's own migrator (per-file, checksummed, recorded in the append-only **`_sqlx
 starts. The bin exits non-zero on any failure, so a bad migration **blocks the deploy**: the new server is
 never promoted and the previous version keeps serving.
 
+*Interim (free tier — Pre-Deploy unavailable):* the server applies migrations **at startup**
+(`run_migrations_if_enabled`, gated by `MIGRATE_ON_START`, default on). sqlx's migrator takes a Postgres
+advisory lock, so this is safe even with multiple instances; the server serves regardless of the outcome so
+`/health` reports the true schema state (a failed migration is held back by the health check, not a
+crash-loop). Switch to Pre-Deploy on a paid instance by setting `MIGRATE_ON_START=false`.
+
 **3. Expand/Contract (parallel change).** Schema changes are **additive** during the expand phase
 (add columns/objects; never rename/drop/alter in place). Destructive **cleanup is a later forward
 migration**, shipped only after the app version that needed the old shape is retired. Rollback is therefore
