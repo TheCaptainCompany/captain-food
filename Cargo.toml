@@ -38,4 +38,4 @@ async-trait = "0.1"
 # Render's Linux build image, whereas rustls would require building `ring` (needs a C toolchain).
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-native-tls", "postgres"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-native-tls", "postgres", "migrate", "macros"] }

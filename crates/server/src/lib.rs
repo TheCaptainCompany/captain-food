@@ -5,16 +5,20 @@
 //! as a library so `desktop` (Tauri) can embed the same server in-process. Referencing `application`,
 //! `infrastructure` and `shared_types` proves the server → those-three edges.
 //!
-//! Today the surface is just `/health`, which reflects database connectivity via a 30-second `SELECT 1`
-//! heartbeat (deploy target, ADR-0042). GraphQL (role-as-path, ADR-0006) and tenant/auth middleware land
-//! on top of this same router later.
+//! `/health` is a strict readiness gate (ADR-0043). This build **embeds** its migration set (`MIGRATOR`);
+//! readiness means every embedded migration is present-and-successful in sqlx's `_sqlx_migrations` ledger.
+//! A 30-second heartbeat computes this and caches it. If any are missing, `/health` returns `503` and
+//! **names them** (`version_description`, e.g. `0005_view_order_v5`) so a mis-migrated deploy is diagnosable
+//! at a glance. Because the app only requires *its own* embedded set, an older build still passes against a
+//! newer DB — preserving rollback-by-redeploy under expand/contract (ADR-0043).
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use serde_json::json;
+use sqlx::migrate::Migrator;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
@@ -22,13 +26,39 @@ use application::ports::RestaurantRepository;
 use infrastructure::PgRestaurantRepository;
 use shared_types::HealthDto;
 
-/// Shared handler state. `Clone` is cheap: `PgPool` is an `Arc` internally and `db_up` is an `Arc`.
+/// The migration set this build depends on, embedded at compile time from the repo-root `migrations/`
+/// (ADR-0043). Shared with the `migrate` bin so there is a single source of truth for what must be applied.
+pub static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
+
+/// Readiness states published by the heartbeat, read by `/health`.
+mod db_state {
+    pub const NOT_CONFIGURED: u8 = 0; // DATABASE_URL unset
+    pub const DOWN: u8 = 1; // unreachable, or `_sqlx_migrations` does not exist yet
+    pub const SCHEMA_BEHIND: u8 = 2; // reachable, but some embedded migration is not applied
+    pub const HEALTHY: u8 = 3; // reachable and every embedded migration is applied
+}
+
+/// A cached readiness snapshot. Cheap to clone; refreshed every 30s by the heartbeat.
+#[derive(Clone)]
+struct Snapshot {
+    state: u8,
+    /// Highest successfully-applied version in the DB (`-1` if none/unknown).
+    applied_version: i64,
+    /// Highest version this build requires.
+    required_version: i64,
+    /// Embedded migrations not yet applied, named `version_description`.
+    missing: Vec<String>,
+}
+
+impl Default for Snapshot {
+    fn default() -> Self {
+        Self { state: db_state::NOT_CONFIGURED, applied_version: -1, required_version: required_version(), missing: Vec::new() }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
-    /// `None` when `DATABASE_URL` is unset (e.g. the very first boot before Supabase is wired).
-    db: Option<PgPool>,
-    /// Latest result of the 30-second `SELECT 1` heartbeat.
-    db_up: Arc<AtomicBool>,
+    snap: Arc<Mutex<Snapshot>>,
 }
 
 /// Build the application wiring (skeleton). Constructs a port impl behind its trait, proving the
@@ -39,55 +69,94 @@ pub fn wire() -> HealthDto {
 }
 
 /// Build the Axum router. Reads `DATABASE_URL`; when present it opens a *lazy* pool (never blocks or fails
-/// at boot — it connects on first use) and spawns the 30-second `SELECT 1` heartbeat that feeds `/health`.
+/// at boot) and spawns the 30-second readiness heartbeat that feeds `/health`.
 pub fn router() -> Router {
-    // Prove the DI graph wires up at startup.
     let _ = wire();
 
-    let db_up = Arc::new(AtomicBool::new(false));
-    let db = match std::env::var("DATABASE_URL") {
+    let snap = Arc::new(Mutex::new(Snapshot::default()));
+
+    match std::env::var("DATABASE_URL") {
         Ok(url) if !url.is_empty() => match PgPoolOptions::new().max_connections(5).connect_lazy(&url) {
             Ok(pool) => {
-                spawn_db_heartbeat(pool.clone(), db_up.clone());
-                Some(pool)
+                // Configured but unconfirmed until the first probe: report DOWN, not NOT_CONFIGURED.
+                snap.lock().expect("health snapshot mutex").state = db_state::DOWN;
+                spawn_heartbeat(pool, snap.clone());
             }
-            Err(e) => {
-                eprintln!("DATABASE_URL is set but pool init failed: {e}");
-                None
-            }
+            Err(e) => eprintln!("DATABASE_URL set but pool init failed: {e}"),
         },
-        _ => {
-            eprintln!("DATABASE_URL not set — /health will report db: not_configured");
-            None
-        }
-    };
+        _ => eprintln!("DATABASE_URL not set — /health will report not_configured (503)"),
+    }
 
     Router::new()
         .route("/health", get(health))
-        .with_state(AppState { db, db_up })
+        .with_state(AppState { snap })
 }
 
-/// Ping the database with `SELECT 1` every 30 seconds and publish the result to `db_up`. The first ping
-/// runs immediately (before the initial sleep), so `/health` reflects reality within a moment of boot.
-fn spawn_db_heartbeat(pool: PgPool, db_up: Arc<AtomicBool>) {
+/// Highest version among the embedded migrations.
+fn required_version() -> i64 {
+    MIGRATOR.iter().map(|m| m.version).max().unwrap_or(0)
+}
+
+/// Every 30 seconds, recompute readiness and publish it. The first run happens immediately (before the
+/// initial sleep) so `/health` reflects reality within a moment of boot.
+fn spawn_heartbeat(pool: PgPool, snap: Arc<Mutex<Snapshot>>) {
     tokio::spawn(async move {
         loop {
-            let ok = sqlx::query("SELECT 1").execute(&pool).await.is_ok();
-            db_up.store(ok, Ordering::Relaxed);
+            let next = probe(&pool).await;
+            *snap.lock().expect("health snapshot mutex") = next;
             tokio::time::sleep(Duration::from_secs(30)).await;
         }
     });
 }
 
-/// Health endpoint. `200` when the DB is reachable (or not yet configured), `503` when it is configured
-/// but the last heartbeat failed. Point Render's Health Check Path here.
-async fn health(State(state): State<AppState>) -> impl IntoResponse {
-    match state.db {
-        None => (StatusCode::OK, Json(json!({ "status": "ok", "db": "not_configured" }))),
-        Some(_) if state.db_up.load(Ordering::Relaxed) => {
-            (StatusCode::OK, Json(json!({ "status": "ok", "db": "up" })))
+/// Compare the embedded migration set against `_sqlx_migrations` (successful rows only). A missing ledger
+/// table (migrator not yet run) surfaces as a query error → `DOWN`.
+async fn probe(pool: &PgPool) -> Snapshot {
+    let required_version = required_version();
+    match sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations WHERE success")
+        .fetch_all(pool)
+        .await
+    {
+        Ok(applied) => {
+            let applied_set: HashSet<i64> = applied.iter().copied().collect();
+            let applied_version = applied.iter().copied().max().unwrap_or(-1);
+            let missing: Vec<String> = MIGRATOR
+                .iter()
+                .filter(|m| !applied_set.contains(&m.version))
+                .map(|m| format!("{:04}_{}", m.version, m.description))
+                .collect();
+            let state = if missing.is_empty() { db_state::HEALTHY } else { db_state::SCHEMA_BEHIND };
+            Snapshot { state, applied_version, required_version, missing }
         }
-        Some(_) => (
+        Err(_) => Snapshot { state: db_state::DOWN, applied_version: -1, required_version, missing: Vec::new() },
+    }
+}
+
+/// Strict readiness endpoint. `200` only when the DB is reachable and every embedded migration is applied;
+/// otherwise `503` with a machine-readable reason (and, when behind, the names of the missing migrations).
+async fn health(State(app): State<AppState>) -> impl IntoResponse {
+    let snap = app.snap.lock().expect("health snapshot mutex").clone();
+    match snap.state {
+        db_state::HEALTHY => (
+            StatusCode::OK,
+            Json(json!({ "status": "ok", "db": "up", "schemaVersion": snap.applied_version })),
+        ),
+        db_state::SCHEMA_BEHIND => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "status": "degraded",
+                "db": "up",
+                "reason": "schema_behind",
+                "schemaVersion": snap.applied_version,
+                "requiredSchemaVersion": snap.required_version,
+                "missing": snap.missing,
+            })),
+        ),
+        db_state::NOT_CONFIGURED => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "status": "degraded", "db": "not_configured" })),
+        ),
+        _ => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "status": "degraded", "db": "down" })),
         ),
