@@ -20,7 +20,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-license = "UNLICENSED"
+license-file = "LICENSE.md"
 
 # Centralized versions for the light, host-buildable deps used by the skeleton. Heavier framework deps
 # (axum/tokio/async-graphql, sqlx, leptos, tauri, crux, uniffi, reqwest) are added per crate when that

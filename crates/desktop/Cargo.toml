@@ -2,7 +2,7 @@
 name = "desktop"
 version = "0.1.0"
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 publish = false
 description = "Captain.Food Tauri 2.0 desktop shell (restaurant manager): embeds the `server` and `web` crates in-process. Depends on `server` + `web` (ADR-0035)."
 

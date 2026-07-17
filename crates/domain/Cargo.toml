@@ -2,7 +2,7 @@
 name = "domain"
 version = "0.1.0"
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 publish = false
 description = "Captain.Food pure domain (DDD): aggregates, commands, events, policies, value objects, typed IDs. Depends on NO other workspace crate (ADR-0035). serde derives are allowed on events/value objects (decision 1); serialization logic stays in the ACL."
 

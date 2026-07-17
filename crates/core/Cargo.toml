@@ -2,7 +2,7 @@
 name = "app-core"
 version = "0.1.0"
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 publish = false
 description = "Captain.Food Crux core (app-shell over the domain): typed app state, UI events, and declared capabilities — pure, no side effects. Depends on `domain` + `shared_types` (ADR-0035). Named `app-core` (crate `app_core`) to avoid shadowing the std `core` crate."
 
