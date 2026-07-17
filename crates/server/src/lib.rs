@@ -41,6 +41,7 @@ use shared_types::HealthDto;
 use graphql::schema::ReadDeps;
 
 mod graphql;
+mod hosts;
 
 /// Minimal health/edge-proof: lets the `desktop` (Tauri) shell embed the server in-process and proves the
 /// server → shared_types edge (ADR-0035). The real DI graph is built in `router()`.
@@ -146,6 +147,10 @@ pub fn router() -> Router {
         .with_state(AppState { snap, projector_status });
 
     base.merge(graphql::routes::graphql_routes(graphql::schema::build_schema(read_deps)))
+        // Host-based landing (ADR-0036): any path not matched above is dispatched by the request `Host`
+        // to its per-audience/tenant placeholder. Explicit routes (/health, /ping, /{role}/graphql) win,
+        // so Render's health check (internal *.onrender.com host) is unaffected. Covers `/` too.
+        .fallback(hosts::host_root)
         // Outer layer: stamp every response with its server-side build time.
         .layer(middleware::from_fn(response_timing))
 }
