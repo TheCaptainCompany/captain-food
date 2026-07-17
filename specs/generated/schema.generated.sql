@@ -126,6 +126,22 @@ CREATE TABLE domain_stream (
   max_count INTEGER NULL
 );
 
+CREATE TABLE external_sirene_restaurants (
+  siret TEXT PRIMARY KEY,
+  payload JSONB NOT NULL,
+  etat TEXT NOT NULL,
+  naf TEXT NOT NULL,
+  department TEXT NOT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL,
+  last_seen_at TIMESTAMPTZ NOT NULL,
+  sync_run_id UUID NOT NULL,
+  processed_at TIMESTAMPTZ NULL
+);
+CREATE INDEX ON external_sirene_restaurants (etat);
+CREATE INDEX ON external_sirene_restaurants (naf);
+CREATE INDEX ON external_sirene_restaurants (department);
+CREATE INDEX ON external_sirene_restaurants (last_seen_at);
+
 CREATE TABLE PhoneCountry (
   country TEXT PRIMARY KEY,
   dialing_code TEXT NOT NULL,
