@@ -8,8 +8,16 @@ description = "Captain.Food Axum BFF: the composition root that injects infrastr
 
 [dependencies]
 application = { path = "../application" }
+# The generated GraphQL layer wraps the domain scalars/enums (orphan rule: the async-graphql wrapper
+# newtypes + From conversions live here, `domain` stays GraphQL-free — ADR-0035).
+domain = { path = "../domain" }
 infrastructure = { path = "../infrastructure" }
 shared_types = { path = "../shared_types" }
+
+# Generated GraphQL type layer: wrapper scalar inners (uuid/chrono) + serde derives.
+serde = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
 
 # HTTP surface + DB health probe (ADR-0042) + GraphQL BFF (ADR-0006 role-as-path). The tenant/auth
 # middleware and the runtime ACL guard land later; today the server binds $PORT, serves /health, and

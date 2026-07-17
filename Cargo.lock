@@ -73,6 +73,7 @@ dependencies = [
  "asynk-strim",
  "base64",
  "bytes",
+ "chrono",
  "fast_chemail",
  "fnv",
  "futures-util",
@@ -1763,11 +1764,15 @@ dependencies = [
  "async-graphql",
  "async-graphql-axum",
  "axum",
+ "chrono",
+ "domain",
  "infrastructure",
+ "serde",
  "serde_json",
  "shared_types",
  "sqlx",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

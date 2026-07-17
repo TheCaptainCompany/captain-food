@@ -3148,29 +3148,39 @@ fn enums_block(model: &Model) -> String {
     blocks.join("\n\n")
 }
 
+/// One FK-derived navigation field on an output type (shared by the SDL emitter and the server
+/// async-graphql emitter, so the two can never drift).
+struct NavField {
+    field: String,
+    target: String,
+    list: bool,
+    nullable: bool,
+}
+
 fn nav_add(
     entity: &str,
-    field: &str,
-    line: &str,
+    nf: NavField,
     entity_names: &HashSet<String>,
     seen: &mut HashMap<String, HashSet<String>>,
-    out: &mut HashMap<String, Vec<String>>,
+    out: &mut HashMap<String, Vec<NavField>>,
 ) {
     if !entity_names.contains(entity) {
         return;
     }
     let s = seen.entry(entity.to_string()).or_default();
-    if s.contains(field) {
+    if s.contains(&nf.field) {
         return;
     }
-    s.insert(field.to_string());
-    out.entry(entity.to_string()).or_default().push(format!("  {}", line));
+    s.insert(nf.field.clone());
+    out.entry(entity.to_string()).or_default().push(nf);
 }
 
-fn nav_by_entity(views: &[SqlView], entity_names: &HashSet<String>) -> HashMap<String, Vec<String>> {
+/// FK-derived navigation fields per entity, structured (views.yaml foreign keys → `src.tgt` single
+/// navigation + `tgt.srcs` reverse collection).
+fn nav_fields(views: &[SqlView], entity_names: &HashSet<String>) -> HashMap<String, Vec<NavField>> {
     let view_agg: HashMap<String, String> = views.iter().map(|v| (v.name.clone(), v.aggregate.clone())).collect();
     let mut seen: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    let mut out: HashMap<String, Vec<NavField>> = HashMap::new();
     for v in views {
         for col in &v.columns {
             let fk = match &col.fk {
@@ -3184,12 +3194,31 @@ fn nav_by_entity(views: &[SqlView], entity_names: &HashSet<String>) -> HashMap<S
             };
             let src = v.aggregate.clone();
             if entity_names.contains(&tgt) {
-                nav_add(&src, &camel(&tgt), &format!("{}: {}{}", camel(&tgt), tgt, if col.nullable { "" } else { "!" }), entity_names, &mut seen, &mut out);
-                nav_add(&tgt, &format!("{}s", camel(&src)), &format!("{}s: [{}!]!", camel(&src), src), entity_names, &mut seen, &mut out);
+                nav_add(&src, NavField { field: camel(&tgt), target: tgt.clone(), list: false, nullable: col.nullable }, entity_names, &mut seen, &mut out);
+                nav_add(&tgt, NavField { field: format!("{}s", camel(&src)), target: src.clone(), list: true, nullable: false }, entity_names, &mut seen, &mut out);
             }
         }
     }
     out
+}
+
+fn nav_by_entity(views: &[SqlView], entity_names: &HashSet<String>) -> HashMap<String, Vec<String>> {
+    nav_fields(views, entity_names)
+        .into_iter()
+        .map(|(entity, nfs)| {
+            let lines = nfs
+                .into_iter()
+                .map(|n| {
+                    if n.list {
+                        format!("  {}: [{}!]!", n.field, n.target)
+                    } else {
+                        format!("  {}: {}{}", n.field, n.target, if n.nullable { "" } else { "!" })
+                    }
+                })
+                .collect();
+            (entity, lines)
+        })
+        .collect()
 }
 
 fn output_types_block(model: &Model, views: &[SqlView], api: &Api) -> String {
@@ -5666,6 +5695,354 @@ fn emit_domain_commands(model: &Model) -> String {
     out
 }
 
+// ─── crates/server/src/graphql/generated/ (Stage 1a — async-graphql type layer from api.yaml) ───
+//
+// The server hosts the GraphQL surface with async-graphql, but `domain` must stay GraphQL-free
+// (ADR-0035) and the orphan rule forbids implementing async-graphql's foreign traits on the foreign
+// domain newtypes from `server`. So the generator emits a SERVER-SIDE wrapper layer: one wrapper
+// newtype (GraphQL scalar) / mirror enum per scalars.yaml type with `From` conversions both ways,
+// SimpleObject output types, InputObject inputs, and a QueryRoot exposing every api.yaml query
+// (read resolvers stubbed until the read-model repositories land).
+
+/// Rust-safe struct name for a GraphQL type emitted into the server layer: a spec type may collide with
+/// a Rust prelude name (the API type `Option` does) — emitted as `<Name>_` plus an explicit
+/// `#[graphql(name = "<Name>")]`, so the GraphQL name stays the spec name.
+fn gql_rust_name(name: &str) -> String {
+    match name {
+        "Option" | "Box" | "String" | "Vec" | "Result" => format!("{}_", name),
+        _ => name.to_string(),
+    }
+}
+
+/// Rust type of an inline (non-`$ref`) schema primitive in the GraphQL layer. `integer` → `i64`
+/// (async-graphql serializes any Rust integer as the GraphQL `Int`, and the domain uses `i64`);
+/// `date-time` strings → `chrono::DateTime<Utc>` (the `DateTime` scalar via async-graphql's `chrono`
+/// feature).
+fn rust_inline_primitive(t: &str, format: Option<&str>) -> String {
+    match t {
+        "integer" => "i64".into(),
+        "boolean" => "bool".into(),
+        "number" => "f64".into(),
+        "string" if format == Some("date-time") => "chrono::DateTime<chrono::Utc>".into(),
+        _ => "String".into(),
+    }
+}
+
+/// Rust base type of a spec node in the server GraphQL layer — mirrors `base_type` (the SDL emitter):
+/// scalars.yaml refs → the wrapper scalar / mirror enum, other refs → the generated struct
+/// (`…Input`-suffixed when `input`), arrays → `Vec<…>`, inline primitives via `rust_inline_primitive`.
+fn rust_base_type(node: &Value, ctx: &str, input: bool) -> String {
+    if let Some(rf) = node.get("$ref").and_then(|x| x.as_str()) {
+        let file = ref_target_file(rf, ctx);
+        let name = parse_ref(rf).and_then(|p| p.path.into_iter().next()).unwrap_or_else(|| "String".into());
+        if file.as_deref() == Some("scalars.yaml") {
+            return gql_rust_name(&name);
+        }
+        return if input { format!("{}Input", name) } else { gql_rust_name(&name) };
+    }
+    if node.get("type").and_then(|x| x.as_str()) == Some("array") {
+        if let Some(items) = node.get("items") {
+            return format!("Vec<{}>", rust_base_type(items, ctx, input));
+        }
+    }
+    rust_inline_primitive(
+        node.get("type").and_then(|x| x.as_str()).unwrap_or("string"),
+        node.get("format").and_then(|x| x.as_str()),
+    )
+}
+
+/// Rust base type of an api.yaml field — mirrors `api_field_type` (without the nullability suffix).
+fn rust_api_field_base(model: &Model, f: &ApiField, input: bool) -> String {
+    let mut base = if f.is_ref {
+        if input && !scalar_names(model).contains(&f.ty) {
+            format!("{}Input", f.ty)
+        } else {
+            gql_rust_name(&f.ty)
+        }
+    } else {
+        rust_inline_primitive(&f.ty, f.format.as_deref())
+    };
+    if f.array {
+        base = format!("Vec<{}>", base);
+    }
+    base
+}
+
+/// Push one generated GraphQL struct field: an explicit `#[graphql(name = …)]` (the exact SDL name —
+/// independent of derive rename rules and raw `r#` idents), `#[serde(default)]` on arrays (lenient
+/// jsonb → typed mapping), raw-escaped snake_case ident.
+fn push_gql_field(out: &mut String, name: &str, base: &str, non_null: bool) {
+    let ident = rust_ident(&snake_field(name));
+    let ty = if non_null { base.to_string() } else { format!("Option<{}>", base) };
+    out.push_str(&format!("    #[graphql(name = \"{}\")]\n", name));
+    if ty.starts_with("Vec<") {
+        out.push_str("    #[serde(default)]\n");
+    }
+    out.push_str(&format!("    pub {}: {},\n", ident, ty));
+}
+
+/// Open one generated server-side GraphQL struct (`derive` = `SimpleObject` or `InputObject`). serde
+/// derives use `rename_all = "camelCase"` so the struct (de)serializes to/from the spec wire shape —
+/// this is what lets jsonb read-model columns deserialize straight into the typed output structs.
+fn push_gql_struct_open(out: &mut String, gql_name: &str, derive: &str) {
+    let rust = gql_rust_name(gql_name);
+    out.push_str(&format!(
+        "\n#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::{})]\n#[serde(rename_all = \"camelCase\")]\n",
+        derive
+    ));
+    if rust != gql_name {
+        out.push_str(&format!("#[graphql(name = \"{}\")]\n", gql_name));
+    }
+    out.push_str(&format!("pub struct {} {{\n", rust));
+}
+
+/// Push the fields of a spec object def (entities.yaml / commands.yaml shape) — mirrors `object_fields`.
+fn push_gql_object_fields(out: &mut String, def: &Value, ctx: &str, input: bool) {
+    let props = match def.get("properties").and_then(|p| p.as_mapping()) {
+        Some(m) => m,
+        None => return,
+    };
+    let required: HashSet<&str> = def
+        .get("required")
+        .and_then(|r| r.as_sequence())
+        .map(|s| s.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    for (k, p) in props {
+        let name = match k.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        if input && p.get("readOnly").and_then(|x| x.as_bool()) == Some(true) {
+            continue;
+        }
+        let base = rust_base_type(p, ctx, input);
+        let non_null = if input {
+            required.contains(name)
+        } else {
+            p.get("nullable").and_then(|x| x.as_bool()) != Some(true)
+        };
+        push_gql_field(out, name, &base, non_null);
+    }
+}
+
+/// Emit `crates/server/src/graphql/generated/scalars.rs` — the async-graphql wrapper layer over the
+/// domain scalars (orphan rule): non-enum scalars.yaml types become wrapper newtypes registered via
+/// `async_graphql::scalar!`, enums become mirror `async_graphql::Enum`s (verbatim variants), each with
+/// `From` conversions both ways to `domain::generated::scalars`.
+fn emit_server_scalars(model: &Model) -> String {
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/scalars.yaml — do not edit by hand.\n// Server-side async-graphql scalar layer: `domain` stays GraphQL-free (ADR-0035) and the orphan rule\n// forbids implementing async-graphql traits on domain newtypes here, so each scalars.yaml type gets a\n// wrapper newtype (GraphQL scalar) / mirror enum with `From` conversions both ways.\n#![allow(dead_code)]\n#![allow(non_camel_case_types)]\n\nuse domain::generated::scalars as ds;\n",
+    );
+    if let Some(Value::Mapping(m)) = model.defs.get("scalars.yaml") {
+        for (k, node) in m {
+            let name = match k.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            out.push('\n');
+            out.push_str(&scalar_doc(node));
+            if let Some(vals) = node.get("enum").and_then(|e| e.as_sequence()) {
+                let variants: Vec<&str> = vals.iter().filter_map(|v| v.as_str()).collect();
+                out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]\n");
+                out.push_str(&format!("pub enum {} {{\n", name));
+                for v in &variants {
+                    out.push_str(&format!("    #[graphql(name = \"{}\")]\n    {},\n", v, v));
+                }
+                out.push_str("}\n");
+                out.push_str(&format!("impl From<ds::{}> for {} {{\n    fn from(v: ds::{}) -> Self {{\n        match v {{\n", name, name, name));
+                for v in &variants {
+                    out.push_str(&format!("            ds::{}::{} => Self::{},\n", name, v, v));
+                }
+                out.push_str("        }\n    }\n}\n");
+                out.push_str(&format!("impl From<{}> for ds::{} {{\n    fn from(v: {}) -> Self {{\n        match v {{\n", name, name, name));
+                for v in &variants {
+                    out.push_str(&format!("            {}::{} => Self::{},\n", name, v, v));
+                }
+                out.push_str("        }\n    }\n}\n");
+                continue;
+            }
+            let ty = node.get("type").and_then(|t| t.as_str()).unwrap_or("string");
+            let is_uuid = node.get("format").and_then(|f| f.as_str()) == Some("uuid");
+            let (derives, inner) = if is_uuid {
+                ("Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize", "uuid::Uuid")
+            } else if ty == "integer" {
+                ("Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize", "i64")
+            } else if ty == "number" {
+                ("Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize", "f64")
+            } else {
+                ("Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize", "String")
+            };
+            out.push_str(&format!("#[derive({})]\n", derives));
+            out.push_str(&format!("pub struct {}(pub {});\n", name, inner));
+            out.push_str(&format!("async_graphql::scalar!({});\n", name));
+            out.push_str(&format!(
+                "impl From<ds::{}> for {} {{\n    fn from(v: ds::{}) -> Self {{\n        Self(v.0)\n    }}\n}}\n",
+                name, name, name
+            ));
+            out.push_str(&format!(
+                "impl From<{}> for ds::{} {{\n    fn from(v: {}) -> Self {{\n        Self(v.0)\n    }}\n}}\n",
+                name, name, name
+            ));
+        }
+    }
+    out
+}
+
+/// Emit `crates/server/src/graphql/generated/types.rs` — the GraphQL output types (SimpleObject),
+/// mirroring `output_types_block`: entities.yaml types not registered in api.yaml `types`, then the
+/// api.yaml types, each with its FK-derived navigation fields (data fields, resolved empty until the
+/// read resolvers land). Includes the worked `From<RestaurantRow> for Restaurant` mapping (Stage 1a).
+fn emit_server_types(model: &Model) -> String {
+    let api = parse_api(model);
+    let views = parse_views(model);
+    let registered: HashSet<String> = api.types.iter().map(|t| t.name.clone()).collect();
+    let nav = nav_fields(&views, &registered);
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/api.yaml + specs/entities.yaml — do not edit by hand.\n// GraphQL output types (async-graphql SimpleObject), mirroring the generated SDL: entities.yaml types\n// not registered as api.yaml projections, then the api.yaml types, each with its FK-derived navigation\n// fields (plain data fields for now — resolved empty until the read resolvers land).\n#![allow(dead_code)]\n#![allow(non_camel_case_types)]\n\nuse application::projections::RestaurantRow;\nuse domain::generated::scalars as ds;\n\nuse super::scalars::*;\n",
+    );
+    let push_nav = |out: &mut String, name: &str| {
+        if let Some(nfs) = nav.get(name) {
+            for n in nfs {
+                let base = if n.list { format!("Vec<{}>", gql_rust_name(&n.target)) } else { gql_rust_name(&n.target) };
+                push_gql_field(out, &n.field, &base, n.list || !n.nullable);
+            }
+        }
+    };
+    if let Some(Value::Mapping(m)) = model.defs.get("entities.yaml") {
+        for (k, def) in m {
+            let name = match k.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            if registered.contains(name) {
+                continue;
+            }
+            push_gql_struct_open(&mut out, name, "SimpleObject");
+            push_gql_object_fields(&mut out, def, "entities.yaml", false);
+            push_nav(&mut out, name);
+            out.push_str("}\n");
+        }
+    }
+    for t in &api.types {
+        push_gql_struct_open(&mut out, &t.name, "SimpleObject");
+        for f in &t.properties {
+            let base = rust_api_field_base(model, f, false);
+            push_gql_field(&mut out, &f.name, &base, !f.nullable);
+        }
+        push_nav(&mut out, &t.name);
+        out.push_str("}\n");
+    }
+    // Worked example (Stage 1a): read-model row → API type. Mechanical columns map by conversion;
+    // jsonb columns deserialize into the typed structs (serde camelCase); `orderable` is the derived
+    // flag documented in api.yaml; nav fields resolve empty until the read resolvers land.
+    out.push_str(
+        "\n/// Read-model row → API type (Stage 1a worked example). jsonb columns deserialize into the typed\n/// structs; `orderable` = ACTIVE_PARTNER + status ACTIVE + acceptance != PAUSED (api.yaml); navigation\n/// fields resolve empty until the read resolvers land.\nimpl From<RestaurantRow> for Restaurant {\n    fn from(row: RestaurantRow) -> Self {\n        Self {\n            id: row.restaurant_id.into(),\n            account_id: row.restaurant_account_id.map(Into::into),\n            listing_status: row.listing_status.into(),\n            orderable: row.listing_status == ds::RestaurantListingStatus::ACTIVE_PARTNER\n                && row.status == ds::RestaurantStatus::ACTIVE\n                && row.order_acceptance != ds::OrderAcceptanceMode::PAUSED,\n            external_identifiers: row\n                .external_identifiers\n                .and_then(|v| serde_json::from_value(v).ok())\n                .unwrap_or_default(),\n            slug: row.slug.into(),\n            display_name: row.display_name.into(),\n            description: row.description,\n            tags: row.tags.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),\n            cuisine_category: row.cuisine_category.map(Into::into),\n            rating: row.rating.map(Into::into),\n            reviews_count: row.reviews_count,\n            website: row.website.map(Into::into),\n            gbp_order_url: row.gbp_order_url.map(Into::into),\n            gbp_link_status: row.gbp_link_status.map(Into::into),\n            address: serde_json::from_value(row.address).expect(\"Restaurant.address: invalid jsonb\"),\n            location: row.location.and_then(|v| serde_json::from_value(v).ok()),\n            opening_hours: serde_json::from_value(row.opening_hours).unwrap_or_default(),\n            status: row.status.into(),\n            order_acceptance: row.order_acceptance.into(),\n            default_currency: row.default_currency.into(),\n            timezone: row.timezone.map(Into::into),\n            preparation_time_minutes: row.preparation_time_minutes,\n            updated_at: row.updated_at,\n            delivery_jobs: Vec::new(),\n            prospects: Vec::new(),\n            catalogs: Vec::new(),\n            carts: Vec::new(),\n            orders: Vec::new(),\n        }\n    }\n}\n",
+    );
+    out
+}
+
+/// Emit `crates/server/src/graphql/generated/inputs.rs` — the GraphQL input types (InputObject),
+/// mirroring `input_types_block`: one `<Command>Input` per mutation command, one `<Query>QueryInput`
+/// per query with args, one `<Name>SubscriptionInput` per subscription with args, plus every entity
+/// reachable from those payloads as `<Name>Input` (recursive, deduped).
+fn emit_server_inputs(model: &Model) -> String {
+    let api = parse_api(model);
+    let mut needed: Vec<(String, String)> = Vec::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/api.yaml + specs/commands.yaml — do not edit by hand.\n// GraphQL input types (async-graphql InputObject), mirroring the generated SDL: command payloads,\n// query/subscription args, and every entity reachable from them as `<Name>Input`.\n#![allow(dead_code)]\n\nuse super::scalars::*;\n",
+    );
+
+    for m in &api.mutations {
+        if let Some(def) = model.defs.get("commands.yaml").and_then(|d| d.get(&m.command)) {
+            push_gql_struct_open(&mut out, &format!("{}Input", m.command), "InputObject");
+            push_gql_object_fields(&mut out, def, "commands.yaml", true);
+            out.push_str("}\n");
+            visit_inputs(model, &m.command, "commands.yaml", &mut needed, &mut visited);
+        }
+    }
+
+    let scalars = scalar_names(model);
+    for q in &api.queries {
+        if q.args.is_empty() {
+            continue;
+        }
+        push_gql_struct_open(&mut out, &format!("{}QueryInput", pascal(&q.name)), "InputObject");
+        for a in &q.args {
+            let base = rust_api_field_base(model, a, true);
+            push_gql_field(&mut out, &a.name, &base, a.required);
+        }
+        out.push_str("}\n");
+        for a in &q.args {
+            if a.is_ref && !scalars.contains(&a.ty) {
+                visit_inputs(model, &a.ty, "entities.yaml", &mut needed, &mut visited);
+            }
+        }
+    }
+
+    for s in &api.subscriptions {
+        if s.args.is_empty() {
+            continue;
+        }
+        push_gql_struct_open(&mut out, &format!("{}SubscriptionInput", pascal(&s.name)), "InputObject");
+        for a in &s.args {
+            let base = rust_api_field_base(model, a, true);
+            push_gql_field(&mut out, &a.name, &base, a.required);
+        }
+        out.push_str("}\n");
+        for a in &s.args {
+            if a.is_ref && !scalars.contains(&a.ty) {
+                visit_inputs(model, &a.ty, "entities.yaml", &mut needed, &mut visited);
+            }
+        }
+    }
+
+    let mut emitted: HashSet<String> = HashSet::new();
+    for (name, file) in &needed {
+        if emitted.contains(name) {
+            continue;
+        }
+        emitted.insert(name.clone());
+        if let Some(def) = model.defs.get(file).and_then(|d| d.get(name)) {
+            push_gql_struct_open(&mut out, &format!("{}Input", name), "InputObject");
+            push_gql_object_fields(&mut out, def, file, true);
+            out.push_str("}\n");
+        }
+    }
+    out
+}
+
+/// Emit `crates/server/src/graphql/generated/query.rs` — the `QueryRoot`, mirroring `query_block`:
+/// one async resolver per api.yaml query with the SDL argument/return shape. Every resolver returns
+/// `Err("not implemented")` until the read-model repositories are injected (a later stage).
+fn emit_server_query(model: &Model) -> String {
+    let api = parse_api(model);
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/api.yaml — do not edit by hand.\n// The GraphQL QueryRoot: one resolver per api.yaml query, matching the generated SDL shape. All\n// resolvers are stubs (`not implemented`) until the read-model repositories land; the schema builds\n// and introspects. The per-role ACL guard is the acl module's seam (ADR-0006), not generated here.\n#![allow(unused_variables)]\n#![allow(dead_code)]\n\nuse super::inputs::*;\nuse super::types::*;\n\npub struct QueryRoot;\n\n#[async_graphql::Object]\nimpl QueryRoot {\n",
+    );
+    for q in &api.queries {
+        let fnname = rust_ident(&snake_field(&q.name));
+        let arg = if q.args.is_empty() {
+            String::new()
+        } else {
+            let ty = format!("{}QueryInput", pascal(&q.name));
+            let ty = if q.args.iter().any(|a| a.required) { ty } else { format!("Option<{}>", ty) };
+            format!(", input: {}", ty)
+        };
+        let inner = gql_rust_name(&q.returns_type);
+        let mut ret = if q.returns_list { format!("Vec<{}>", inner) } else { inner };
+        if q.returns_nullable {
+            ret = format!("Option<{}>", ret);
+        }
+        out.push_str(&format!(
+            "    #[graphql(name = \"{}\")]\n    async fn {}(&self{}) -> async_graphql::Result<{}> {{\n        Err(async_graphql::Error::new(\"not implemented\"))\n    }}\n",
+            q.name, fnname, arg, ret
+        ));
+    }
+    out.push_str("}\n");
+    out
+}
+
 /// Repo root, derived from the `--specs` path's parent (so generated crate files land correctly whether
 /// `--specs` is relative like `specs` or an absolute path).
 fn repo_root(specs: &std::path::Path) -> PathBuf {
@@ -5837,6 +6214,27 @@ fn main() {
         ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\n".to_string()),
     ] {
         let path = app_gen.join(name);
+        if let Err(e) = fs::write(&path, content) {
+            eprintln!("✗ write {}: {}", path.display(), e);
+            std::process::exit(1);
+        }
+        eprintln!("✓ wrote {}", path.display());
+    }
+    // crates/server/src/graphql/generated/: the async-graphql type layer from api.yaml (Stage 1a) —
+    // wrapper scalars/mirror enums, SimpleObject output types, InputObject inputs, and the QueryRoot.
+    let srv_gen = repo_root(&specs).join("crates/server/src/graphql/generated");
+    if let Err(e) = fs::create_dir_all(&srv_gen) {
+        eprintln!("✗ create {}: {}", srv_gen.display(), e);
+        std::process::exit(1);
+    }
+    for (name, content) in [
+        ("scalars.rs", emit_server_scalars(&model)),
+        ("types.rs", emit_server_types(&model)),
+        ("inputs.rs", emit_server_inputs(&model)),
+        ("query.rs", emit_server_query(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod types;\npub mod inputs;\npub mod query;\n".to_string()),
+    ] {
+        let path = srv_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
             eprintln!("✗ write {}: {}", path.display(), e);
             std::process::exit(1);
