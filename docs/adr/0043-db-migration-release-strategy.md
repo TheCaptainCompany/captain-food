@@ -53,10 +53,20 @@ as *pending* and would re-run it, and it validates checksums of applied ones. "R
 support" is achieved by shipping the **contract migration** (a new forward version) and retiring the old
 app — not by deleting history.
 
-**6. Naming convention.** Name each migration after the object it introduces, version-suffixing objects
-whose structure is versioned (e.g. `0005_view_order_v5.sql` → view `View_Order_v5`), so the `/health`
-"missing" output points straight at the absent SQL object. This dovetails with accessing tables **through
-versioned views** (ADR-0005): the view is the stable contract; the underlying column change is expand/contract.
+**6. Naming & versioning convention.** Versions are **UTC timestamps** `YYYYMMDDHHMMSS` (sqlx's native
+format), so `schemaVersion` in `/health` also tells you **when** a migration was deployed. Name each
+migration after the object it introduces, version-suffixing objects whose structure is versioned
+(e.g. `20260718090000_view_order_v5.sql` → view `View_Order_v5`), so the `/health` "missing" output points
+straight at the absent SQL object. This dovetails with accessing tables **through versioned views**
+(ADR-0005): the view is the stable contract; the underlying column change is expand/contract. (The genesis
+baseline was initially applied as version `1`; the timestamp scheme applies from the first re-baseline /
+new migration onward.)
+
+**8. Connection pooling (Supabase).** Connect via the **Session pooler (port 5432)**, not the transaction
+pooler (6543): sqlx uses prepared statements, which the transaction pooler breaks (statements are routed to
+a different backend → errors). As defence-in-depth the `/health` heartbeat uses the **simple query protocol**
+(`raw_sql`, no prepared statement) so it is correct on either pooler; the app pool keeps one warm connection
+and bounds idle/lifetime so idle connections are recycled cleanly rather than dropped by the pooler.
 
 **7. Codegen reconciliation.** The generated full schema is the **target/baseline**. `0001_baseline.sql`
 marks version 1 with no schema change; the first real domain-schema migration (`0002+`) bootstraps from

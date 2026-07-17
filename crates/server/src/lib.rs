@@ -20,7 +20,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::ge
 use serde_json::json;
 use sqlx::migrate::Migrator;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
 use application::ports::RestaurantRepository;
 use infrastructure::PgRestaurantRepository;
@@ -104,7 +104,14 @@ pub fn router() -> Router {
     let snap = Arc::new(Mutex::new(Snapshot::default()));
 
     match std::env::var("DATABASE_URL") {
-        Ok(url) if !url.is_empty() => match PgPoolOptions::new().max_connections(5).connect_lazy(&url) {
+        Ok(url) if !url.is_empty() => match PgPoolOptions::new()
+            .max_connections(5)
+            .min_connections(1) // keep one connection warm so the 30s heartbeat reuses it
+            .acquire_timeout(Duration::from_secs(10))
+            .idle_timeout(Duration::from_secs(240)) // recycle cleanly before the pooler drops idle conns
+            .max_lifetime(Duration::from_secs(1800))
+            .connect_lazy(&url)
+        {
             Ok(pool) => {
                 // Configured but unconfirmed until the first probe: report DOWN, not NOT_CONFIGURED.
                 snap.lock().expect("health snapshot mutex").state = db_state::DOWN;
@@ -141,17 +148,21 @@ fn spawn_heartbeat(pool: PgPool, snap: Arc<Mutex<Snapshot>>) {
 /// table (migrator not yet run) surfaces as a query error → `DOWN`.
 async fn probe(pool: &PgPool) -> Snapshot {
     let required_version = required_version();
-    match sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations WHERE success")
+    // Simple query protocol (raw_sql, no prepared statement) so the heartbeat is safe on ANY pooler mode,
+    // including Supabase's transaction pooler (6543) where prepared statements from a pooled connection
+    // are routed to a different backend and error. See ADR-0043.
+    match sqlx::raw_sql("SELECT version FROM _sqlx_migrations WHERE success")
         .fetch_all(pool)
         .await
     {
-        Ok(applied) => {
+        Ok(rows) => {
+            let applied: Vec<i64> = rows.iter().filter_map(|r| r.try_get::<i64, _>("version").ok()).collect();
             let applied_set: HashSet<i64> = applied.iter().copied().collect();
             let applied_version = applied.iter().copied().max().unwrap_or(-1);
             let missing: Vec<String> = MIGRATOR
                 .iter()
                 .filter(|m| !applied_set.contains(&m.version))
-                .map(|m| format!("{:04}_{}", m.version, m.description))
+                .map(|m| format!("{}_{}", m.version, m.description))
                 .collect();
             let state = if missing.is_empty() { db_state::HEALTHY } else { db_state::SCHEMA_BEHIND };
             Snapshot { state, applied_version, required_version, missing }
