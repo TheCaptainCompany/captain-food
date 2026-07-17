@@ -17,12 +17,14 @@
 # Projector: runs in-process in this web service for now (Render Background Workers are paid); it will move
 # to a dedicated worker service later (ADR-0040/0043).
 #
-# Auto-Deploy gating: `autoDeploy: true` below is a boolean and cannot express Render's deploy mode. The
-# service is configured in the Render dashboard (Settings -> Auto-Deploy) to "After CI Checks Pass", so a
-# push to `main` deploys ONLY once all GitHub checks (the `codegen-consistency` workflow) conclude green.
-# This mode is NOT captured here — if the service is recreated from this blueprint it defaults to "On Commit"
-# (deploy on push, no CI gate), so re-set it in the dashboard. Caveat: in this mode Render will NOT deploy a
-# commit that has zero checks, so keep the CI workflow triggering on every push to `main`.
+# Auto-Deploy gating: `autoDeployTrigger: checksPass` makes a push to `main` deploy ONLY once all GitHub
+# checks (the `codegen-consistency` workflow) conclude green — the "After CI Checks Pass" mode, now encoded
+# in source so it survives a blueprint re-create. Caveat: in this mode Render will NOT deploy a commit that
+# has zero checks, so keep the CI workflow triggering on every push to `main`.
+#
+# This file is the single source of truth ONLY once the repo is linked as a Blueprint in Render (Blueprints
+# -> New Blueprint Instance); Render then matches the existing `captain-food` service by name and re-syncs
+# this config on every push. Secrets stay dashboard-managed via `sync: false`.
 services:
   - type: web
     name: captain-food
@@ -32,7 +34,7 @@ services:
     plan: free
     branch: main
     healthCheckPath: /health
-    autoDeploy: true
+    autoDeployTrigger: checksPass
     envVars:
       - key: DATABASE_URL
         sync: false
