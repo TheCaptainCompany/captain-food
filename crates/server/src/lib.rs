@@ -22,7 +22,7 @@ use axum::{
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
+    Extension, Json, Router,
 };
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -43,6 +43,7 @@ use shared_types::HealthDto;
 
 use graphql::schema::{ReadDeps, WriteDeps};
 
+mod auth;
 mod graphql;
 mod hosts;
 
@@ -179,6 +180,9 @@ pub fn router() -> Router {
         // to its per-audience/tenant placeholder. Explicit routes (/health, /ping, /{role}/graphql) win,
         // so Render's health check (internal *.onrender.com host) is unaffected. Covers `/` too.
         .fallback(hosts::host_root)
+        // API auth (ADR-0047): the Supabase-JWT verifier, available to the `/{role}/graphql` handler which
+        // gates every non-public path. Shared as an Extension so the JWKS cache is process-wide.
+        .layer(Extension(auth::AuthContext::from_env()))
         // Outer layer: stamp every response with its server-side build time.
         .layer(middleware::from_fn(response_timing))
 }

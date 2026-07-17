@@ -5,15 +5,19 @@
 //! renders GraphiQL, `POST` executes (introspection included — so `GET /{role}/voyager`, GraphQL Voyager's
 //! interactive schema graph, sees that role's filtered schema).
 
+use std::sync::Arc;
+
 use async_graphql::http::GraphiQLSource;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{any, get},
-    Router,
+    Extension, Router,
 };
+
+use crate::auth::AuthContext;
 
 use super::acl::RequestRole;
 use super::schema::CaptainSchema;
@@ -32,18 +36,26 @@ pub fn graphql_routes(schema: CaptainSchema) -> Router {
 
 async fn graphql_handler(
     State(schema): State<CaptainSchema>,
+    Extension(auth): Extension<Arc<AuthContext>>,
     Path(role_seg): Path<String>,
+    headers: HeaderMap,
     req: GraphQLRequest,
 ) -> Response {
-    match RequestRole::from_segment(&role_seg) {
-        // Inject the role: the generated guard/visible ACL bindings read it from the request context
-        // to authorize execution and filter introspection per path (ADR-0006).
-        Some(role) => {
-            let resp: GraphQLResponse = schema.execute(req.into_inner().data(role)).await.into();
-            resp.into_response()
-        }
-        None => (StatusCode::NOT_FOUND, "unknown role path").into_response(),
-    }
+    let Some(role) = RequestRole::from_segment(&role_seg) else {
+        return (StatusCode::NOT_FOUND, "unknown role path").into_response();
+    };
+    // Authn/authz at the path boundary (ADR-0047): /public is open; every other path needs a valid
+    // Supabase JWT whose `captain_role` matches this path — so the role is now VERIFIED, not merely
+    // self-asserted by the URL. On success we inject BOTH the RequestRole — read by the generated
+    // guard/visible ACL bindings that enforce per-field authz + filter introspection (ADR-0006) — and the
+    // verified Principal (identity for resolvers).
+    let principal = match auth.authorize(role, &headers).await {
+        Ok(p) => p,
+        Err(e) => return e.into_response(),
+    };
+    let resp: GraphQLResponse =
+        schema.execute(req.into_inner().data(role).data(principal)).await.into();
+    resp.into_response()
 }
 
 async fn graphiql(Path(role_seg): Path<String>) -> Response {

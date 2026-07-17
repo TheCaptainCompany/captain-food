@@ -23,8 +23,14 @@ chrono = { workspace = true }
 # per-role guard/visible ACL enforced at runtime). The tenant/auth (identity) middleware lands later;
 # today the server binds $PORT, serves /health, and exposes the role-filtered GraphQL schema per path.
 axum = { workspace = true }
-tokio = { workspace = true }
+# `sync` (RwLock) added for the JWKS cache in the ADR-0047 auth verifier, on top of the workspace features.
+tokio = { workspace = true, features = ["sync"] }
 sqlx = { workspace = true }
 serde_json = { workspace = true }
 async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
+# API auth (ADR-0047): verify Supabase-issued JWTs against the project's PUBLIC keys (JWKS) — the signing
+# secret never touches this server. `jsonwebtoken` does the signature/claims verification; `reqwest` fetches
+# the JWKS (default-features off + native-tls, matching the workspace sqlx/infra TLS choice).
+jsonwebtoken = "9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
