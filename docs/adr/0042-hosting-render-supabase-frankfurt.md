@@ -63,6 +63,18 @@ and data inside the EU**.
 - **Two vendors to operate/bill/monitor** rather than one integrated platform.
 
 ### Operational notes
+- **Deployment is Infrastructure-as-Code via a Render Blueprint.** The Render service is driven by
+  [`render.yaml`](../../render.yaml) at the repo root, linked as a Render **Blueprint** so the file — not
+  the dashboard — is the source of truth (matched to the existing service by name, `captain-food`).
+  - Blueprint ID: `exs-d9d8q058nd3s73dosclg` · repo `Captain-Food/captain-food` · branch `main` · path `render.yaml`.
+  - Enforced config: `runtime: docker` + `dockerfilePath: ./Dockerfile` (cargo-chef cached build + slim
+    runtime image), and `autoDeployTrigger: checksPass` so a push to `main` deploys **only after** the
+    `codegen-consistency` CI checks pass (ADR-0043 keeps migrations out-of-band; the `/health`
+    schema-version gate still holds a deploy that races ahead of a migration).
+  - Every push to `main` re-syncs the Blueprint automatically; "Manual sync" in the dashboard only forces
+    one. Secrets stay dashboard-managed via `sync: false` and are never committed.
+  - Linked 2026-07-17; first sync at commit `5a9e2f5` switched the service from a manually-configured
+    native `cargo build` to this Docker runtime, resolving the prior dashboard↔blueprint drift.
 - **Supabase Data API (PostgREST) is intentionally DISABLED** — all access is via the BFF + direct sqlx
   (ADR-0006), so PostgREST is unused and its REST surface is not exposed. Known, benign side effect: with
   the Data API off, PostgREST still runs and logs `schema "pg_pgrst_no_exposed_schemas" does not exist`
