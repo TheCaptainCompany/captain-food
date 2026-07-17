@@ -1,0 +1,6 @@
+# Keep the Docker build context small + avoid copying the host's (Windows) target dir into the Linux build.
+/target
+**/target
+.git
+.github
+*.log

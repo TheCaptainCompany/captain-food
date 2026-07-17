@@ -1,8 +1,9 @@
 # Render Blueprint (Infrastructure-as-Code) — Captain.Food BFF (ADR-0042).
 #
 # Hosted in Frankfurt, co-located with Supabase (eu-central-1) for low app<->DB latency, both in the EU.
-# Only `-p server` is built: the workspace also contains `web` (Leptos/WASM) and `desktop` (Tauri), which
-# need other targets/system libs and must NOT be built here.
+# Built via the cargo-chef Dockerfile so Render caches the dependency layer across deploys (only changed
+# app code recompiles). The Dockerfile builds just `-p server` (the workspace's web/desktop crates are not
+# built here). First deploy is a full build (seeds the layer cache); later deploys are fast.
 #
 # Secrets (`sync: false`) are entered in the Render dashboard, never committed:
 #   DATABASE_URL  -> Supabase *Session pooler* string (IPv4), port 5432, with ?sslmode=require.
@@ -18,12 +19,11 @@
 services:
   - type: web
     name: captain-food
-    runtime: rust
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     region: frankfurt
     plan: free
     branch: main
-    buildCommand: cargo build --release -p server
-    startCommand: ./target/release/server
     healthCheckPath: /health
     autoDeploy: true
     envVars:
