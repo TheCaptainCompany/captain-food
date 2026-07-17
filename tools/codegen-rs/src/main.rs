@@ -2868,6 +2868,7 @@ struct ApiField {
     nullable: bool,
     array: bool,
     format: Option<String>,
+    description: Option<String>,
 }
 struct ApiType {
     name: String,
@@ -2955,6 +2956,7 @@ fn parse_field(name: &str, n: &Value) -> ApiField {
         nullable: flag("nullable"),
         array: flag("array"),
         format: n.get("format").and_then(|x| x.as_str()).map(|s| s.to_string()),
+        description: n.get("description").and_then(|x| x.as_str()).map(|s| s.to_string()),
     }
 }
 fn field_map(v: Option<&Value>) -> Vec<ApiField> {
@@ -5768,12 +5770,29 @@ fn rust_api_field_base(model: &Model, f: &ApiField, input: bool) -> String {
     base
 }
 
-/// Push one generated GraphQL struct field: an explicit `#[graphql(name = …)]` (the exact SDL name —
-/// independent of derive rename rules and raw `r#` idents), `#[serde(default)]` on arrays (lenient
-/// jsonb → typed mapping), raw-escaped snake_case ident.
-fn push_gql_field(out: &mut String, name: &str, base: &str, non_null: bool) {
+/// Spec `description` → Rust `///` doc lines at `indent` (one per non-empty trimmed line). async-graphql
+/// turns doc comments into GraphQL descriptions (SimpleObject/InputObject structs + fields, Enum,
+/// `#[Object]` resolvers), so the spec documentation reaches introspection/GraphiQL. No description →
+/// no lines.
+fn push_doc(out: &mut String, indent: &str, desc: Option<&str>) {
+    if let Some(d) = desc {
+        for line in d.trim().lines() {
+            let line = line.trim();
+            if !line.is_empty() {
+                out.push_str(&format!("{}/// {}\n", indent, line));
+            }
+        }
+    }
+}
+
+/// Push one generated GraphQL struct field: the spec description as a `///` doc (→ introspection), an
+/// explicit `#[graphql(name = …)]` (the exact SDL name — independent of derive rename rules and raw
+/// `r#` idents), `#[serde(default)]` on arrays (lenient jsonb → typed mapping), raw-escaped snake_case
+/// ident.
+fn push_gql_field(out: &mut String, name: &str, base: &str, non_null: bool, desc: Option<&str>) {
     let ident = rust_ident(&snake_field(name));
     let ty = if non_null { base.to_string() } else { format!("Option<{}>", base) };
+    push_doc(out, "    ", desc);
     out.push_str(&format!("    #[graphql(name = \"{}\")]\n", name));
     if ty.starts_with("Vec<") {
         out.push_str("    #[serde(default)]\n");
@@ -5781,13 +5800,16 @@ fn push_gql_field(out: &mut String, name: &str, base: &str, non_null: bool) {
     out.push_str(&format!("    pub {}: {},\n", ident, ty));
 }
 
-/// Open one generated server-side GraphQL struct (`derive` = `SimpleObject` or `InputObject`). serde
-/// derives use `rename_all = "camelCase"` so the struct (de)serializes to/from the spec wire shape —
-/// this is what lets jsonb read-model columns deserialize straight into the typed output structs.
-fn push_gql_struct_open(out: &mut String, gql_name: &str, derive: &str) {
+/// Open one generated server-side GraphQL struct (`derive` = `SimpleObject` or `InputObject`), with the
+/// spec description as a `///` doc (→ the type's introspection description). serde derives use
+/// `rename_all = "camelCase"` so the struct (de)serializes to/from the spec wire shape — this is what
+/// lets jsonb read-model columns deserialize straight into the typed output structs.
+fn push_gql_struct_open(out: &mut String, gql_name: &str, derive: &str, desc: Option<&str>) {
     let rust = gql_rust_name(gql_name);
+    out.push('\n');
+    push_doc(out, "", desc);
     out.push_str(&format!(
-        "\n#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::{})]\n#[serde(rename_all = \"camelCase\")]\n",
+        "#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::{})]\n#[serde(rename_all = \"camelCase\")]\n",
         derive
     ));
     if rust != gql_name {
@@ -5821,7 +5843,7 @@ fn push_gql_object_fields(out: &mut String, def: &Value, ctx: &str, input: bool)
         } else {
             p.get("nullable").and_then(|x| x.as_bool()) != Some(true)
         };
-        push_gql_field(out, name, &base, non_null);
+        push_gql_field(out, name, &base, non_null, p.get("description").and_then(|x| x.as_str()));
     }
 }
 
@@ -5874,7 +5896,12 @@ fn emit_server_scalars(model: &Model) -> String {
             };
             out.push_str(&format!("#[derive({})]\n", derives));
             out.push_str(&format!("pub struct {}(pub {});\n", name, inner));
-            out.push_str(&format!("async_graphql::scalar!({});\n", name));
+            // The scalar! macro takes the introspection description explicitly (doc comments don't
+            // reach it) — whitespace-collapsed to one line, escaped as a Rust string literal.
+            match node.get("description").and_then(|d| d.as_str()) {
+                Some(d) => out.push_str(&format!("async_graphql::scalar!({}, {:?}, {:?});\n", name, name, ws1(d.trim()))),
+                None => out.push_str(&format!("async_graphql::scalar!({});\n", name)),
+            }
             out.push_str(&format!(
                 "impl From<ds::{}> for {} {{\n    fn from(v: ds::{}) -> Self {{\n        Self(v.0)\n    }}\n}}\n",
                 name, name, name
@@ -5904,7 +5931,7 @@ fn emit_server_types(model: &Model) -> String {
         if let Some(nfs) = nav.get(name) {
             for n in nfs {
                 let base = if n.list { format!("Vec<{}>", gql_rust_name(&n.target)) } else { gql_rust_name(&n.target) };
-                push_gql_field(out, &n.field, &base, n.list || !n.nullable);
+                push_gql_field(out, &n.field, &base, n.list || !n.nullable, None);
             }
         }
     };
@@ -5917,17 +5944,17 @@ fn emit_server_types(model: &Model) -> String {
             if registered.contains(name) {
                 continue;
             }
-            push_gql_struct_open(&mut out, name, "SimpleObject");
+            push_gql_struct_open(&mut out, name, "SimpleObject", def.get("description").and_then(|d| d.as_str()));
             push_gql_object_fields(&mut out, def, "entities.yaml", false);
             push_nav(&mut out, name);
             out.push_str("}\n");
         }
     }
     for t in &api.types {
-        push_gql_struct_open(&mut out, &t.name, "SimpleObject");
+        push_gql_struct_open(&mut out, &t.name, "SimpleObject", t.description.as_deref());
         for f in &t.properties {
             let base = rust_api_field_base(model, f, false);
-            push_gql_field(&mut out, &f.name, &base, !f.nullable);
+            push_gql_field(&mut out, &f.name, &base, !f.nullable, f.description.as_deref());
         }
         push_nav(&mut out, &t.name);
         out.push_str("}\n");
@@ -5955,7 +5982,7 @@ fn emit_server_inputs(model: &Model) -> String {
 
     for m in &api.mutations {
         if let Some(def) = model.defs.get("commands.yaml").and_then(|d| d.get(&m.command)) {
-            push_gql_struct_open(&mut out, &format!("{}Input", m.command), "InputObject");
+            push_gql_struct_open(&mut out, &format!("{}Input", m.command), "InputObject", def.get("description").and_then(|d| d.as_str()));
             push_gql_object_fields(&mut out, def, "commands.yaml", true);
             out.push_str("}\n");
             visit_inputs(model, &m.command, "commands.yaml", &mut needed, &mut visited);
@@ -5967,10 +5994,10 @@ fn emit_server_inputs(model: &Model) -> String {
         if q.args.is_empty() {
             continue;
         }
-        push_gql_struct_open(&mut out, &format!("{}QueryInput", pascal(&q.name)), "InputObject");
+        push_gql_struct_open(&mut out, &format!("{}QueryInput", pascal(&q.name)), "InputObject", None);
         for a in &q.args {
             let base = rust_api_field_base(model, a, true);
-            push_gql_field(&mut out, &a.name, &base, a.required);
+            push_gql_field(&mut out, &a.name, &base, a.required, a.description.as_deref());
         }
         out.push_str("}\n");
         for a in &q.args {
@@ -5984,10 +6011,10 @@ fn emit_server_inputs(model: &Model) -> String {
         if s.args.is_empty() {
             continue;
         }
-        push_gql_struct_open(&mut out, &format!("{}SubscriptionInput", pascal(&s.name)), "InputObject");
+        push_gql_struct_open(&mut out, &format!("{}SubscriptionInput", pascal(&s.name)), "InputObject", None);
         for a in &s.args {
             let base = rust_api_field_base(model, a, true);
-            push_gql_field(&mut out, &a.name, &base, a.required);
+            push_gql_field(&mut out, &a.name, &base, a.required, a.description.as_deref());
         }
         out.push_str("}\n");
         for a in &s.args {
@@ -6004,7 +6031,7 @@ fn emit_server_inputs(model: &Model) -> String {
         }
         emitted.insert(name.clone());
         if let Some(def) = model.defs.get(file).and_then(|d| d.get(name)) {
-            push_gql_struct_open(&mut out, &format!("{}Input", name), "InputObject");
+            push_gql_struct_open(&mut out, &format!("{}Input", name), "InputObject", def.get("description").and_then(|d| d.as_str()));
             push_gql_object_fields(&mut out, def, file, true);
             out.push_str("}\n");
         }
@@ -6018,7 +6045,7 @@ fn emit_server_inputs(model: &Model) -> String {
 fn emit_server_query(model: &Model) -> String {
     let api = parse_api(model);
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/api.yaml — do not edit by hand.\n// The GraphQL QueryRoot: one resolver per api.yaml query, matching the generated SDL shape. All\n// resolvers are stubs (`not implemented`) until the read-model repositories land; the schema builds\n// and introspects. The per-role ACL guard is the acl module's seam (ADR-0006), not generated here.\n#![allow(unused_variables)]\n#![allow(dead_code)]\n\nuse super::inputs::*;\nuse super::types::*;\n\npub struct QueryRoot;\n\n#[async_graphql::Object]\nimpl QueryRoot {\n",
+        "// GENERATED by the Captain.Food codegen from specs/api.yaml — do not edit by hand.\n// The GraphQL QueryRoot: one resolver per api.yaml query, matching the generated SDL shape. All\n// resolvers are stubs (`not implemented`) until the read-model repositories land; the schema builds\n// and introspects. The per-role ACL guard is the acl module's seam (ADR-0006), not generated here.\n#![allow(unused_variables)]\n#![allow(dead_code)]\n\nuse super::inputs::*;\nuse super::types::*;\n\npub struct QueryRoot;\n\n#[async_graphql::Object(name = \"Query\")]\nimpl QueryRoot {\n",
     );
     for q in &api.queries {
         let fnname = rust_ident(&snake_field(&q.name));
@@ -6034,6 +6061,7 @@ fn emit_server_query(model: &Model) -> String {
         if q.returns_nullable {
             ret = format!("Option<{}>", ret);
         }
+        push_doc(&mut out, "    ", q.description.as_deref());
         out.push_str(&format!(
             "    #[graphql(name = \"{}\")]\n    async fn {}(&self{}) -> async_graphql::Result<{}> {{\n        Err(async_graphql::Error::new(\"not implemented\"))\n    }}\n",
             q.name, fnname, arg, ret

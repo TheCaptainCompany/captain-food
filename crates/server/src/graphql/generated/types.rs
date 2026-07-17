@@ -10,6 +10,7 @@ use domain::generated::scalars as ds;
 
 use super::scalars::*;
 
+/// Stronger-typed money than HubRise's "9.80 EUR" string. Converted at the HubRise boundary (parse + x100), kept as integer minor units + currency internally.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Money {
@@ -19,42 +20,58 @@ pub struct Money {
     pub currency: CurrencyCode,
 }
 
+/// The order's money breakdown, computed server-side by PlaceOrderProcess (ADR-0016/0017/0018). Carries BOTH the buyer-facing checkout lines and the 3-way Stripe Connect split, in one place so they can't diverge. Invariants: total = articles + delivery + serviceFee; restaurantPayout = articles − restaurantContribution; riderPayout = delivery; captainNet = serviceFee + restaurantContribution (gross of Stripe fees, which Captain absorbs as merchant of record). 0% commission on food: restaurantContribution is a distinct service line, never a cut of the menu price.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentBreakdown {
+    /// Food sub-total TTC (100% to the restaurant, minus its service contribution).
     #[graphql(name = "articles")]
     pub articles: Money,
+    /// Delivery fee (→ rider); zero for collection. Delivery integration is post-V0.
     #[graphql(name = "delivery")]
     pub delivery: Money,
+    /// Captain service fee shown to the buyer (the buyer part of the fee).
     #[graphql(name = "serviceFee")]
     pub service_fee: Money,
+    /// What the buyer pays = articles + delivery + serviceFee (the PaymentIntent amount).
     #[graphql(name = "total")]
     pub total: Money,
+    /// Restaurant's variable service part (margin-proportional); deducted from its payout.
     #[graphql(name = "restaurantContribution")]
     pub restaurant_contribution: Money,
+    /// Transfer to the restaurant Connect account = articles − restaurantContribution.
     #[graphql(name = "restaurantPayout")]
     pub restaurant_payout: Money,
+    /// Transfer to the rider Connect account = delivery.
     #[graphql(name = "riderPayout")]
     pub rider_payout: Money,
+    /// Kept on the Captain platform account = serviceFee + restaurantContribution (gross of Stripe).
     #[graphql(name = "captainNet")]
     pub captain_net: Money,
 }
 
+/// What the same order would cost — and how it would be split — on Uber Eats, for the pedagogical comparison (ADR-0022/0025). `basis` says whether these are the restaurant's REAL Uber prices (shared via HubRise opt-in, ADR-0023) or a labelled ESTIMATE (coefficient-based, ADR-0024). Estimated split: restaurantShare = uberFood × (1 − uber_commission); riderShare ≈ rider_base (+/km, not modelled in V0); platformShare = total − restaurantShare − riderShare. The client derives "you save" = captainTotal − total.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct UberComparison {
+    /// Estimated (or real) all-in Uber Eats price for the same order.
     #[graphql(name = "total")]
     pub total: Money,
+    /// What the restaurant would net on Uber (after its ~30% commission).
     #[graphql(name = "restaurantShare")]
     pub restaurant_share: Money,
+    /// What the courier would earn on Uber (base + per-km; per-km not modelled in V0).
     #[graphql(name = "riderShare")]
     pub rider_share: Money,
+    /// What Uber Eats would keep = total − restaurantShare − riderShare.
     #[graphql(name = "platformShare")]
     pub platform_share: Money,
+    /// REAL (HubRise opt-in) or ESTIMATED (labelled). V0 shows ESTIMATED.
     #[graphql(name = "basis")]
     pub basis: ComparisonBasis,
 }
 
+/// One customer tip to a single recipient (ADR-012). Optional, separate from the price; Captain keeps 0%.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Tip {
@@ -64,6 +81,7 @@ pub struct Tip {
     pub amount: Money,
 }
 
+/// The person delivering an order. For an INDEPENDENT rider, `riderId` is set (a Captain RIDER); for a PARTNER courier (e.g. Avelo37) only `displayName`/`phone` are known, reported by the partner.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Courier {
@@ -71,10 +89,12 @@ pub struct Courier {
     pub display_name: String,
     #[graphql(name = "phone")]
     pub phone: Option<PhoneNumber>,
+    /// Set when the courier is an independent Captain rider; null for a partner courier.
     #[graphql(name = "riderId")]
     pub rider_id: Option<RiderId>,
 }
 
+/// Per-service-mode VAT, mirroring HubRise product tax_rate.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxRate {
@@ -86,15 +106,19 @@ pub struct TaxRate {
     pub eat_in: Option<TaxRatePercent>,
 }
 
+/// Inventory of a offer/option. status is DERIVED from quantity and lowStockThreshold (see scalars.yaml#/StockStatus).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Stock {
     #[graphql(name = "quantity")]
     pub quantity: Quantity,
+    /// If quantity <= threshold, status becomes LOW_STOCK.
     #[graphql(name = "lowStockThreshold")]
     pub low_stock_threshold: Option<Quantity>,
+    /// DERIVED server-side from quantity vs lowStockThreshold — never a client input.
     #[graphql(name = "status")]
     pub status: StockStatus,
+    /// Restock/availability date for out-of-stock items (HubRise inventory expires_at).
     #[graphql(name = "expiresAt")]
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -114,6 +138,7 @@ pub struct Address {
     pub country: CountryCode,
 }
 
+/// One opening time window for a given weekday (HubRise opening_hours).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OpeningHoursSlot {
@@ -125,6 +150,7 @@ pub struct OpeningHoursSlot {
     pub to: TimeOfDay,
 }
 
+/// Both fields optional: HubRise locations do not expose email/phone, so an imported restaurant starts without contact info, to be completed by the admin.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct RestaurantContact {
@@ -134,6 +160,7 @@ pub struct RestaurantContact {
     pub phone: Option<PhoneNumber>,
 }
 
+/// WGS84 geographic coordinates of the restaurant location (e.g. from Google Maps, for map display & distance).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct GeoPoint {
@@ -143,6 +170,7 @@ pub struct GeoPoint {
     pub longitude: Longitude,
 }
 
+/// A generic external identifier kept on a Restaurant listing, preserving the ORIGINAL source key/value (e.g. siret/naf from INSEE Sirene, google_place_id from Google, hubrise_ref). Source-agnostic and multi-valued: a restaurant may carry several, and a key (e.g. siret) is NOT unique across restaurants.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalIdentifier {
@@ -163,11 +191,13 @@ pub struct CustomerContact {
     pub phone: PhoneNumber,
 }
 
+/// The business account that owns one or more restaurant locations (HubRise: restaurant).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct RestaurantAccount {
     #[graphql(name = "id")]
     pub id: RestaurantAccountId,
+    /// HubRise restaurant (account) reference, when imported.
     #[graphql(name = "ref")]
     pub r#ref: Option<ExternalReference>,
     #[graphql(name = "legalName")]
@@ -207,6 +237,7 @@ pub struct ProductItemOption {
     pub stock: Option<Stock>,
 }
 
+/// A line stored in a cart: the customer's selection by id (no prices stored).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct CartLineItem {
@@ -221,6 +252,7 @@ pub struct CartLineItem {
     pub selected_option_ids: Vec<OptionId>,
 }
 
+/// An option chosen by the customer on a line item, priced at order time.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectedOption {
@@ -252,10 +284,12 @@ pub struct OrderLineItem {
     #[graphql(name = "selectedOptions")]
     #[serde(default)]
     pub selected_options: Vec<SelectedOption>,
+    /// (unitPrice + sum(selectedOptions.price)) * quantity, computed server-side.
     #[graphql(name = "lineTotal")]
     pub line_total: Money,
 }
 
+/// A restaurant (public discovery + single-restaurant header). Navigates to its catalogs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Restaurant {
@@ -327,6 +361,7 @@ pub struct Restaurant {
     pub orders: Vec<Order>,
 }
 
+/// A restaurant's catalog (categories → products → offers + option lists).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Catalog {
@@ -353,6 +388,7 @@ pub struct Catalog {
     pub restaurant: Restaurant,
 }
 
+/// A customer's in-progress selection for a single restaurant (priced by the projection).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Cart {
@@ -379,6 +415,7 @@ pub struct Cart {
     pub restaurant: Restaurant,
 }
 
+/// An order with its tracking status and payment state.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
@@ -440,6 +477,7 @@ pub struct Order {
     pub restaurant: Restaurant,
 }
 
+/// A catalog category (tree via parentRef).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogCategory {
@@ -459,6 +497,7 @@ pub struct CatalogCategory {
     pub image_ids: Vec<ImageId>,
 }
 
+/// A catalog product grouping one or more purchasable offers.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Product {
@@ -483,6 +522,7 @@ pub struct Product {
     pub offers: Vec<Offer>,
 }
 
+/// A purchasable offer (SKU) of a product, with its price and derived availability.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Offer {
@@ -505,6 +545,7 @@ pub struct Offer {
     pub option_list_ids: Vec<OptionListId>,
 }
 
+/// A modifier group (HubRise option list).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OptionList {
@@ -523,6 +564,7 @@ pub struct OptionList {
     pub options: Vec<Option_>,
 }
 
+/// A selectable option within an option list.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "Option")]
@@ -541,6 +583,7 @@ pub struct Option_ {
     pub stock_status: Option<StockStatus>,
 }
 
+/// A customer's own profile (display name + contact). Backed by the identity read model; surfaced to the customer only (profile management is V1 — no V0 query yet).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomerProfile {
@@ -560,6 +603,7 @@ pub struct CustomerProfile {
     pub timezone: Option<TimeZone>,
 }
 
+/// A selectable phone country for the dialing-code picker (static reference data).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct PhoneCountry {
@@ -573,6 +617,7 @@ pub struct PhoneCountry {
     pub default_locale: Locale,
 }
 
+/// Stripe PaymentIntent handle for the checkout step. NON-PROJECTED (transient): it is returned via the PlaceOrder mutation payload, never read through a View_* — hence no `reads`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentIntent {
@@ -584,6 +629,7 @@ pub struct PaymentIntent {
     pub status: String,
 }
 
+/// Live status of a command/operation, streamed by the `operationStatusChanged` subscription and correlated by `correlationId` (every mutation payload carries one). NON-PROJECTED (transient) — no backing View_*, hence no `reads`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Operation {
@@ -597,6 +643,7 @@ pub struct Operation {
     pub occurred_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// One delivery of an order (ADR-0031): status, courier, addresses and ETAs. Serves the rider job list, the restaurant delivery board and admin.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryJob {
@@ -632,6 +679,7 @@ pub struct DeliveryJob {
     pub restaurant: Restaurant,
 }
 
+/// A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct Prospect {
@@ -651,6 +699,7 @@ pub struct Prospect {
     pub restaurant: Restaurant,
 }
 
+/// The calibratable Captain service-fee policy (ADR-0016/0017); admin/transparency.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct PricingPolicy {
@@ -668,6 +717,7 @@ pub struct PricingPolicy {
     pub effective_from: chrono::DateTime<chrono::Utc>,
 }
 
+/// Calibratable per-cuisine Uber Eats mark-up coefficient (ADR-0024/0030); admin/transparency.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct UberEstimationPolicy {
@@ -679,6 +729,7 @@ pub struct UberEstimationPolicy {
     pub effective_from: chrono::DateTime<chrono::Utc>,
 }
 
+/// Calibratable Uber Eats split/fee assumptions for the estimated comparison (ADR-0024/0025/0030); admin/transparency.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct UberSplitPolicy {

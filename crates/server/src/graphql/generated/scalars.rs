@@ -10,7 +10,7 @@ use domain::generated::scalars as ds;
 /// Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RestaurantAccountId(pub uuid::Uuid);
-async_graphql::scalar!(RestaurantAccountId);
+async_graphql::scalar!(RestaurantAccountId, "RestaurantAccountId", "Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations.");
 impl From<ds::RestaurantAccountId> for RestaurantAccountId {
     fn from(v: ds::RestaurantAccountId) -> Self {
         Self(v.0)
@@ -25,7 +25,7 @@ impl From<RestaurantAccountId> for ds::RestaurantAccountId {
 /// A single restaurant location (HubRise: location), belonging to a RestaurantAccount.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RestaurantId(pub uuid::Uuid);
-async_graphql::scalar!(RestaurantId);
+async_graphql::scalar!(RestaurantId, "RestaurantId", "A single restaurant location (HubRise: location), belonging to a RestaurantAccount.");
 impl From<ds::RestaurantId> for RestaurantId {
     fn from(v: ds::RestaurantId) -> Self {
         Self(v.0)
@@ -40,7 +40,7 @@ impl From<RestaurantId> for ds::RestaurantId {
 /// Catalog id (HubRise: catalog).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CatalogId(pub uuid::Uuid);
-async_graphql::scalar!(CatalogId);
+async_graphql::scalar!(CatalogId, "CatalogId", "Catalog id (HubRise: catalog).");
 impl From<ds::CatalogId> for CatalogId {
     fn from(v: ds::CatalogId) -> Self {
         Self(v.0)
@@ -69,7 +69,7 @@ impl From<ProductCategoryId> for ds::ProductCategoryId {
 /// A product groups one or more offers (HubRise: product).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ProductId(pub uuid::Uuid);
-async_graphql::scalar!(ProductId);
+async_graphql::scalar!(ProductId, "ProductId", "A product groups one or more offers (HubRise: product).");
 impl From<ds::ProductId> for ProductId {
     fn from(v: ds::ProductId) -> Self {
         Self(v.0)
@@ -84,7 +84,7 @@ impl From<ProductId> for ds::ProductId {
 /// A purchasable offer with its own price (HubRise: SKU).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct OfferId(pub uuid::Uuid);
-async_graphql::scalar!(OfferId);
+async_graphql::scalar!(OfferId, "OfferId", "A purchasable offer with its own price (HubRise: SKU).");
 impl From<ds::OfferId> for OfferId {
     fn from(v: ds::OfferId) -> Self {
         Self(v.0)
@@ -169,7 +169,7 @@ impl From<CartId> for ds::CartId {
 /// Identifies a line within a cart, used to edit its quantity or remove it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CartLineId(pub uuid::Uuid);
-async_graphql::scalar!(CartLineId);
+async_graphql::scalar!(CartLineId, "CartLineId", "Identifies a line within a cart, used to edit its quantity or remove it.");
 impl From<ds::CartLineId> for CartLineId {
     fn from(v: ds::CartLineId) -> Self {
         Self(v.0)
@@ -184,7 +184,7 @@ impl From<CartLineId> for ds::CartLineId {
 /// Correlates a command with the events/state it produces. Returned by every mutation payload so the client can track the outcome via the read side (matches domain_events.correlation_id).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CorrelationId(pub uuid::Uuid);
-async_graphql::scalar!(CorrelationId);
+async_graphql::scalar!(CorrelationId, "CorrelationId", "Correlates a command with the events/state it produces. Returned by every mutation payload so the client can track the outcome via the read side (matches domain_events.correlation_id).");
 impl From<ds::CorrelationId> for CorrelationId {
     fn from(v: ds::CorrelationId) -> Self {
         Self(v.0)
@@ -199,7 +199,7 @@ impl From<CorrelationId> for ds::CorrelationId {
 /// Causation id: the id of the message/event that directly caused this one (matches domain_events.cause_id). Threads a cause→effect chain through the log; null for a root command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CauseId(pub uuid::Uuid);
-async_graphql::scalar!(CauseId);
+async_graphql::scalar!(CauseId, "CauseId", "Causation id: the id of the message/event that directly caused this one (matches domain_events.cause_id). Threads a cause→effect chain through the log; null for a root command.");
 impl From<ds::CauseId> for CauseId {
     fn from(v: ds::CauseId) -> Self {
         Self(v.0)
@@ -214,7 +214,7 @@ impl From<CauseId> for ds::CauseId {
 /// Identifies one DeliveryJob (a single delivery of an order from restaurant to customer).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct DeliveryJobId(pub uuid::Uuid);
-async_graphql::scalar!(DeliveryJobId);
+async_graphql::scalar!(DeliveryJobId, "DeliveryJobId", "Identifies one DeliveryJob (a single delivery of an order from restaurant to customer).");
 impl From<ds::DeliveryJobId> for DeliveryJobId {
     fn from(v: ds::DeliveryJobId) -> Self {
         Self(v.0)
@@ -229,7 +229,7 @@ impl From<DeliveryJobId> for ds::DeliveryJobId {
 /// An independent Captain rider (courier). Null on a partner-fulfilled job (the partner's courier is name/phone only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RiderId(pub uuid::Uuid);
-async_graphql::scalar!(RiderId);
+async_graphql::scalar!(RiderId, "RiderId", "An independent Captain rider (courier). Null on a partner-fulfilled job (the partner's courier is name/phone only).");
 impl From<ds::RiderId> for RiderId {
     fn from(v: ds::RiderId) -> Self {
         Self(v.0)
@@ -244,7 +244,7 @@ impl From<RiderId> for ds::RiderId {
 /// Stripe PaymentIntent id (provider reference). Example: 'pi_3Nabc...'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PaymentIntentId(pub String);
-async_graphql::scalar!(PaymentIntentId);
+async_graphql::scalar!(PaymentIntentId, "PaymentIntentId", "Stripe PaymentIntent id (provider reference). Example: 'pi_3Nabc...'.");
 impl From<ds::PaymentIntentId> for PaymentIntentId {
     fn from(v: ds::PaymentIntentId) -> Self {
         Self(v.0)
@@ -259,7 +259,7 @@ impl From<PaymentIntentId> for ds::PaymentIntentId {
 /// Stripe Refund id (provider reference). Example: 're_3Nabc...'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RefundId(pub String);
-async_graphql::scalar!(RefundId);
+async_graphql::scalar!(RefundId, "RefundId", "Stripe Refund id (provider reference). Example: 're_3Nabc...'.");
 impl From<ds::RefundId> for RefundId {
     fn from(v: ds::RefundId) -> Self {
         Self(v.0)
@@ -288,7 +288,7 @@ impl From<UserId> for ds::UserId {
 /// Identifies a saved address in a customer's address book.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AddressId(pub uuid::Uuid);
-async_graphql::scalar!(AddressId);
+async_graphql::scalar!(AddressId, "AddressId", "Identifies a saved address in a customer's address book.");
 impl From<ds::AddressId> for AddressId {
     fn from(v: ds::AddressId) -> Self {
         Self(v.0)
@@ -303,7 +303,7 @@ impl From<AddressId> for ds::AddressId {
 /// Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PaymentMethodId(pub String);
-async_graphql::scalar!(PaymentMethodId);
+async_graphql::scalar!(PaymentMethodId, "PaymentMethodId", "Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'.");
 impl From<ds::PaymentMethodId> for PaymentMethodId {
     fn from(v: ds::PaymentMethodId) -> Self {
         Self(v.0)
@@ -332,7 +332,7 @@ impl From<ImageId> for ds::ImageId {
 /// External reference code (HubRise `ref`), unique within its scope. Used for idempotent import/sync and as a stable reference inside orders. Example: 'MARGHERITA', 'CAT-PIZZAS'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ExternalReference(pub String);
-async_graphql::scalar!(ExternalReference);
+async_graphql::scalar!(ExternalReference, "ExternalReference", "External reference code (HubRise `ref`), unique within its scope. Used for idempotent import/sync and as a stable reference inside orders. Example: 'MARGHERITA', 'CAT-PIZZAS'.");
 impl From<ds::ExternalReference> for ExternalReference {
     fn from(v: ds::ExternalReference) -> Self {
         Self(v.0)
@@ -347,7 +347,7 @@ impl From<ExternalReference> for ds::ExternalReference {
 /// Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ExternalIdentifierKey(pub String);
-async_graphql::scalar!(ExternalIdentifierKey);
+async_graphql::scalar!(ExternalIdentifierKey, "ExternalIdentifierKey", "Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).");
 impl From<ds::ExternalIdentifierKey> for ExternalIdentifierKey {
     fn from(v: ds::ExternalIdentifierKey) -> Self {
         Self(v.0)
@@ -362,7 +362,7 @@ impl From<ExternalIdentifierKey> for ds::ExternalIdentifierKey {
 /// Google Maps Place id identifying the establishment (enrichment / Business Profile).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GooglePlaceId(pub String);
-async_graphql::scalar!(GooglePlaceId);
+async_graphql::scalar!(GooglePlaceId, "GooglePlaceId", "Google Maps Place id identifying the establishment (enrichment / Business Profile).");
 impl From<ds::GooglePlaceId> for GooglePlaceId {
     fn from(v: ds::GooglePlaceId) -> Self {
         Self(v.0)
@@ -377,7 +377,7 @@ impl From<GooglePlaceId> for ds::GooglePlaceId {
 /// WGS84 latitude in decimal degrees.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct Latitude(pub f64);
-async_graphql::scalar!(Latitude);
+async_graphql::scalar!(Latitude, "Latitude", "WGS84 latitude in decimal degrees.");
 impl From<ds::Latitude> for Latitude {
     fn from(v: ds::Latitude) -> Self {
         Self(v.0)
@@ -392,7 +392,7 @@ impl From<Latitude> for ds::Latitude {
 /// WGS84 longitude in decimal degrees.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct Longitude(pub f64);
-async_graphql::scalar!(Longitude);
+async_graphql::scalar!(Longitude, "Longitude", "WGS84 longitude in decimal degrees.");
 impl From<ds::Longitude> for Longitude {
     fn from(v: ds::Longitude) -> Self {
         Self(v.0)
@@ -407,7 +407,7 @@ impl From<Longitude> for ds::Longitude {
 /// Google Maps / Business Profile average rating (0–5), enrichment only.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct GoogleRating(pub f64);
-async_graphql::scalar!(GoogleRating);
+async_graphql::scalar!(GoogleRating, "GoogleRating", "Google Maps / Business Profile average rating (0–5), enrichment only.");
 impl From<ds::GoogleRating> for GoogleRating {
     fn from(v: ds::GoogleRating) -> Self {
         Self(v.0)
@@ -422,7 +422,7 @@ impl From<GoogleRating> for ds::GoogleRating {
 /// An http(s) URL — restaurant website or the Google Business Profile 'Order online' link.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct WebUrl(pub String);
-async_graphql::scalar!(WebUrl);
+async_graphql::scalar!(WebUrl, "WebUrl", "An http(s) URL — restaurant website or the Google Business Profile 'Order online' link.");
 impl From<ds::WebUrl> for WebUrl {
     fn from(v: ds::WebUrl) -> Self {
         Self(v.0)
@@ -437,7 +437,7 @@ impl From<WebUrl> for ds::WebUrl {
 /// URL-safe identifier for restaurants. Lowercase, dash-separated. Example: 'chez-marco', 'tokyo-sushi'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Slug(pub String);
-async_graphql::scalar!(Slug);
+async_graphql::scalar!(Slug, "Slug", "URL-safe identifier for restaurants. Lowercase, dash-separated. Example: 'chez-marco', 'tokyo-sushi'.");
 impl From<ds::Slug> for Slug {
     fn from(v: ds::Slug) -> Self {
         Self(v.0)
@@ -452,7 +452,7 @@ impl From<Slug> for ds::Slug {
 /// Public label shown to customers. Can be short and brand-oriented. Example: 'Chez Marco', 'Tokyo Sushi'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RestaurantDisplayName(pub String);
-async_graphql::scalar!(RestaurantDisplayName);
+async_graphql::scalar!(RestaurantDisplayName, "RestaurantDisplayName", "Public label shown to customers. Can be short and brand-oriented. Example: 'Chez Marco', 'Tokyo Sushi'.");
 impl From<ds::RestaurantDisplayName> for RestaurantDisplayName {
     fn from(v: ds::RestaurantDisplayName) -> Self {
         Self(v.0)
@@ -467,7 +467,7 @@ impl From<RestaurantDisplayName> for ds::RestaurantDisplayName {
 /// Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RestaurantLegalName(pub String);
-async_graphql::scalar!(RestaurantLegalName);
+async_graphql::scalar!(RestaurantLegalName, "RestaurantLegalName", "Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.");
 impl From<ds::RestaurantLegalName> for RestaurantLegalName {
     fn from(v: ds::RestaurantLegalName) -> Self {
         Self(v.0)
@@ -538,7 +538,7 @@ impl From<ProductDescription> for ds::ProductDescription {
 /// Offer label, unique within a product (HubRise SKU name). Example: 'Small', 'Large', 'Default'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct OfferName(pub String);
-async_graphql::scalar!(OfferName);
+async_graphql::scalar!(OfferName, "OfferName", "Offer label, unique within a product (HubRise SKU name). Example: 'Small', 'Large', 'Default'.");
 impl From<ds::OfferName> for OfferName {
     fn from(v: ds::OfferName) -> Self {
         Self(v.0)
@@ -581,7 +581,7 @@ impl From<OptionName> for ds::OptionName {
 /// Free-form label (HubRise: tags). Example: 'vegan', 'spicy', 'eco'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Tag(pub String);
-async_graphql::scalar!(Tag);
+async_graphql::scalar!(Tag, "Tag", "Free-form label (HubRise: tags). Example: 'vegan', 'spicy', 'eco'.");
 impl From<ds::Tag> for Tag {
     fn from(v: ds::Tag) -> Self {
         Self(v.0)
@@ -610,7 +610,7 @@ impl From<EmailAddress> for ds::EmailAddress {
 /// Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber and stored on events/views. Validation enforced at application level.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PhoneNumber(pub String);
-async_graphql::scalar!(PhoneNumber);
+async_graphql::scalar!(PhoneNumber, "PhoneNumber", "Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber and stored on events/views. Validation enforced at application level.");
 impl From<ds::PhoneNumber> for PhoneNumber {
     fn from(v: ds::PhoneNumber) -> Self {
         Self(v.0)
@@ -625,7 +625,7 @@ impl From<PhoneNumber> for ds::PhoneNumber {
 /// Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct DialingCode(pub String);
-async_graphql::scalar!(DialingCode);
+async_graphql::scalar!(DialingCode, "DialingCode", "Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.");
 impl From<ds::DialingCode> for DialingCode {
     fn from(v: ds::DialingCode) -> Self {
         Self(v.0)
@@ -640,7 +640,7 @@ impl From<DialingCode> for ds::DialingCode {
 /// National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct NationalPhoneNumber(pub String);
-async_graphql::scalar!(NationalPhoneNumber);
+async_graphql::scalar!(NationalPhoneNumber, "NationalPhoneNumber", "National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.");
 impl From<ds::NationalPhoneNumber> for NationalPhoneNumber {
     fn from(v: ds::NationalPhoneNumber) -> Self {
         Self(v.0)
@@ -655,7 +655,7 @@ impl From<NationalPhoneNumber> for ds::NationalPhoneNumber {
 /// One-time SMS code from Supabase Auth (sent via Twilio; a mock provider in dev).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct OtpCode(pub String);
-async_graphql::scalar!(OtpCode);
+async_graphql::scalar!(OtpCode, "OtpCode", "One-time SMS code from Supabase Auth (sent via Twilio; a mock provider in dev).");
 impl From<ds::OtpCode> for OtpCode {
     fn from(v: ds::OtpCode) -> Self {
         Self(v.0)
@@ -670,7 +670,7 @@ impl From<OtpCode> for ds::OtpCode {
 /// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct EmailVerificationToken(pub String);
-async_graphql::scalar!(EmailVerificationToken);
+async_graphql::scalar!(EmailVerificationToken, "EmailVerificationToken", "Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).");
 impl From<ds::EmailVerificationToken> for EmailVerificationToken {
     fn from(v: ds::EmailVerificationToken) -> Self {
         Self(v.0)
@@ -727,7 +727,7 @@ impl From<PostalCode> for ds::PostalCode {
 /// ISO 3166-1 alpha-2 country code. Example: 'FR'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CountryCode(pub String);
-async_graphql::scalar!(CountryCode);
+async_graphql::scalar!(CountryCode, "CountryCode", "ISO 3166-1 alpha-2 country code. Example: 'FR'.");
 impl From<ds::CountryCode> for CountryCode {
     fn from(v: ds::CountryCode) -> Self {
         Self(v.0)
@@ -742,7 +742,7 @@ impl From<CountryCode> for ds::CountryCode {
 /// IANA timezone. Example: 'Europe/Paris'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TimeZone(pub String);
-async_graphql::scalar!(TimeZone);
+async_graphql::scalar!(TimeZone, "TimeZone", "IANA timezone. Example: 'Europe/Paris'.");
 impl From<ds::TimeZone> for TimeZone {
     fn from(v: ds::TimeZone) -> Self {
         Self(v.0)
@@ -757,7 +757,7 @@ impl From<TimeZone> for ds::TimeZone {
 /// i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Locale(pub String);
-async_graphql::scalar!(Locale);
+async_graphql::scalar!(Locale, "Locale", "i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).");
 impl From<ds::Locale> for Locale {
     fn from(v: ds::Locale) -> Self {
         Self(v.0)
@@ -772,7 +772,7 @@ impl From<Locale> for ds::Locale {
 /// ISO 4217 currency code. Example: 'EUR'.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CurrencyCode(pub String);
-async_graphql::scalar!(CurrencyCode);
+async_graphql::scalar!(CurrencyCode, "CurrencyCode", "ISO 4217 currency code. Example: 'EUR'.");
 impl From<ds::CurrencyCode> for CurrencyCode {
     fn from(v: ds::CurrencyCode) -> Self {
         Self(v.0)
@@ -787,7 +787,7 @@ impl From<CurrencyCode> for ds::CurrencyCode {
 /// Monetary amount in minor units (e.g. cents).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct MoneyCents(pub i64);
-async_graphql::scalar!(MoneyCents);
+async_graphql::scalar!(MoneyCents, "MoneyCents", "Monetary amount in minor units (e.g. cents).");
 impl From<ds::MoneyCents> for MoneyCents {
     fn from(v: ds::MoneyCents) -> Self {
         Self(v.0)
@@ -802,7 +802,7 @@ impl From<MoneyCents> for ds::MoneyCents {
 /// Percentage tax rate. Example: 10.0 for 10%.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct TaxRatePercent(pub f64);
-async_graphql::scalar!(TaxRatePercent);
+async_graphql::scalar!(TaxRatePercent, "TaxRatePercent", "Percentage tax rate. Example: 10.0 for 10%.");
 impl From<ds::TaxRatePercent> for TaxRatePercent {
     fn from(v: ds::TaxRatePercent) -> Self {
         Self(v.0)
@@ -817,7 +817,7 @@ impl From<TaxRatePercent> for ds::TaxRatePercent {
 /// A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct MarginPercent(pub f64);
-async_graphql::scalar!(MarginPercent);
+async_graphql::scalar!(MarginPercent, "MarginPercent", "A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.");
 impl From<ds::MarginPercent> for MarginPercent {
     fn from(v: ds::MarginPercent) -> Self {
         Self(v.0)
@@ -832,7 +832,7 @@ impl From<MarginPercent> for ds::MarginPercent {
 /// Stock quantity in units. Decimals allowed to match HubRise inventory. 0 means out of stock.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct Quantity(pub f64);
-async_graphql::scalar!(Quantity);
+async_graphql::scalar!(Quantity, "Quantity", "Stock quantity in units. Decimals allowed to match HubRise inventory. 0 means out of stock.");
 impl From<ds::Quantity> for Quantity {
     fn from(v: ds::Quantity) -> Self {
         Self(v.0)
@@ -875,7 +875,7 @@ impl From<OrderNote> for ds::OrderNote {
 /// Restaurant rating in stars (0–5), given by the customer on a delivered order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct StarRating(pub i64);
-async_graphql::scalar!(StarRating);
+async_graphql::scalar!(StarRating, "StarRating", "Restaurant rating in stars (0–5), given by the customer on a delivered order.");
 impl From<ds::StarRating> for StarRating {
     fn from(v: ds::StarRating) -> Self {
         Self(v.0)
@@ -915,7 +915,7 @@ impl From<ThumbRating> for ds::ThumbRating {
 /// Free-text comment accompanying a restaurant rating.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RatingComment(pub String);
-async_graphql::scalar!(RatingComment);
+async_graphql::scalar!(RatingComment, "RatingComment", "Free-text comment accompanying a restaurant rating.");
 impl From<ds::RatingComment> for RatingComment {
     fn from(v: ds::RatingComment) -> Self {
         Self(v.0)
@@ -974,7 +974,7 @@ impl From<Weekday> for ds::Weekday {
 /// Local time of day, HH:mm (HubRise opening_hours format).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TimeOfDay(pub String);
-async_graphql::scalar!(TimeOfDay);
+async_graphql::scalar!(TimeOfDay, "TimeOfDay", "Local time of day, HH:mm (HubRise opening_hours format).");
 impl From<ds::TimeOfDay> for TimeOfDay {
     fn from(v: ds::TimeOfDay) -> Self {
         Self(v.0)
@@ -1226,7 +1226,7 @@ impl From<GbpLinkStatus> for ds::GbpLinkStatus {
 /// B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct ProspectionScore(pub i64);
-async_graphql::scalar!(ProspectionScore);
+async_graphql::scalar!(ProspectionScore, "ProspectionScore", "B2B prospection priority (0–10), COMPUTED by the ProspectionPipeline projection from listing facts (ADR-0020) — never stored in an event.");
 impl From<ds::ProspectionScore> for ProspectionScore {
     fn from(v: ds::ProspectionScore) -> Self {
         Self(v.0)

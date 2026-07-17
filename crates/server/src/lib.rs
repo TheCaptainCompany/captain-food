@@ -14,7 +14,14 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
+use axum::{
+    extract::{Request, State},
+    http::{HeaderValue, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
@@ -95,7 +102,26 @@ pub fn router() -> Router {
         .with_state(AppState { snap });
 
     // GraphQL BFF (ADR-0006). Scaffold schema needs no DB, so it mounts regardless of DATABASE_URL.
-    health_router.merge(graphql::routes::graphql_routes(graphql::schema::build_schema()))
+    health_router
+        .merge(graphql::routes::graphql_routes(graphql::schema::build_schema()))
+        // Outer layer: stamp every response with its server-side build time.
+        .layer(middleware::from_fn(response_timing))
+}
+
+/// Stamp every response with how long the server took to build it: `x-response-time-ms` (milliseconds) and
+/// the standard `Server-Timing` header (shown in browser devtools). Applied as an outer layer over all routes.
+async fn response_timing(req: Request, next: Next) -> Response {
+    let start = std::time::Instant::now();
+    let mut resp = next.run(req).await;
+    let ms = format!("{:.2}", start.elapsed().as_secs_f64() * 1000.0);
+    let headers = resp.headers_mut();
+    if let Ok(v) = HeaderValue::from_str(&ms) {
+        headers.insert("x-response-time-ms", v);
+    }
+    if let Ok(v) = HeaderValue::from_str(&format!("app;dur={ms}")) {
+        headers.insert("server-timing", v);
+    }
+    resp
 }
 
 /// Liveness: the process is up. No dependencies (does not touch the DB) — for uptime pingers and to keep

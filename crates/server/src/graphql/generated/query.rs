@@ -10,84 +10,104 @@ use super::types::*;
 
 pub struct QueryRoot;
 
-#[async_graphql::Object]
+#[async_graphql::Object(name = "Query")]
 impl QueryRoot {
+    /// Selectable phone countries for the dialing-code picker (static reference data; the picker sends back the dialingCode '+33').
     #[graphql(name = "phoneCountries")]
     async fn phone_countries(&self) -> async_graphql::Result<Vec<PhoneCountry>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// Poll a command/operation's status by its correlationId (the pull counterpart of the operationStatusChanged subscription). Transient — resolver-served, no View_*.
     #[graphql(name = "operation")]
     async fn operation(&self, input: OperationQueryInput) -> async_graphql::Result<Option<Operation>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// The signed-in customer's own profile (resolves the session authRef → Customer via Customer).
     #[graphql(name = "me")]
     async fn me(&self) -> async_graphql::Result<Option<CustomerProfile>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant).
     #[graphql(name = "favoriteRestaurants")]
     async fn favorite_restaurants(&self, input: FavoriteRestaurantsQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// Discover: public list of restaurants. All args are optional filters resolved by the read side (Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
     #[graphql(name = "restaurants")]
     async fn restaurants(&self, input: Option<RestaurantsQueryInput>) -> async_graphql::Result<Vec<Restaurant>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// A restaurant's full catalog (categories → products → offers + option lists).
     #[graphql(name = "catalog")]
     async fn catalog(&self, input: CatalogQueryInput) -> async_graphql::Result<Option<Catalog>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
     #[graphql(name = "categories")]
     async fn categories(&self, input: CategoriesQueryInput) -> async_graphql::Result<Vec<CatalogCategory>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
     #[graphql(name = "restaurant")]
     async fn restaurant(&self, input: RestaurantQueryInput) -> async_graphql::Result<Option<Restaurant>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// A customer's carts (one OPEN cart per restaurant).
     #[graphql(name = "carts")]
     async fn carts(&self, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// A single cart by id (session-scoped; readable by the guest/customer who owns it).
     #[graphql(name = "cart")]
     async fn cart(&self, input: CartQueryInput) -> async_graphql::Result<Option<Cart>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
     #[graphql(name = "orders")]
     async fn orders(&self, input: Option<OrdersQueryInput>) -> async_graphql::Result<Vec<Order>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// Order tracking by id; owning customer or the restaurant/admin. Ownership enforced server-side.
     #[graphql(name = "order")]
     async fn order(&self, input: OrderQueryInput) -> async_graphql::Result<Option<Order>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// The delivery job of an order (tracking); owning customer, the restaurant/admin, or the assigned rider. Ownership enforced server-side.
     #[graphql(name = "delivery")]
     async fn delivery(&self, input: DeliveryQueryInput) -> async_graphql::Result<Option<DeliveryJob>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// The independent rider's assigned/available delivery jobs (rider app).
     #[graphql(name = "myDeliveries")]
     async fn my_deliveries(&self, input: Option<MyDeliveriesQueryInput>) -> async_graphql::Result<Vec<DeliveryJob>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// A restaurant's active delivery jobs (delivery board; ownership enforced server-side).
     #[graphql(name = "restaurantDeliveries")]
     async fn restaurant_deliveries(&self, input: RestaurantDeliveriesQueryInput) -> async_graphql::Result<Vec<DeliveryJob>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// All restaurant locations under an account (back-office; ownership enforced server-side).
     #[graphql(name = "restaurantLocationsByAccount")]
     async fn restaurant_locations_by_account(&self, input: RestaurantLocationsByAccountQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// B2B prospection pipeline (admin): scored prospects, optionally filtered by minimum score / pipeline status.
     #[graphql(name = "prospectionPipeline")]
     async fn prospection_pipeline(&self, input: Option<ProspectionPipelineQueryInput>) -> async_graphql::Result<Vec<Prospect>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// The active Captain service-fee policy (admin; calibration/transparency).
     #[graphql(name = "pricingPolicy")]
     async fn pricing_policy(&self) -> async_graphql::Result<Vec<PricingPolicy>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// The active per-cuisine Uber Eats mark-up coefficients (admin; calibration/transparency).
     #[graphql(name = "uberEstimationPolicy")]
     async fn uber_estimation_policy(&self) -> async_graphql::Result<Vec<UberEstimationPolicy>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// The active Uber Eats split/fee assumptions for the estimated comparison (admin; calibration/transparency).
     #[graphql(name = "uberSplitPolicy")]
     async fn uber_split_policy(&self) -> async_graphql::Result<Vec<UberSplitPolicy>> {
         Err(async_graphql::Error::new("not implemented"))
