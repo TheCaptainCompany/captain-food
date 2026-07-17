@@ -13,7 +13,8 @@ pub mod persistence;
 pub mod projection;
 
 pub use persistence::{
-    PgEventStore, PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
+    PgCartRepository, PgCatalogRepository, PgEventStore, PgOrderRepository,
+    PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
     PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
 };
 pub use projection::{ProjectionStatus, ProjectionWorker};

@@ -80,4 +80,17 @@ impl RestaurantReadRepository for PgRestaurantRepository {
             .map_err(db_err)?;
         row.as_ref().map(restaurant_store::decode).transpose()
     }
+
+    async fn by_id(&self, id: RestaurantId) -> Result<Option<RestaurantRow>, DomainError> {
+        let sql = format!(
+            "SELECT {} FROM restaurant WHERE restaurant_id = $1",
+            restaurant_store::COLUMNS
+        );
+        let row = sqlx::query(&sql)
+            .bind(id.0)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+        row.as_ref().map(restaurant_store::decode).transpose()
+    }
 }

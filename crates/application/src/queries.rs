@@ -4,9 +4,15 @@
 
 use async_trait::async_trait;
 
-use domain::generated::scalars::{CuisineCategory, CurrencyCode, ProspectPipelineStatus, Slug};
+use domain::generated::scalars::{
+    CartId, CuisineCategory, CurrencyCode, CustomerId, OrderId, OrderStatus, ProspectPipelineStatus,
+    RestaurantId, Slug,
+};
 use domain::shared::errors::DomainError;
 
+pub use crate::generated::rows::CartRow;
+pub use crate::generated::rows::CatalogRow;
+pub use crate::generated::rows::OrderTrackingRow;
 pub use crate::generated::rows::ProspectionPipelineRow;
 pub use crate::generated::rows::RestaurantRow;
 
@@ -26,6 +32,44 @@ pub trait RestaurantReadRepository: Send + Sync {
     async fn list(&self, filter: RestaurantFilter) -> Result<Vec<RestaurantRow>, DomainError>;
     /// A single restaurant by its slug (the per-restaurant storefront), or `None` if absent.
     async fn by_slug(&self, slug: Slug) -> Result<Option<RestaurantRow>, DomainError>;
+    /// A single restaurant by id — the FK-navigation join other read slices hydrate from.
+    async fn by_id(&self, id: RestaurantId) -> Result<Option<RestaurantRow>, DomainError>;
+}
+
+/// Read port over the `Catalog` projection table (ADR-0040). Backs the public `catalog` and
+/// `categories` GraphQL queries (`categories` derives from the same row's `tree`).
+#[async_trait]
+pub trait CatalogReadRepository: Send + Sync {
+    /// A restaurant's catalog (newest first when several exist), or `None` before CatalogCreated.
+    async fn by_restaurant(&self, restaurant_id: RestaurantId) -> Result<Option<CatalogRow>, DomainError>;
+}
+
+/// Read port over the `Cart` projection table (ADR-0040). Backs the `carts`/`cart` GraphQL queries.
+#[async_trait]
+pub trait CartReadRepository: Send + Sync {
+    /// A customer's carts (one OPEN cart per restaurant), most recently updated first.
+    async fn by_customer(&self, customer_id: CustomerId) -> Result<Vec<CartRow>, DomainError>;
+    /// A single cart by id (session-scoped), or `None` if absent.
+    async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError>;
+}
+
+/// Optional filters for the order list — mirrors the `orders` query args in api.yaml
+/// (`customerId` / `restaurantId` / `status`); ownership/scope is enforced server-side.
+#[derive(Debug, Clone, Default)]
+pub struct OrderFilter {
+    pub customer_id: Option<CustomerId>,
+    pub restaurant_id: Option<RestaurantId>,
+    pub status: Option<OrderStatus>,
+}
+
+/// Read port over the `OrderTracking` projection table (ADR-0040). Backs the `orders`/`order`
+/// GraphQL queries — the single canonical Order read model (history + back-office queue + tracking).
+#[async_trait]
+pub trait OrderReadRepository: Send + Sync {
+    /// Orders honouring the filter, most recently placed first.
+    async fn list(&self, filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError>;
+    /// A single order by id (tracking), or `None` if absent.
+    async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError>;
 }
 
 /// Optional filters for the admin prospection pipeline — mirrors the `prospectionPipeline` query args

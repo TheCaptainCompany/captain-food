@@ -6,3 +6,6 @@ tools/codegen-rs/target/
 target/
 # Ephemeral codegen scratch (e.g. `make c4-export` .mmd output)
 tools/codegen-rs/out/
+
+# Agent worktrees (temporary, auto-managed)
+.claude/worktrees/

@@ -1,13 +1,15 @@
 //! Enum ↔ INTEGER ordinal mapping (ADR-0037): enum columns are stored as the DECLARATION-ORDER ordinal
-//! (= `ref_<enum>.sort_order`). One impl per enum the `Restaurant`/`ProspectionPipeline` projection
-//! tables need; shared by the read repositories (row → `…Row`) and the projection upserts (row → SQL).
+//! (= `ref_<enum>.sort_order`). One impl per enum the projection tables (`Restaurant`,
+//! `ProspectionPipeline`, `Catalog`, `Cart`, `OrderTracking`) need; shared by the read repositories
+//! (row → `…Row`) and the projection upserts (row → SQL).
 //!
 //! The declaration order below MUST match `domain::generated::scalars` (which is generated from
 //! `specs/scalars.yaml`, the same source the `ref_*` seed rows come from).
 
 use domain::generated::scalars::{
-    CuisineCategory, GbpLinkStatus, OrderAcceptanceMode, ProspectPipelineStatus,
-    RestaurantListingStatus, RestaurantStatus,
+    CartStatus, ComparisonBasis, CuisineCategory, DeliveryStatus, GbpLinkStatus, OrderAcceptanceMode,
+    OrderStatus, ProspectPipelineStatus, RestaurantListingStatus, RestaurantStatus, ServiceType,
+    ThumbRating,
 };
 use domain::shared::errors::DomainError;
 
@@ -53,6 +55,30 @@ enum_ord!(ProspectPipelineStatus {
     REPLIED => 3,
     CONVERTED => 4,
 });
+enum_ord!(CartStatus { OPEN => 0, CHECKED_OUT => 1 });
+enum_ord!(ServiceType { DELIVERY => 0, COLLECTION => 1 });
+enum_ord!(OrderStatus {
+    PLACED => 0,
+    ACCEPTED => 1,
+    REJECTED => 2,
+    PREPARING => 3,
+    READY => 4,
+    OUT_FOR_DELIVERY => 5,
+    DELIVERED => 6,
+    CANCELLED_BY_CUSTOMER => 7,
+    CANCELLED_BY_RESTAURANT => 8,
+});
+enum_ord!(DeliveryStatus {
+    PENDING => 0,
+    ASSIGNED => 1,
+    PICKED_UP => 2,
+    OUT_FOR_DELIVERY => 3,
+    DELIVERED => 4,
+    FAILED => 5,
+    CANCELLED => 6,
+});
+enum_ord!(ComparisonBasis { ESTIMATED => 0, REAL => 1 });
+enum_ord!(ThumbRating { UP => 0, DOWN => 1 });
 
 /// `to_ord` through an `Option` (nullable enum column).
 pub fn opt_to_ord<E: EnumOrd>(v: &Option<E>) -> Option<i32> {
@@ -84,6 +110,13 @@ mod tests {
         assert_eq!(GbpLinkStatus::BROKEN.to_ord(), 3);
         assert_eq!(ProspectPipelineStatus::CONVERTED.to_ord(), 4);
         assert_eq!(ProspectPipelineStatus::from_ord(1).unwrap(), ProspectPipelineStatus::CONTACTED);
+        assert_eq!(CartStatus::CHECKED_OUT.to_ord(), 1);
+        assert_eq!(ServiceType::COLLECTION.to_ord(), 1);
+        assert_eq!(OrderStatus::CANCELLED_BY_RESTAURANT.to_ord(), 8);
+        assert_eq!(OrderStatus::from_ord(4).unwrap(), OrderStatus::READY);
+        assert_eq!(DeliveryStatus::CANCELLED.to_ord(), 6);
+        assert_eq!(ComparisonBasis::REAL.to_ord(), 1);
+        assert_eq!(ThumbRating::DOWN.to_ord(), 1);
         assert!(RestaurantStatus::from_ord(99).is_err());
     }
 }

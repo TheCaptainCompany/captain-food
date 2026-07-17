@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
-use application::projections::{ProspectionPipelineRow, RestaurantRow};
+use application::projections::{CartRow, CatalogRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
 use application::queries::{PricingPolicyRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
@@ -806,6 +806,137 @@ impl From<(ProspectionPipelineRow, RestaurantRow)> for Prospect {
             contacts_count: row.contacts_count,
             last_contacted_at: row.last_contacted_at,
             replied_at: row.replied_at,
+            restaurant: restaurant.into(),
+        }
+    }
+}
+
+/// One section of the projected `Catalog.tree` jsonb (camelCase keys), leniently parsed: an
+/// absent key or an empty/unbuilt tree (the merge is a documented projector TODO(runtime)) yields an
+/// empty list.
+pub(crate) fn catalog_tree_section<T: serde::de::DeserializeOwned>(tree: &serde_json::Value, key: &str) -> Vec<T> {
+    tree.get(key).cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+/// Read-model rows → API type: the Catalog row plus the joined Restaurant row (the FK-derived
+/// `restaurant` navigation field is non-null, so the resolver hydrates it from the Restaurant read
+/// model). categories/products/optionLists deserialize out of the projected `tree` jsonb.
+impl From<(CatalogRow, RestaurantRow)> for Catalog {
+    fn from((row, restaurant): (CatalogRow, RestaurantRow)) -> Self {
+        Self {
+            id: row.catalog_id.into(),
+            restaurant_id: row.restaurant_id.into(),
+            slug: row.slug.into(),
+            name: row.name.into(),
+            categories: catalog_tree_section(&row.tree, "categories"),
+            products: catalog_tree_section(&row.tree, "products"),
+            option_lists: catalog_tree_section(&row.tree, "optionLists"),
+            updated_at: row.updated_at,
+            restaurant: restaurant.into(),
+        }
+    }
+}
+
+/// Read-model rows → API type: the Cart row plus the joined Restaurant row (non-null `restaurant`
+/// navigation field). jsonb columns deserialize into the typed structs (serde camelCase); the priced
+/// columns are whatever the projector computed (documented TODO(runtime) until the pricing ports land).
+impl From<(CartRow, RestaurantRow)> for Cart {
+    fn from((row, restaurant): (CartRow, RestaurantRow)) -> Self {
+        Self {
+            id: row.cart_id.into(),
+            restaurant_id: row.restaurant_id.into(),
+            customer_id: row.customer_id.map(Into::into),
+            status: row.status.into(),
+            lines: serde_json::from_value(row.lines).unwrap_or_default(),
+            total_amount: Money {
+                amount_cents: row.total_amount_cents.into(),
+                currency: row.currency.into(),
+            },
+            breakdown: row.estimated_breakdown.and_then(|v| serde_json::from_value(v).ok()),
+            uber_comparison: row.uber_comparison.and_then(|v| serde_json::from_value(v).ok()),
+            updated_at: row.updated_at,
+            restaurant: restaurant.into(),
+        }
+    }
+}
+
+/// Minor-units column + the row's currency → the Money value object.
+fn order_money(cents: ds::MoneyCents, currency: &ds::CurrencyCode) -> Money {
+    Money { amount_cents: cents.into(), currency: currency.clone().into() }
+}
+
+/// Read-model rows → API type: the OrderTracking row plus the joined Restaurant row (non-null
+/// `restaurant` navigation field). The breakdown's `restaurantContribution` is re-derived as
+/// articles − restaurantPayout (the projection stores the split's leaves); the Uber comparison is
+/// rebuilt only when every `uber_*` column is present; `paymentStatus` is folded as TEXT by the
+/// projector and parsed leniently (unknown → PENDING); nav `deliveryJobs` resolve empty until that
+/// read model lands.
+impl From<(OrderTrackingRow, RestaurantRow)> for Order {
+    fn from((row, restaurant): (OrderTrackingRow, RestaurantRow)) -> Self {
+        let currency = row.currency.clone();
+        let breakdown = PaymentBreakdown {
+            articles: order_money(row.articles_cents.clone(), &currency),
+            delivery: order_money(row.delivery_cents.clone(), &currency),
+            service_fee: order_money(row.service_fee_cents.clone(), &currency),
+            total: order_money(row.total_amount_cents.clone(), &currency),
+            restaurant_contribution: order_money(
+                ds::MoneyCents(row.articles_cents.0 - row.restaurant_payout_cents.0),
+                &currency,
+            ),
+            restaurant_payout: order_money(row.restaurant_payout_cents.clone(), &currency),
+            rider_payout: order_money(row.rider_payout_cents.clone(), &currency),
+            captain_net: order_money(row.captain_net_cents.clone(), &currency),
+        };
+        let uber_comparison = match (
+            row.uber_total_cents,
+            row.uber_restaurant_cents,
+            row.uber_rider_cents,
+            row.uber_platform_cents,
+            row.uber_basis,
+        ) {
+            (Some(total), Some(restaurant_share), Some(rider_share), Some(platform_share), Some(basis)) => {
+                Some(UberComparison {
+                    total: order_money(total, &currency),
+                    restaurant_share: order_money(restaurant_share, &currency),
+                    rider_share: order_money(rider_share, &currency),
+                    platform_share: order_money(platform_share, &currency),
+                    basis: basis.into(),
+                })
+            }
+            _ => None,
+        };
+        Self {
+            id: row.order_id.into(),
+            r#ref: row.r#ref.into(),
+            restaurant_id: row.restaurant_id.into(),
+            customer_id: row.customer_id.map(Into::into),
+            status: row.status.into(),
+            service_type: row.service_type.into(),
+            items: serde_json::from_value(row.items).unwrap_or_default(),
+            total_amount: order_money(row.total_amount_cents, &currency),
+            breakdown,
+            delivery_address: row.delivery_address.and_then(|v| serde_json::from_value(v).ok()),
+            estimated_ready_at: row.estimated_ready_at,
+            placed_at: row.placed_at,
+            status_changed_at: row.status_changed_at,
+            payment_status: match row.payment_status.as_str() {
+                "CAPTURED" => PaymentStatus::CAPTURED,
+                "FAILED" => PaymentStatus::FAILED,
+                "REFUNDED" => PaymentStatus::REFUNDED,
+                _ => PaymentStatus::PENDING,
+            },
+            restaurant_stars: row.restaurant_stars.map(Into::into),
+            rating_comment: row.rating_comment.map(Into::into),
+            rider_thumb: row.rider_thumb.map(Into::into),
+            rider_tip: row.rider_tip_cents.map(|c| order_money(c, &currency)),
+            restaurant_tip: row.restaurant_tip_cents.map(|c| order_money(c, &currency)),
+            captain_tip: row.captain_tip_cents.map(|c| order_money(c, &currency)),
+            uber_comparison,
+            delivery_status: row.delivery_status.map(Into::into),
+            courier: row.courier.and_then(|v| serde_json::from_value(v).ok()),
+            estimated_dropoff_at: row.estimated_dropoff_at,
+            rated_at: row.rated_at,
+            delivery_jobs: Vec::new(),
             restaurant: restaurant.into(),
         }
     }

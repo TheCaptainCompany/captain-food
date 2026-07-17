@@ -1,7 +1,8 @@
 //! App-layer projection runtime (ADR-0040): the worker that folds `domain_events` into the materialized
-//! read-model tables using the hand-written `…Compute` projectors, checkpointed in
-//! `projection_checkpoint`. V0 covers the Restaurant-stream slice: the `restaurant` and
-//! `prospectionpipeline` read models.
+//! read-model tables using the hand-written `…Compute` projectors, checkpointed per stream-prefix group
+//! in `projection_checkpoint`. The registry covers the Restaurant stream (the `restaurant` +
+//! `prospectionpipeline` read models), the Catalog stream (`catalog`), the Cart stream (`cart`) and the
+//! Order stream (`ordertracking`).
 
 pub mod worker;
 
@@ -12,11 +13,13 @@ pub use worker::ProjectionWorker;
 pub struct ProjectionStatus {
     /// Whether the polling loop is running.
     pub running: bool,
-    /// Last `domain_events.position` folded and committed to `projection_checkpoint`.
+    /// The log position every registry group has drained up to after the last successful tick (each
+    /// group's own conservative checkpoint row lives in `projection_checkpoint`).
     pub checkpoint: i64,
     /// Highest `domain_events.position` seen at the last tick.
     pub head: i64,
-    /// `head - checkpoint`: how many log positions the read model is behind.
+    /// `head - checkpoint`: how many log positions the read models are behind (0 after a successful
+    /// full drain; > 0 only transiently or when a tick errors).
     pub lag: i64,
     /// When the worker last completed a tick (successful or not).
     pub last_tick_at: Option<chrono::DateTime<chrono::Utc>>,

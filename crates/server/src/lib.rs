@@ -29,12 +29,14 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
 use application::queries::{
-    PricingPolicyReadRepository, ProspectionReadRepository, RestaurantReadRepository,
-    UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
+    CartReadRepository, CatalogReadRepository, OrderReadRepository, PricingPolicyReadRepository,
+    ProspectionReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
+    UberSplitPolicyReadRepository,
 };
 use infrastructure::{
-    PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
-    PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, ProjectionStatus, ProjectionWorker,
+    PgCartRepository, PgCatalogRepository, PgOrderRepository, PgPricingPolicyRepository,
+    PgProspectionRepository, PgRestaurantRepository, PgUberEstimationPolicyRepository,
+    PgUberSplitPolicyRepository, ProjectionStatus, ProjectionWorker,
 };
 use shared_types::HealthDto;
 
@@ -117,12 +119,21 @@ pub fn router() -> Router {
                     Arc::new(PgUberEstimationPolicyRepository::new(pool.clone()));
                 let uber_split_policy: Arc<dyn UberSplitPolicyReadRepository> =
                     Arc::new(PgUberSplitPolicyRepository::new(pool.clone()));
+                let catalogs: Arc<dyn CatalogReadRepository> =
+                    Arc::new(PgCatalogRepository::new(pool.clone()));
+                let carts: Arc<dyn CartReadRepository> =
+                    Arc::new(PgCartRepository::new(pool.clone()));
+                let orders: Arc<dyn OrderReadRepository> =
+                    Arc::new(PgOrderRepository::new(pool.clone()));
                 read_deps = Some(ReadDeps {
                     restaurants,
                     prospection,
                     pricing_policy,
                     uber_estimation_policy,
                     uber_split_policy,
+                    catalogs,
+                    carts,
+                    orders,
                 });
 
                 // In-process projection worker (ADR-0040). RUN_PROJECTOR=false hands it to a dedicated worker.

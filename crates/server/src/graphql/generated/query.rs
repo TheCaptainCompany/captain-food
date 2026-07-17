@@ -44,13 +44,29 @@ impl QueryRoot {
     }
     /// A restaurant's full catalog (categories → products → offers + option lists).
     #[graphql(name = "catalog")]
-    async fn catalog(&self, input: CatalogQueryInput) -> async_graphql::Result<Option<Catalog>> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn catalog(&self, ctx: &async_graphql::Context<'_>, input: CatalogQueryInput) -> async_graphql::Result<Option<Catalog>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let Some(row) = repo.by_restaurant(input.restaurant_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
+        // The non-null `restaurant` navigation field: hydrate from the Restaurant read model (both rows
+        // are projections of the same domain log, so the FK target always exists).
+        let restaurant = restaurants
+            .by_id(row.restaurant_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .ok_or_else(|| async_graphql::Error::new("catalog references an unknown restaurant"))?;
+        Ok(Some(Catalog::from((row, restaurant))))
     }
     /// The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
     #[graphql(name = "categories")]
-    async fn categories(&self, input: CategoriesQueryInput) -> async_graphql::Result<Vec<CatalogCategory>> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn categories(&self, ctx: &async_graphql::Context<'_>, input: CategoriesQueryInput) -> async_graphql::Result<Vec<CatalogCategory>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
+        let row = repo.by_restaurant(input.restaurant_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // Categories live inside the projected Catalog.tree jsonb; an absent catalog or an empty/unbuilt
+        // tree (the merge is a documented projector TODO(runtime)) yields an empty list.
+        Ok(row.map(|r| catalog_tree_section::<CatalogCategory>(&r.tree, "categories")).unwrap_or_default())
     }
     /// A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
     #[graphql(name = "restaurant")]
@@ -61,23 +77,80 @@ impl QueryRoot {
     }
     /// A customer's carts (one OPEN cart per restaurant).
     #[graphql(name = "carts")]
-    async fn carts(&self, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn carts(&self, ctx: &async_graphql::Context<'_>, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let rows = repo.by_customer(input.customer_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory
+        // (a cart is only ever started against a projected restaurant, so a match always exists).
+        let by_id: std::collections::HashMap<_, _> = restaurants
+            .list(application::queries::RestaurantFilter::default())
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .into_iter()
+            .map(|r| (r.restaurant_id.0, r))
+            .collect();
+        Ok(rows
+            .into_iter()
+            .filter_map(|c| by_id.get(&c.restaurant_id.0).cloned().map(|r| Cart::from((c, r))))
+            .collect())
     }
     /// A single cart by id (session-scoped; readable by the guest/customer who owns it).
     #[graphql(name = "cart")]
-    async fn cart(&self, input: CartQueryInput) -> async_graphql::Result<Option<Cart>> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn cart(&self, ctx: &async_graphql::Context<'_>, input: CartQueryInput) -> async_graphql::Result<Option<Cart>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
+        let restaurant = restaurants
+            .by_id(row.restaurant_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .ok_or_else(|| async_graphql::Error::new("cart references an unknown restaurant"))?;
+        Ok(Some(Cart::from((row, restaurant))))
     }
     /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
     #[graphql(name = "orders")]
-    async fn orders(&self, input: Option<OrdersQueryInput>) -> async_graphql::Result<Vec<Order>> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn orders(&self, ctx: &async_graphql::Context<'_>, input: Option<OrdersQueryInput>) -> async_graphql::Result<Vec<Order>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let filter = input
+            .map(|i| application::queries::OrderFilter {
+                customer_id: i.customer_id.map(Into::into),
+                restaurant_id: i.restaurant_id.map(Into::into),
+                status: i.status.map(Into::into),
+            })
+            .unwrap_or_default();
+        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory
+        // (an order is only ever placed against a projected restaurant, so a match always exists).
+        let by_id: std::collections::HashMap<_, _> = restaurants
+            .list(application::queries::RestaurantFilter::default())
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .into_iter()
+            .map(|r| (r.restaurant_id.0, r))
+            .collect();
+        Ok(rows
+            .into_iter()
+            .filter_map(|o| by_id.get(&o.restaurant_id.0).cloned().map(|r| Order::from((o, r))))
+            .collect())
     }
     /// Order tracking by id; owning customer or the restaurant/admin. Ownership enforced server-side.
     #[graphql(name = "order")]
-    async fn order(&self, input: OrderQueryInput) -> async_graphql::Result<Option<Order>> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn order(&self, ctx: &async_graphql::Context<'_>, input: OrderQueryInput) -> async_graphql::Result<Option<Order>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
+        let restaurant = restaurants
+            .by_id(row.restaurant_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            .ok_or_else(|| async_graphql::Error::new("order references an unknown restaurant"))?;
+        Ok(Some(Order::from((row, restaurant))))
     }
     /// The delivery job of an order (tracking); owning customer, the restaurant/admin, or the assigned rider. Ownership enforced server-side.
     #[graphql(name = "delivery")]
