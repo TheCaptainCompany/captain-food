@@ -36,7 +36,10 @@ Stripe/HubRise ──webhook (REST)──▶ POST /webhooks/{partner}   (crates/
   - **Stripe**: verify the `Stripe-Signature` header — `HMAC-SHA256(STRIPE_WEBHOOK_SECRET, "<t>.<rawBody>")`,
     constant-time compare, reject on `|now − t| > 300s` (replay window). Verify over the **raw body bytes**.
     Secret unset ⇒ 503.
-  - **HubRise**: its own token/OAuth on the callback (to be detailed with that adapter).
+  - **HubRise**: `X-HubRise-Hmac-SHA256` = **hex** `HMAC-SHA256(client_secret, raw_body)` (no timestamp),
+    constant-time compare, `HUBRISE_WEBHOOK_SECRET` unset ⇒ 503. **Ingress shipped**; the domain ACL
+    (→ `OfferStockUpdated`/`ImportCatalog`) is deferred because catalog/inventory callbacks carry no state
+    and need an OAuth2 API pull + external-ref→domain-id mapping.
 - **ACL translation.** External shapes never leak into the domain: Stripe minor-unit amounts → `Money`, etc.
 - **In-process append.** Inbound facts append to `domain_events` via the existing event-store port (no
   command); the one orchestrated case (HubRise catalog) goes through the `ImportCatalog` command handler.

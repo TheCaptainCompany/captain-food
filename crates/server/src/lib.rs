@@ -217,6 +217,9 @@ pub fn router() -> Router {
         // Stripe webhook ingestion: `POST /webhooks/stripe` — signature-verified (STRIPE_WEBHOOK_SECRET,
         // fail-closed) inbound payment facts recorded via the ACL. Not part of the GraphQL surface.
         .merge(graphql::routes::stripe_webhook_routes(stripe_ingestor))
+        // HubRise callback ingress: `POST /webhooks/hubrise` — HMAC-verified (HUBRISE_WEBHOOK_SECRET,
+        // fail-closed) + envelope-parsed. Stateless; domain enrichment (OAuth pull) is a follow-up.
+        .merge(graphql::routes::hubrise_webhook_routes())
         // Host-based landing (ADR-0036): any path not matched above is dispatched by the request `Host`
         // to its per-audience/tenant placeholder. Explicit routes (/health, /ping, /{role}/graphql) win,
         // so Render's health check (internal *.onrender.com host) is unaffected. Covers `/` too.

@@ -54,3 +54,7 @@ services:
       # (ADR-20260718-145856). Unset ⇒ the endpoint fails closed (503).
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      # HubRise app client secret — the HMAC key for `POST /webhooks/hubrise` callback verification
+      # (`X-HubRise-Hmac-SHA256`, ADR-20260718-145856). Unset ⇒ the endpoint fails closed (503).
+      - key: HUBRISE_WEBHOOK_SECRET
+        sync: false

@@ -18,8 +18,9 @@ use axum::{
 };
 use axum::body::Bytes;
 use infrastructure::{
-    verify_stripe_signature, SireneSyncWorker, StripeEvent, StripeIngestOutcome,
-    StripeWebhookIngestor, STRIPE_WEBHOOK_SECRET_ENV,
+    verify_hubrise_signature, verify_stripe_signature, HubRiseCallback, SireneSyncWorker, StripeEvent,
+    StripeIngestOutcome, StripeWebhookIngestor, HUBRISE_SIGNATURE_HEADER, HUBRISE_WEBHOOK_SECRET_ENV,
+    STRIPE_WEBHOOK_SECRET_ENV,
 };
 
 use crate::auth::AuthContext;
@@ -92,6 +93,55 @@ async fn sirene_drain(
 /// idempotently keyed on the Stripe event id (redeliveries are 200-ACKed no-ops).
 pub fn stripe_webhook_routes(ingestor: Option<Arc<StripeWebhookIngestor>>) -> Router {
     Router::new().route("/webhooks/stripe", post(stripe_webhook)).with_state(ingestor)
+}
+
+/// HubRise callback ingress (ADR-20260718-145856) — NOT the GraphQL surface. `POST /webhooks/hubrise`
+/// verifies the `X-HubRise-Hmac-SHA256` HMAC over the RAW body (fail-closed if the client secret is
+/// unset) and parses the envelope. This is the verified ingress only: domain translation
+/// (OAuth pull → `OfferStockUpdated` / `ImportCatalog`) is a deliberate follow-up. Stateless.
+pub fn hubrise_webhook_routes() -> Router {
+    Router::new().route("/webhooks/hubrise", post(hubrise_webhook))
+}
+
+async fn hubrise_webhook(headers: HeaderMap, body: Bytes) -> Response {
+    // Fail closed: without the client secret nothing can be authenticated.
+    let secret = match std::env::var(HUBRISE_WEBHOOK_SECRET_ENV) {
+        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
+        _ => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "hubrise webhooks not configured (HUBRISE_WEBHOOK_SECRET unset)",
+            )
+                .into_response()
+        }
+    };
+    let Some(signature) = headers.get(HUBRISE_SIGNATURE_HEADER).and_then(|v| v.to_str().ok()) else {
+        return (StatusCode::BAD_REQUEST, "missing X-HubRise-Hmac-SHA256 header").into_response();
+    };
+    if let Err(e) = verify_hubrise_signature(&secret, signature, &body) {
+        return (StatusCode::BAD_REQUEST, format!("invalid HubRise signature: {e}")).into_response();
+    }
+    let callback: HubRiseCallback = match serde_json::from_slice(&body) {
+        Ok(c) => c,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("unparsable HubRise callback: {e}"))
+                .into_response()
+        }
+    };
+    // Verified ingress only. Domain enrichment (OAuth pull → OfferStockUpdated / ImportCatalog) is the
+    // next chapter; acknowledge so HubRise stops redelivering.
+    println!(
+        "hubrise webhook: verified {}.{} (id {}){}",
+        callback.resource_type,
+        callback.event_type,
+        callback.id,
+        if callback.needs_pull() { " [needs API pull to enrich]" } else { "" }
+    );
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "received": true, "status": "verified_pending_enrichment" })),
+    )
+        .into_response()
 }
 
 async fn stripe_webhook(

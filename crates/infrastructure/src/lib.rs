@@ -13,6 +13,10 @@ pub mod persistence;
 pub mod projection;
 
 pub use integrations::google::{FailClosedGoogleOwnershipVerifier, UnverifiedGbpOrderLinkProbe};
+pub use integrations::hubrise::{
+    verify_hubrise_signature, HubRiseCallback, HubRiseSignatureError, HUBRISE_SIGNATURE_HEADER,
+    HUBRISE_WEBHOOK_SECRET_ENV,
+};
 pub use integrations::stripe::{
     verify_signature as verify_stripe_signature, SignatureError as StripeSignatureError,
     StripeEvent, StripeIngestOutcome, StripeWebhookIngestor, STRIPE_WEBHOOK_SECRET_ENV,

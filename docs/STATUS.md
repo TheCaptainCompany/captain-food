@@ -65,7 +65,7 @@
 |---|---|---|
 | **Stripe** `POST /webhooks/stripe` | ✅ | `Stripe-Signature` HMAC verify over raw body (constant-time, 300s replay window, fail-closed); ACL maps `payment_intent.succeeded`/`.payment_failed`/`charge.refunded` → `PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`; idempotent by Stripe event id (`StripeEvent-<id>` stream). 12 unit tests |
 | Checkout must set `metadata.restaurantId` (+`orderId`) on the PaymentIntent/charge | 📋 | Else `charge.refunded` is unmappable (logged + 200-ACKed). Lands with `placeOrder` |
-| **HubRise** `POST /webhooks/hubrise` | 📋 | Next adapter — auth + ACL → `OfferStockUpdated`/`ImportCatalog` |
+| **HubRise** `POST /webhooks/hubrise` — verified ingress | 🚧 | HMAC-SHA256 (hex, `X-HubRise-Hmac-SHA256`, `HUBRISE_WEBHOOK_SECRET`, constant-time, fail-closed) + envelope parse (4 tests). **Domain ACL (→ `OfferStockUpdated`/`ImportCatalog`) deferred**: catalog/inventory callbacks carry no state → needs an OAuth2 API pull + external-ref→domain-id mapping (next chapter) |
 
 ## 👤 Pending user actions
 

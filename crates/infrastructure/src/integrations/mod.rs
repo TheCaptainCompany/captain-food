@@ -14,9 +14,14 @@
 //!   Stripe event id. The HTTP endpoint (`POST /webhooks/stripe`) lives in `server`.
 //! - [`supabase_auth`] — the wrapped auth provider seam (phone-OTP + email magic link, ADR-0015);
 //!   fail-closed stand-in until the real `supabase-acl` adapter lands.
-//! - Later: HubRise (catalog import, inventory), delivery partner.
+//! - [`hubrise`] — the HubRise callback ingress: HMAC-SHA256 signature verification + envelope parsing
+//!   (ADR-20260718-145856). Domain translation (→ `OfferStockUpdated`/`ImportCatalog`) needs an OAuth
+//!   API pull + ref-mapping and is a deliberate follow-up. The HTTP endpoint (`POST /webhooks/hubrise`)
+//!   lives in `server`.
+//! - Later: HubRise domain enrichment (OAuth catalog/inventory pull), delivery partner.
 
 pub mod google;
+pub mod hubrise;
 pub mod sirene;
 pub mod stripe;
 pub mod supabase_auth;
