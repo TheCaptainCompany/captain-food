@@ -12,26 +12,57 @@
 //! Cross-aggregate invariants that still lack a read port are explicit `TODO(invariant)` markers —
 //! they are NOT silently skipped semantics, they are the documented gap.
 
+use std::collections::HashSet;
+
+use domain::catalog::CatalogState;
+use domain::customer::CustomerState;
 use domain::generated::commands::{
-    ActivateRestaurant, ChangeOrderAcceptanceMode, ChangeRestaurantListingStatus,
-    ClaimRestaurantListing, ConfigureGoogleBusinessProfileOrderLink, DeactivateRestaurant,
-    MarkRestaurantClosed, OptOutRestaurantListing, RegisterRestaurant, RegisterRestaurantAccount,
-    RemoveRestaurant, UpdateRestaurant, UpdateRestaurantGoogleBusinessProfile,
+    ActivateRestaurant, AddCatalogCategory, AddOptionList, AddProduct, ChangeLanguage,
+    ChangeOrderAcceptanceMode, ChangeRestaurantListingStatus, ClaimRestaurantListing,
+    ConfigureGoogleBusinessProfileOrderLink, ConfirmEmailVerification, ConfirmPhoneChange,
+    CreateCatalog, DeactivateRestaurant, DeleteRestaurantAccount, ImportCatalog, MarkProspectCold,
+    MarkRestaurantAsFavorite, MarkRestaurantClosed, OptOutRestaurantListing, RecordProspectContact,
+    RecordProspectReply, RegisterRestaurant, RegisterRestaurantAccount, RemoveCatalogCategory,
+    RemoveCustomerAddress, RemoveOptionList, RemoveProduct, RemoveRestaurant,
+    RequestEmailVerification, RequestPhoneChange, RequestPhoneVerification, SetCustomerAddress,
+    SetCustomerPaymentMethod, SetCustomerPreferences, UnmarkRestaurantAsFavorite,
+    UpdateCatalogCategory, UpdateCustomerInfo, UpdateOfferStock, UpdateOptionList, UpdateProduct,
+    UpdateRestaurant, UpdateRestaurantAccount, UpdateRestaurantGoogleBusinessProfile, VerifyPhone,
     VerifyGoogleBusinessProfileOrderLink,
 };
+use domain::generated::entities::{Money, Product, Stock};
 use domain::generated::events::{
-    DomainEvent, RestaurantAcceptanceModeChanged, RestaurantAccountRegistered, RestaurantActivated,
-    RestaurantDeactivated, RestaurantGoogleBusinessProfileOrderLinkConfigured,
+    CatalogCategoryAdded, CatalogCategoryRemoved, CatalogCategoryUpdated, CatalogCreated,
+    CatalogImported, CustomerAddressRemoved, CustomerAddressSet, CustomerEmailVerified,
+    CustomerIdentified, CustomerInfoUpdated, CustomerLanguageChanged, CustomerPaymentMethodSet,
+    CustomerPhoneChanged, CustomerPreferencesSet, CustomerRegistered, DomainEvent, OfferStockUpdated,
+    OptionListAdded, OptionListRemoved, OptionListUpdated, ProductAdded, ProductRemoved,
+    ProductUpdated, ProspectContacted, ProspectMarkedCold, ProspectReplied,
+    RestaurantAcceptanceModeChanged, RestaurantAccountDeleted, RestaurantAccountRegistered,
+    RestaurantAccountUpdated, RestaurantActivated, RestaurantDeactivated, RestaurantFavorited,
+    RestaurantGoogleBusinessProfileOrderLinkConfigured,
     RestaurantGoogleBusinessProfileOrderLinkVerified, RestaurantGoogleBusinessProfileUpdated,
     RestaurantListingClaimed, RestaurantListingOptedOut, RestaurantListingStatusChanged,
-    RestaurantMarkedClosed, RestaurantRegistered, RestaurantRemoved, RestaurantUpdated,
+    RestaurantMarkedClosed, RestaurantRegistered, RestaurantRemoved, RestaurantUnfavorited,
+    RestaurantUpdated,
 };
-use domain::generated::scalars::{RestaurantId, RestaurantListingStatus, RestaurantStatus};
+use domain::generated::scalars::{
+    CatalogId, CurrencyCode, CustomerId, DialingCode, ExternalReference, NationalPhoneNumber,
+    PhoneNumber, RestaurantAccountId, RestaurantId, RestaurantListingStatus, RestaurantStatus,
+    StockStatus,
+};
+use domain::prospect::ProspectState;
 use domain::restaurant::RestaurantState;
+use domain::restaurant_account::RestaurantAccountState;
 use domain::shared::errors::DomainError;
 
-use crate::ports::{is_version_conflict, Actor, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
-use crate::queries::RestaurantReadRepository;
+use crate::ports::{
+    is_version_conflict, Actor, AuthProviderGateway, EmailTokenCheck, EventStore, GbpOrderLinkProbe,
+    GoogleOwnershipVerifier, PhoneOtpCheck,
+};
+use crate::queries::{
+    CustomerReadRepository, ProspectFilter, ProspectionReadRepository, RestaurantReadRepository,
+};
 
 // --- Cart / Order / DeliveryJob / PlaceOrderProcess (checkout→order→delivery flow, ADR-0046 round 2) ---
 use domain::cart::{CartState, MAX_LINE_QUANTITY};
@@ -42,7 +73,7 @@ use domain::generated::commands::{
     MarkOrderDelivered, MarkOrderReady, PlaceOrder, RateOrder, RateRestaurant, RejectOrder,
     RemoveCartLine, RequestRefund, StartPreparation, TipOrder,
 };
-use domain::generated::entities::{CartLineItem, Money};
+use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
     CartLineAdded, CartLineQuantityChanged, CartLineRemoved, CartStarted, DeliveryAcceptedByRider,
     DeliveryCancelled, DeliveryCompleted, DeliveryPickedUp, OrderAcceptedByRestaurant,
@@ -110,8 +141,43 @@ async fn require_restaurant(
     }
 }
 
+/// The stream a RestaurantAccount aggregate lives on.
+fn restaurant_account_stream(id: &RestaurantAccountId) -> String {
+    format!("RestaurantAccount-{}", id.0)
+}
+
+/// Rehydrate the RestaurantAccount aggregate (fold + current version).
+async fn load_restaurant_account(
+    store: &dyn EventStore,
+    id: &RestaurantAccountId,
+) -> Result<(Option<RestaurantAccountState>, i64), DomainError> {
+    let (events, version) = store.load(&restaurant_account_stream(id)).await?;
+    Ok((domain::restaurant_account::fold(&events), version))
+}
+
+/// Rehydrate and require existence (a deleted account no longer exists), or reject with
+/// `errors.yaml#/RestaurantAccountNotFound`.
+async fn require_restaurant_account(
+    store: &dyn EventStore,
+    id: &RestaurantAccountId,
+) -> Result<(RestaurantAccountState, i64), DomainError> {
+    let (state, version) = load_restaurant_account(store, id).await?;
+    match state {
+        Some(state) => Ok((state, version)),
+        None => Err(reject("RestaurantAccountNotFound", format!("restaurantAccountId={}", id.0))),
+    }
+}
+
+/// `errors.yaml#/InvalidCurrency`: an ISO 4217 code is exactly three ASCII uppercase letters (the
+/// shape check catches "EURO"/"eur"; validating against the full ISO code LIST is reference data the
+/// pricing referential owns, not a domain constant).
+fn is_valid_iso4217(currency: &CurrencyCode) -> bool {
+    currency.0.len() == 3 && currency.0.bytes().all(|b| b.is_ascii_uppercase())
+}
+
 /// Handle `commands.yaml#/RegisterRestaurantAccount` → emit `events.yaml#/RestaurantAccountRegistered`
-/// on the new `RestaurantAccount-<id>` stream (actors.yaml, RestaurantAccount aggregate).
+/// on the new `RestaurantAccount-<id>` stream (actors.yaml, RestaurantAccount aggregate). Rejects a
+/// malformed default currency (`InvalidCurrency`, ISO 4217 shape).
 pub async fn register_restaurant_account(
     store: &dyn EventStore,
     cmd: RegisterRestaurantAccount,
@@ -119,8 +185,10 @@ pub async fn register_restaurant_account(
 ) -> Result<(), DomainError> {
     // TODO(invariant): RefAlreadyUsed — reject when cmd.ref is already owned by another aggregate
     //                  (needs an external-reference read-model lookup).
-    // TODO(invariant): InvalidCurrency — reject when cmd.default_currency is not a valid ISO 4217 code.
-    let stream_name = format!("RestaurantAccount-{}", cmd.restaurant_account_id.0);
+    if !is_valid_iso4217(&cmd.default_currency) {
+        return Err(reject("InvalidCurrency", format!("currency={}", cmd.default_currency.0)));
+    }
+    let stream_name = restaurant_account_stream(&cmd.restaurant_account_id);
     let event = DomainEvent::RestaurantAccountRegistered(RestaurantAccountRegistered {
         restaurant_account_id: cmd.restaurant_account_id,
         r#ref: cmd.r#ref,
@@ -131,6 +199,49 @@ pub async fn register_restaurant_account(
         timezone: cmd.timezone,
     });
     idempotent_on_existing(store.append(&stream_name, 0, &[event], actor).await)
+}
+
+/// Handle `commands.yaml#/UpdateRestaurantAccount` → emit `events.yaml#/RestaurantAccountUpdated`
+/// (replace semantics on the provided account-level fields). An update carrying nothing editable is
+/// rejected (`errors.yaml#/NoEditableFieldProvided`).
+pub async fn update_restaurant_account(
+    store: &dyn EventStore,
+    cmd: UpdateRestaurantAccount,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = require_restaurant_account(store, &cmd.restaurant_account_id).await?;
+    let has_editable_field = cmd.legal_name.is_some()
+        || cmd.contact.is_some()
+        || cmd.default_tax_rate.is_some()
+        || cmd.timezone.is_some();
+    if !has_editable_field {
+        return Err(reject("NoEditableFieldProvided", "update carried no editable field"));
+    }
+    let stream_name = restaurant_account_stream(&cmd.restaurant_account_id);
+    let event = DomainEvent::RestaurantAccountUpdated(RestaurantAccountUpdated {
+        restaurant_account_id: cmd.restaurant_account_id,
+        legal_name: cmd.legal_name,
+        contact: cmd.contact,
+        default_tax_rate: cmd.default_tax_rate,
+        timezone: cmd.timezone,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/DeleteRestaurantAccount` → emit `events.yaml#/RestaurantAccountDeleted`
+/// (the account is closed; the stream and its history remain, but the fold treats it as gone).
+pub async fn delete_restaurant_account(
+    store: &dyn EventStore,
+    cmd: DeleteRestaurantAccount,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = require_restaurant_account(store, &cmd.restaurant_account_id).await?;
+    let stream_name = restaurant_account_stream(&cmd.restaurant_account_id);
+    let event = DomainEvent::RestaurantAccountDeleted(RestaurantAccountDeleted {
+        restaurant_account_id: cmd.restaurant_account_id,
+        reason: cmd.reason,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
 }
 
 /// Handle `commands.yaml#/RegisterRestaurant` → emit `events.yaml#/RestaurantRegistered` on the new
@@ -1160,4 +1271,918 @@ pub async fn place_order(
     });
     idempotent_on_existing(store.append(&order_stream(&cmd.order_id), 0, &[event], actor).await)?;
     Ok(intent)
+}
+
+// ================================================================================================
+// Prospect aggregate (ADR-0020) — id = restaurantId; born by its first recorded contact.
+// ================================================================================================
+
+/// The stream a Prospect aggregate lives on (id = the prospected restaurant's id).
+fn prospect_stream(id: &RestaurantId) -> String {
+    format!("Prospect-{}", id.0)
+}
+
+/// Rehydrate the Prospect aggregate (fold + current version).
+async fn load_prospect(
+    store: &dyn EventStore,
+    id: &RestaurantId,
+) -> Result<(Option<ProspectState>, i64), DomainError> {
+    let (events, version) = store.load(&prospect_stream(id)).await?;
+    Ok((domain::prospect::fold(&events), version))
+}
+
+/// Handle `commands.yaml#/RecordProspectContact` → emit `events.yaml#/ProspectContacted`. The first
+/// contact is the prospect's birth. Anti-spam invariants: at most 3 contacts total
+/// (`ProspectContactLimitReached`, from the fold) and ≥ 7 days between contacts
+/// (`ProspectContactedTooRecently`) — the contact TIME is envelope metadata (`occurred_at`) invisible
+/// to the fold, so it is read from the `ProspectionPipeline` projection's `last_contacted_at` (the
+/// same read model the prospection worker schedules from; a not-yet-projected prospect passes).
+pub async fn record_prospect_contact(
+    store: &dyn EventStore,
+    prospection: &dyn ProspectionReadRepository,
+    cmd: RecordProspectContact,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_prospect(store, &cmd.restaurant_id).await?;
+    if state.as_ref().map_or(0, |s| s.contacts) >= 3 {
+        return Err(reject(
+            "ProspectContactLimitReached",
+            format!("restaurantId={}", cmd.restaurant_id.0),
+        ));
+    }
+    let row = prospection
+        .list(ProspectFilter::default())
+        .await?
+        .into_iter()
+        .find(|r| r.restaurant_id == cmd.restaurant_id);
+    if let Some(last) = row.and_then(|r| r.last_contacted_at) {
+        if chrono::Utc::now().signed_duration_since(last) < chrono::Duration::days(7) {
+            return Err(reject(
+                "ProspectContactedTooRecently",
+                format!("restaurantId={}", cmd.restaurant_id.0),
+            ));
+        }
+    }
+    let stream_name = prospect_stream(&cmd.restaurant_id);
+    let event = DomainEvent::ProspectContacted(ProspectContacted {
+        restaurant_id: cmd.restaurant_id,
+        channel: cmd.channel,
+        sequence_step: cmd.sequence_step,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/MarkProspectCold` → emit `events.yaml#/ProspectMarkedCold`. Requires a
+/// contact history (`ProspectNotFound`): a never-contacted listing is not a prospect yet.
+pub async fn mark_prospect_cold(
+    store: &dyn EventStore,
+    cmd: MarkProspectCold,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_prospect(store, &cmd.restaurant_id).await?;
+    if state.is_none() {
+        return Err(reject("ProspectNotFound", format!("restaurantId={}", cmd.restaurant_id.0)));
+    }
+    let stream_name = prospect_stream(&cmd.restaurant_id);
+    let event = DomainEvent::ProspectMarkedCold(ProspectMarkedCold {
+        restaurant_id: cmd.restaurant_id,
+        reason: cmd.reason,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RecordProspectReply` → emit `events.yaml#/ProspectReplied`. Requires a
+/// contact history (`ProspectNotFound`).
+pub async fn record_prospect_reply(
+    store: &dyn EventStore,
+    cmd: RecordProspectReply,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_prospect(store, &cmd.restaurant_id).await?;
+    if state.is_none() {
+        return Err(reject("ProspectNotFound", format!("restaurantId={}", cmd.restaurant_id.0)));
+    }
+    let stream_name = prospect_stream(&cmd.restaurant_id);
+    let event = DomainEvent::ProspectReplied(ProspectReplied {
+        restaurant_id: cmd.restaurant_id,
+        note: cmd.note,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// Catalog aggregate — catalog, category tree, products/offers (SKUs), option lists, stock.
+// ================================================================================================
+
+/// The stream a Catalog aggregate lives on.
+fn catalog_stream(id: &CatalogId) -> String {
+    format!("Catalog-{}", id.0)
+}
+
+/// Rehydrate the Catalog aggregate (fold + current version).
+async fn load_catalog(
+    store: &dyn EventStore,
+    id: &CatalogId,
+) -> Result<(Option<CatalogState>, i64), DomainError> {
+    let (events, version) = store.load(&catalog_stream(id)).await?;
+    Ok((domain::catalog::fold(&events), version))
+}
+
+/// Rehydrate and require existence, or reject with `errors.yaml#/CatalogNotFound`.
+async fn require_catalog(
+    store: &dyn EventStore,
+    id: &CatalogId,
+) -> Result<(CatalogState, i64), DomainError> {
+    let (state, version) = load_catalog(store, id).await?;
+    match state {
+        Some(state) => Ok((state, version)),
+        None => Err(reject("CatalogNotFound", format!("catalogId={}", id.0))),
+    }
+}
+
+/// `errors.yaml#/RefNotUnique`: every `ref` (idempotent import key) must be unique WITHIN the catalog.
+/// Checks the candidate refs against the folded catalog content and against each other.
+fn ensure_refs_unique(
+    state: &CatalogState,
+    catalog_id: &CatalogId,
+    candidates: &[&ExternalReference],
+) -> Result<(), DomainError> {
+    let existing = state.refs_in_use();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for r in candidates {
+        if existing.contains(r.0.as_str()) || !seen.insert(r.0.as_str()) {
+            return Err(reject("RefNotUnique", format!("ref={} catalogId={}", r.0, catalog_id.0)));
+        }
+    }
+    Ok(())
+}
+
+/// `errors.yaml#/CurrencyMismatch`: every offer price must use the restaurant's default currency. The
+/// currency authority is the Restaurant projection row (`default_currency`, ADR-0016); a row not yet
+/// projected (read-model lag) skips the check rather than failing the write with an undeclared error.
+async fn ensure_prices_use_restaurant_currency(
+    restaurants: &dyn RestaurantReadRepository,
+    restaurant_id: RestaurantId,
+    prices: &[&Money],
+) -> Result<(), DomainError> {
+    let Some(row) = restaurants.by_id(restaurant_id).await? else {
+        return Ok(());
+    };
+    for price in prices {
+        if price.currency != row.default_currency {
+            return Err(reject(
+                "CurrencyMismatch",
+                format!(
+                    "restaurantName={} currency={}",
+                    row.display_name.0, row.default_currency.0
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Handle `commands.yaml#/CreateCatalog` → emit `events.yaml#/CatalogCreated` on the new
+/// `Catalog-<id>` stream. Requires the owning restaurant to exist in the read model
+/// (`RestaurantNotFound`); idempotent on replay (client-generated ids, ADR-0034).
+pub async fn create_catalog(
+    store: &dyn EventStore,
+    restaurants: &dyn RestaurantReadRepository,
+    cmd: CreateCatalog,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    // TODO(invariant): RefNotUnique — the catalog's own ref vs the restaurant's OTHER catalogs needs
+    //                  an external-reference read-model index port; within this (new, empty) catalog
+    //                  there is nothing to collide with yet.
+    if restaurants.by_id(cmd.restaurant_id).await?.is_none() {
+        return Err(reject("RestaurantNotFound", format!("restaurantId={}", cmd.restaurant_id.0)));
+    }
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::CatalogCreated(CatalogCreated {
+        catalog_id: cmd.catalog_id,
+        r#ref: cmd.r#ref,
+        restaurant_id: cmd.restaurant_id,
+        name: cmd.name,
+    });
+    idempotent_on_existing(store.append(&stream_name, 0, &[event], actor).await)
+}
+
+/// Handle `commands.yaml#/AddProduct` → emit `events.yaml#/ProductAdded`. Enforces `CatalogNotFound`,
+/// `CurrencyMismatch` (offer prices vs the restaurant's default currency),
+/// `CatalogCategoryRefNotFound` (the categoryRef must resolve in the folded tree) and `RefNotUnique`
+/// (the product's and offers' refs must be fresh within the catalog).
+pub async fn add_product(
+    store: &dyn EventStore,
+    restaurants: &dyn RestaurantReadRepository,
+    cmd: AddProduct,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_catalog(store, &cmd.catalog_id).await?;
+    let prices: Vec<&Money> = cmd.offers.iter().map(|o| &o.price).collect();
+    ensure_prices_use_restaurant_currency(restaurants, state.restaurant_id, &prices).await?;
+    if let Some(category_ref) = &cmd.category_ref {
+        if state.category_by_ref(category_ref).is_none() {
+            return Err(reject("CatalogCategoryRefNotFound", format!("ref={}", category_ref.0)));
+        }
+    }
+    let candidate_refs: Vec<&ExternalReference> =
+        cmd.r#ref.iter().chain(cmd.offers.iter().filter_map(|o| o.r#ref.as_ref())).collect();
+    ensure_refs_unique(&state, &cmd.catalog_id, &candidate_refs)?;
+    let product = Product {
+        id: cmd.product_id,
+        r#ref: cmd.r#ref,
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        category_ref: cmd.category_ref,
+        name: cmd.name,
+        description: cmd.description,
+        tags: cmd.tags,
+        image_ids: vec![],
+        tax_rate: cmd.tax_rate,
+        offers: cmd.offers,
+    };
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::ProductAdded(ProductAdded {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        product,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/UpdateProduct` → emit `events.yaml#/ProductUpdated` (full replace,
+/// including offers). Enforces `ProductNotFound`, `ProductMustHaveOffer` (a product keeps ≥ 1 offer)
+/// and `CurrencyMismatch`.
+pub async fn update_product(
+    store: &dyn EventStore,
+    restaurants: &dyn RestaurantReadRepository,
+    cmd: UpdateProduct,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_catalog(store, &cmd.catalog_id).await?;
+    let exists = state.as_ref().is_some_and(|s| s.product_by_id(cmd.product.id).is_some());
+    if !exists {
+        return Err(reject("ProductNotFound", format!("productId={}", cmd.product.id.0)));
+    }
+    let state = state.expect("existence checked above");
+    if cmd.product.offers.is_empty() {
+        return Err(reject(
+            "ProductMustHaveOffer",
+            format!("productId={} productName={}", cmd.product.id.0, cmd.product.name.0),
+        ));
+    }
+    let prices: Vec<&Money> = cmd.product.offers.iter().map(|o| &o.price).collect();
+    ensure_prices_use_restaurant_currency(restaurants, state.restaurant_id, &prices).await?;
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::ProductUpdated(ProductUpdated {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        product: cmd.product,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RemoveProduct` → emit `events.yaml#/ProductRemoved`. `ProductNotFound`
+/// covers both a missing product and a missing catalog (the only error this message declares).
+pub async fn remove_product(
+    store: &dyn EventStore,
+    cmd: RemoveProduct,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_catalog(store, &cmd.catalog_id).await?;
+    let exists = state.as_ref().is_some_and(|s| s.product_by_id(cmd.product_id).is_some());
+    if !exists {
+        return Err(reject("ProductNotFound", format!("productId={}", cmd.product_id.0)));
+    }
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::ProductRemoved(ProductRemoved {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        product_id: cmd.product_id,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/AddCatalogCategory` → emit `events.yaml#/CatalogCategoryAdded`. Enforces
+/// `CatalogNotFound`, `ParentCatalogCategoryNotFound` (parentRef must resolve in the folded tree) and
+/// `RefNotUnique` (the category's ref must be fresh within the catalog).
+pub async fn add_catalog_category(
+    store: &dyn EventStore,
+    cmd: AddCatalogCategory,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_catalog(store, &cmd.catalog_id).await?;
+    if let Some(parent_ref) = &cmd.category.parent_ref {
+        if state.category_by_ref(parent_ref).is_none() {
+            return Err(reject(
+                "ParentCatalogCategoryNotFound",
+                format!("parentRef={}", parent_ref.0),
+            ));
+        }
+    }
+    let candidate_refs: Vec<&ExternalReference> = cmd.category.r#ref.iter().collect();
+    ensure_refs_unique(&state, &cmd.catalog_id, &candidate_refs)?;
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::CatalogCategoryAdded(CatalogCategoryAdded {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        category: cmd.category,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/UpdateCatalogCategory` → emit `events.yaml#/CatalogCategoryUpdated` (full
+/// replace). Enforces `CatalogCategoryNotFound` (also covering a missing catalog — the only not-found
+/// this message declares) and `CatalogCategoryCycle` (the new parentRef must not loop the tree).
+pub async fn update_catalog_category(
+    store: &dyn EventStore,
+    cmd: UpdateCatalogCategory,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_catalog(store, &cmd.catalog_id).await?;
+    let exists = state.as_ref().is_some_and(|s| s.category_by_id(cmd.category.id).is_some());
+    if !exists {
+        return Err(reject(
+            "CatalogCategoryNotFound",
+            format!("productCategoryId={}", cmd.category.id.0),
+        ));
+    }
+    let state = state.expect("existence checked above");
+    if state.would_create_cycle(&cmd.category) {
+        return Err(reject(
+            "CatalogCategoryCycle",
+            format!("productCategoryId={} categoryName={}", cmd.category.id.0, cmd.category.name.0),
+        ));
+    }
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::CatalogCategoryUpdated(CatalogCategoryUpdated {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        category: cmd.category,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RemoveCatalogCategory` → emit `events.yaml#/CatalogCategoryRemoved`.
+/// Enforces `CatalogCategoryNotFound` and `CatalogCategoryNotEmpty` (no child category / product may
+/// still reference it).
+pub async fn remove_catalog_category(
+    store: &dyn EventStore,
+    cmd: RemoveCatalogCategory,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_catalog(store, &cmd.catalog_id).await?;
+    let Some(category) =
+        state.as_ref().and_then(|s| s.category_by_id(cmd.product_category_id)).cloned()
+    else {
+        return Err(reject(
+            "CatalogCategoryNotFound",
+            format!("productCategoryId={}", cmd.product_category_id.0),
+        ));
+    };
+    let state = state.expect("existence checked above");
+    if state.category_has_dependents(&category) {
+        return Err(reject(
+            "CatalogCategoryNotEmpty",
+            format!("productCategoryId={} categoryName={}", category.id.0, category.name.0),
+        ));
+    }
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::CatalogCategoryRemoved(CatalogCategoryRemoved {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        product_category_id: cmd.product_category_id,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/AddOptionList` → emit `events.yaml#/OptionListAdded`. Enforces
+/// `CatalogNotFound`, `OptionListMustHaveOption` (≥ 1 option) and `InvalidSelectionBounds`
+/// (minSelections must fit within maxSelections and the number of options).
+pub async fn add_option_list(
+    store: &dyn EventStore,
+    cmd: AddOptionList,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = require_catalog(store, &cmd.catalog_id).await?;
+    let ol = &cmd.option_list;
+    if ol.options.is_empty() {
+        return Err(reject(
+            "OptionListMustHaveOption",
+            format!("optionListId={} optionListName={}", ol.id.0, ol.name.0),
+        ));
+    }
+    let out_of_bounds = ol.min_selections < 0
+        || ol.max_selections.is_some_and(|max| ol.min_selections > max)
+        || ol.min_selections > ol.options.len() as i64;
+    if out_of_bounds {
+        return Err(reject(
+            "InvalidSelectionBounds",
+            format!("optionListId={} optionListName={}", ol.id.0, ol.name.0),
+        ));
+    }
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::OptionListAdded(OptionListAdded {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        option_list: cmd.option_list,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/UpdateOptionList` → emit `events.yaml#/OptionListUpdated` (full replace).
+/// Enforces `OptionListNotFound` (also covering a missing catalog) and `OptionListMustHaveOption`.
+pub async fn update_option_list(
+    store: &dyn EventStore,
+    cmd: UpdateOptionList,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_catalog(store, &cmd.catalog_id).await?;
+    let exists = state.as_ref().is_some_and(|s| s.option_list_by_id(cmd.option_list.id).is_some());
+    if !exists {
+        return Err(reject(
+            "OptionListNotFound",
+            format!("optionListId={}", cmd.option_list.id.0),
+        ));
+    }
+    if cmd.option_list.options.is_empty() {
+        return Err(reject(
+            "OptionListMustHaveOption",
+            format!(
+                "optionListId={} optionListName={}",
+                cmd.option_list.id.0, cmd.option_list.name.0
+            ),
+        ));
+    }
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::OptionListUpdated(OptionListUpdated {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        option_list: cmd.option_list,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RemoveOptionList` → emit `events.yaml#/OptionListRemoved`. Enforces
+/// `OptionListNotFound` and `OptionListInUse` (no offer may still reference it).
+pub async fn remove_option_list(
+    store: &dyn EventStore,
+    cmd: RemoveOptionList,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_catalog(store, &cmd.catalog_id).await?;
+    let Some(option_list) =
+        state.as_ref().and_then(|s| s.option_list_by_id(cmd.option_list_id)).cloned()
+    else {
+        return Err(reject(
+            "OptionListNotFound",
+            format!("optionListId={}", cmd.option_list_id.0),
+        ));
+    };
+    let state = state.expect("existence checked above");
+    if state.option_list_in_use(cmd.option_list_id) {
+        return Err(reject(
+            "OptionListInUse",
+            format!("optionListId={} optionListName={}", option_list.id.0, option_list.name.0),
+        ));
+    }
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::OptionListRemoved(OptionListRemoved {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        option_list_id: cmd.option_list_id,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/UpdateOfferStock` → emit `events.yaml#/OfferStockUpdated`. Enforces
+/// `OfferNotFound`; the `StockStatus` is DERIVED server-side from quantity vs lowStockThreshold
+/// (0 → OUT_OF_STOCK, ≤ threshold → LOW_STOCK, else IN_STOCK). The inbound HubRise inventory sync
+/// records the same event WITHOUT this command (actors.yaml event reaction — the ACL appends the
+/// already-derived fact; there is nothing to reject).
+pub async fn update_offer_stock(
+    store: &dyn EventStore,
+    cmd: UpdateOfferStock,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_catalog(store, &cmd.catalog_id).await?;
+    let exists = state.as_ref().is_some_and(|s| s.offer_by_id(cmd.offer_id).is_some());
+    if !exists {
+        return Err(reject("OfferNotFound", format!("offerId={}", cmd.offer_id.0)));
+    }
+    // TODO(invariant): OfferNotStockTracked — the Offer entity carries no stock-tracking flag (an
+    //                  offer simply STARTS tracking on its first UpdateOfferStock, per the tests.yaml
+    //                  fixture), so this rejection needs a model-level flag to be enforceable.
+    let status = if cmd.quantity.0 <= 0.0 {
+        StockStatus::OUT_OF_STOCK
+    } else if cmd.low_stock_threshold.as_ref().is_some_and(|t| cmd.quantity.0 <= t.0) {
+        StockStatus::LOW_STOCK
+    } else {
+        StockStatus::IN_STOCK
+    };
+    let stock = Stock {
+        quantity: cmd.quantity,
+        low_stock_threshold: cmd.low_stock_threshold,
+        status,
+        expires_at: cmd.expires_at,
+    };
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::OfferStockUpdated(OfferStockUpdated {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        offer_id: cmd.offer_id,
+        stock,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ImportCatalog` → emit `events.yaml#/CatalogImported` (full replace of the
+/// catalog content; idempotent via entity refs). Enforces `CatalogNotFound` and `MissingRef` (every
+/// imported entity must carry its ref — the idempotency key). `CatalogTranslationFailed` is raised by
+/// the HubRise ACL while TRANSLATING the external payload, i.e. before this command exists — it never
+/// fires here.
+pub async fn import_catalog(
+    store: &dyn EventStore,
+    cmd: ImportCatalog,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = require_catalog(store, &cmd.catalog_id).await?;
+    let missing_ref = cmd.categories.iter().any(|c| c.r#ref.is_none())
+        || cmd
+            .products
+            .iter()
+            .any(|p| p.r#ref.is_none() || p.offers.iter().any(|o| o.r#ref.is_none()))
+        || cmd
+            .option_lists
+            .iter()
+            .any(|l| l.r#ref.is_none() || l.options.iter().any(|o| o.r#ref.is_none()));
+    if missing_ref {
+        return Err(reject("MissingRef", "every imported entity must carry its ref"));
+    }
+    let stream_name = catalog_stream(&cmd.catalog_id);
+    let event = DomainEvent::CatalogImported(CatalogImported {
+        catalog_id: cmd.catalog_id,
+        restaurant_id: cmd.restaurant_id,
+        source: cmd.source,
+        categories: cmd.categories,
+        products: cmd.products,
+        option_lists: cmd.option_lists,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// Customer aggregate — WRAPPED Supabase Auth identity (ADR-0015) + profile/preferences/favorites.
+// The request/confirm pairs stay pure: the AuthProviderGateway port is the ACL boundary doing the
+// actual Supabase call; only verified FACTS are appended here.
+// ================================================================================================
+
+/// The stream a Customer aggregate lives on.
+fn customer_stream(id: &CustomerId) -> String {
+    format!("Customer-{}", id.0)
+}
+
+/// Rehydrate the Customer aggregate (fold + current version).
+async fn load_customer(
+    store: &dyn EventStore,
+    id: &CustomerId,
+) -> Result<(Option<CustomerState>, i64), DomainError> {
+    let (events, version) = store.load(&customer_stream(id)).await?;
+    Ok((domain::customer::fold(&events), version))
+}
+
+/// Canonical E.164 from the split phone input: dialing code + national number with the trunk `0`
+/// stripped (e.g. `+33` + `0612345678` → `+33612345678`), matching `scalars.yaml#/PhoneNumber`.
+/// Carrier-grade validation belongs to the auth provider (it delivers the SMS), not here.
+fn canonical_phone(dialing_code: &DialingCode, national_number: &NationalPhoneNumber) -> PhoneNumber {
+    PhoneNumber(format!("{}{}", dialing_code.0, national_number.0.trim_start_matches('0')))
+}
+
+/// Handle `commands.yaml#/RequestPhoneVerification` — a pure EFFECT (actors.yaml: emits nothing):
+/// delegate the SMS OTP send to the wrapped auth provider (Supabase → Twilio, ADR-0015), localized by
+/// the locale the caller provided (pre-identification, so there is no stored locale yet).
+pub async fn request_phone_verification(
+    _store: &dyn EventStore,
+    auth: &dyn AuthProviderGateway,
+    cmd: RequestPhoneVerification,
+    _actor: &Actor,
+) -> Result<(), DomainError> {
+    auth.send_phone_otp(&cmd.dialing_code, &cmd.national_number, cmd.locale.as_ref()).await
+}
+
+/// What [`verify_phone`] resolved — surfaced in the GraphQL `verifyPhone` payload (api.yaml).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VerifyPhoneOutcome {
+    /// The AUTHORITATIVE customer id: the existing customer for a returning phone (the
+    /// client-proposed id is discarded), else the newly registered one.
+    pub customer_id: CustomerId,
+    /// Whether a new Customer was registered (`true`) or a returning one identified (`false`).
+    pub created: bool,
+}
+
+/// Handle `commands.yaml#/VerifyPhone` → register-or-identify. The OTP is verified through the auth
+/// provider port (`InvalidVerificationCode` / `VerificationCodeExpired`); the backend then decides
+/// new-vs-returning by resolving the canonical phone in the Customer read model: a known phone emits
+/// `CustomerIdentified` on the EXISTING customer's stream (the client-proposed id is discarded), a
+/// new phone emits `CustomerRegistered` on the new `Customer-<id>` stream (idempotent on replay).
+pub async fn verify_phone(
+    store: &dyn EventStore,
+    auth: &dyn AuthProviderGateway,
+    customers: &dyn CustomerReadRepository,
+    cmd: VerifyPhone,
+    actor: &Actor,
+) -> Result<VerifyPhoneOutcome, DomainError> {
+    let phone = canonical_phone(&cmd.dialing_code, &cmd.national_number);
+    let auth_ref = match auth
+        .verify_phone_otp(&cmd.dialing_code, &cmd.national_number, &cmd.code)
+        .await?
+    {
+        PhoneOtpCheck::Verified { auth_ref } => auth_ref,
+        PhoneOtpCheck::Invalid => {
+            return Err(reject("InvalidVerificationCode", format!("phone={}", phone.0)));
+        }
+        PhoneOtpCheck::Expired => {
+            return Err(reject("VerificationCodeExpired", format!("phone={}", phone.0)));
+        }
+    };
+    if let Some(existing) = customers.by_phone(phone.clone()).await? {
+        let (_state, version) = load_customer(store, &existing.customer_id).await?;
+        let stream_name = customer_stream(&existing.customer_id);
+        let event = DomainEvent::CustomerIdentified(CustomerIdentified {
+            customer_id: existing.customer_id,
+            auth_ref,
+        });
+        store.append(&stream_name, version, &[event], actor).await?;
+        return Ok(VerifyPhoneOutcome { customer_id: existing.customer_id, created: false });
+    }
+    let stream_name = customer_stream(&cmd.customer_id);
+    let customer_id = cmd.customer_id;
+    let event = DomainEvent::CustomerRegistered(CustomerRegistered {
+        mode: None,
+        customer_id: cmd.customer_id,
+        auth_ref: Some(auth_ref),
+        phone,
+        display_name: cmd.display_name,
+        email: None, // email is verified-only (ConfirmEmailVerification), never set at registration
+        locale: cmd.locale,
+        timezone: cmd.timezone,
+    });
+    idempotent_on_existing(store.append(&stream_name, 0, &[event], actor).await)?;
+    Ok(VerifyPhoneOutcome { customer_id, created: true })
+}
+
+/// Handle `commands.yaml#/RequestEmailVerification` — a pure EFFECT (emits nothing): reject an email
+/// already owned by ANOTHER customer (`EmailAlreadyInUse`), then delegate the magic-link send to the
+/// auth provider, localized via the customer's STORED locale (ADR-0015: no per-call language param).
+pub async fn request_email_verification(
+    store: &dyn EventStore,
+    auth: &dyn AuthProviderGateway,
+    customers: &dyn CustomerReadRepository,
+    cmd: RequestEmailVerification,
+    _actor: &Actor,
+) -> Result<(), DomainError> {
+    if let Some(owner) = customers.by_email(cmd.email.clone()).await? {
+        if owner.customer_id != cmd.customer_id {
+            return Err(reject("EmailAlreadyInUse", format!("email={}", cmd.email.0)));
+        }
+    }
+    let (state, _version) = load_customer(store, &cmd.customer_id).await?;
+    let locale = state.and_then(|s| s.locale);
+    auth.send_email_magic_link(&cmd.email, locale.as_ref()).await
+}
+
+/// Handle `commands.yaml#/ConfirmEmailVerification` → emit `events.yaml#/CustomerEmailVerified`. The
+/// token is verified SERVER-SIDE through the auth provider port (`InvalidVerificationToken` /
+/// `VerificationCodeExpired`), which reports the email it proves — the linked email is never taken
+/// from client input.
+pub async fn confirm_email_verification(
+    store: &dyn EventStore,
+    auth: &dyn AuthProviderGateway,
+    cmd: ConfirmEmailVerification,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let email = match auth.verify_email_token(&cmd.token).await? {
+        EmailTokenCheck::Verified { email } => email,
+        EmailTokenCheck::Invalid => {
+            return Err(reject("InvalidVerificationToken", "magic-link token failed verification"));
+        }
+        EmailTokenCheck::Expired => {
+            return Err(reject("VerificationCodeExpired", "magic-link token expired"));
+        }
+    };
+    let (_state, version) = load_customer(store, &cmd.customer_id).await?;
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::CustomerEmailVerified(CustomerEmailVerified {
+        customer_id: cmd.customer_id,
+        email,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RequestPhoneChange` — a pure EFFECT (emits nothing): reject a new phone
+/// already owned by ANOTHER customer (`PhoneAlreadyInUse`), then delegate the OTP send to the new
+/// phone (localized via the STORED locale).
+pub async fn request_phone_change(
+    store: &dyn EventStore,
+    auth: &dyn AuthProviderGateway,
+    customers: &dyn CustomerReadRepository,
+    cmd: RequestPhoneChange,
+    _actor: &Actor,
+) -> Result<(), DomainError> {
+    let new_phone = canonical_phone(&cmd.new_dialing_code, &cmd.new_national_number);
+    if let Some(owner) = customers.by_phone(new_phone.clone()).await? {
+        if owner.customer_id != cmd.customer_id {
+            return Err(reject("PhoneAlreadyInUse", format!("phone={}", new_phone.0)));
+        }
+    }
+    let (state, _version) = load_customer(store, &cmd.customer_id).await?;
+    let locale = state.and_then(|s| s.locale);
+    auth.send_phone_otp(&cmd.new_dialing_code, &cmd.new_national_number, locale.as_ref()).await
+}
+
+/// Handle `commands.yaml#/ConfirmPhoneChange` → emit `events.yaml#/CustomerPhoneChanged` (canonical
+/// E.164). The OTP on the NEW phone is verified through the auth provider port
+/// (`InvalidVerificationCode` / `VerificationCodeExpired`) and uniqueness is re-checked at confirm
+/// time (`PhoneAlreadyInUse`).
+pub async fn confirm_phone_change(
+    store: &dyn EventStore,
+    auth: &dyn AuthProviderGateway,
+    customers: &dyn CustomerReadRepository,
+    cmd: ConfirmPhoneChange,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let new_phone = canonical_phone(&cmd.new_dialing_code, &cmd.new_national_number);
+    match auth
+        .verify_phone_otp(&cmd.new_dialing_code, &cmd.new_national_number, &cmd.code)
+        .await?
+    {
+        PhoneOtpCheck::Verified { .. } => {}
+        PhoneOtpCheck::Invalid => {
+            return Err(reject("InvalidVerificationCode", format!("phone={}", new_phone.0)));
+        }
+        PhoneOtpCheck::Expired => {
+            return Err(reject("VerificationCodeExpired", format!("phone={}", new_phone.0)));
+        }
+    }
+    if let Some(owner) = customers.by_phone(new_phone.clone()).await? {
+        if owner.customer_id != cmd.customer_id {
+            return Err(reject("PhoneAlreadyInUse", format!("phone={}", new_phone.0)));
+        }
+    }
+    let (_state, version) = load_customer(store, &cmd.customer_id).await?;
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::CustomerPhoneChanged(CustomerPhoneChanged {
+        customer_id: cmd.customer_id,
+        phone: new_phone,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ChangeLanguage` → emit `events.yaml#/CustomerLanguageChanged` (the single
+/// locale setter; later authenticated SMS/email sends use the stored locale). Declares no throws.
+pub async fn change_language(
+    store: &dyn EventStore,
+    cmd: ChangeLanguage,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = load_customer(store, &cmd.customer_id).await?;
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::CustomerLanguageChanged(CustomerLanguageChanged {
+        customer_id: cmd.customer_id,
+        locale: cmd.locale,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/MarkRestaurantAsFavorite` → emit `events.yaml#/RestaurantFavorited`. The
+/// favorited restaurant must exist in the read model (`RestaurantNotFound`).
+pub async fn mark_restaurant_as_favorite(
+    store: &dyn EventStore,
+    restaurants: &dyn RestaurantReadRepository,
+    cmd: MarkRestaurantAsFavorite,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    if restaurants.by_id(cmd.restaurant_id).await?.is_none() {
+        return Err(reject("RestaurantNotFound", format!("restaurantId={}", cmd.restaurant_id.0)));
+    }
+    let (_state, version) = load_customer(store, &cmd.customer_id).await?;
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::RestaurantFavorited(RestaurantFavorited {
+        customer_id: cmd.customer_id,
+        restaurant_id: cmd.restaurant_id,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/UnmarkRestaurantAsFavorite` → emit `events.yaml#/RestaurantUnfavorited`.
+/// Idempotent per actors.yaml: unfavoriting a restaurant that is not a favorite is a no-op (no event,
+/// no error).
+pub async fn unmark_restaurant_as_favorite(
+    store: &dyn EventStore,
+    cmd: UnmarkRestaurantAsFavorite,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_customer(store, &cmd.customer_id).await?;
+    let is_favorite = state.is_some_and(|s| s.favorites.contains(&cmd.restaurant_id));
+    if !is_favorite {
+        return Ok(());
+    }
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::RestaurantUnfavorited(RestaurantUnfavorited {
+        customer_id: cmd.customer_id,
+        restaurant_id: cmd.restaurant_id,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/UpdateCustomerInfo` → emit `events.yaml#/CustomerInfoUpdated`. An update
+/// carrying nothing editable is rejected (`errors.yaml#/NoEditableFieldProvided`; displayName is the
+/// only editable field — email is verified-only).
+pub async fn update_customer_info(
+    store: &dyn EventStore,
+    cmd: UpdateCustomerInfo,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    if cmd.display_name.is_none() {
+        return Err(reject("NoEditableFieldProvided", "update carried no editable field"));
+    }
+    let (_state, version) = load_customer(store, &cmd.customer_id).await?;
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::CustomerInfoUpdated(CustomerInfoUpdated {
+        customer_id: cmd.customer_id,
+        display_name: cmd.display_name,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/SetCustomerPreferences` → emit `events.yaml#/CustomerPreferencesSet`
+/// (discovery + i18n preferences; language is ChangeLanguage). Declares no throws.
+pub async fn set_customer_preferences(
+    store: &dyn EventStore,
+    cmd: SetCustomerPreferences,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = load_customer(store, &cmd.customer_id).await?;
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::CustomerPreferencesSet(CustomerPreferencesSet {
+        customer_id: cmd.customer_id,
+        timezone: cmd.timezone,
+        dietary_tags: cmd.dietary_tags,
+        favorite_cuisines: cmd.favorite_cuisines,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/SetCustomerAddress` → emit `events.yaml#/CustomerAddressSet` (add-or-update
+/// by addressId, replace semantics). Declares no throws.
+pub async fn set_customer_address(
+    store: &dyn EventStore,
+    cmd: SetCustomerAddress,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = load_customer(store, &cmd.customer_id).await?;
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::CustomerAddressSet(CustomerAddressSet {
+        customer_id: cmd.customer_id,
+        address_id: cmd.address_id,
+        label: cmd.label,
+        address: cmd.address,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RemoveCustomerAddress` → emit `events.yaml#/CustomerAddressRemoved`.
+/// Idempotent per actors.yaml: removing an unknown address is a no-op (no event, no error).
+pub async fn remove_customer_address(
+    store: &dyn EventStore,
+    cmd: RemoveCustomerAddress,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = load_customer(store, &cmd.customer_id).await?;
+    let is_saved = state.is_some_and(|s| s.addresses.contains(&cmd.address_id));
+    if !is_saved {
+        return Ok(());
+    }
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::CustomerAddressRemoved(CustomerAddressRemoved {
+        customer_id: cmd.customer_id,
+        address_id: cmd.address_id,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/SetCustomerPaymentMethod` → emit `events.yaml#/CustomerPaymentMethodSet`
+/// (the preferred Stripe payment method reference; Stripe owns the instrument). Declares no throws.
+pub async fn set_customer_payment_method(
+    store: &dyn EventStore,
+    cmd: SetCustomerPaymentMethod,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = load_customer(store, &cmd.customer_id).await?;
+    let stream_name = customer_stream(&cmd.customer_id);
+    let event = DomainEvent::CustomerPaymentMethodSet(CustomerPaymentMethodSet {
+        customer_id: cmd.customer_id,
+        payment_method_id: cmd.payment_method_id,
+    });
+    store.append(&stream_name, version, &[event], actor).await.map(|_| ())
 }

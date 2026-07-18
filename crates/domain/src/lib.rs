@@ -10,10 +10,14 @@
 //! model is generated/implemented from the specs. Only the `shared` vocabulary is scaffolded for now.
 
 pub mod cart;
+pub mod catalog;
+pub mod customer;
 pub mod delivery_job;
 pub mod generated;
 pub mod order;
+pub mod prospect;
 pub mod restaurant;
+pub mod restaurant_account;
 pub mod shared;
 
 #[cfg(test)]

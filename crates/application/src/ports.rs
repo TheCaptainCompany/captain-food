@@ -4,7 +4,10 @@
 
 use async_trait::async_trait;
 use domain::generated::events::DomainEvent;
-use domain::generated::scalars::{GbpLinkStatus, WebUrl};
+use domain::generated::scalars::{
+    DialingCode, EmailAddress, EmailVerificationToken, ExternalReference, GbpLinkStatus, Locale,
+    NationalPhoneNumber, OtpCode, WebUrl,
+};
 use domain::shared::{errors::DomainError, identifiers::RestaurantId};
 
 /// Acting user + correlation for the event envelope (ADR-0041). The actor who performed a change is
@@ -76,6 +79,66 @@ pub trait GoogleOwnershipVerifier: Send + Sync {
 pub trait GbpOrderLinkProbe: Send + Sync {
     /// Observe the live state of the configured link (`VERIFIED` when it answers as expected).
     async fn probe(&self, url: &WebUrl) -> Result<GbpLinkStatus, DomainError>;
+}
+
+/// Outcome of a phone-OTP verification by the wrapped auth provider (Supabase Auth, ADR-0015).
+/// `Verified` carries the provider's user reference (`authRef`) so the domain can link the identity.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PhoneOtpCheck {
+    /// The code matched — the provider resolved/created its user and reports its reference.
+    Verified { auth_ref: ExternalReference },
+    /// The code does not match → `errors.yaml#/InvalidVerificationCode`.
+    Invalid,
+    /// The code is past its validity window → `errors.yaml#/VerificationCodeExpired`.
+    Expired,
+}
+
+/// Outcome of an email magic-link token verification by the wrapped auth provider (ADR-0015).
+#[derive(Debug, Clone, PartialEq)]
+pub enum EmailTokenCheck {
+    /// The token verified server-side — the provider reports WHICH email it proves.
+    Verified { email: EmailAddress },
+    /// The token failed verification → `errors.yaml#/InvalidVerificationToken`.
+    Invalid,
+    /// The token is past its validity window → `errors.yaml#/VerificationCodeExpired`.
+    Expired,
+}
+
+/// The WRAPPED auth provider (Supabase Auth behind our GraphQL, ADR-0015): passwordless phone-OTP and
+/// email magic-link identity. The Customer command handlers stay pure and free of the Supabase SDK —
+/// this port IS the ACL boundary; the `supabase-acl` adapter (infrastructure) owns the actual HTTP/SDK
+/// calls, Twilio SMS delivery and token semantics. Until it lands the composition root injects a
+/// fail-closed stand-in (sends error, verifications report `Invalid` — never silently accept).
+#[async_trait]
+pub trait AuthProviderGateway: Send + Sync {
+    /// Send an SMS OTP to this phone (Twilio via Supabase; mock in dev), localized by `locale`.
+    async fn send_phone_otp(
+        &self,
+        dialing_code: &DialingCode,
+        national_number: &NationalPhoneNumber,
+        locale: Option<&Locale>,
+    ) -> Result<(), DomainError>;
+
+    /// Verify an SMS OTP for this phone with the provider.
+    async fn verify_phone_otp(
+        &self,
+        dialing_code: &DialingCode,
+        national_number: &NationalPhoneNumber,
+        code: &OtpCode,
+    ) -> Result<PhoneOtpCheck, DomainError>;
+
+    /// Email a magic link to verify/link `email`, localized by the customer's STORED `locale`.
+    async fn send_email_magic_link(
+        &self,
+        email: &EmailAddress,
+        locale: Option<&Locale>,
+    ) -> Result<(), DomainError>;
+
+    /// Verify a returned magic-link token server-side with the provider.
+    async fn verify_email_token(
+        &self,
+        token: &EmailVerificationToken,
+    ) -> Result<EmailTokenCheck, DomainError>;
 }
 
 /// Read-side port: the query handlers resolve restaurants through this. In V0 the adapter reads the

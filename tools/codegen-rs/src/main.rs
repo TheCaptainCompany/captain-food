@@ -6298,15 +6298,31 @@ fn emit_server_mutation(model: &Model) -> String {
 /// write vertical). Returned as the fn body (8-space indent); `None` → the `not implemented` stub.
 /// Extend as more aggregates land. `payload` is the mutation's `<Name>Payload` Rust type.
 fn wired_mutation_body(name: &str, payload: &str) -> Option<String> {
+    // verifyPhone is the one payload carrying more than the correlation id (customerId + created):
+    // the handler returns a VerifyPhoneOutcome the resolver maps into the payload, so it gets a
+    // bespoke body instead of the generic fire-and-ack template below.
+    if name == "verifyPhone" {
+        return Some(format!(
+            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;\n        let auth = ctx.data::<std::sync::Arc<dyn application::ports::AuthProviderGateway>>()?;\n        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;\n        let cmd: domain::generated::commands::VerifyPhone = to_command(&input)?;\n        let actor = request_actor(ctx);\n        let outcome = application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor)\n            .await\n            .map_err(domain_error)?;\n        Ok({payload} {{\n            correlation_id: CorrelationId(actor.correlation_id),\n            customer_id: outcome.customer_id.into(),\n            created: outcome.created,\n        }})"
+        ));
+    }
     // (domain command, application::commands handler, extra port beyond the EventStore).
     enum Extra {
         None,
-        /// `RestaurantReadRepository` — backs the SlugAlreadyTaken uniqueness check.
+        /// `RestaurantReadRepository` — backs the SlugAlreadyTaken/RestaurantNotFound and
+        /// CurrencyMismatch (default currency) checks.
         Restaurants,
         /// `GoogleOwnershipVerifier` — GBP ownership proof (ADR-0019).
         Ownership,
         /// `GbpOrderLinkProbe` — GBP 'Order online' link ping (ADR-0021).
         Probe,
+        /// `ProspectionReadRepository` — backs the ProspectContactedTooRecently check (ADR-0020).
+        Prospection,
+        /// `AuthProviderGateway` — the wrapped Supabase Auth ACL boundary (ADR-0015).
+        Auth,
+        /// `AuthProviderGateway` + `CustomerReadRepository` — identity flows that also need the
+        /// phone/email uniqueness-and-resolution lookups.
+        AuthCustomers,
     }
     let (command, handler, extra) = match name {
         "registerRestaurant" => ("RegisterRestaurant", "register_restaurant", Extra::Restaurants),
@@ -6367,6 +6383,61 @@ fn wired_mutation_body(name: &str, payload: &str) -> Option<String> {
         // wiring it needs the PaymentGateway + CartReadRepository ports injected at the composition
         // root (crates/server graphql::schema `.data(...)`) — add the arm once the gateway adapter
         // (fail-closed Stripe stand-in) is registered there.
+        // RestaurantAccount aggregate.
+        "registerRestaurantAccount" => {
+            ("RegisterRestaurantAccount", "register_restaurant_account", Extra::None)
+        }
+        "updateRestaurantAccount" => {
+            ("UpdateRestaurantAccount", "update_restaurant_account", Extra::None)
+        }
+        "deleteRestaurantAccount" => {
+            ("DeleteRestaurantAccount", "delete_restaurant_account", Extra::None)
+        }
+        // Prospect aggregate (ADR-0020).
+        "recordProspectContact" => {
+            ("RecordProspectContact", "record_prospect_contact", Extra::Prospection)
+        }
+        "markProspectCold" => ("MarkProspectCold", "mark_prospect_cold", Extra::None),
+        "recordProspectReply" => ("RecordProspectReply", "record_prospect_reply", Extra::None),
+        // Catalog aggregate.
+        "createCatalog" => ("CreateCatalog", "create_catalog", Extra::Restaurants),
+        "addProduct" => ("AddProduct", "add_product", Extra::Restaurants),
+        "updateProduct" => ("UpdateProduct", "update_product", Extra::Restaurants),
+        "removeProduct" => ("RemoveProduct", "remove_product", Extra::None),
+        "addCatalogCategory" => ("AddCatalogCategory", "add_catalog_category", Extra::None),
+        "updateCatalogCategory" => ("UpdateCatalogCategory", "update_catalog_category", Extra::None),
+        "removeCatalogCategory" => ("RemoveCatalogCategory", "remove_catalog_category", Extra::None),
+        "addOptionList" => ("AddOptionList", "add_option_list", Extra::None),
+        "updateOptionList" => ("UpdateOptionList", "update_option_list", Extra::None),
+        "removeOptionList" => ("RemoveOptionList", "remove_option_list", Extra::None),
+        "updateOfferStock" => ("UpdateOfferStock", "update_offer_stock", Extra::None),
+        "importCatalog" => ("ImportCatalog", "import_catalog", Extra::None),
+        // Customer aggregate (wrapped Supabase Auth, ADR-0015).
+        "requestPhoneVerification" => {
+            ("RequestPhoneVerification", "request_phone_verification", Extra::Auth)
+        }
+        "requestEmailVerification" => {
+            ("RequestEmailVerification", "request_email_verification", Extra::AuthCustomers)
+        }
+        "confirmEmailVerification" => {
+            ("ConfirmEmailVerification", "confirm_email_verification", Extra::Auth)
+        }
+        "requestPhoneChange" => ("RequestPhoneChange", "request_phone_change", Extra::AuthCustomers),
+        "confirmPhoneChange" => ("ConfirmPhoneChange", "confirm_phone_change", Extra::AuthCustomers),
+        "changeLanguage" => ("ChangeLanguage", "change_language", Extra::None),
+        "markRestaurantAsFavorite" => {
+            ("MarkRestaurantAsFavorite", "mark_restaurant_as_favorite", Extra::Restaurants)
+        }
+        "unmarkRestaurantAsFavorite" => {
+            ("UnmarkRestaurantAsFavorite", "unmark_restaurant_as_favorite", Extra::None)
+        }
+        "updateCustomerInfo" => ("UpdateCustomerInfo", "update_customer_info", Extra::None),
+        "setCustomerPreferences" => ("SetCustomerPreferences", "set_customer_preferences", Extra::None),
+        "setCustomerAddress" => ("SetCustomerAddress", "set_customer_address", Extra::None),
+        "removeCustomerAddress" => ("RemoveCustomerAddress", "remove_customer_address", Extra::None),
+        "setCustomerPaymentMethod" => {
+            ("SetCustomerPaymentMethod", "set_customer_payment_method", Extra::None)
+        }
         _ => return None,
     };
     let (resolve_extra, extra_arg) = match extra {
@@ -6382,6 +6453,18 @@ fn wired_mutation_body(name: &str, payload: &str) -> Option<String> {
         Extra::Probe => (
             "        let probe = ctx.data::<std::sync::Arc<dyn application::ports::GbpOrderLinkProbe>>()?;\n".to_string(),
             ", probe.as_ref()",
+        ),
+        Extra::Prospection => (
+            "        let prospection = ctx.data::<std::sync::Arc<dyn application::queries::ProspectionReadRepository>>()?;\n".to_string(),
+            ", prospection.as_ref()",
+        ),
+        Extra::Auth => (
+            "        let auth = ctx.data::<std::sync::Arc<dyn application::ports::AuthProviderGateway>>()?;\n".to_string(),
+            ", auth.as_ref()",
+        ),
+        Extra::AuthCustomers => (
+            "        let auth = ctx.data::<std::sync::Arc<dyn application::ports::AuthProviderGateway>>()?;\n        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;\n".to_string(),
+            ", auth.as_ref(), customers.as_ref()",
         ),
     };
     Some(format!(

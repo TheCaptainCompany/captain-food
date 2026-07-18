@@ -75,7 +75,8 @@
   <tr><td class="p"><code>MutationRoot</code> (all api.yaml mutations generated)</td><td class="s done">✅</td><td class="note"></td></tr>
   <tr><td class="p">Restaurant aggregate (13 commands)</td><td class="s done">✅</td><td class="note">Spec invariants via event-stream rehydration + 25 behaviour tests (ADR-0046)</td></tr>
   <tr><td class="p">Cart (3) · Order (11) · DeliveryJob (4)</td><td class="s done">✅</td><td class="note">Round 2a — real invariants + 29 behaviour tests</td></tr>
-  <tr><td class="p">Catalog · Customer · Prospect · RestaurantAccount</td><td class="s prog">🚧</td><td class="note">Round 2b — in progress</td></tr>
+  <tr><td class="p">Catalog (12) · Prospect (3) · RestaurantAccount (3)</td><td class="s done">✅</td><td class="note">Round 2b — real invariants + behaviour tests</td></tr>
+  <tr><td class="p">Customer (14)</td><td class="s prog">🚧</td><td class="note">Handlers + tests done; needs <code>AuthProviderGateway</code> stand-in + Customer read model wired at the composition root</td></tr>
   <tr><td class="p"><code>placeOrder</code> (checkout saga)</td><td class="s prog">🚧</td><td class="note">Handler + <code>PaymentGateway</code> port ready; mutation stubbed until Stripe + PlaceOrderProcess land</td></tr>
   <tr><td class="p">Structured typed errors (vs interim <code>"Code: detail"</code>)</td><td class="s plan">📋</td><td class="note">ADR-0046 follow-up</td></tr>
 </table></div>

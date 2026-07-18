@@ -5,13 +5,14 @@
 use async_trait::async_trait;
 
 use domain::generated::scalars::{
-    CartId, CuisineCategory, CurrencyCode, CustomerId, OrderId, OrderStatus, ProspectPipelineStatus,
-    RestaurantId, Slug,
+    CartId, CuisineCategory, CurrencyCode, CustomerId, EmailAddress, OrderId, OrderStatus,
+    PhoneNumber, ProspectPipelineStatus, RestaurantId, Slug,
 };
 use domain::shared::errors::DomainError;
 
 pub use crate::generated::rows::CartRow;
 pub use crate::generated::rows::CatalogRow;
+pub use crate::generated::rows::CustomerRow;
 pub use crate::generated::rows::OrderTrackingRow;
 pub use crate::generated::rows::ProspectionPipelineRow;
 pub use crate::generated::rows::RestaurantRow;
@@ -51,6 +52,17 @@ pub trait CartReadRepository: Send + Sync {
     async fn by_customer(&self, customer_id: CustomerId) -> Result<Vec<CartRow>, DomainError>;
     /// A single cart by id (session-scoped), or `None` if absent.
     async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError>;
+}
+
+/// Read port over the `Customer` projection table (ADR-0040) — the identity/lookup read model. Backs
+/// the write-side uniqueness/resolution invariants of the Customer aggregate (VerifyPhone
+/// register-vs-identify, `PhoneAlreadyInUse`, `EmailAlreadyInUse`) and, later, the `me` query.
+#[async_trait]
+pub trait CustomerReadRepository: Send + Sync {
+    /// The customer owning this canonical E.164 phone (the primary identifier), or `None`.
+    async fn by_phone(&self, phone: PhoneNumber) -> Result<Option<CustomerRow>, DomainError>;
+    /// The customer whose verified email this is, or `None`.
+    async fn by_email(&self, email: EmailAddress) -> Result<Option<CustomerRow>, DomainError>;
 }
 
 /// Optional filters for the order list — mirrors the `orders` query args in api.yaml
