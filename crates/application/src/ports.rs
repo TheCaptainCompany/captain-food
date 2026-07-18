@@ -85,3 +85,29 @@ pub trait RestaurantRepository: Send + Sync {
     /// Whether a restaurant with this id is visible in the read model.
     async fn exists(&self, id: RestaurantId) -> Result<bool, DomainError>;
 }
+
+/// What [`PaymentGateway::create_payment_intent`] hands back: the Stripe PaymentIntent reference plus
+/// the client secret the frontend needs to confirm the payment — the `placeOrder` mutation payload's
+/// server-resolved values (api.yaml).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreatedPaymentIntent {
+    pub payment_intent_id: domain::generated::scalars::PaymentIntentId,
+    pub client_secret: String,
+}
+
+/// Stripe checkout seam for the PlaceOrder saga's first leg (`commands.yaml#/PlaceOrder` →
+/// `events.yaml#/PaymentIntentCreated`, actors.yaml PlaceOrderProcess). The adapter owns the Stripe
+/// call; the handler only records the created intent. A SYNCHRONOUS decline must be returned as the
+/// canonical `errors.yaml#/PaymentDeclined` rejection (`DomainError::Invariant("PaymentDeclined: …")`).
+/// The payment OUTCOME (`PaymentCaptured`/`PaymentFailed`) is INBOUND from Stripe webhooks (CLAUDE.md
+/// "Commands vs inbound events") and never flows through this port. Until the real Stripe adapter lands
+/// the composition root injects a fail-closed stand-in (never silently accepts).
+#[async_trait]
+pub trait PaymentGateway: Send + Sync {
+    /// Create the PaymentIntent for `amount` against `payment_method_id`.
+    async fn create_payment_intent(
+        &self,
+        amount: &domain::generated::entities::Money,
+        payment_method_id: &str,
+    ) -> Result<CreatedPaymentIntent, DomainError>;
+}

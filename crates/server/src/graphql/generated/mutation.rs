@@ -537,16 +537,34 @@ pub struct MutationRoot;
 #[async_graphql::Object(name = "Mutation")]
 impl MutationRoot {
     #[graphql(name = "addCartLine")]
-    async fn add_cart_line(&self, input: AddCartLineInput) -> async_graphql::Result<AddCartLinePayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn add_cart_line(&self, ctx: &async_graphql::Context<'_>, input: AddCartLineInput) -> async_graphql::Result<AddCartLinePayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::AddCartLine = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::add_cart_line(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(AddCartLinePayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "removeCartLine")]
-    async fn remove_cart_line(&self, input: RemoveCartLineInput) -> async_graphql::Result<RemoveCartLinePayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn remove_cart_line(&self, ctx: &async_graphql::Context<'_>, input: RemoveCartLineInput) -> async_graphql::Result<RemoveCartLinePayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::RemoveCartLine = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::remove_cart_line(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(RemoveCartLinePayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "changeCartLineQuantity")]
-    async fn change_cart_line_quantity(&self, input: ChangeCartLineQuantityInput) -> async_graphql::Result<ChangeCartLineQuantityPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn change_cart_line_quantity(&self, ctx: &async_graphql::Context<'_>, input: ChangeCartLineQuantityInput) -> async_graphql::Result<ChangeCartLineQuantityPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::ChangeCartLineQuantity = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::change_cart_line_quantity(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(ChangeCartLineQuantityPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "registerRestaurantAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
     async fn register_restaurant_account(&self, input: RegisterRestaurantAccountInput) -> async_graphql::Result<RegisterRestaurantAccountPayload> {
@@ -815,64 +833,154 @@ impl MutationRoot {
         Err(async_graphql::Error::new("not implemented"))
     }
     #[graphql(name = "acceptOrder", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
-    async fn accept_order(&self, input: AcceptOrderInput) -> async_graphql::Result<AcceptOrderPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn accept_order(&self, ctx: &async_graphql::Context<'_>, input: AcceptOrderInput) -> async_graphql::Result<AcceptOrderPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::AcceptOrder = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::accept_order(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(AcceptOrderPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "rejectOrder", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
-    async fn reject_order(&self, input: RejectOrderInput) -> async_graphql::Result<RejectOrderPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn reject_order(&self, ctx: &async_graphql::Context<'_>, input: RejectOrderInput) -> async_graphql::Result<RejectOrderPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::RejectOrder = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::reject_order(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(RejectOrderPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "startPreparation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
-    async fn start_preparation(&self, input: StartPreparationInput) -> async_graphql::Result<StartPreparationPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn start_preparation(&self, ctx: &async_graphql::Context<'_>, input: StartPreparationInput) -> async_graphql::Result<StartPreparationPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::StartPreparation = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::start_preparation(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(StartPreparationPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "markOrderReady", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
-    async fn mark_order_ready(&self, input: MarkOrderReadyInput) -> async_graphql::Result<MarkOrderReadyPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn mark_order_ready(&self, ctx: &async_graphql::Context<'_>, input: MarkOrderReadyInput) -> async_graphql::Result<MarkOrderReadyPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::MarkOrderReady = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::mark_order_ready(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(MarkOrderReadyPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "markOrderDelivered", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER)", visible = "visible_restaurant_account_restaurant_rider")]
-    async fn mark_order_delivered(&self, input: MarkOrderDeliveredInput) -> async_graphql::Result<MarkOrderDeliveredPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn mark_order_delivered(&self, ctx: &async_graphql::Context<'_>, input: MarkOrderDeliveredInput) -> async_graphql::Result<MarkOrderDeliveredPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::MarkOrderDelivered = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::mark_order_delivered(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(MarkOrderDeliveredPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "cancelOrderByCustomer", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
-    async fn cancel_order_by_customer(&self, input: CancelOrderByCustomerInput) -> async_graphql::Result<CancelOrderByCustomerPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn cancel_order_by_customer(&self, ctx: &async_graphql::Context<'_>, input: CancelOrderByCustomerInput) -> async_graphql::Result<CancelOrderByCustomerPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::CancelOrderByCustomer = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::cancel_order_by_customer(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(CancelOrderByCustomerPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "cancelOrderByRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
-    async fn cancel_order_by_restaurant(&self, input: CancelOrderByRestaurantInput) -> async_graphql::Result<CancelOrderByRestaurantPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn cancel_order_by_restaurant(&self, ctx: &async_graphql::Context<'_>, input: CancelOrderByRestaurantInput) -> async_graphql::Result<CancelOrderByRestaurantPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::CancelOrderByRestaurant = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::cancel_order_by_restaurant(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(CancelOrderByRestaurantPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "rateOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
-    async fn rate_order(&self, input: RateOrderInput) -> async_graphql::Result<RateOrderPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn rate_order(&self, ctx: &async_graphql::Context<'_>, input: RateOrderInput) -> async_graphql::Result<RateOrderPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::RateOrder = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::rate_order(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(RateOrderPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "rateRestaurant", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
-    async fn rate_restaurant(&self, input: RateRestaurantInput) -> async_graphql::Result<RateRestaurantPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn rate_restaurant(&self, ctx: &async_graphql::Context<'_>, input: RateRestaurantInput) -> async_graphql::Result<RateRestaurantPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::RateRestaurant = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::rate_restaurant(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(RateRestaurantPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "tipOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_customer_restaurant_account_restaurant")]
-    async fn tip_order(&self, input: TipOrderInput) -> async_graphql::Result<TipOrderPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn tip_order(&self, ctx: &async_graphql::Context<'_>, input: TipOrderInput) -> async_graphql::Result<TipOrderPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::TipOrder = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::tip_order(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(TipOrderPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "requestRefund", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
-    async fn request_refund(&self, input: RequestRefundInput) -> async_graphql::Result<RequestRefundPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn request_refund(&self, ctx: &async_graphql::Context<'_>, input: RequestRefundInput) -> async_graphql::Result<RequestRefundPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::RequestRefund = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::request_refund(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(RequestRefundPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "acceptDelivery", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
-    async fn accept_delivery(&self, input: AcceptDeliveryInput) -> async_graphql::Result<AcceptDeliveryPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn accept_delivery(&self, ctx: &async_graphql::Context<'_>, input: AcceptDeliveryInput) -> async_graphql::Result<AcceptDeliveryPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::AcceptDelivery = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::accept_delivery(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(AcceptDeliveryPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "confirmPickup", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
-    async fn confirm_pickup(&self, input: ConfirmPickupInput) -> async_graphql::Result<ConfirmPickupPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn confirm_pickup(&self, ctx: &async_graphql::Context<'_>, input: ConfirmPickupInput) -> async_graphql::Result<ConfirmPickupPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::ConfirmPickup = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::confirm_pickup(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(ConfirmPickupPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "completeDelivery", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
-    async fn complete_delivery(&self, input: CompleteDeliveryInput) -> async_graphql::Result<CompleteDeliveryPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn complete_delivery(&self, ctx: &async_graphql::Context<'_>, input: CompleteDeliveryInput) -> async_graphql::Result<CompleteDeliveryPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::CompleteDelivery = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::complete_delivery(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(CompleteDeliveryPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "cancelDelivery", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
-    async fn cancel_delivery(&self, input: CancelDeliveryInput) -> async_graphql::Result<CancelDeliveryPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn cancel_delivery(&self, ctx: &async_graphql::Context<'_>, input: CancelDeliveryInput) -> async_graphql::Result<CancelDeliveryPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let cmd: domain::generated::commands::CancelDelivery = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::commands::cancel_delivery(store.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(CancelDeliveryPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
 }
 

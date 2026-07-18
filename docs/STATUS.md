@@ -32,7 +32,9 @@
 |---|---|---|
 | `MutationRoot` (all api.yaml mutations generated) | ✅ | |
 | Restaurant aggregate (13 commands) | ✅ | Spec invariants (event-stream rehydration) + 25 behaviour tests |
-| Other aggregates (Prospect, Catalog, Cart, Order, Customer, RestaurantAccount, Delivery) | 🚧 | Round 2 — in progress |
+| Cart (3) · Order (11) · DeliveryJob (4) | ✅ | Round 2a — real invariants + 29 behaviour tests; some Cart line-checks await a Catalog offer read port |
+| Catalog · Customer · Prospect · RestaurantAccount | 🚧 | Round 2b — in progress |
+| `placeOrder` (checkout saga) | 🚧 | Handler + `PaymentGateway` port ready; mutation stubbed until the Stripe integration + PlaceOrderProcess saga land (payment legs are inbound webhooks) |
 | Structured typed errors (vs interim `"Code: detail"`) | 📋 | ADR-0046 follow-up |
 
 ## 🔐 Authorization

@@ -6338,6 +6338,35 @@ fn wired_mutation_body(name: &str, payload: &str) -> Option<String> {
         "verifyGbpOrderLink" => {
             ("VerifyGoogleBusinessProfileOrderLink", "verify_gbp_order_link", Extra::Probe)
         }
+        // Cart aggregate (ADR-0046 round 2: the checkout→order→delivery flow).
+        "addCartLine" => ("AddCartLine", "add_cart_line", Extra::None),
+        "removeCartLine" => ("RemoveCartLine", "remove_cart_line", Extra::None),
+        "changeCartLineQuantity" => {
+            ("ChangeCartLineQuantity", "change_cart_line_quantity", Extra::None)
+        }
+        // Order aggregate.
+        "acceptOrder" => ("AcceptOrder", "accept_order", Extra::None),
+        "rejectOrder" => ("RejectOrder", "reject_order", Extra::None),
+        "startPreparation" => ("StartPreparation", "start_preparation", Extra::None),
+        "markOrderReady" => ("MarkOrderReady", "mark_order_ready", Extra::None),
+        "markOrderDelivered" => ("MarkOrderDelivered", "mark_order_delivered", Extra::None),
+        "cancelOrderByCustomer" => ("CancelOrderByCustomer", "cancel_order_by_customer", Extra::None),
+        "cancelOrderByRestaurant" => {
+            ("CancelOrderByRestaurant", "cancel_order_by_restaurant", Extra::None)
+        }
+        "rateOrder" => ("RateOrder", "rate_order", Extra::None),
+        "rateRestaurant" => ("RateRestaurant", "rate_restaurant", Extra::None),
+        "tipOrder" => ("TipOrder", "tip_order", Extra::None),
+        "requestRefund" => ("RequestRefund", "request_refund", Extra::None),
+        // DeliveryJob aggregate (independent-rider fulfilment, ADR-0031).
+        "acceptDelivery" => ("AcceptDelivery", "accept_delivery", Extra::None),
+        "confirmPickup" => ("ConfirmPickup", "confirm_pickup", Extra::None),
+        "completeDelivery" => ("CompleteDelivery", "complete_delivery", Extra::None),
+        "cancelDelivery" => ("CancelDelivery", "cancel_delivery", Extra::None),
+        // placeOrder (PlaceOrderProcess) stays stubbed: application::commands::place_order exists, but
+        // wiring it needs the PaymentGateway + CartReadRepository ports injected at the composition
+        // root (crates/server graphql::schema `.data(...)`) — add the arm once the gateway adapter
+        // (fail-closed Stripe stand-in) is registered there.
         _ => return None,
     };
     let (resolve_extra, extra_arg) = match extra {
