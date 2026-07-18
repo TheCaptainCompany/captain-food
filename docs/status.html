@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Captain.Food — Development & Deployment Status</title>
+<style>
+  :root {
+    --bg:#0f1115; --card:#171a21; --line:#262b36; --fg:#e7eaf0; --muted:#9aa4b2;
+    --green:#2ecc71; --amber:#f1c40f; --blue:#4aa3ff; --grey:#6b7686;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --card:#fff; --line:#e4e7ec; --fg:#1a1f2b; --muted:#5b6472; --grey:#8a93a2; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; padding:28px 18px 64px; }
+  header h1 { font-size:1.6rem; margin:0 0 4px; }
+  header p { color:var(--muted); margin:0 0 8px; }
+  .legend { color:var(--muted); font-size:.86rem; margin:10px 0 26px; }
+  h2 { font-size:1.15rem; margin:30px 0 12px; display:flex; align-items:center; gap:8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:.8rem; text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td { border-bottom:none; }
+  td.s { white-space:nowrap; width:1%; font-weight:600; }
+  td.p { width:32%; font-weight:600; }
+  .note { color:var(--muted); font-size:.9rem; }
+  code { background:rgba(127,127,127,.16); padding:.08em .38em; border-radius:5px; font-size:.86em; }
+  .pill { display:inline-block; padding:.05em .5em; border-radius:999px; font-size:.78rem; font-weight:700; }
+  .done { color:var(--green); } .prog { color:var(--amber); } .wait { color:var(--grey); } .plan { color:var(--blue); }
+  footer { margin-top:34px; color:var(--muted); font-size:.85rem; }
+  a { color:var(--blue); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>🚦 Captain.Food — Development &amp; Deployment Status</h1>
+  <p>Local-first food ordering for independent restaurants &amp; food trucks — V0 target: Tours.</p>
+  <div class="legend">Snapshot of 2026-07-18 (companion to <code>docs/STATUS.md</code>).
+    Legend: <span class="done">✅ done &amp; verified</span> ·
+    <span class="prog">🚧 in progress</span> ·
+    <span class="wait">⏳ waiting/optional</span> ·
+    <span class="plan">📋 planned</span>.</div>
+</header>
+
+<h2>🌐 Deployment</h2>
+<div class="card"><table>
+  <tr><th>Piece</th><th>Status</th><th>Notes</th></tr>
+  <tr><td class="p">Render web service (Docker, Frankfurt)</td><td class="s done">✅</td><td class="note">Blueprint IaC, cargo-chef cached build, verified live</td></tr>
+  <tr><td class="p">Supabase Postgres (Frankfurt)</td><td class="s done">✅</td><td class="note">Session pooler; Data API off (intentional)</td></tr>
+  <tr><td class="p">CI: codegen-consistency + db-migrate</td><td class="s done">✅</td><td class="note">Deploys gated on green build; migrations applied out-of-band (ADR-0043)</td></tr>
+  <tr><td class="p"><code>/health</code> · <code>/ping</code> · <code>/projector</code></td><td class="s done">✅</td><td class="note">Schema-version readiness (<code>&gt;=</code> gate); in-process projector</td></tr>
+  <tr><td class="p">GraphQL <code>/{role}/graphql</code> + <code>/{role}/voyager</code></td><td class="s done">✅</td><td class="note">Role-as-path; per-role filtered schema</td></tr>
+  <tr><td class="p">Custom domains <code>*.captain.food</code> + Host router</td><td class="s done">✅</td><td class="note">Wildcard TLS; apex/www → marketing; <code>hosts.rs</code> dispatches audiences + <code>{slug}</code> tenants (ADR-0036)</td></tr>
+</table></div>
+
+<h2>📖 Read side (queries)</h2>
+<div class="card"><table>
+  <tr><th>Query</th><th>Status</th><th>Notes</th></tr>
+  <tr><td class="p"><code>restaurants</code> / <code>restaurant</code></td><td class="s done">✅</td><td class="note">Real data once SIRENE runs</td></tr>
+  <tr><td class="p"><code>prospectionPipeline</code></td><td class="s done">✅</td><td class="note">Admin; fed by SIRENE registrations</td></tr>
+  <tr><td class="p"><code>pricingPolicy</code> / <code>uberEstimationPolicy</code> / <code>uberSplitPolicy</code></td><td class="s done">✅</td><td class="note"><strong>Real seeded data</strong></td></tr>
+  <tr><td class="p"><code>catalog</code> / <code>categories</code> / <code>carts</code> / <code>cart</code> / <code>orders</code> / <code>order</code></td><td class="s done">✅</td><td class="note">Wired; empty until the write side emits their events</td></tr>
+  <tr><td class="p"><code>me</code> / <code>favoriteRestaurants</code></td><td class="s prog">🚧</td><td class="note">Identity now available (ADR-0047 <code>Principal</code> in ctx); resolver wiring pending</td></tr>
+  <tr><td class="p">Projection worker → per-aggregate registry</td><td class="s done">✅</td><td class="note">In-process, per-aggregate checkpoints</td></tr>
+</table></div>
+
+<h2>✍️ Write side (mutations)</h2>
+<div class="card"><table>
+  <tr><th>Piece</th><th>Status</th><th>Notes</th></tr>
+  <tr><td class="p"><code>MutationRoot</code> (all api.yaml mutations generated)</td><td class="s done">✅</td><td class="note"></td></tr>
+  <tr><td class="p">Restaurant aggregate (13 commands)</td><td class="s done">✅</td><td class="note">Spec invariants via event-stream rehydration + 25 behaviour tests (ADR-0046)</td></tr>
+  <tr><td class="p">Cart · Order · DeliveryJob · Catalog · Customer · Prospect · RestaurantAccount</td><td class="s prog">🚧</td><td class="note">Round 2 — in progress (two parallel workstreams)</td></tr>
+  <tr><td class="p">Structured typed errors (vs interim <code>"Code: detail"</code>)</td><td class="s plan">📋</td><td class="note">ADR-0046 follow-up</td></tr>
+</table></div>
+
+<h2>🔐 Authentication &amp; authorization</h2>
+<div class="card"><table>
+  <tr><th>Piece</th><th>Status</th><th>Notes</th></tr>
+  <tr><td class="p">Authentication — Supabase JWT via JWKS</td><td class="s done">✅</td><td class="note">First cut (ADR-0047): asymmetric verify at <code>/{role}/graphql</code>, ~1h key cache, fail-closed; verified role + <code>Principal</code> injected</td></tr>
+  <tr><td class="p">Per-role ACL — guard + per-role introspection/Voyager</td><td class="s done">✅</td><td class="note">Spec-derived from api.yaml <code>roles</code> (ADR-0006)</td></tr>
+  <tr><td class="p">Per-field ACL on FK-derived nav edges</td><td class="s plan">📋</td><td class="note">Needs a DSL decision (plan mode)</td></tr>
+</table></div>
+
+<h2>🔎 SIRENE prospection (ADR-0019/0020/0027/0045)</h2>
+<div class="card"><table>
+  <tr><th>Piece</th><th>Status</th><th>Notes</th></tr>
+  <tr><td class="p">SIRENE ACL (INSEE → RegisterRestaurant)</td><td class="s done">✅</td><td class="note">Unit + DB verified</td></tr>
+  <tr><td class="p">Interim direct-write binary</td><td class="s done">✅</td><td class="note"><strong>Retired</strong> (ADR-0045) — replaced by the split below</td></tr>
+  <tr><td class="p"><code>external_sirene_restaurants</code> staging table</td><td class="s done">✅</td><td class="note">Migration applied by CI</td></tr>
+  <tr><td class="p">Thin CI ingestion crate <code>sirene_ingest</code></td><td class="s done">✅</td><td class="note">No domain deps; France-wide by department, active-only</td></tr>
+  <tr><td class="p">On-app <code>sync_sirene_worker</code> + deletion reconciliation</td><td class="s done">✅</td><td class="note">Per-row checkpoint; detect-by-absence + explicit F/C; NON_PARTNER auto-close, partners flagged; token-gated <code>/internal/sirene/drain</code></td></tr>
+  <tr><td class="p"><code>INSEE_API_TOKEN</code> secret</td><td class="s done">✅</td><td class="note">Added — SIRENE runs live on deploy</td></tr>
+</table></div>
+
+<h2>👤 Pending user actions</h2>
+<div class="card"><table>
+  <tr><td class="p"><code>INTERNAL_TRIGGER_TOKEN</code> (optional)</td><td class="s wait">⏳</td><td class="note">Set on Render + as a repo secret to let CI ping the worker for an immediate drain. Not required — the worker polls on its own.</td></tr>
+</table></div>
+
+<footer>
+  Architecture decisions in <a href="adr/">docs/adr/</a> — ADR ids are now UTC date-time
+  (<code>YYYYMMDD-HHMMSS</code>) so concurrent sessions never collide. Latest: 0045 (SIRENE redesign),
+  0046 (write side), 0047 (API auth). Kept in sync with <code>docs/STATUS.md</code>.
+</footer>
+</div>
+</body>
+</html>
