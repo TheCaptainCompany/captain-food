@@ -100,10 +100,15 @@ struct CachedJwks {
     fetched: Instant,
 }
 
-/// Verifier state: the JWKS endpoint, the expected audience/issuer, an HTTP client, and the cached key set.
+/// Verifier state: the JWKS endpoint, the expected audience/issuer, an HTTP client, the cached key set,
+/// and the pre-shared EXTERNAL service tokens (machine callers to `/external`).
 pub struct AuthContext {
     jwks_url: Option<String>,
     issuer: Option<String>,
+    /// Pre-shared secrets for EXTERNAL machine callers (Stripe/HubRise/Avelo37 ACLs), presented via the
+    /// `X-External-Api-Key` header. Loaded from `EXTERNAL_API_TOKENS` (comma-separated). Empty ⇒ no
+    /// service-token access to `/external` (a Supabase JWT with captain_role EXTERNAL still works).
+    external_tokens: Vec<String>,
     http: reqwest::Client,
     cache: RwLock<Option<CachedJwks>>,
 }
@@ -120,7 +125,17 @@ impl AuthContext {
         if jwks_url.is_none() {
             eprintln!("SUPABASE_JWKS_URL not set — non-public GraphQL paths will return 503 (fail closed)");
         }
-        Arc::new(Self { jwks_url, issuer, http: reqwest::Client::new(), cache: RwLock::new(None) })
+        let external_tokens: Vec<String> = std::env::var("EXTERNAL_API_TOKENS")
+            .ok()
+            .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect())
+            .unwrap_or_default();
+        Arc::new(Self {
+            jwks_url,
+            issuer,
+            external_tokens,
+            http: reqwest::Client::new(),
+            cache: RwLock::new(None),
+        })
     }
 
     /// Authorize a request for `path_role`. `/public` is always allowed (anonymous); every other path
@@ -128,6 +143,19 @@ impl AuthContext {
     pub async fn authorize(&self, path_role: RequestRole, headers: &HeaderMap) -> Result<Principal, AuthError> {
         if path_role == RequestRole::Public {
             return Ok(Principal::anonymous());
+        }
+        // EXTERNAL machine callers (Stripe/HubRise/Avelo37 ACLs) present a pre-shared service token via
+        // the `X-External-Api-Key` header instead of a user JWT. If a key header is present it is
+        // authoritative (valid → allow, invalid → reject); if absent we fall through to JWT verification,
+        // so a Supabase user carrying captain_role EXTERNAL still works.
+        if path_role == RequestRole::External {
+            if let Some(key) = headers.get("x-external-api-key").and_then(|v| v.to_str().ok()) {
+                return if self.external_key_valid(key) {
+                    Ok(Principal { user_id: None, role: RequestRole::External })
+                } else {
+                    Err(AuthError::Unauthorized)
+                };
+            }
         }
         let token = bearer(headers).ok_or(AuthError::Unauthorized)?;
         let claims = self.verify(token).await?;
@@ -213,6 +241,26 @@ impl AuthContext {
         *self.cache.write().await = Some(CachedJwks { set, fetched: Instant::now() });
         Ok(())
     }
+}
+
+impl AuthContext {
+    /// True when `presented` matches a configured EXTERNAL service token, compared in constant time.
+    fn external_key_valid(&self, presented: &str) -> bool {
+        self.external_tokens.iter().any(|t| ct_eq(t.as_bytes(), presented.as_bytes()))
+    }
+}
+
+/// Constant-time byte equality — no early return on the first differing byte, so a matching-prefix key
+/// can't be discovered by timing. (Length is allowed to differ observably, as is standard for API keys.)
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// Extract the `Authorization: Bearer <token>` value.
@@ -330,9 +378,44 @@ mod tests {
         AuthContext {
             jwks_url: None, // any refresh() therefore fails — proves we never hit the network on a cache hit
             issuer: None,
+            external_tokens: Vec::new(),
             http: reqwest::Client::new(),
             cache: RwLock::new(Some(CachedJwks { set, fetched })),
         }
+    }
+
+    fn ctx_with_external(tokens: &[&str]) -> AuthContext {
+        AuthContext {
+            jwks_url: None,
+            issuer: None,
+            external_tokens: tokens.iter().map(|t| t.to_string()).collect(),
+            http: reqwest::Client::new(),
+            cache: RwLock::new(None),
+        }
+    }
+
+    #[test]
+    fn ct_eq_matches_only_identical_bytes() {
+        assert!(ct_eq(b"s3cret-key", b"s3cret-key"));
+        assert!(!ct_eq(b"s3cret-key", b"s3cret-keZ"));
+        assert!(!ct_eq(b"s3cret-key", b"s3cret-ke")); // differing length
+    }
+
+    #[tokio::test]
+    async fn external_service_key_authorizes_only_the_external_path() {
+        let ctx = ctx_with_external(&["s3cret-key", "second-key"]);
+        let mut ok = HeaderMap::new();
+        ok.insert("x-external-api-key", "second-key".parse().unwrap());
+        assert!(ctx.authorize(RequestRole::External, &ok).await.is_ok(), "valid key must authorize");
+
+        let mut bad = HeaderMap::new();
+        bad.insert("x-external-api-key", "wrong".parse().unwrap());
+        assert!(ctx.authorize(RequestRole::External, &bad).await.is_err(), "wrong key must fail");
+
+        // The external key is ignored on other paths (they still require a JWT, absent here → 401).
+        assert!(ctx.authorize(RequestRole::Admin, &ok).await.is_err(), "external key must not open /admin");
+        // /public stays open regardless.
+        assert!(ctx.authorize(RequestRole::Public, &HeaderMap::new()).await.is_ok());
     }
 
     #[tokio::test]

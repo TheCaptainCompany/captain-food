@@ -46,3 +46,7 @@ services:
         sync: false
       - key: SUPABASE_JWKS_URL
         sync: false
+      # Pre-shared service tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047),
+      # comma-separated. Optional — unset means only a Supabase JWT (captain_role EXTERNAL) reaches /external.
+      - key: EXTERNAL_API_TOKENS
+        sync: false

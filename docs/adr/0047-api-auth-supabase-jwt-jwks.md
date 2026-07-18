@@ -33,7 +33,10 @@ Authenticate at the `/{role}/graphql` boundary by verifying a Supabase-issued **
   - `/customer` → any valid token (`captain_role` defaults to CUSTOMER).
   - `/admin` → `captain_role == ADMIN`.
   - `/restaurant`, `/restaurant-account`, `/rider` → matching `captain_role`.
-  - `/external` → `captain_role == EXTERNAL` (machine/third-party tokens; may get a dedicated mechanism later).
+  - `/external` → a **pre-shared service key** via the `X-External-Api-Key` header (`EXTERNAL_API_TOKENS`,
+    comma-separated, **constant-time** compared) for machine callers (Stripe/HubRise/Avelo37 ACLs); or a
+    Supabase JWT with `captain_role == EXTERNAL`. A present key header is authoritative (valid → allow,
+    invalid → 401); absent → fall through to the JWT path.
   - Missing/invalid token on a non-public path → **401**; valid token, wrong role → **403**.
 - The verified **`Principal { user_id (sub), role }`** is injected into the GraphQL context (replacing the
   self-asserted path role), so the deferred per-field `@auth` guard (ADR-0006) can build on a trustworthy
@@ -57,14 +60,17 @@ Authenticate at the `/{role}/graphql` boundary by verifying a Supabase-issued **
 ### Negative / caveats
 - JWKS fetch/caching is a runtime dependency (must handle refresh + rotation, and fail closed).
 - This gates the **path**, not yet each **field** — the per-field `@auth` guard is still to come.
-- **EXTERNAL/machine tokens** (Stripe/HubRise/Avelo37 callers) need a longer-term service-token story.
+- **EXTERNAL/machine tokens** use a pre-shared `X-External-Api-Key` (shipped); per-partner keys + rotation
+  are future hardening.
 - `app_metadata.captain_role` is **coarse** (single role); multi-role / tenant-scoped grants are future work.
 
 ## Follow-up actions
 - Implement the middleware in `crates/server` (`jsonwebtoken` + JWKS cache), gate `/{role}/graphql`, inject
   `Principal`. *(Ships with this ADR as a first cut.)*
 - Wire the per-field `@auth` guard over the injected `Principal` (completes ADR-0006).
-- Define EXTERNAL service-token handling.
+- ~~Define EXTERNAL service-token handling.~~ **Done**: pre-shared `X-External-Api-Key` (`EXTERNAL_API_TOKENS`,
+  constant-time). Future hardening: per-partner keys + rotation, and signature-based inbound (Stripe) webhooks
+  which are ACL/inbound-event concerns, not `/external` GraphQL.
 - Consider a **Custom Access Token Hook** for a top-level `captain_role` claim (vs reading `app_metadata`).
 - Document admin provisioning (`app_metadata.captain_role` via SQL / Admin API).
 
