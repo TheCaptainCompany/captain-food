@@ -8,6 +8,7 @@
 //! - `/health` — readiness gate (ADR-0043): `200` only when the DB is reachable AND its schema version is
 //!   `>= REQUIRED_SCHEMA_VERSION`; else `503`. Migrations are applied out-of-band by **sqlx-cli in CI**.
 //! - `/projector` — projection-worker readiness (running / checkpoint / head / lag / lastTickAt).
+//! - `/saga` — process-manager (saga) runner readiness, same shape as `/projector`.
 //! - `/{role}/graphql` (+ `/{role}/voyager`) — the GraphQL BFF (ADR-0006), see `graphql`.
 //! - `POST /internal/sirene/drain` — wakes the SIRENE sync worker after a CI ingestion run (ADR-0045);
 //!   secured by the `INTERNAL_TRIGGER_TOKEN` shared secret (`x-internal-token` header).
@@ -40,11 +41,12 @@ use application::queries::{
     UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
 use infrastructure::{
-    FailClosedAuthProviderGateway, FailClosedGoogleOwnershipVerifier, PgCartRepository,
-    PgCatalogRepository, PgCustomerRepository, PgEventStore, PgOrderRepository,
+    FailClosedAuthProviderGateway, FailClosedGoogleOwnershipVerifier, FailClosedPaymentGateway,
+    PgCartRepository, PgCatalogRepository, PgCustomerRepository, PgEventStore, PgOrderRepository,
     PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
-    PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, ProjectionStatus, ProjectionWorker,
-    SireneSyncWorker, UnverifiedGbpOrderLinkProbe,
+    PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, ProcessManagerRunner,
+    ProcessManagerStatus, ProjectionStatus, ProjectionWorker, SireneSyncWorker,
+    UnavailableCheckoutSnapshotSource, UnverifiedGbpOrderLinkProbe,
 };
 use stripe_adapter::StripeWebhookIngestor;
 use shared_types::HealthDto;
@@ -102,6 +104,9 @@ pub struct AppState {
     snap: Arc<Mutex<Snapshot>>,
     /// Live projection-worker status when the worker runs in-process; `None` when not started.
     projector_status: Option<Arc<Mutex<ProjectionStatus>>>,
+    /// Live saga-runner (process managers, actors.yaml) status when it runs in-process; `None` when
+    /// not started.
+    saga_status: Option<Arc<Mutex<ProcessManagerStatus>>>,
 }
 
 /// Build the Axum router: `/ping`, `/health`, `/projector`, and the role-as-path GraphQL routes. Reads
@@ -112,6 +117,7 @@ pub fn router() -> Router {
     let mut read_deps: Option<ReadDeps> = None;
     let mut write_deps: Option<WriteDeps> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
+    let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
     let mut sirene_worker: Option<Arc<SireneSyncWorker>> = None;
     let mut stripe_ingestor: Option<Arc<StripeWebhookIngestor>> = None;
 
@@ -168,6 +174,10 @@ pub fn router() -> Router {
                     ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
                     gbp_probe: Arc::new(UnverifiedGbpOrderLinkProbe),
                     auth_provider: Arc::new(FailClosedAuthProviderGateway),
+                    // Fail-closed Stripe create-intent stand-in: placeOrder is wired end-to-end but
+                    // declines every checkout until the real Stripe adapter (integration workstream)
+                    // replaces it here.
+                    payments: Arc::new(FailClosedPaymentGateway),
                 });
 
                 // In-process projection worker (ADR-0040). RUN_PROJECTOR=false hands it to a dedicated worker.
@@ -178,6 +188,22 @@ pub fn router() -> Router {
                     println!("projection worker: running in-process (set RUN_PROJECTOR=false to disable)");
                 } else {
                     println!("RUN_PROJECTOR=false — projection worker not started in-process");
+                }
+
+                // In-process saga runner (process managers, actors.yaml) — same pattern as the
+                // projection worker: RUN_PROCESS_MANAGERS=false hands it to a dedicated worker.
+                // PlaceOrderProcess's checkout-snapshot seam is the fail-closed stand-in until the
+                // Stripe adapter provides the real source.
+                if std::env::var("RUN_PROCESS_MANAGERS").map(|v| v != "false").unwrap_or(true) {
+                    let runner = ProcessManagerRunner::new(
+                        pool.clone(),
+                        Arc::new(UnavailableCheckoutSnapshotSource),
+                    );
+                    saga_status = Some(runner.status());
+                    tokio::spawn(runner.run_loop());
+                    println!("saga runner: running in-process (set RUN_PROCESS_MANAGERS=false to disable)");
+                } else {
+                    println!("RUN_PROCESS_MANAGERS=false — saga runner not started in-process");
                 }
 
                 // SIRENE sync worker (ADR-0045): drains the `external_sirene_restaurants` staging
@@ -210,7 +236,8 @@ pub fn router() -> Router {
         .route("/ping", get(ping))
         .route("/health", get(health))
         .route("/projector", get(projector))
-        .with_state(AppState { snap, projector_status });
+        .route("/saga", get(saga))
+        .with_state(AppState { snap, projector_status, saga_status });
 
     base.merge(graphql::routes::graphql_routes(graphql::schema::build_schema(read_deps, write_deps)))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
@@ -265,6 +292,23 @@ async fn projector(State(app): State<AppState>) -> impl IntoResponse {
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "running": false, "reason": "projector_not_started" })),
+        ),
+    }
+}
+
+/// Saga-runner readiness (the `/projector` counterpart for the process managers). `200` when the
+/// runner is running, `503` otherwise. Reports checkpoint/head/lag/lastTickAt.
+async fn saga(State(app): State<AppState>) -> impl IntoResponse {
+    match &app.saga_status {
+        Some(handle) => {
+            let status = handle.lock().expect("saga status mutex").clone();
+            let code = if status.running { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+            let body = serde_json::to_value(&status).unwrap_or_else(|_| json!({ "running": false }));
+            (code, Json(body))
+        }
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "running": false, "reason": "saga_runner_not_started" })),
         ),
     }
 }

@@ -7,7 +7,9 @@
 use std::sync::Arc;
 
 use async_graphql::{EmptySubscription, Schema};
-use application::ports::{AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
+use application::ports::{
+    AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier, PaymentGateway,
+};
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, RestaurantReadRepository,
@@ -42,6 +44,9 @@ pub struct WriteDeps {
     pub ownership: Arc<dyn GoogleOwnershipVerifier>,
     pub gbp_probe: Arc<dyn GbpOrderLinkProbe>,
     pub auth_provider: Arc<dyn AuthProviderGateway>,
+    /// The Stripe create-intent seam `placeOrder` needs (fail-closed stand-in until the real Stripe
+    /// adapter lands — a checkout is declined, never silently "paid").
+    pub payments: Arc<dyn PaymentGateway>,
 }
 
 /// Build the master schema served under every role path. With `Some(deps)`/`Some(writes)` the
@@ -65,6 +70,7 @@ pub fn build_schema(deps: Option<ReadDeps>, writes: Option<WriteDeps>) -> Captai
         builder = builder.data(w.ownership);
         builder = builder.data(w.gbp_probe);
         builder = builder.data(w.auth_provider);
+        builder = builder.data(w.payments);
     }
     builder.finish()
 }

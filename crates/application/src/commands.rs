@@ -1186,12 +1186,12 @@ pub async fn cancel_delivery(
 /// `errors.yaml#/PaymentDeclined`). Returns the created intent so the mutation payload can carry
 /// `paymentIntentId`/`clientSecret` (api.yaml).
 ///
-/// TODO(saga): the remaining PlaceOrderProcess legs are event-driven and NOT implemented here —
+/// The remaining PlaceOrderProcess legs are event-driven and live in
+/// [`crate::process_managers::place_order`] (run by the infrastructure `ProcessManagerRunner`):
 ///   * `events.yaml#/PaymentCaptured` (INBOUND Stripe webhook, CLAUDE.md "Commands vs inbound
-///     events") → emit `OrderPlaced` (priced line items + `PaymentBreakdown`, ADR-0016/0017, binding
-///     `customerId` onto the order) on `Order-<orderId>` and `CartCheckedOut` on `Cart-<cartId>`;
+///     events") → emit `OrderPlaced` on `Order-<orderId>` and `CartCheckedOut` on `Cart-<cartId>`,
+///     from the checkout frozen by the `CheckoutSnapshotSource` seam;
 ///   * `events.yaml#/PaymentFailed` (INBOUND) → abort: no OrderPlaced, the cart stays OPEN.
-///   They need the process-manager runtime + the Stripe webhook ACL (`crates/infrastructure`).
 pub async fn place_order(
     store: &dyn EventStore,
     carts: &dyn CartReadRepository,

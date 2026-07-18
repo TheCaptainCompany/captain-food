@@ -10,10 +10,12 @@
 
 pub mod integrations;
 pub mod persistence;
+pub mod process_manager;
 pub mod projection;
 
 pub use integrations::google::{FailClosedGoogleOwnershipVerifier, UnverifiedGbpOrderLinkProbe};
 // Stripe/HubRise webhook adapters moved to their own crates (`crates/adapters/*`, ADR-20260718-213352).
+pub use integrations::payments::{FailClosedPaymentGateway, UnavailableCheckoutSnapshotSource};
 pub use integrations::supabase_auth::FailClosedAuthProviderGateway;
 pub use integrations::sync_sirene_worker::{SireneSyncSummary, SireneSyncWorker};
 pub use persistence::{
@@ -21,4 +23,5 @@ pub use persistence::{
     PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
     PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
 };
+pub use process_manager::{ProcessManagerRunner, ProcessManagerStatus};
 pub use projection::{ProjectionStatus, ProjectionWorker};

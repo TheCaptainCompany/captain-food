@@ -1040,8 +1040,20 @@ impl MutationRoot {
         Ok(SetCustomerPaymentMethodPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "placeOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
-    async fn place_order(&self, input: PlaceOrderInput) -> async_graphql::Result<PlaceOrderPayload> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn place_order(&self, ctx: &async_graphql::Context<'_>, input: PlaceOrderInput) -> async_graphql::Result<PlaceOrderPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;
+        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?;
+        let cmd: domain::generated::commands::PlaceOrder = to_command(&input)?;
+        let actor = request_actor(ctx);
+        let intent = application::commands::place_order(store.as_ref(), carts.as_ref(), payments.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(PlaceOrderPayload {
+            correlation_id: CorrelationId(actor.correlation_id),
+            payment_intent_id: intent.payment_intent_id.into(),
+            client_secret: intent.client_secret,
+        })
     }
     #[graphql(name = "acceptOrder", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
     async fn accept_order(&self, ctx: &async_graphql::Context<'_>, input: AcceptOrderInput) -> async_graphql::Result<AcceptOrderPayload> {

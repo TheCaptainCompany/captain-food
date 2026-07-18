@@ -10,6 +10,8 @@
 //!   fail-closed stand-ins until the real Google adapters land.
 //! - [`supabase_auth`] — the wrapped auth provider seam (phone-OTP + email magic link, ADR-0015);
 //!   fail-closed stand-in until the real `supabase-acl` adapter lands.
+//! - [`payments`] — the Stripe OUTBOUND seams (create-intent gateway + checkout-snapshot source);
+//!   fail-closed stand-ins until the real Stripe adapter lands (integration workstream).
 //!
 //! Partner **webhook** adapters (Stripe, HubRise) now live in their own self-contained crates under
 //! `crates/adapters/*` (ADR-20260718-213352) — each an ACL + HTTP shell + standalone binary, so it can
@@ -17,6 +19,7 @@
 //! partner.
 
 pub mod google;
+pub mod payments;
 pub mod sirene;
 pub mod supabase_auth;
 pub mod sync_sirene_worker;

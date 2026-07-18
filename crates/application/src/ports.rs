@@ -174,3 +174,39 @@ pub trait PaymentGateway: Send + Sync {
         payment_method_id: &str,
     ) -> Result<CreatedPaymentIntent, DomainError>;
 }
+
+/// The validated, server-priced checkout the PlaceOrder saga froze when it created the PaymentIntent —
+/// everything `events.yaml#/OrderPlaced` + `events.yaml#/CartCheckedOut` need beyond the inbound
+/// `PaymentCaptured` fact itself. `events.yaml#/PaymentIntentCreated` (frozen DSL) does NOT carry this
+/// snapshot (no cartId, contact, serviceType, items, breakdown), so it must be resolved out-of-log by
+/// [`CheckoutSnapshotSource`]; see that trait for the seam contract.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckoutSnapshot {
+    pub order_id: domain::generated::scalars::OrderId,
+    pub cart_id: domain::generated::scalars::CartId,
+    pub restaurant_id: domain::generated::scalars::RestaurantId,
+    pub customer_id: Option<domain::generated::scalars::CustomerId>,
+    pub mode: Option<domain::generated::scalars::Mode>,
+    pub r#ref: Option<ExternalReference>,
+    pub customer_contact: domain::generated::entities::CustomerContact,
+    pub service_type: domain::generated::scalars::ServiceType,
+    pub delivery_address: Option<domain::generated::entities::Address>,
+    pub items: Vec<domain::generated::entities::OrderLineItem>,
+    pub total_amount: domain::generated::entities::Money,
+    pub breakdown: domain::generated::entities::PaymentBreakdown,
+    pub note: Option<domain::generated::scalars::OrderNote>,
+}
+
+/// Resolves a PaymentIntent back to its frozen [`CheckoutSnapshot`] so PlaceOrderProcess can
+/// materialize the Order on `PaymentCaptured` (actors.yaml). The real adapter belongs to the Stripe
+/// integration workstream (PaymentIntent `metadata` written at create-intent time, or a durable
+/// pending-checkout store keyed by `payment_intent_id`). Until it lands the composition root injects a
+/// fail-closed stand-in returning `None` — the saga then SKIPS (logged, never guesses a business fact).
+#[async_trait]
+pub trait CheckoutSnapshotSource: Send + Sync {
+    /// The checkout frozen for this PaymentIntent, or `None` when unknown/not yet resolvable.
+    async fn by_payment_intent(
+        &self,
+        payment_intent_id: &domain::generated::scalars::PaymentIntentId,
+    ) -> Result<Option<CheckoutSnapshot>, DomainError>;
+}

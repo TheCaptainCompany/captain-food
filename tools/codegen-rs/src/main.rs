@@ -6320,6 +6320,17 @@ fn wired_mutation_body(name: &str, payload: &str) -> Option<String> {
             "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;\n        let auth = ctx.data::<std::sync::Arc<dyn application::ports::AuthProviderGateway>>()?;\n        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;\n        let cmd: domain::generated::commands::VerifyPhone = to_command(&input)?;\n        let actor = request_actor(ctx);\n        let outcome = application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor)\n            .await\n            .map_err(domain_error)?;\n        Ok({payload} {{\n            correlation_id: CorrelationId(actor.correlation_id),\n            customer_id: outcome.customer_id.into(),\n            created: outcome.created,\n        }})"
         ));
     }
+    // placeOrder's payload carries the Stripe-assigned values (paymentIntentId + clientSecret): the
+    // handler returns the CreatedPaymentIntent the resolver maps into the payload, and it needs the
+    // CartReadRepository (server-side pricing) + PaymentGateway (create-intent seam; the composition
+    // root injects the fail-closed Stripe stand-in until the real adapter lands) — so it gets a
+    // bespoke body like verifyPhone. The saga's event legs (PaymentCaptured/PaymentFailed) run in the
+    // infrastructure ProcessManagerRunner, not here.
+    if name == "placeOrder" {
+        return Some(format!(
+            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;\n        let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;\n        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?;\n        let cmd: domain::generated::commands::PlaceOrder = to_command(&input)?;\n        let actor = request_actor(ctx);\n        let intent = application::commands::place_order(store.as_ref(), carts.as_ref(), payments.as_ref(), cmd, &actor)\n            .await\n            .map_err(domain_error)?;\n        Ok({payload} {{\n            correlation_id: CorrelationId(actor.correlation_id),\n            payment_intent_id: intent.payment_intent_id.into(),\n            client_secret: intent.client_secret,\n        }})"
+        ));
+    }
     // (domain command, application::commands handler, extra port beyond the EventStore).
     enum Extra {
         None,
@@ -6393,10 +6404,7 @@ fn wired_mutation_body(name: &str, payload: &str) -> Option<String> {
         "confirmPickup" => ("ConfirmPickup", "confirm_pickup", Extra::None),
         "completeDelivery" => ("CompleteDelivery", "complete_delivery", Extra::None),
         "cancelDelivery" => ("CancelDelivery", "cancel_delivery", Extra::None),
-        // placeOrder (PlaceOrderProcess) stays stubbed: application::commands::place_order exists, but
-        // wiring it needs the PaymentGateway + CartReadRepository ports injected at the composition
-        // root (crates/server graphql::schema `.data(...)`) — add the arm once the gateway adapter
-        // (fail-closed Stripe stand-in) is registered there.
+        // placeOrder is handled by the bespoke body above (Stripe-assigned payload fields).
         // RestaurantAccount aggregate.
         "registerRestaurantAccount" => {
             ("RegisterRestaurantAccount", "register_restaurant_account", Extra::None)

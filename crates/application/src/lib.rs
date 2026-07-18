@@ -8,6 +8,7 @@
 
 pub mod commands;
 pub mod generated;
+pub mod process_managers;
 pub mod projections;
 pub mod projectors;
 pub mod ports;

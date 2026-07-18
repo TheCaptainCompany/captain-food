@@ -8,14 +8,17 @@
 
 use std::sync::Arc;
 
-use application::ports::{AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
+use application::ports::{
+    AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier, PaymentGateway,
+};
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, RestaurantReadRepository,
     UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
 use infrastructure::{
-    FailClosedAuthProviderGateway, FailClosedGoogleOwnershipVerifier, PgCartRepository,
+    FailClosedAuthProviderGateway, FailClosedGoogleOwnershipVerifier, FailClosedPaymentGateway,
+    PgCartRepository,
     PgCatalogRepository, PgCustomerRepository, PgEventStore, PgOrderRepository,
     PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
     PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, UnverifiedGbpOrderLinkProbe,
@@ -101,6 +104,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
     let ownership: Arc<dyn GoogleOwnershipVerifier> = Arc::new(FailClosedGoogleOwnershipVerifier);
     let gbp_probe: Arc<dyn GbpOrderLinkProbe> = Arc::new(UnverifiedGbpOrderLinkProbe);
     let auth_provider: Arc<dyn AuthProviderGateway> = Arc::new(FailClosedAuthProviderGateway);
+    let payments: Arc<dyn PaymentGateway> = Arc::new(FailClosedPaymentGateway);
     server::graphql_schema::build_schema(
         Some(server::graphql_schema::ReadDeps {
             restaurants,
@@ -113,7 +117,13 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             orders,
             customers,
         }),
-        Some(server::graphql_schema::WriteDeps { event_store, ownership, gbp_probe, auth_provider }),
+        Some(server::graphql_schema::WriteDeps {
+            event_store,
+            ownership,
+            gbp_probe,
+            auth_provider,
+            payments,
+        }),
     )
 }
 
