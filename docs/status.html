@@ -100,6 +100,13 @@
   <tr><td class="p"><code>INSEE_API_TOKEN</code> secret</td><td class="s done">✅</td><td class="note">Added — SIRENE runs live on deploy</td></tr>
 </table></div>
 
+<h2>🔌 Inbound integrations (webhooks → ACL → events)</h2>
+<div class="card"><table>
+  <tr><th>Piece</th><th>Status</th><th>Notes</th></tr>
+  <tr><td class="p"><strong>Stripe</strong> <code>POST /webhooks/stripe</code></td><td class="s done">✅</td><td class="note">Signature HMAC verify over raw body (constant-time, replay window, fail-closed); ACL maps succeeded/failed/refunded → <code>PaymentCaptured</code>/<code>PaymentFailed</code>/<code>PaymentRefunded</code>; idempotent by Stripe event id (ADR-20260718-145856)</td></tr>
+  <tr><td class="p"><strong>HubRise</strong> <code>POST /webhooks/hubrise</code></td><td class="s plan">📋</td><td class="note">Next adapter — auth + ACL → <code>OfferStockUpdated</code> / <code>ImportCatalog</code></td></tr>
+</table></div>
+
 <h2>👤 Pending user actions</h2>
 <div class="card"><table>
   <tr><td class="p"><code>INTERNAL_TRIGGER_TOKEN</code> (optional)</td><td class="s wait">⏳</td><td class="note">Set on Render + as a repo secret to let CI ping the worker for an immediate drain. Not required — the worker polls on its own.</td></tr>
@@ -108,7 +115,7 @@
 <footer>
   Architecture decisions in <a href="adr/">docs/adr/</a> — ADR ids are now UTC date-time
   (<code>YYYYMMDD-HHMMSS</code>) so concurrent sessions never collide. Latest: 0045 (SIRENE redesign),
-  0046 (write side), 0047 (API auth). Kept in sync with <code>docs/STATUS.md</code>.
+  0046 (write side), 0047 (API auth), 20260718-145856 (inbound webhooks). Kept in sync with <code>docs/STATUS.md</code>.
 </footer>
 </div>
 </body>
