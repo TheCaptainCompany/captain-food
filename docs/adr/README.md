@@ -91,6 +91,7 @@ New ADRs use a UTC date-time id (ADR-20260718-135417) and are appended here, new
 | ADR | Title |
 |---|---|
 | [20260718-135417](20260718-135417-adr-id-scheme-datetime.md) | ADR identifiers are **date-time based** (`ADR-YYYYMMDD-HHMMSS`) — kills the shared-counter collision when concurrent sessions each grab "the next number" (as 0046 was double-allocated 2026-07-17); legacy `0001`–`0047` keep their sequential ids, both coexist |
+| [20260718-145856](20260718-145856-inbound-webhook-integration-acl.md) | **Inbound webhook integrations** (Stripe/HubRise) via dedicated REST endpoints (`POST /webhooks/{partner}`, NOT `/external/graphql`) + **partner-specific auth** (Stripe signature, HubRise token) + **ACL → inbound events** appended in-process, idempotent. `/external/graphql` + `X-External-Api-Key` is the distinct *pull* path (ADR-0047) |
 
 ## Proposed (deferred until app/runtime code exists)
 
