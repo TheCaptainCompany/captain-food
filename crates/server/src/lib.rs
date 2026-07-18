@@ -11,6 +11,8 @@
 //! - `/{role}/graphql` (+ `/{role}/voyager`) — the GraphQL BFF (ADR-0006), see `graphql`.
 //! - `POST /internal/sirene/drain` — wakes the SIRENE sync worker after a CI ingestion run (ADR-0045);
 //!   secured by the `INTERNAL_TRIGGER_TOKEN` shared secret (`x-internal-token` header).
+//! - `POST /webhooks/stripe` — Stripe webhook ingestion (inbound payment facts through the ACL);
+//!   secured by `Stripe-Signature` HMAC verification against `STRIPE_WEBHOOK_SECRET` (fail-closed).
 //!
 //! The projection worker (ADR-0040) runs **in-process** here for now (Render Background Workers are paid),
 //! gated by `RUN_PROJECTOR` (default on) so it can graduate to a dedicated worker with no logic change.
@@ -41,7 +43,7 @@ use infrastructure::{
     FailClosedGoogleOwnershipVerifier, PgCartRepository, PgCatalogRepository, PgEventStore,
     PgOrderRepository, PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
     PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, ProjectionStatus, ProjectionWorker,
-    SireneSyncWorker, UnverifiedGbpOrderLinkProbe,
+    SireneSyncWorker, StripeWebhookIngestor, UnverifiedGbpOrderLinkProbe,
 };
 use shared_types::HealthDto;
 
@@ -109,6 +111,7 @@ pub fn router() -> Router {
     let mut write_deps: Option<WriteDeps> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut sirene_worker: Option<Arc<SireneSyncWorker>> = None;
+    let mut stripe_ingestor: Option<Arc<StripeWebhookIngestor>> = None;
 
     match std::env::var("DATABASE_URL") {
         Ok(url) if !url.is_empty() => match PgPoolOptions::new()
@@ -174,6 +177,12 @@ pub fn router() -> Router {
                 // table through the ACL into the ordinary write path. Always constructed (the
                 // /internal/sirene/drain ping needs it); the slow safety-net poll loop is gated by
                 // RUN_SIRENE_WORKER (default on) like the projector.
+                // Stripe webhook ingestor (INBOUND payment facts): records what Stripe reports through
+                // the ordinary event-store append port, idempotently by Stripe event id. The HTTP
+                // endpoint (`POST /webhooks/stripe`) is mounted below with the other non-GraphQL routes.
+                stripe_ingestor =
+                    Some(Arc::new(StripeWebhookIngestor::new(Arc::new(PgEventStore::new(pool.clone())))));
+
                 let worker = Arc::new(SireneSyncWorker::new(pool.clone()));
                 sirene_worker = Some(worker.clone());
                 if std::env::var("RUN_SIRENE_WORKER").map(|v| v != "false").unwrap_or(true) {
@@ -199,6 +208,9 @@ pub fn router() -> Router {
     base.merge(graphql::routes::graphql_routes(graphql::schema::build_schema(read_deps, write_deps)))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))
+        // Stripe webhook ingestion: `POST /webhooks/stripe` — signature-verified (STRIPE_WEBHOOK_SECRET,
+        // fail-closed) inbound payment facts recorded via the ACL. Not part of the GraphQL surface.
+        .merge(graphql::routes::stripe_webhook_routes(stripe_ingestor))
         // Host-based landing (ADR-0036): any path not matched above is dispatched by the request `Host`
         // to its per-audience/tenant placeholder. Explicit routes (/health, /ping, /{role}/graphql) win,
         // so Render's health check (internal *.onrender.com host) is unaffected. Covers `/` too.

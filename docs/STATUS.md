@@ -59,6 +59,14 @@
 | `INSEE_API_TOKEN` repo secret | ✅ | Added; SIRENE runs live on deploy (scheduled ingestion → staging → worker) |
 | `INTERNAL_TRIGGER_TOKEN` (Render env + repo secret) to enable the CI→worker ping | ⏳ | Optional; without it CI ingests and the worker drains on its own poll loop (`RUN_SIRENE_WORKER`, default on) |
 
+## 🔌 Inbound integrations (webhooks → ACL → events, ADR-20260718-145856)
+
+| Piece | Status | Notes |
+|---|---|---|
+| **Stripe** `POST /webhooks/stripe` | ✅ | `Stripe-Signature` HMAC verify over raw body (constant-time, 300s replay window, fail-closed); ACL maps `payment_intent.succeeded`/`.payment_failed`/`charge.refunded` → `PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`; idempotent by Stripe event id (`StripeEvent-<id>` stream). 12 unit tests |
+| Checkout must set `metadata.restaurantId` (+`orderId`) on the PaymentIntent/charge | 📋 | Else `charge.refunded` is unmappable (logged + 200-ACKed). Lands with `placeOrder` |
+| **HubRise** `POST /webhooks/hubrise` | 📋 | Next adapter — auth + ACL → `OfferStockUpdated`/`ImportCatalog` |
+
 ## 👤 Pending user actions
 
 - ⏳ *(optional)* Set `INTERNAL_TRIGGER_TOKEN` on the Render service **and** as a repo secret to let the CI ingestion ping the worker for an immediate drain. Not required — the worker polls on its own (`RUN_SIRENE_WORKER`, default on).

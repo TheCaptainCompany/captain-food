@@ -8,8 +8,13 @@
 //!   table through the ACL into the ordinary write path (register/close, ADR-0045).
 //! - [`google`] — Google Business Profile seams (ownership proof + order-link probe, ADR-0019/0021);
 //!   fail-closed stand-ins until the real Google adapters land.
-//! - Later: HubRise (catalog import, inventory), Stripe (payment facts), delivery partner.
+//! - [`stripe`] — the Stripe webhook ACL: signature verification + translation of
+//!   `payment_intent.succeeded` / `payment_intent.payment_failed` / `charge.refunded` into the INBOUND
+//!   payment facts (`PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`), recorded idempotently by
+//!   Stripe event id. The HTTP endpoint (`POST /webhooks/stripe`) lives in `server`.
+//! - Later: HubRise (catalog import, inventory), delivery partner.
 
 pub mod google;
 pub mod sirene;
+pub mod stripe;
 pub mod sync_sirene_worker;

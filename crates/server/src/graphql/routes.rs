@@ -16,7 +16,11 @@ use axum::{
     routing::{any, get, post},
     Extension, Json, Router,
 };
-use infrastructure::SireneSyncWorker;
+use axum::body::Bytes;
+use infrastructure::{
+    verify_stripe_signature, SireneSyncWorker, StripeEvent, StripeIngestOutcome,
+    StripeWebhookIngestor, STRIPE_WEBHOOK_SECRET_ENV,
+};
 
 use crate::auth::AuthContext;
 
@@ -79,6 +83,88 @@ async fn sirene_drain(
         }
     });
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "draining" }))).into_response()
+}
+
+/// Stripe webhook ingestion (INBOUND integration events, CLAUDE.md) — NOT part of the GraphQL surface,
+/// mounted here alongside it like the SIRENE trigger. `POST /webhooks/stripe` receives Stripe's signed
+/// deliveries; the ACL (`infrastructure::integrations::stripe`) verifies the `Stripe-Signature` header
+/// against the RAW body and records `PaymentCaptured`/`PaymentFailed`/`PaymentRefunded` facts,
+/// idempotently keyed on the Stripe event id (redeliveries are 200-ACKed no-ops).
+pub fn stripe_webhook_routes(ingestor: Option<Arc<StripeWebhookIngestor>>) -> Router {
+    Router::new().route("/webhooks/stripe", post(stripe_webhook)).with_state(ingestor)
+}
+
+async fn stripe_webhook(
+    State(ingestor): State<Option<Arc<StripeWebhookIngestor>>>,
+    headers: HeaderMap,
+    // RAW body bytes: the signature covers the exact bytes Stripe sent — a re-serialized JSON would
+    // never verify. Parsing happens only AFTER the MAC checks out.
+    body: Bytes,
+) -> Response {
+    // Fail closed: without the signing secret nothing can be authenticated.
+    let secret = match std::env::var(STRIPE_WEBHOOK_SECRET_ENV) {
+        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
+        _ => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "stripe webhooks not configured (STRIPE_WEBHOOK_SECRET unset)",
+            )
+                .into_response()
+        }
+    };
+    let Some(signature) = headers.get("stripe-signature").and_then(|v| v.to_str().ok()) else {
+        return (StatusCode::BAD_REQUEST, "missing Stripe-Signature header").into_response();
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if let Err(e) = verify_stripe_signature(&secret, signature, &body, now) {
+        // 4xx (not 2xx): Stripe surfaces the failure in its dashboard and retries — correct for a
+        // mis-rolled secret; an attacker just gets a rejection.
+        return (StatusCode::BAD_REQUEST, format!("invalid Stripe signature: {e}")).into_response();
+    }
+
+    let Some(ingestor) = ingestor else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stripe webhook ingestor not available (no database configured)",
+        )
+            .into_response();
+    };
+    let event: StripeEvent = match serde_json::from_slice(&body) {
+        Ok(e) => e,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("unparsable Stripe event: {e}"))
+                .into_response()
+        }
+    };
+
+    match ingestor.ingest(&event).await {
+        // All definitive outcomes ACK with 200 so Stripe stops redelivering; `unmappable` (verified
+        // but missing our metadata) is logged — a retry would carry the same payload.
+        Ok(outcome) => {
+            let status = match &outcome {
+                StripeIngestOutcome::Recorded { event_type } => {
+                    println!("stripe webhook: recorded {event_type} ({})", event.id);
+                    "recorded"
+                }
+                StripeIngestOutcome::Duplicate => "duplicate",
+                StripeIngestOutcome::Ignored { .. } => "ignored",
+                StripeIngestOutcome::Unmappable { reason } => {
+                    eprintln!("stripe webhook: unmappable {} ({}): {reason}", event.event_type, event.id);
+                    "unmappable"
+                }
+            };
+            (StatusCode::OK, Json(serde_json::json!({ "received": true, "status": status })))
+                .into_response()
+        }
+        // Infrastructure failure (event store unreachable): 5xx so Stripe retries the delivery.
+        Err(e) => {
+            eprintln!("stripe webhook: append failed for {}: {e}", event.id);
+            (StatusCode::INTERNAL_SERVER_ERROR, "failed to record event").into_response()
+        }
+    }
 }
 
 async fn graphql_handler(

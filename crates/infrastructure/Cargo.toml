@@ -27,3 +27,9 @@ sqlx = { workspace = true, features = ["chrono", "uuid", "json"] }
 # feature set also carries rt/macros used by the integration test.
 tokio = { workspace = true }
 # reqwest moved out with the SIRENE HTTP client to `sirene_ingest` (ADR-0045) — no direct HTTP here.
+# Stripe webhook signature verification (integrations/stripe): HMAC-SHA256 over the RAW body with a
+# constant-time comparison (`Mac::verify_slice`). All three are already in-tree transitively (sqlx's
+# SCRAM auth pulls hmac/sha2/hex), so this adds no new build weight.
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"

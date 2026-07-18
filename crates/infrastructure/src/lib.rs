@@ -13,6 +13,10 @@ pub mod persistence;
 pub mod projection;
 
 pub use integrations::google::{FailClosedGoogleOwnershipVerifier, UnverifiedGbpOrderLinkProbe};
+pub use integrations::stripe::{
+    verify_signature as verify_stripe_signature, SignatureError as StripeSignatureError,
+    StripeEvent, StripeIngestOutcome, StripeWebhookIngestor, STRIPE_WEBHOOK_SECRET_ENV,
+};
 pub use integrations::sync_sirene_worker::{SireneSyncSummary, SireneSyncWorker};
 pub use persistence::{
     PgCartRepository, PgCatalogRepository, PgEventStore, PgOrderRepository,

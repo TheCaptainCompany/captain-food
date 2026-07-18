@@ -50,3 +50,7 @@ services:
       # comma-separated. Optional — unset means only a Supabase JWT (captain_role EXTERNAL) reaches /external.
       - key: EXTERNAL_API_TOKENS
         sync: false
+      # Stripe webhook signing secret (`whsec_…`) for `POST /webhooks/stripe` signature verification
+      # (ADR-20260718-145856). Unset ⇒ the endpoint fails closed (503).
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
