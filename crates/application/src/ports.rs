@@ -158,6 +158,20 @@ pub struct CreatedPaymentIntent {
     pub client_secret: String,
 }
 
+/// Everything [`PaymentGateway::create_payment_intent`] needs: the server-priced amount, the
+/// customer's payment method, and OUR correlation ids. The ids are REQUIRED because the Stripe
+/// webhook ACL (adapters/stripe acl.rs) can only map an inbound `payment_intent.*` fact back onto
+/// our aggregates through the PaymentIntent's `metadata` (`restaurantId`/`orderId`, plus `cartId`
+/// for traceability) — Stripe cannot know them unless we set them at creation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaymentIntentRequest {
+    pub amount: domain::generated::entities::Money,
+    pub payment_method_id: String,
+    pub order_id: domain::generated::scalars::OrderId,
+    pub restaurant_id: domain::generated::scalars::RestaurantId,
+    pub cart_id: domain::generated::scalars::CartId,
+}
+
 /// Stripe checkout seam for the PlaceOrder saga's first leg (`commands.yaml#/PlaceOrder` →
 /// `events.yaml#/PaymentIntentCreated`, actors.yaml PlaceOrderProcess) and RefundProcess's outbound
 /// refund call (`specs/processmanager.yaml#/RefundProcess`, port `payment_gateway`). The adapter owns
@@ -168,11 +182,12 @@ pub struct CreatedPaymentIntent {
 /// Stripe adapter lands the composition root injects a fail-closed stand-in (never silently accepts).
 #[async_trait]
 pub trait PaymentGateway: Send + Sync {
-    /// Create the PaymentIntent for `amount` against `payment_method_id`.
+    /// Create the PaymentIntent for the request's amount against its payment method, tagging the
+    /// intent with our `orderId`/`restaurantId`/`cartId` metadata so the inbound webhook facts can
+    /// be mapped back onto our aggregates.
     async fn create_payment_intent(
         &self,
-        amount: &domain::generated::entities::Money,
-        payment_method_id: &str,
+        request: &PaymentIntentRequest,
     ) -> Result<CreatedPaymentIntent, DomainError>;
 
     /// Request a (possibly partial) refund of the captured PaymentIntent (RefundProcess

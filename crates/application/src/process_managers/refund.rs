@@ -364,8 +364,7 @@ mod tests {
     impl PaymentGateway for RecordingGateway {
         async fn create_payment_intent(
             &self,
-            _amount: &Money,
-            _payment_method_id: &str,
+            _request: &crate::ports::PaymentIntentRequest,
         ) -> Result<crate::ports::CreatedPaymentIntent, DomainError> {
             unreachable!("RefundProcess never creates intents")
         }

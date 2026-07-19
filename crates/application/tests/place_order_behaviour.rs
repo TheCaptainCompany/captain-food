@@ -108,10 +108,9 @@ struct FakeGateway;
 impl PaymentGateway for FakeGateway {
     async fn create_payment_intent(
         &self,
-        _amount: &Money,
-        payment_method_id: &str,
+        request: &application::ports::PaymentIntentRequest,
     ) -> Result<CreatedPaymentIntent, DomainError> {
-        if payment_method_id == "pm_declined" {
+        if request.payment_method_id == "pm_declined" {
             return Err(DomainError::Invariant("PaymentDeclined: card_declined".into()));
         }
         Ok(CreatedPaymentIntent {

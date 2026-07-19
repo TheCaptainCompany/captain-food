@@ -2485,6 +2485,7 @@ dependencies = [
  "hex",
  "hmac",
  "infrastructure",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
