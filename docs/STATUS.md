@@ -37,7 +37,7 @@
 > guard always `throws` a typed exception, on EVENT legs too** (run aborts + error surfaced — e.g.
 > `PaymentEventOrphaned` for an orphan Stripe capture/failure, `DeliveryJobNotFound` for partner
 > reports on an unknown dispatch run); `skip` is strictly for benign alternatives, and the validator
-> enforces exactly-one-outcome per guard. ② The **codegen-consistency CI gate now runs on every
+> enforces exactly-one-outcome per guard. ② The **CI gate (workflow `ci`, ex `codegen-consistency`) now runs on every
 > branch push** (was main-only), so no branch escapes validate + test + drift. ③ The **per-PM
 > sequence diagrams are now embedded in the product documentation** — `documentation.generated.md`
 > (mermaid fences, renders on GitHub) **and** `documentation.generated.html` (in-page mermaid
@@ -62,7 +62,7 @@
 |---|---|---|
 | Render web service (Docker, Frankfurt) | ✅ | Blueprint IaC (`render.yaml`), cargo-chef cached build, verified live |
 | Supabase Postgres (Frankfurt, eu-central-1) | ✅ | Session pooler; Data API off (intentional) |
-| CI `codegen-consistency` (build+test+validate+drift) | ✅ | Gates deploys (`autoDeployTrigger: checksPass`) |
+| CI workflow `ci` (build+test+validate+drift; ex `codegen-consistency`) | ✅ | Gates deploys (`autoDeployTrigger: checksPass`) |
 | CI `db-migrate` (sqlx-cli, gated on green build) | ✅ | Applies `migrations/*.sql` out-of-band (ADR-0043) |
 | `/health` (schema-version readiness), `/ping`, `/projector` | ✅ | `>=` version gate; in-process projector |
 | GraphQL `/{role}/graphql` + `/{role}/voyager` | ✅ | Role-as-path; per-role filtered schema |

@@ -69,7 +69,7 @@ and data inside the EU**.
   - Blueprint ID: `exs-d9d8q058nd3s73dosclg` · repo `Captain-Food/captain-food` · branch `main` · path `render.yaml`.
   - Enforced config: `runtime: docker` + `dockerfilePath: ./Dockerfile` (cargo-chef cached build + slim
     runtime image), and `autoDeployTrigger: checksPass` so a push to `main` deploys **only after** the
-    `codegen-consistency` CI checks pass (ADR-0043 keeps migrations out-of-band; the `/health`
+    `ci` workflow checks pass (ADR-0043 keeps migrations out-of-band; the `/health`
     schema-version gate still holds a deploy that races ahead of a migration).
   - Every push to `main` re-syncs the Blueprint automatically; "Manual sync" in the dashboard only forces
     one. Secrets stay dashboard-managed via `sync: false` and are never committed.

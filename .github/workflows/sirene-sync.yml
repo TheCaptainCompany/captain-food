@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      # Same cache strategy as codegen-consistency: repeat runs only rebuild what changed.
+      # Same cache strategy as the ci workflow: repeat runs only rebuild what changed.
       - uses: Swatinem/rust-cache@v2
 
       - name: Build the ingestion binary (no domain crates — ADR-0045)

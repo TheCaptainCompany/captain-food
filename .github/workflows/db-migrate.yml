@@ -1,6 +1,6 @@
 # Apply database migrations with sqlx-cli (ADR-0043) — GATED on a green CI run.
 #
-# Runs ONLY after `codegen-consistency` succeeds on main (build + tests + spec validation + no drift), so we
+# Runs ONLY after the `ci` workflow succeeds on main (build + tests + spec validation + no drift), so we
 # never deploy SQL to Supabase for a commit that doesn't compile, fails tests, or is out of sync with the
 # specs. `sqlx migrate run` is idempotent (applies only pending migrations), so running it after every green
 # build is safe. Requires repo secret DATABASE_URL = the Supabase Session-pooler string (5432, ?sslmode=require).
@@ -11,7 +11,7 @@ name: db-migrate
 
 on:
   workflow_run:
-    workflows: ["codegen-consistency"]
+    workflows: ["ci"]
     types: [completed]
     branches: [main]
 

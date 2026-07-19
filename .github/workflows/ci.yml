@@ -1,4 +1,4 @@
-name: codegen-consistency
+name: ci
 
 # Enforces the operating-model rule "specs/*.yaml are the source of truth; everything else is
 # generated". On every push/PR we validate the DSL, regenerate every artifact, and fail if the result

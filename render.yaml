@@ -18,7 +18,7 @@
 # to a dedicated worker service later (ADR-0040/0043).
 #
 # Auto-Deploy gating: `autoDeployTrigger: checksPass` makes a push to `main` deploy ONLY once all GitHub
-# checks (the `codegen-consistency` workflow) conclude green — the "After CI Checks Pass" mode, now encoded
+# checks (the `ci` workflow) conclude green — the "After CI Checks Pass" mode, now encoded
 # in source so it survives a blueprint re-create. Caveat: in this mode Render will NOT deploy a commit that
 # has zero checks, so keep the CI workflow triggering on every push to `main`.
 #

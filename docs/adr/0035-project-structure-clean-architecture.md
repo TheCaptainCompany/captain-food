@@ -48,7 +48,7 @@ captain-food/
 ├── supabase/
 │   ├── migrations/            # INCREMENTAL timestamped SQL for STATEFUL tables (domain_events, auth/tenant) — EF-style
 │   └── seed/
-└── .github/workflows/         # codegen-consistency.yml (the codegen gate) + deploy_web / deploy_server
+└── .github/workflows/         # ci.yml (the codegen gate) + deploy_web / deploy_server
 ```
 
 Differences from the draft (the "misses"): the real granular `specs/` (not 2 files); the codegen is

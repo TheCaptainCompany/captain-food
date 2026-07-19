@@ -1,6 +1,6 @@
 # Captain.Food
 
-[![codegen-consistency](https://github.com/Captain-Food/captain-food/actions/workflows/codegen-consistency.yml/badge.svg?branch=main)](https://github.com/Captain-Food/captain-food/actions/workflows/codegen-consistency.yml)
+[![ci](https://github.com/Captain-Food/captain-food/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Captain-Food/captain-food/actions/workflows/ci.yml)
 
 Local-first food ordering & delivery for independent restaurants and food trucks.
 **V0** validates product–market fit in **Tours**, with a mobile-first web UX and a backend that can
@@ -27,7 +27,7 @@ make validate     # the single blocking gate — must be 0 errors (needs a Rust 
 make generate     # regenerate every artifact from the specs
 ```
 
-The **codegen-consistency** workflow (the badge above) runs `validate` + `generate` on every push/PR and
+The **ci** workflow (the badge above) runs `validate` + `generate` on every push/PR and
 fails if the committed artifacts drift from the specs — so `specs/generated/` is always in sync. Its single
 `codegen` job builds + tests the Rust `tools/codegen-rs`, validates, regenerates, and diffs.
 
