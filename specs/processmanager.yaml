@@ -20,16 +20,24 @@ description: >
                          Map port name → { description, operations: { <operation>: { description } } }.
     - <PM>.receives    : the inbox. Each entry { message, description?, steps }:
         * message : $ref to the command (commands.yaml) or event (events.yaml) received.
-                    COMMAND legs may reject (guards `throws`); EVENT legs are reactions to facts and
-                    NEVER throw — a failed guard/expect is a `skip` (idempotent no-op).
+                    COMMAND legs reject with the thrown error. EVENT legs never reject the FACT —
+                    but an error condition still `throws` (run aborts, error surfaced); only benign
+                    alternatives `skip`.
         * steps   : ordered list; each step is one of:
             - read    : { model, as, where?, note? } — read a read model. `model` is a $ref to a
                         projection table (database/tables/projection_tables.yaml) or view
                         (database/projection_views.yaml); `as` names the result for later steps;
                         `where` maps its columns to values.
-            - guard   : { that?, throws | skip: true, note? } — a precondition. On a COMMAND leg it
-                        MUST carry `throws` ($ref errors.yaml); on an EVENT leg it MUST carry
-                        `skip: true`. `that` (optional, when structurally expressible) maps a subject
+            - guard   : { that?, throws | skip: true, note? } — a precondition, exactly one outcome:
+                        * throws ($ref errors.yaml) — the condition is an ERROR. On a COMMAND leg the
+                          command is REJECTED with the typed error. On an EVENT leg the recorded fact
+                          stands (facts are never rejected) but the run ABORTS and SURFACES the typed
+                          error (poison/ops flag, retry or manual attention) — never a silent skip.
+                        * skip: true — the condition is a BENIGN expected alternative (idempotent
+                          re-delivery, COLLECTION no-op): the run ends as a no-op. Never use skip for
+                          an error condition.
+                        A COMMAND leg may only `throws` (a command has no benign-skip path).
+                        `that` (optional, when structurally expressible) maps a subject
                         (`message`, `state`, or a read alias) → field → { const: <ENUM> }.
             - call    : { port, operation, note? } — invoke a declared outbound port operation
                         (external system; not a domain message).
@@ -124,8 +132,13 @@ PlaceOrderProcess:
       steps:
         - state:
             by: { payment_intent_id: { from: { $ref: 'events.yaml#/PaymentCaptured/properties/paymentIntentId' } } }
+            note: "Load the checkout run this capture belongs to."
+        - guard:
+            throws: { $ref: 'errors.yaml#/PaymentEventOrphaned' }
+            note: "ERROR — a capture matching no run means money was taken with no order to materialize; abort and surface (the fact stays recorded on the Payment)."
+        - state:
             expect: { process_status: { const: AWAITING_PAYMENT_RESULT } }
-            note: "Unknown intent or already-resolved run → skip (idempotent under Stripe re-delivery)."
+            note: "Already-resolved run → skip (benign Stripe re-delivery)."
         - deliver:
             event: { $ref: 'events.yaml#/OrderPlaced' }
             to: { $ref: 'actors.yaml#/Order' }
@@ -149,7 +162,13 @@ PlaceOrderProcess:
       steps:
         - state:
             by: { payment_intent_id: { from: { $ref: 'events.yaml#/PaymentFailed/properties/paymentIntentId' } } }
+            note: "Load the checkout run this failure belongs to."
+        - guard:
+            throws: { $ref: 'errors.yaml#/PaymentEventOrphaned' }
+            note: "ERROR — a failure matching no run is the same anomaly class as an orphan capture; abort and surface."
+        - state:
             expect: { process_status: { const: AWAITING_PAYMENT_RESULT } }
+            note: "Already-resolved run → skip (benign Stripe re-delivery)."
         - state:
             set:
               payment_status: { const: FAILED }
@@ -395,6 +414,11 @@ DeliveryDispatchProcess:
       steps:
         - state:
             by: { delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryAcceptedByPartner/properties/deliveryJobId' } } }
+            note: "Load the dispatch run for this job."
+        - guard:
+            throws: { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+            note: "ERROR — an acceptance for an unknown dispatch run; abort and surface."
+        - state:
             set: { process_status: { const: ACCEPTED } }
 
     - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
@@ -402,6 +426,11 @@ DeliveryDispatchProcess:
       steps:
         - state:
             by: { delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/deliveryJobId' } } }
+            note: "Load the dispatch run for this job."
+        - guard:
+            throws: { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+            note: "ERROR — a rejection for an unknown dispatch run; abort and surface."
+        - state:
             set: { process_status: { const: REOFFER_REQUIRED } }
         - call:
             port: delivery_partner
@@ -416,6 +445,10 @@ DeliveryDispatchProcess:
             skip: true
         - state:
             by: { delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryStatusUpdated/properties/deliveryJobId' } } }
+            note: "Load the dispatch run for this job."
+        - guard:
+            throws: { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+            note: "ERROR — a DELIVERED report for an unknown dispatch run; abort and surface."
         - send:
             command: { $ref: 'commands.yaml#/MarkOrderDelivered' }
             to: { $ref: 'actors.yaml#/Order' }
@@ -431,6 +464,10 @@ DeliveryDispatchProcess:
       steps:
         - state:
             by: { delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryCompleted/properties/deliveryJobId' } } }
+            note: "Load the dispatch run for this job."
+        - guard:
+            throws: { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+            note: "ERROR — a completion for an unknown dispatch run; abort and surface."
         - send:
             command: { $ref: 'commands.yaml#/MarkOrderDelivered' }
             to: { $ref: 'actors.yaml#/Order' }

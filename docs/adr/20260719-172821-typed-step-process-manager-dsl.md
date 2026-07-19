@@ -31,9 +31,14 @@ declares:
 
 Semantic rules, enforced by the validator (§2b in `tools/codegen-rs`):
 
-- **Command legs reject; event legs skip.** A guard on a command-triggered leg MUST `throws` a typed
-  `errors.yaml` error; a guard on an event-triggered leg MUST `skip: true` — a recorded fact is never
-  rejected, only idempotently ignored (a failed `state.expect` is likewise a skip).
+- **Errors always throw; only benign alternatives skip.** Every guard declares exactly one outcome.
+  `throws` (a typed `errors.yaml` error) marks an ERROR — on a command leg the command is rejected;
+  on an event leg the recorded fact stands (facts are never rejected) but the run ABORTS and SURFACES
+  the typed error (poison/ops flag) instead of continuing. `skip: true` is reserved for benign
+  expected alternatives (idempotent re-delivery, COLLECTION no-op — a failed `state.expect` is such a
+  skip) and never for error conditions. A command leg has no benign-skip path: its guards only throw.
+  Examples: an orphan Stripe capture/failure throws `PaymentEventOrphaned`; a partner report for an
+  unknown dispatch run throws `DeliveryJobNotFound`.
 - Every `deliver`/`send` target must actually receive that message per `actors.yaml` (single wiring
   truth); every column, port operation, alias and enum const must exist.
 - A PM's `emits`/`throws` are **derived** from its steps (delivered events ∪ the emits of sent

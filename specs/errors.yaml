@@ -626,6 +626,18 @@ PaymentDeclined:
     en: "Payment was declined."
     fr: "Le paiement a été refusé."
 
+PaymentEventOrphaned:
+  description: >
+    A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known
+    checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and
+    surfaces this error for ops attention (money may have been taken with no order to materialize) —
+    an anomaly is never silently skipped.
+  context:
+    paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }
+  messages:
+    en: "Payment event received for an unknown checkout."
+    fr: "Événement de paiement reçu pour un checkout inconnu."
+
 RefundNotPending:
   description: >
     The admin refund decision (ApproveRefund / DenyRefund) targets an order with no refund pending

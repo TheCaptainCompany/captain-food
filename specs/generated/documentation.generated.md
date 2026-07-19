@@ -3031,8 +3031,8 @@ _⚙️ process manager_ — The checkout saga. On PlaceOrder: reads the OPEN ca
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
-| [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) | — |
-| [⚡ `PaymentFailed`](#event-paymentfailed) | _Payment failed: resolve the run; no order is placed and the cart stays OPEN._ | — |
+| [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
+| [⚡ `PaymentFailed`](#event-paymentfailed) | _Payment failed: resolve the run; no order is placed and the cart stays OPEN._ | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 
 <a id="actor-refundprocess"></a>
 #### 🎭 Actor: `RefundProcess`
@@ -3977,7 +3977,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The admin refund decision (ApproveRefund / DenyRefund) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 
-### 📐 Business rules _(15)_
+### 📐 Business rules _(16)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -4083,6 +4083,13 @@ _Only an ADMIN decision resolves a pending refund: ApproveRefund (possibly parti
 _The settled refund fact reported back by Stripe is recorded._
 
 - **Verified by**: [🧪 `TestRefundSettledFactRecorded`](#test-testrefundsettledfactrecorded), [🧪 `TestPaymentRefundedRecorded`](#test-testpaymentrefundedrecorded)
+
+<a id="rule-orphanpaymenteventflagged"></a>
+#### 📐 Rule: `OrphanPaymentEventFlagged`
+
+_A Stripe payment outcome that matches no known checkout run is surfaced as a typed error (PaymentEventOrphaned) — the recorded fact stands, but the anomaly is never silently skipped._
+
+- **Verified by**: [🧪 `TestPaymentCaptureOrphanIsFlagged`](#test-testpaymentcaptureorphanisflagged)
 
 ### 🧪 Tests _(5)_
 
@@ -4453,6 +4460,16 @@ _On payment failure the saga aborts and places no order (cart stays open)_
 - **When**: [📩 `PaymentFailed`](#command-paymentfailed)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
+
+<a id="test-testpaymentcaptureorphanisflagged"></a>
+#### 🧪 Test: `TestPaymentCaptureOrphanIsFlagged`
+
+_A capture matching no checkout run aborts the saga with a typed error (never a silent skip)_
+
+- **Given**: _(none)_
+- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
+- **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
 
 **[🎭 `RefundProcess`](#actor-refundprocess)**
 
@@ -5741,10 +5758,10 @@ _⚙️ process manager_ — Dispatches and tracks deliveries (bounded context: 
 | --- | --- | --- |
 | [⚡ `OrderMarkedReady`](#event-ordermarkedready) | [⚡ `DeliveryRequested`](#event-deliveryrequested) | — |
 | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | _The partner accepted (inbound, recorded by the DeliveryJob aggregate — the courier lives on the job): just advance the run.
-_ | — |
-| [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | _The partner declined (inbound): re-offer, or flag for manual handling._ | — |
-| [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⚡ `OrderDelivered`](#event-orderdelivered) | — |
-| [⚡ `DeliveryCompleted`](#event-deliverycompleted) | [⚡ `OrderDelivered`](#event-orderdelivered) | — |
+_ | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
+| [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | _The partner declined (inbound): re-offer, or flag for manual handling._ | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
+| [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⚡ `OrderDelivered`](#event-orderdelivered) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
+| [⚡ `DeliveryCompleted`](#event-deliverycompleted) | [⚡ `OrderDelivered`](#event-orderdelivered) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 
 ### 🗄️ Views (read models) _(1)_
 
@@ -6903,7 +6920,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 
-### ⛔ Errors _(9)_
+### ⛔ Errors _(10)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -6916,6 +6933,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
+| <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 
 <a id="sec-screens"></a>
 ## 📱 Customer screens (SDUI)

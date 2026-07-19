@@ -3060,33 +3060,34 @@ fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) {
                     "guard" => {
                         let throws = body.get("throws");
                         let skip = body.get("skip").and_then(|x| x.as_bool()).unwrap_or(false);
-                        if is_command {
-                            match throws.and_then(|t| t.get("$ref")).and_then(|x| x.as_str()) {
-                                None => issues.push(err(
-                                    "pm-guard",
-                                    sw.clone(),
-                                    "a guard on a COMMAND leg must `throws` a typed error ($ref errors.yaml) — commands can be rejected.".into(),
-                                )),
-                                Some(r) => {
-                                    if ref_target_file(r, CTX).as_deref() != Some("errors.yaml") {
-                                        issues.push(err("pm-guard", format!("{}.throws", sw), format!("guard.throws must reference errors.yaml, got '{}'.", r)));
+                        // Exactly one outcome. `throws` = ERROR (typed, on any leg — an event leg
+                        // aborts and surfaces it); `skip` = benign expected alternative (never an
+                        // error). A command leg has no benign-skip path: it only rejects.
+                        match (throws, skip) {
+                            (Some(t), false) => {
+                                match t.get("$ref").and_then(|x| x.as_str()) {
+                                    None => issues.push(err("pm-guard", format!("{}.throws", sw), "guard.throws must be a { $ref: 'errors.yaml#/<Error>' }.".into())),
+                                    Some(r) => {
+                                        if ref_target_file(r, CTX).as_deref() != Some("errors.yaml") {
+                                            issues.push(err("pm-guard", format!("{}.throws", sw), format!("guard.throws must reference errors.yaml, got '{}'.", r)));
+                                        }
                                     }
                                 }
                             }
-                            if skip {
-                                issues.push(err("pm-guard", sw.clone(), "a COMMAND-leg guard rejects (`throws`), it does not `skip`.".into()));
+                            (None, true) => {
+                                if is_command {
+                                    issues.push(err(
+                                        "pm-guard",
+                                        sw.clone(),
+                                        "a COMMAND-leg guard must `throws` a typed error — a command has no benign-skip path; in case of error the guard throws.".into(),
+                                    ));
+                                }
                             }
-                        } else {
-                            if throws.is_some() {
-                                issues.push(err(
-                                    "pm-guard",
-                                    sw.clone(),
-                                    "an EVENT leg reacts to a recorded fact and never throws — use `skip: true` (idempotent no-op).".into(),
-                                ));
-                            }
-                            if !skip {
-                                issues.push(err("pm-guard", sw.clone(), "an EVENT-leg guard must declare `skip: true`.".into()));
-                            }
+                            _ => issues.push(err(
+                                "pm-guard",
+                                sw.clone(),
+                                "a guard must declare exactly one outcome: `throws` (error — typed $ref errors.yaml) or `skip: true` (benign alternative).".into(),
+                            )),
                         }
                         if let Some(that) = body.get("that").and_then(|x| x.as_mapping()) {
                             for (subj_k, fields) in that {

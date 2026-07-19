@@ -546,6 +546,14 @@ pub const PAYMENT_DECLINED: ErrorDef = ErrorDef {
     message_fr: "Le paiement a été refusé.",
 };
 
+/// A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.
+/// Context: `paymentIntentId`.
+pub const PAYMENT_EVENT_ORPHANED: ErrorDef = ErrorDef {
+    code: "PaymentEventOrphaned",
+    message_en: "Payment event received for an unknown checkout.",
+    message_fr: "Événement de paiement reçu pour un checkout inconnu.",
+};
+
 /// The admin refund decision (ApproveRefund / DenyRefund) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.
 /// Context: `orderId`.
 pub const REFUND_NOT_PENDING: ErrorDef = ErrorDef {
@@ -632,6 +640,7 @@ pub const ERRORS: &[ErrorDef] = &[
     RIDER_NOT_FOUND,
     INVALID_RIDER_STATUS_TRANSITION,
     PAYMENT_DECLINED,
+    PAYMENT_EVENT_ORPHANED,
     REFUND_NOT_PENDING,
     CANNOT_ORDER_TEST_RESTAURANT,
 ];

@@ -2380,3 +2380,15 @@ tests:
       data: { riderId: "rider-1", status: "ON_DELIVERY" }
     thrown:
       - { $ref: 'errors.yaml#/InvalidRiderStatusTransition' }
+
+  # ----------------------- PlaceOrderProcess (error guards) ----------
+  TestPaymentCaptureOrphanIsFlagged:
+    name: "A capture matching no checkout run aborts the saga with a typed error (never a silent skip)"
+    rules: [{ $ref: 'rules.yaml#/OrphanPaymentEventFlagged' }]
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given: []
+    when:
+      type: { $ref: 'events.yaml#/PaymentCaptured' }
+      data: { paymentIntentId: "pi_unknown", restaurantId: "resto-1", amount: { amountCents: 2019, currency: "EUR" } }
+    thrown:
+      - { $ref: 'errors.yaml#/PaymentEventOrphaned' }

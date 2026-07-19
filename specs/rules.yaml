@@ -119,6 +119,8 @@ RefundRequiresAdminApproval:
   description: "Only an ADMIN decision resolves a pending refund: ApproveRefund (possibly partial) requests the Stripe refund, DenyRefund closes it; both are rejected when no refund is pending approval for the order."
 RefundSettledFactRecorded:
   description: "The settled refund fact reported back by Stripe is recorded."
+OrphanPaymentEventFlagged:
+  description: "A Stripe payment outcome that matches no known checkout run is surfaced as a typed error (PaymentEventOrphaned) — the recorded fact stands, but the anomaly is never silently skipped."
 
 # --- CartBindingProcess ---
 GuestCartsBoundOnIdentification:

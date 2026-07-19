@@ -7,9 +7,11 @@ name: codegen-consistency
 #
 # The gate is the Rust codegen (tools/codegen-rs, ADR-0034). The earlier TypeScript codegen reached full
 # parity (byte-identical artifacts + identical validation issue set) and has been retired.
+# The gate runs on EVERY branch push (not just main) so a feature branch is validated even before a
+# PR exists; `pull_request` stays for forked PRs. Duplicate push+PR runs on an open PR are accepted.
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
 
 permissions:
