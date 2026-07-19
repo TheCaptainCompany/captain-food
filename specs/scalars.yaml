@@ -24,6 +24,11 @@ ProductId:
   format: uuid
   description: "A product groups one or more offers (HubRise: product)."
 
+SessionId:
+  type: string
+  format: uuid
+  description: "A session is a temporary auth token (ADR-0041) for a visitor or customer, used to bind carts and track the user across devices."
+
 OfferId:
   type: string
   format: uuid
@@ -398,6 +403,15 @@ DeliveryStatus:
     - FAILED            # could not be delivered — terminal
     - CANCELLED         # cancelled before delivery — terminal
   description: "Status of one delivery, reported by the partner (inbound) or driven by an independent rider's commands."
+
+RiderStatus:
+  type: string
+  enum:
+    - OFFLINE        # not accepting jobs
+    - AVAILABLE      # online, can be offered jobs
+    - ON_DELIVERY    # currently fulfilling a delivery
+    - SUSPENDED      # blocked by admin — terminal until reinstated
+  description: "Availability/lifecycle status of an independent Captain rider."
 
 # Who fulfils a delivery: an external delivery PARTNER (e.g. Avelo37, with its own couriers) or an
 # INDEPENDENT Captain rider (RIDER role) accepting the job directly. Both converge on one DeliveryJob.

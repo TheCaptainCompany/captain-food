@@ -1,0 +1,28 @@
+version: 1
+description: >
+  Real (non-view) tables of the Captain.Food store — the append-only event log and its retention policy.
+  Their DDL is GENERATED from here (ADR-0037); do not hand-write it. Column `type` is either a SQL
+  primitive (`text`/`uuid`/`bigint`/`integer`/`jsonb`/`timestamptz`/`interval`/…) or a `$ref` into a
+  scalars.yaml scalar (mapped to its Postgres type). The View_* read models live in views.yaml (they are
+  VIEWS over domain_events, not tables — ADR-0035).
+
+payment_process_manager:
+  description: >
+    It's a state table for the payment process manager. It keeps track of the state of the payment process for each cart. The table is used to ensure that the payment process is handled correctly and to prevent duplicate processing of payments.
+  columns:
+    cart_id:       { type: text,      identity: true, pk: true, note: "cart id — unique identifier for the cart which is also the payment process manager identifier to avoid processing concurrency" }
+    payment_id:             { type: text,        unique: true,             note: "Internal payment identifier" }
+    external_payment_id:    { type: text,                                  note: "External payment identifier (e.g. Stripe payment intent id)" }
+    process_status:        { type: text,                               note: "Current process status: started | awaiting_payment_result | order_placed | cart_checked_out | failed | done" }
+    payment_status:        { type: text,       note: "Current status of the payment: pending | captured | failed" }
+    last_processed_stripe_event_id:      { type: text,     note: "ID of the last processed Stripe event" }
+    last_update_utc: { type:  timestamptz , note: "Timestamp of the last update to the process manager state"}
+
+
+
+
+
+
+
+
+

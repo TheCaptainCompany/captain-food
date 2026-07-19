@@ -641,6 +641,59 @@ OrderLineItem:
     - unitPrice
     - lineTotal
 
+CheckoutSnapshot:
+  type: object
+  description: >
+    The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated
+    when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced +
+    events.yaml#/CartCheckedOut need beyond the inbound PaymentCaptured fact, so the order is
+    reconstructable from the event log alone (no out-of-log store). Mirrors the application
+    `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true
+    mode:
+      $ref: 'scalars.yaml#/Mode'
+      nullable: true
+    ref:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    customerContact:
+      $ref: '#/CustomerContact'
+    serviceType:
+      $ref: 'scalars.yaml#/ServiceType'
+    deliveryAddress:
+      $ref: '#/Address'
+      nullable: true
+    items:
+      type: array
+      items:
+        $ref: '#/OrderLineItem'
+      description: "Priced order lines frozen at checkout; may be empty until server-side line pricing lands."
+    totalAmount:
+      $ref: '#/Money'
+    breakdown:
+      $ref: '#/PaymentBreakdown'
+    note:
+      $ref: 'scalars.yaml#/OrderNote'
+      nullable: true
+  required:
+    - orderId
+    - cartId
+    - restaurantId
+    - customerContact
+    - serviceType
+    - items
+    - totalAmount
+    - breakdown
+
 Order:
   type: object
   properties:

@@ -586,6 +586,36 @@ DeliveryAlreadyAssigned:
     fr: "Cette livraison a déjà été prise en charge."
 
 # =====================================================================
+# Rider
+# =====================================================================
+
+RiderAlreadyRegistered:
+  description: "A rider is already registered for this identity (authRef/id)."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "You are already registered as a rider."
+    fr: "Vous êtes déjà inscrit en tant que livreur."
+
+RiderNotFound:
+  description: "No rider with this id."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "Rider not found."
+    fr: "Livreur introuvable."
+
+InvalidRiderStatusTransition:
+  description: "The rider is not in a status that allows this transition."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    currentStatus: { $ref: 'scalars.yaml#/RiderStatus' }
+    targetStatus: { $ref: 'scalars.yaml#/RiderStatus' }
+  messages:
+    en: "A rider cannot move from '{currentStatus}' to '{targetStatus}'."
+    fr: "Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'."
+
+# =====================================================================
 # Payment
 # =====================================================================
 

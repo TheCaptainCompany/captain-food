@@ -311,6 +311,25 @@ pub struct OrderLineItem {
     pub line_total: Money,
 }
 
+/// The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced + events.yaml#/CartCheckedOut need beyond the inbound PaymentCaptured fact, so the order is reconstructable from the event log alone (no out-of-log store). Mirrors the application `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutSnapshot {
+    pub order_id: OrderId,
+    pub cart_id: CartId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub mode: Option<Mode>,
+    pub r#ref: Option<ExternalReference>,
+    pub customer_contact: CustomerContact,
+    pub service_type: ServiceType,
+    pub delivery_address: Option<Address>,
+    pub items: Vec<OrderLineItem>,
+    pub total_amount: Money,
+    pub breakdown: PaymentBreakdown,
+    pub note: Option<OrderNote>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {

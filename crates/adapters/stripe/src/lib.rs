@@ -2,7 +2,7 @@
 //!
 //! - [`acl`] — framework-free Anti-Corruption Layer: `Stripe-Signature` verification, Stripe→domain event
 //!   mapping, and the idempotent [`acl::StripeWebhookIngestor`] over the `application` EventStore port.
-//! - `http` — the thin axum shell exposing `POST /webhooks/stripe`; mount [`routes`] into the monolith
+//! - `http` — the thin axum shell exposing `POST /adapters/stripe/webhooks`; mount [`routes`] into the monolith
 //!   server, or run the standalone `stripe-webhook` binary (see `main.rs`) as its own web service.
 
 pub mod acl;

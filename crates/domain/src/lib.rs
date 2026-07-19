@@ -9,6 +9,7 @@
 //! Per-aggregate modules (`restaurant`, `order`, `customer`, `cart`, `review`, …) land here as the domain
 //! model is generated/implemented from the specs. Only the `shared` vocabulary is scaffolded for now.
 
+pub mod aggregate;
 pub mod cart;
 pub mod catalog;
 pub mod customer;

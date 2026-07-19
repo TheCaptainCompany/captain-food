@@ -103,6 +103,8 @@ RefundRequestByCustomer:
 # --- PlaceOrderProcess (checkout saga) ---
 CheckoutPricesCartCreatesPaymentIntent:
   description: "Checkout reads and prices the open cart and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment."
+CheckoutSnapshotFrozenAtIntent:
+  description: "When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment capture — no out-of-log store."
 OrderTestModeIsolation:
   description: "Test-mode isolation (ADR-0038): a production (LIVE) order is rejected against a TEST restaurant, so real customers never reach test data; a TEST order MAY target a LIVE restaurant to validate the real receipt path, and TEST orders/deliveries are excluded from payouts and analytics."
 OrderMaterializedOnPaymentCapture:

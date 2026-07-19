@@ -1,5 +1,5 @@
 //! Standalone Stripe webhook web service (ADR-20260718-213352): binds `$PORT` and serves ONLY
-//! `POST /webhooks/stripe` over a Postgres `EventStore`. This lets the Stripe adapter deploy as its own
+//! `POST /adapters/stripe/webhooks` over a Postgres `EventStore`. This lets the Stripe adapter deploy as its own
 //! Render web service, fully isolated from the other partners — or it can be mounted into the monolith via
 //! [`stripe_adapter::routes`]. Migrations stay out-of-band (ADR-0043); this process only appends events.
 

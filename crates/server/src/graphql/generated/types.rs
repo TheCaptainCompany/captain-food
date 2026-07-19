@@ -290,6 +290,40 @@ pub struct OrderLineItem {
     pub line_total: Money,
 }
 
+/// The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced + events.yaml#/CartCheckedOut need beyond the inbound PaymentCaptured fact, so the order is reconstructable from the event log alone (no out-of-log store). Mirrors the application `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutSnapshot {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "cartId")]
+    pub cart_id: CartId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "customerId")]
+    pub customer_id: Option<CustomerId>,
+    #[graphql(name = "mode")]
+    pub mode: Option<Mode>,
+    #[graphql(name = "ref")]
+    pub r#ref: Option<ExternalReference>,
+    #[graphql(name = "customerContact")]
+    pub customer_contact: CustomerContact,
+    #[graphql(name = "serviceType")]
+    pub service_type: ServiceType,
+    #[graphql(name = "deliveryAddress")]
+    pub delivery_address: Option<Address>,
+    /// Priced order lines frozen at checkout; may be empty until server-side line pricing lands.
+    #[graphql(name = "items")]
+    #[serde(default)]
+    pub items: Vec<OrderLineItem>,
+    #[graphql(name = "totalAmount")]
+    pub total_amount: Money,
+    #[graphql(name = "breakdown")]
+    pub breakdown: PaymentBreakdown,
+    #[graphql(name = "note")]
+    pub note: Option<OrderNote>,
+}
+
 /// A restaurant (public discovery + single-restaurant header). Navigates to its catalogs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]

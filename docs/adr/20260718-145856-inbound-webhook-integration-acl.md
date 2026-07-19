@@ -3,6 +3,11 @@
 ## Status
 Accepted. First adapter (Stripe) implemented in the same change; HubRise follows.
 
+**Amended 2026-07-19:** partner webhook routes are namespaced per adapter crate —
+`POST /adapters/{partner}/webhooks` (was `POST /webhooks/{partner}`), symmetric across adapters and
+aligned with the self-contained adapter-crate layout (ADR-20260718-213352). Adapter `http.rs`, the server
+mount, `render.yaml`, and the integration docs are updated accordingly.
+
 ## Context
 Third-party systems (Stripe payments, HubRise catalog/inventory) must feed Captain.Food. They are
 **machines that PUSH** to us over REST/webhooks, each with **their own authentication** (Stripe request
@@ -23,14 +28,14 @@ an **Anti-Corruption Layer** (the established pattern in `crates/infrastructure/
 `sirene.rs`, `google.rs`) into domain events, appended **in-process**:
 
 ```
-Stripe/HubRise ──webhook (REST)──▶ POST /webhooks/{partner}   (crates/server; NOT the GraphQL surface)
+Stripe/HubRise ──webhook (REST)──▶ POST /adapters/{partner}/webhooks   (crates/server; NOT the GraphQL surface)
                                        │ verify PARTNER-specific auth (signature / token) over the RAW body
                                        ▼ ACL: external payload → domain (keep external vocab out)
                                    inbound event (PaymentCaptured…) → event store        [idempotent by
                                    or, where orchestrated, a command (ImportCatalog) → handler   external ref]
 ```
 
-- **Endpoint, not GraphQL.** `POST /webhooks/stripe`, `POST /webhooks/hubrise` — mounted alongside the
+- **Endpoint, not GraphQL.** `POST /adapters/stripe/webhooks`, `POST /adapters/hubrise/webhooks` — mounted alongside the
   other routes (like `/internal/sirene/drain`), never `/external/graphql`.
 - **Partner-specific auth, fail-closed.**
   - **Stripe**: verify the `Stripe-Signature` header — `HMAC-SHA256(STRIPE_WEBHOOK_SECRET, "<t>.<rawBody>")`,

@@ -59,7 +59,7 @@ validation. In the story map, inbound events are marked 📥.
 
 ## Architecture (summary)
 
-- **Full-stack Rust** (ADR-0034 — supersedes the earlier Next.js/Node stack). **Cargo workspace** in Clean-Architecture layers (ADR-0035): `crates/domain` (pure DDD — aggregates/commands/events/policies/value-objects; may derive `serde` on events/VOs but no serialization *logic*), `crates/application` (use cases — `ports/` traits, command/query handlers, `process_managers/` sagas), `crates/infrastructure` (adapters — event store, read-model repos over `View_*`, `integrations/` ACL for HubRise/Stripe/delivery), `crates/server` (Axum BFF — GraphQL, SDUI, `middleware/tenant`), `crates/shared_types` (serde + UniFFI), `crates/core` (Crux app-shell over `domain`), `crates/web` (Leptos → WASM SDUI renderer), `crates/desktop` (Tauri 2.0). Mobile = thin SwiftUI/Compose shells over the core via UniFFI. Dependency rule: outer→inner only; `domain` imports nothing else.
+- **Full-stack Rust** (ADR-0034 — supersedes the earlier Next.js/Node stack). **Cargo workspace** in Clean-Architecture layers (ADR-0035): `crates/domain` (pure DDD — aggregates/commands/events/policies/value-objects + the `Aggregate` trait (event-sourced-actor identity + `fold`); may derive `serde` on events/VOs but no serialization *logic*), `crates/application` (use cases — `ports/` traits, command/query handlers, `process_managers/` sagas, and a write-side `Repository` over the event-store journal so handlers/runner never touch the raw `EventStore` — ADR-20260719-031136), `crates/infrastructure` (adapters — event store, read-model repos over `View_*`, `integrations/` ACL for HubRise/Stripe/delivery), `crates/server` (Axum BFF — GraphQL, SDUI, `middleware/tenant`), `crates/shared_types` (serde + UniFFI), `crates/core` (Crux app-shell over `domain`), `crates/web` (Leptos → WASM SDUI renderer), `crates/desktop` (Tauri 2.0). Mobile = thin SwiftUI/Compose shells over the core via UniFFI. Dependency rule: outer→inner only; `domain` imports nothing else.
 - **Frontend**: **Leptos** (Rust→WASM), SSR+hydration; the SDUI screens (ADR-0033) render via a generated Leptos component registry. All backend calls go through **GraphQL**.
 - **Backend**: **Rust** — Axum + Tokio + SQLx (compile-time-checked) + async-graphql, **CQRS-light + event log**.
   - Mutations (commands) validate invariants then write events into the append-only `domain_events` table.
@@ -86,7 +86,7 @@ is **generated/derived**, **planning is separate from execution**, and **observa
 Topic rules live in [docs/claude/](docs/claude/) — read the relevant one before working:
 [dsl.md](docs/claude/dsl.md) · [codegen.md](docs/claude/codegen.md) ·
 [observability.md](docs/claude/observability.md) · [c4.md](docs/claude/c4.md) ·
-[adr.md](docs/claude/adr.md) · [loops.md](docs/claude/loops.md). Decisions are recorded in
+[adr.md](docs/claude/adr.md) · [loops.md](docs/claude/loops.md) · [mermaid.md](docs/claude/mermaid.md). Decisions are recorded in
 [docs/adr/](docs/adr/).
 
 Generator/reviewer/observability agents are defined in `.claude/agents/`; acceptance gates are wired as

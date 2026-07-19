@@ -34,7 +34,7 @@ place-order:
   feature: place-order
   criticality: high
   workflow:
-    saga: { $ref: 'actors.yaml#/PlaceOrderProcess' }
+    saga: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     command: { $ref: 'commands.yaml#/PlaceOrder' }
     emits:
       - { $ref: 'events.yaml#/PaymentIntentCreated' }
@@ -124,7 +124,7 @@ refund:
   feature: refund
   criticality: high
   workflow:
-    saga: { $ref: 'actors.yaml#/RefundProcess' }
+    saga: { $ref: 'processmanager.yaml#/RefundProcess' }
     inbound:
       - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
       - { $ref: 'events.yaml#/OrderCancelledByCustomer' }

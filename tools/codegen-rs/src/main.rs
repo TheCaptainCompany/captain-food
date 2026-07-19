@@ -22,6 +22,7 @@ const SOURCE_FILES: &[&str] = &[
     "commands.yaml",
     "errors.yaml",
     "actors.yaml",
+    "processmanager.yaml",
     "database/projection_views.yaml",
     "api.yaml",
     "stories.yaml",

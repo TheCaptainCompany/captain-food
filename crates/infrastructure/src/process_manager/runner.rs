@@ -21,13 +21,15 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use application::ports::{is_version_conflict, Actor, CheckoutSnapshotSource, EventStore};
-use application::process_managers::{
-    cart_binding, cart_stream, delivery_dispatch, delivery_job_stream, order_stream, place_order,
-    refund, restaurant_stream, Decision,
-};
+use application::ports::{is_version_conflict, Actor, CheckoutSnapshotSource};
+use application::process_managers::{cart_binding, delivery_dispatch, place_order, refund, Decision};
+use application::repository::Repository;
 use chrono::Utc;
+use domain::cart::CartState;
+use domain::delivery_job::DeliveryJobState;
 use domain::generated::events::DomainEvent;
+use domain::order::OrderState;
+use domain::restaurant::RestaurantState;
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 
@@ -255,9 +257,9 @@ impl ProcessManagerRunner {
                     None => place_order::on_payment_captured(e, None, &[], 0, &[], 0),
                     Some(snap) => {
                         let (order_events, order_version) =
-                            self.store.load(&order_stream(&snap.order_id)).await?;
+                            Repository::new(&self.store).events::<OrderState>(snap.order_id).await?;
                         let (cart_events, cart_version) =
-                            self.store.load(&cart_stream(&snap.cart_id)).await?;
+                            Repository::new(&self.store).events::<CartState>(snap.cart_id).await?;
                         place_order::on_payment_captured(
                             e,
                             Some(snap),
@@ -294,11 +296,13 @@ impl ProcessManagerRunner {
             }
             // --- DeliveryDispatchProcess ---------------------------------------------------------
             (ProcessManager::DeliveryDispatch, DomainEvent::OrderMarkedReady(e)) => {
-                let (order_events, _) = self.store.load(&order_stream(&e.order_id)).await?;
+                let (order_events, _) =
+                    Repository::new(&self.store).events::<OrderState>(e.order_id).await?;
                 let (restaurant_events, _) =
-                    self.store.load(&restaurant_stream(&e.restaurant_id)).await?;
+                    Repository::new(&self.store).events::<RestaurantState>(e.restaurant_id).await?;
                 let job_id = delivery_dispatch::delivery_job_id_for(&e.order_id);
-                let (job_events, _) = self.store.load(&delivery_job_stream(&job_id)).await?;
+                let (job_events, _) =
+                    Repository::new(&self.store).events::<DeliveryJobState>(job_id).await?;
                 delivery_dispatch::on_order_marked_ready(
                     e,
                     &order_events,
@@ -314,7 +318,7 @@ impl ProcessManagerRunner {
             }
             (ProcessManager::DeliveryDispatch, DomainEvent::DeliveryStatusUpdated(e)) => {
                 let (job_events, _) =
-                    self.store.load(&delivery_job_stream(&e.delivery_job_id)).await?;
+                    Repository::new(&self.store).events::<DeliveryJobState>(e.delivery_job_id).await?;
                 let (order_events, order_version) =
                     self.load_job_order(&job_events).await?;
                 delivery_dispatch::on_delivery_status_updated(
@@ -326,7 +330,7 @@ impl ProcessManagerRunner {
             }
             (ProcessManager::DeliveryDispatch, DomainEvent::DeliveryCompleted(e)) => {
                 let (job_events, _) =
-                    self.store.load(&delivery_job_stream(&e.delivery_job_id)).await?;
+                    Repository::new(&self.store).events::<DeliveryJobState>(e.delivery_job_id).await?;
                 let (order_events, order_version) =
                     self.load_job_order(&job_events).await?;
                 delivery_dispatch::on_delivery_completed(
@@ -353,7 +357,7 @@ impl ProcessManagerRunner {
         job_events: &[DomainEvent],
     ) -> Result<(Vec<DomainEvent>, i64), DomainError> {
         match delivery_dispatch::requested_order(job_events) {
-            Some((order_id, _)) => self.store.load(&order_stream(&order_id)).await,
+            Some((order_id, _)) => Repository::new(&self.store).events::<OrderState>(order_id).await,
             None => Ok((Vec::new(), 0)),
         }
     }
@@ -382,9 +386,11 @@ impl ProcessManagerRunner {
                     correlation_id: trigger.correlation_id,
                     cause_id: Some(trigger.event_id),
                 };
+                let repo = Repository::new(&self.store);
                 for append in appends {
-                    self.store
-                        .append(&append.stream_name, append.expected_version, &append.events, &actor)
+                    // The actor's decided facts go to the actor's journal THROUGH the repository — the
+                    // runner (imperative shell) never touches the EventStore directly.
+                    repo.save(&append.stream_name, append.expected_version, &append.events, &actor)
                         .await?;
                 }
                 Ok(())

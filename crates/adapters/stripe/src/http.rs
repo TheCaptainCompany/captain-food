@@ -1,4 +1,4 @@
-//! HTTP shell for the Stripe adapter: `POST /webhooks/stripe`. Thin — it reads the raw body + signature,
+//! HTTP shell for the Stripe adapter: `POST /adapters/stripe/webhooks`. Thin — it reads the raw body + signature,
 //! delegates verification/mapping/ingestion to the (framework-free) [`crate::acl`], and turns the outcome
 //! into a status code. Verification runs over the RAW body bytes (a re-serialized JSON would never verify).
 
@@ -18,9 +18,9 @@ use crate::acl::{
     STRIPE_WEBHOOK_SECRET_ENV,
 };
 
-/// Mount `POST /webhooks/stripe`. The ingestor is `None` when no database is configured (→ 503).
+/// Mount `POST /adapters/stripe/webhooks`. The ingestor is `None` when no database is configured (→ 503).
 pub fn routes(ingestor: Option<Arc<StripeWebhookIngestor>>) -> Router {
-    Router::new().route("/webhooks/stripe", post(stripe_webhook)).with_state(ingestor)
+    Router::new().route("/adapters/stripe/webhooks", post(stripe_webhook)).with_state(ingestor)
 }
 
 async fn stripe_webhook(

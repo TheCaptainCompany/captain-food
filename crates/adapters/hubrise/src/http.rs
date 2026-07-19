@@ -1,4 +1,4 @@
-//! HTTP shell for the HubRise adapter: `POST /webhooks/hubrise`. Thin — reads the raw body + signature,
+//! HTTP shell for the HubRise adapter: `POST /adapters/hubrise/webhooks`. Thin — reads the raw body + signature,
 //! delegates verification/parsing to the (framework-free) [`crate::acl`], and, when an [`Enricher`] is
 //! wired and the callback needs a pull (catalog/inventory), drives the domain enrichment
 //! (`api` pull → ACL map → command). Verification runs over the RAW body bytes.
@@ -19,10 +19,10 @@ use crate::acl::{
 };
 use crate::enrich::{EnrichOutcome, Enricher};
 
-/// Mount `POST /webhooks/hubrise`. The [`Enricher`] is `None` when no database / API token is configured
+/// Mount `POST /adapters/hubrise/webhooks`. The [`Enricher`] is `None` when no database / API token is configured
 /// — verified callbacks are then ACKed as `verified_pending_enrichment` (ingress-only, as before).
 pub fn routes(enricher: Option<Arc<dyn Enricher>>) -> Router {
-    Router::new().route("/webhooks/hubrise", post(hubrise_webhook)).with_state(enricher)
+    Router::new().route("/adapters/hubrise/webhooks", post(hubrise_webhook)).with_state(enricher)
 }
 
 async fn hubrise_webhook(

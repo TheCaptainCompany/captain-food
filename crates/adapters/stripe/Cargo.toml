@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 license-file.workspace = true
 publish = false
-description = "Stripe partner adapter (ADR-20260718-213352): a self-contained vertical slice — the ACL (Stripe-Signature verification + event mapping + idempotent ingestor over the EventStore port) and its HTTP shell (POST /webhooks/stripe). Exposes `routes()` for the monolith to mount, and a standalone `stripe-webhook` binary so it can deploy as its own web service, isolated from other partners."
+description = "Stripe partner adapter (ADR-20260718-213352): a self-contained vertical slice — the ACL (Stripe-Signature verification + event mapping + idempotent ingestor over the EventStore port) and its HTTP shell (POST /adapters/stripe/webhooks). Exposes `routes()` for the monolith to mount, and a standalone `stripe-webhook` binary so it can deploy as its own web service, isolated from other partners."
 
 [dependencies]
 # Inner layers only (dependency rule): the ACL maps Stripe shapes onto domain events via the application

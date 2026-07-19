@@ -331,11 +331,20 @@ Cart:
         - { $ref: 'errors.yaml#/CartLineNotFound' }
         - { $ref: 'errors.yaml#/InsufficientStock' }
         - { $ref: 'errors.yaml#/QuantityExceedsLimit' }
+    - message:
+          $ref: 'commands.yaml#/BindCartToCustomer'
+      emits:
+      - $ref: 'events.yaml#/CartBoundToCustomer'
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
 
 Order:
   type: aggregate
-  description: "A single order through its lifecycle. Born from OrderPlaced (emitted by PlaceOrderProcess), then driven to a terminal state."
+  description: "A single order through its lifecycle. Born from OrderPlaced (delivered by PlaceOrderProcess and recorded here), then driven to a terminal state."
   receives:
+    - message: { $ref: 'events.yaml#/OrderPlaced' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+      effect: "Birth: PlaceOrderProcess delivers OrderPlaced; the Order records it (idempotent)."
     - message: { $ref: 'commands.yaml#/AcceptOrder' }
       emits: [{ $ref: 'events.yaml#/OrderAcceptedByRestaurant' }]
       throws:
@@ -395,6 +404,22 @@ Order:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
 
+Payment:
+  type: aggregate
+  description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state."
+  receives:
+    - message: 
+        $ref: 'events.yaml#/PaymentIntentCreated'
+      emits: [{ $ref: 'events.yaml#/PaymentIntentCreated' }]
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+      emits: [{ $ref: 'events.yaml#/PaymentCaptured' }]
+    - message: { $ref: 'events.yaml#/PaymentFailed' }
+      emits: [{ $ref: 'events.yaml#/PaymentFailed' }]
+    - message:
+        $ref: 'events.yaml#/PaymentRefunded'
+      emits: [{ $ref: 'events.yaml#/PaymentRefunded' }]
+
+
 DeliveryJob:
   type: aggregate
   description: >
@@ -403,6 +428,9 @@ DeliveryJob:
     delivery partner (inbound DeliveryAcceptedByPartner/RejectedByPartner/StatusUpdated, recorded via the
     avelo37-acl — no command). ADR-0031.
   receives:
+    - message: { $ref: 'events.yaml#/DeliveryRequested' }
+      emits: [{ $ref: 'events.yaml#/DeliveryRequested' }]
+      effect: "Birth: DeliveryDispatchProcess delivers DeliveryRequested; the DeliveryJob records it (idempotent)."
     - message: { $ref: 'commands.yaml#/AcceptDelivery' }
       emits: [{ $ref: 'events.yaml#/DeliveryAcceptedByRider' }]
       throws:
@@ -418,101 +446,68 @@ DeliveryJob:
       emits: [{ $ref: 'events.yaml#/DeliveryCompleted' }]
       throws:
         - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
-        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be PICKED_UP/OUT_FOR_DELIVERY
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
     - message: { $ref: 'commands.yaml#/CancelDelivery' }
       emits: [{ $ref: 'events.yaml#/DeliveryCancelled' }]
       throws:
         - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
         - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # a DELIVERED job cannot be cancelled
-
-# --- Process managers (sagas — react to events, coordinate aggregates & externals) ---
-
-PlaceOrderProcess:
-  type: process-manager
-  description: >
-    The PlaceOrder saga: reads the OPEN cart, re-validates it against the live catalog, prices it
-    server-side, drives the Stripe payment, and on capture materializes the Order and closes the
-    cart. Receives both the initiating command and the payment-outcome events.
-  receives:
-    - message: { $ref: 'commands.yaml#/PlaceOrder' }
-      emits: [{ $ref: 'events.yaml#/PaymentIntentCreated' }]
+    - message: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
+      emits: [{ $ref: 'events.yaml#/DeliveryIssueReported' }]
       throws:
-        - { $ref: 'errors.yaml#/RestaurantNotFound' }
-        - { $ref: 'errors.yaml#/RestaurantNotActive' }
-        - { $ref: 'errors.yaml#/RestaurantPaused' }
-        - { $ref: 'errors.yaml#/CartNotFound' }
-        - { $ref: 'errors.yaml#/CartNotOpen' }
-        - { $ref: 'errors.yaml#/CartEmpty' }
-        - { $ref: 'errors.yaml#/CartRestaurantMismatch' }
-        - { $ref: 'errors.yaml#/DeliveryAddressRequired' }
-        - { $ref: 'errors.yaml#/OutsideDeliveryArea' }
-        - { $ref: 'errors.yaml#/OfferUnavailable' }
-        - { $ref: 'errors.yaml#/InsufficientStock' }
-        - { $ref: 'errors.yaml#/InvalidOptionSelection' }
-        - { $ref: 'errors.yaml#/PaymentDeclined' }
-        - { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }
-      effect: "Read & price the OPEN cart, create the Stripe PaymentIntent, then await the outcome."
-    - message: { $ref: 'events.yaml#/PaymentCaptured' }
-      emits: [{ $ref: 'events.yaml#/OrderPlaced' }, { $ref: 'events.yaml#/CartCheckedOut' }]
-      effect: "Payment confirmed (reported by Stripe); the Order is born from the cart and the cart is closed."
-    - message: { $ref: 'events.yaml#/PaymentFailed' }
-      emits: []
-      effect: "Abort the saga; no OrderPlaced; the cart stays OPEN."
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # a DELIVERED job cannot report an issue
+    - message: { $ref: 'commands.yaml#/ResolveDeliveryIssue' }
+      emits: [{ $ref: 'events.yaml#/DeliveryIssueResolved' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # a DELIVERED job cannot resolve an issue
 
-RefundProcess:
-  type: process-manager
-  description: >
-    Coordinates refunds. Reacts to an order reaching a refundable terminal state, requests the refund
-    from Stripe (external call, not a domain command), then records the settled fact reported back.
-  receives:
-    - message: { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
-      emits: []
-      effect: "Request refund from Stripe."
-    - message: { $ref: 'events.yaml#/OrderCancelledByCustomer' }
-      emits: []
-      effect: "Request refund from Stripe."
-    - message: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
-      emits: []
-      effect: "Request refund from Stripe."
-    - message: { $ref: 'events.yaml#/RefundRequested' }
-      emits: []
-      effect: "Customer-initiated refund request; validate eligibility, then request the refund from Stripe."
-    - message: { $ref: 'events.yaml#/PaymentRefunded' }
-      emits: []
-      effect: "Record the settled refund fact (reported by Stripe)."
+    - message: { $ref: 'commands.yaml#/UpdateDeliveryStatus' }
+      emits: [{ $ref: 'events.yaml#/DeliveryStatusUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a valid status transition
 
-CartBindingProcess:
-  type: process-manager
-  description: >
-    Binds a returning visitor's OPEN guest carts to their Customer. Reacts to the inbound
-    CustomerIdentified fact (authRef → customerId, reported when the visitor signs in) so the
-    Cart projection stamps the customerId onto their carts — enabling cross-device carts to
-    converge and be merged at checkout.
-  receives:
-    - message: { $ref: 'events.yaml#/CustomerIdentified' }
-      emits: []
-      effect: "Bind customerId onto the visitor's OPEN carts (Cart projection); no new event in V0."
+    - message: { $ref: 'commands.yaml#/AssignDeliveryToPartner' }
+      emits: [{ $ref: 'events.yaml#/DeliveryAssignedToPartner' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a PENDING job
+        - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }
+    - message: { $ref: 'commands.yaml#/UnassignDeliveryFromPartner' }
+      emits: [{ $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be an ASSIGNED job
 
-DeliveryDispatchProcess:
-  type: process-manager
-  description: >
-    Dispatches and tracks deliveries (bounded context: delivery). When a DELIVERY order is ready, creates
-    the delivery job and offers it (dispatch to a partner via the avelo37-acl and/or make it available to
-    independent riders). Reacts to partner-reported facts and to the rider completion to close the order.
-    ADR-0031.
+    - message: { $ref: 'commands.yaml#/UpdateDeliveryPartnerStatus' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a valid status transition
+    - message: { $ref: 'commands.yaml#/DeclineDelivery' }
+      emits: [{ $ref: 'events.yaml#/DeliveryDeclinedByRider' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # only a PENDING job can be declined
+        - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }
+    
+Rider:
+  type: aggregate
+  description: "A rider identity, linked to the auth provider user (authRef)."
   receives:
-    - message: { $ref: 'events.yaml#/OrderMarkedReady' }
-      emits: [{ $ref: 'events.yaml#/DeliveryRequested' }]
-      effect: "For a DELIVERY order, create the delivery job (PENDING) and offer it to a partner and/or independent riders. No-op for COLLECTION."
-    - message: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
-      emits: []
-      effect: "Partner accepted (reported inbound); record the assigned courier + ETAs on the job."
-    - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
-      emits: []
-      effect: "Partner declined (reported inbound); re-offer to another partner/independent riders or flag for manual handling."
-    - message: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
-      emits: [{ $ref: 'events.yaml#/OrderDelivered' }]
-      effect: "Fold the partner-reported status onto the job; when it reaches DELIVERED, close the order (OrderDelivered)."
-    - message: { $ref: 'events.yaml#/DeliveryCompleted' }
-      emits: [{ $ref: 'events.yaml#/OrderDelivered' }]
-      effect: "Independent rider completed the delivery; close the order (OrderDelivered)."
+    - message: { $ref: 'commands.yaml#/RegisterRider' }
+      emits: [{ $ref: 'events.yaml#/RiderRegistered' }]
+      throws:
+        - { $ref: 'errors.yaml#/RiderAlreadyRegistered' }
+    - message: { $ref: 'commands.yaml#/UpdateRiderInfo' }
+      emits: [{ $ref: 'events.yaml#/RiderInfoUpdated' }]
+      throws:
+        - { $ref: 'errors.yaml#/RiderNotFound' }
+        - { $ref: 'errors.yaml#/NoEditableFieldProvided' }
+    - message: { $ref: 'commands.yaml#/ChangeRiderStatus' }
+      emits: [{ $ref: 'events.yaml#/RiderStatusChanged' }]
+      throws:
+        - { $ref: 'errors.yaml#/RiderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidRiderStatusTransition' }

@@ -4,7 +4,7 @@
 //!   envelope parsing.
 //! - [`api`] — the OUTBOUND OAuth2 client (domain enrichment): pull catalog/inventory from HubRise after a
 //!   (stateless) callback, since those callbacks carry no state.
-//! - `http` — the thin axum shell exposing `POST /webhooks/hubrise`; mount [`routes`] into the monolith
+//! - `http` — the thin axum shell exposing `POST /adapters/hubrise/webhooks`; mount [`routes`] into the monolith
 //!   server, or run the standalone `hubrise-webhook` binary (see `main.rs`) as its own web service.
 //!
 //! - [`enrich`] — the **domain wiring** (now landed): callback → `api` pull → ACL map (deterministic

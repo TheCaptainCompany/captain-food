@@ -1,15 +1,17 @@
 //! HubRise **outbound** API client (ADR-20260718-213352) — the "domain enrichment" half.
 //!
-//! HubRise callbacks for catalog/inventory carry no state, so after a `POST /webhooks/hubrise` we must
+//! HubRise callbacks for catalog/inventory carry no state, so after a `POST /adapters/hubrise/webhooks` we must
 //! PULL the changed resource from HubRise's REST API. This is that client: OAuth2 (authorization-code,
 //! non-expiring tokens) + authenticated GETs.
 //!
 //! Confirmed from HubRise docs:
 //! - Token exchange: `POST https://manager.hubrise.com/oauth2/v1/token`, `client_id:client_secret` in the
 //!   HTTP Basic `Authorization` header, `code=<auth code>` in an `x-www-form-urlencoded` body. Access
-//!   tokens **do not expire** and there is no refresh token — so for V0 a single connected location's
-//!   token is a configured secret (`HUBRISE_ACCESS_TOKEN`); a multi-location connect flow that stores
-//!   tokens is a later enhancement (needs a connection table → plan mode).
+//!   tokens **do not expire** and there is no refresh token — so for V0 a single connected account's
+//!   token is a configured secret (`HUBRISE_ACCESS_TOKEN`). A HubRise Account maps to our RestaurantAccount
+//!   (its Locations = our Restaurants), so multi-account support — a connection/token table keyed by
+//!   RestaurantAccount — is a later enhancement (needs a connection table → plan mode). See
+//!   docs/integrations/hubrise-process.md §0.
 //! - API calls: base `https://api.hubrise.com/v1`, access token in the `X-Access-Token` header.
 //!
 //! NOTE: the resource *paths* below (`/location/{id}/inventory`, `/catalog/{id}`) are the expected shapes;

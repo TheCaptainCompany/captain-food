@@ -32,7 +32,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use application::commands::{mark_restaurant_closed, register_restaurant};
-use application::ports::{Actor, EventStore};
+use application::ports::Actor;
+use application::repository::Repository;
+use domain::restaurant::RestaurantState;
 use chrono::{DateTime, Utc};
 use domain::generated::commands::MarkRestaurantClosed;
 use domain::generated::scalars::{RestaurantListingStatus, RestaurantStatus};
@@ -311,8 +313,9 @@ impl SireneSyncWorker {
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
         let restaurant_id = restaurant_id_for_siret(siret);
-        let (events, _version) = store.load(&format!("Restaurant-{}", restaurant_id.0)).await?;
-        let Some(state) = domain::restaurant::fold(&events) else {
+        let (state, _version) =
+            Repository::new(store).load::<RestaurantState>(restaurant_id).await?;
+        let Some(state) = state else {
             return Ok(()); // never registered — nothing to close
         };
         if state.status == RestaurantStatus::INACTIVE {

@@ -653,6 +653,7 @@ CustomerIdentified:
     NOT an auth event (OTP/session live in the auth provider): this records the DOMAIN fact so the
     visitor's OPEN guest carts can be bound to the customerId — letting carts started on different
     devices converge under one customer and be merged at checkout.
+    Thanks to the sessionId, the existing open cart(s) can be bound to the customerId and merged at checkout. This is a domain event, not an auth event.
   type: object
   properties:
     customerId:
@@ -660,9 +661,28 @@ CustomerIdentified:
     authRef:
       $ref: 'scalars.yaml#/ExternalReference'
       description: "Auth provider user id that was matched to this Customer (via Customer.auth_ref)."
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "Session id (ADR-0041) for the sign-in event; not required for cart binding."
   required:
     - customerId
     - authRef
+    - sessionId
+
+CartBoundToCustomer:
+  description: >
+    A cart that was started by a guest visitor (no customerId) was bound to a Customer after sign-in.
+    This is a domain event, not an auth event. The cartId is the same as the original guest cart; the
+    cart's customerId is now set to the signed-in customer.
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+  required:
+    - cartId
+    - customerId
 
 RestaurantFavorited:
   description: "Customer marked a restaurant as a favorite."
@@ -1104,7 +1124,11 @@ RefundRequested:
 # vs inbound (integration) events".
 
 PaymentIntentCreated:
-  description: "A payment intent was created at checkout for a pending order."
+  description: >
+    A payment intent was created at checkout for a pending order. Carries the full priced checkout frozen
+    at intent creation (`checkout`), so PlaceOrderProcess can rebuild OrderPlaced + CartCheckedOut from the
+    event log alone when PaymentCaptured arrives (no out-of-log store). `checkout.restaurantId`/`customerId`
+    duplicate the top-level fields and `checkout.totalAmount == amount == checkout.breakdown.total`.
   type: object
   properties:
     paymentIntentId:
@@ -1116,10 +1140,14 @@ PaymentIntentCreated:
       nullable: true
     amount:
       $ref: 'entities.yaml#/Money'
+    checkout:
+      $ref: 'entities.yaml#/CheckoutSnapshot'
+      description: "The full priced checkout frozen at intent creation (rebuilds OrderPlaced/CartCheckedOut on capture)."
   required:
     - paymentIntentId
     - restaurantId
     - amount
+    - checkout
 
 PaymentCaptured:
   description: "Payment was successfully authorized/captured for an order."
@@ -1318,3 +1346,152 @@ DeliveryStatusUpdated:
       maxLength: 500
       nullable: true
   required: [deliveryJobId, status]
+
+# =====================================================================
+# Delivery — operational facts (DeliveryJob aggregate)
+# =====================================================================
+
+DeliveryAssignedToPartner:
+  description: "A delivery job was assigned to a delivery partner (e.g. Avelo37) for fulfilment."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    partnerRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      description: "Partner-side delivery id; idempotent key for inbound updates."
+  required: [deliveryJobId, partnerRef]
+
+DeliveryUnassignedFromPartner:
+  description: "A delivery job was unassigned from its partner (e.g. to re-offer it elsewhere)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId]
+
+DeliveryPartnerStatusUpdated:
+  description: "A partner-driven status change applied to the job by the DeliveryJob aggregate (from the inbound partner report)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    partnerRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+    occurredAt:
+      type: string
+      format: date-time
+  required: [deliveryJobId, status]
+
+DeliveryDeclinedByRider:
+  description: "An independent rider declined a pending delivery job (stays PENDING, re-offerable)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId, riderId]
+
+DeliveryIssueReported:
+  description: "An issue was reported on a delivery job (by the rider, partner, or support)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId:
+      $ref: 'scalars.yaml#/RiderId'
+      nullable: true
+    issue:
+      type: string
+      maxLength: 1000
+    reportedAt:
+      type: string
+      format: date-time
+  required: [deliveryJobId, issue]
+
+DeliveryIssueResolved:
+  description: "A previously reported delivery issue was resolved."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    resolution:
+      type: string
+      maxLength: 1000
+    resolvedAt:
+      type: string
+      format: date-time
+  required: [deliveryJobId, resolution]
+
+# =====================================================================
+# Rider (independent Captain courier)
+# =====================================================================
+
+RiderRegistered:
+  description: "An independent Captain rider registered (linked to the auth provider user)."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    authRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      description: "Auth-provider user reference (Supabase), like the Customer's authRef."
+    displayName:
+      type: string
+      maxLength: 200
+    phone: { $ref: 'scalars.yaml#/PhoneNumber' }
+    status: { $ref: 'scalars.yaml#/RiderStatus' }
+  required: [riderId, authRef, displayName, phone, status]
+
+RiderInfoUpdated:
+  description: "One or more editable rider profile fields changed."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    displayName:
+      type: string
+      maxLength: 200
+      nullable: true
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+      nullable: true
+  required: [riderId]
+
+RiderStatusChanged:
+  description: "A rider's availability/lifecycle status changed."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    status: { $ref: 'scalars.yaml#/RiderStatus' }
+  required: [riderId, status]
+
+# =====================================================================
+# Refund (admin-approved; RefundProcess state PM — ADR pending)
+# =====================================================================
+
+RefundApproved:
+  description: "An admin approved a refund; the RefundProcess will drive the Stripe refund for this amount."
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "Approved refund amount (may be partial)."
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [orderId, amount]
+
+RefundDenied:
+  description: "An admin denied a pending refund request."
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason:
+      type: string
+      maxLength: 500
+  required: [orderId, reason]

@@ -1,0 +1,127 @@
+version: 1
+description: >
+  Captain.Food PROCESS MANAGER catalog (actor-model). Its goal is to be a CODE-GENERATION SOURCE: from it a
+  generator can scaffold the in-domain message handlers — aggregates with command handlers that emit
+  events, and process managers that react to events. It does not redefine names: every message,
+  event and error is a `$ref` into commands.yaml / events.yaml / errors.yaml, so a validator (or
+  codegen) can confirm the referenced type EXISTS, exactly as scalars/entities are referenced.
+
+  PROCESS MANAGER (actor model) — an in-domain entity that RECEIVES MESSAGES, holds private state in a state table, and follows these STEPS.
+    - process-manager  : a saga that reacts to events and coordinates aggregates/externals
+                         (PlaceOrderProcess, RefundProcess, etc.).
+
+  Example: the PlaceOrderProcess process manager RECEIVES commands.yaml#/PlaceOrder and follows these STEPS.
+
+
+  Field meaning:
+    - <ProcessManager>.type       : aggregate | process-manager (selects the generated base class).
+    - <ProcessManager>.receives   : the ProcessManager's inbox. Each entry { message, steps[, effect] }:
+        * message : $ref to the command (commands.yaml) or event (events.yaml) received.
+        * steps: a list of steps (in order) that the process manager takes to handle the message. Each step is a
+          short description of what the ProcessManager does (read/write state, call an external service, emit
+          events, etc.). The steps are for documentation purposes and may be used by code generators
+          to scaffold the ProcessManager's message handler.
+        * effect  : optional note when emits is empty or the reaction is non-obvious.
+
+
+
+# --- Process managers (sagas — react to events, coordinate aggregates & externals) ---
+
+PlaceOrderProcess:
+  type: process-manager
+  description: >
+    The PlaceOrder saga: reads the OPEN cart, re-validates it against the live catalog, prices it
+    server-side, drives the Stripe payment, and on capture materializes the Order and closes the
+    cart. Receives both the initiating command and the payment-outcome events.
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      steps:
+        lockProcessManager: "Lock the PlaceOrderProcess (optimistic concurrency) to prevent concurrent checkout attempts."
+        readCart: "Read the OPEN cart and its restaurant catalog."
+        priceCart: "Price the cart server-side (re-validate offers, options, stock, delivery area)."
+        paymentGatewayCreateIntent: "Create a Stripe PaymentIntent (external call, not a domain command)."
+        savePaymentIntent: "Save the PaymentIntent ID on the payment actor (for later correlation)."
+        lockCart: "Lock the cart (optimistic concurrency) to prevent cart alterations."
+        unlockProcessManager: "Unlock the PlaceOrderProcess (optimistic concurrency) to allow other checkout attempts."        
+
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+      steps:
+        lockProcessManager: "Lock the PlaceOrderProcess (optimistic concurrency) to prevent concurrent checkout attempts."
+        savePaymentSuccess: "Save the payment success fact on the payment actor (for later correlation)."
+        cartCheckedOut: "Cart checked out successfully; materialize the Order and close the cart."
+        orderPlaced: "Emit the OrderPlaced event (the order is now in the Order aggregate)."
+        unlockProcessManager: "Unlock the PlaceOrderProcess (optimistic concurrency) to allow other checkout attempts."        
+
+    - message: { $ref: 'events.yaml#/PaymentFailed' }
+      steps:
+        lockProcessManager: "Lock the PlaceOrderProcess (optimistic concurrency) to prevent concurrent checkout attempts."
+        savePaymentFailure: "Save the payment failure reason on the payment actor (for later correlation)."
+        unlockCart: "Unlock the cart (optimistic concurrency) to allow alterations."
+        unlockProcessManager: "Unlock the PlaceOrderProcess (optimistic concurrency) to allow other checkout attempts."        
+
+RefundProcess:
+  type: process-manager
+  description: >
+    Coordinates refunds. Reacts to an order reaching a refundable terminal state, requests the refund
+    from Stripe (external call, not a domain command), then records the settled fact reported back.
+    ---
+    I don't know the process to apply here, we need to discuss about it.
+#  receives:
+#    - messagge:
+#        anyOf:
+#        - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
+#        - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
+#        - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+#      steps:
+#        - lockProcessManager: "Lock the RefundProcess (optimistic concurrency) to prevent concurrent refund attempts."
+#        - requestRefund: "Request refund from Stripe (external call, not a domain command)."
+#        - unlockProcessManager: "Unlock the RefundProcess (optimistic concurrency) to allow other refund attempts."
+#      effect: "Request refund from Stripe."
+#    - message: { $ref: 'events.yaml#/RefundRequested' }
+#      steps:
+#        - lockProcessManager: "Lock the RefundProcess (optimistic concurrency) to prevent concurrent refund attempts."
+#        - validateEligibility: "Validate eligibility, then request the refund from Stripe (external call, not a domain command)."
+#        - callStripeRefund: "Request refund from Stripe (external call, not a domain command)."
+#        - saveRefundRequest: "Save the refund request fact on the payment actor (for later correlation)."
+#        - unlockProcessManager: "Unlock the RefundProcess (optimistic concurrency) to allow other refund attempts."
+#      effect: "Customer-initiated refund request; validate eligibility, then request the refund from Stripe."
+#    - message: { $ref: 'events.yaml#/PaymentRefunded' }
+#      emits: []
+#      effect: "Record the settled refund fact (reported by Stripe)."
+
+CartBindingProcess:
+  type: process-manager
+  description: >
+    Binds a returning visitor's OPEN guest carts to their Customer. Reacts to the inbound
+    CustomerIdentified fact (authRef → customerId, reported when the visitor signs in) so the
+    Cart projection stamps the customerId onto their carts — enabling cross-device carts to
+    converge and be merged at checkout.
+  receives:
+    - message: { $ref: 'events.yaml#/CustomerIdentified' }
+      steps:
+        lockProcessManager: "Lock the CartBindingProcess (optimistic concurrency) to prevent concurrent cart-binding attempts."
+        readOpenCart: "Read the visitor's OPEN carts (Cart projection) by sessionId"
+        bindCustomerId: "Bind the customerId onto the visitor's OPEN carts (Cart projection) based on the sessionId."
+        unlockProcessManager: "Unlock the CartBindingProcess (optimistic concurrency) to allow other cart-binding attempts."
+      effect: "Bind customerId onto the visitor's OPEN carts (Cart projection) based on the sessionId."
+
+DeliveryDispatchProcess:
+  type: process-manager
+  description: >
+    Dispatches and tracks deliveries (bounded context: delivery). When a DELIVERY order is ready, creates
+    the delivery job and offers it (dispatch to a partner via the avelo37-acl and/or make it available to
+    independent riders). Reacts to partner-reported facts and to the rider completion to close the order.
+    ADR-0031.
+  receives:
+    - message: { $ref: 'events.yaml#/OrderMarkedReady' }
+      steps:
+        lockProcessManager: "Lock the DeliveryDispatchProcess (optimistic concurrency) to prevent concurrent delivery dispatch attempts."
+        createDeliveryJob: "Create the delivery job (PENDING) and offer it to a partner and/or independent riders."
+        unlockProcessManager: "Unlock the DeliveryDispatchProcess (optimistic concurrency) to allow other delivery dispatch attempts."
+      effect: "For a DELIVERY order, create the delivery job (PENDING) and offer it to a partner and/or independent riders. No-op for COLLECTION."
+    - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
+      steps:
+        lockProcessManager: "Lock the DeliveryDispatchProcess (optimistic concurrency) to prevent concurrent delivery dispatch attempts."
+        createNewDeliveryJob: "Create a new delivery job (PENDING) and offer it to another partner and/or independent riders."
+        unlockProcessManager: "Unlock the DeliveryDispatchProcess (optimistic concurrency) to allow other delivery dispatch attempts."
+      effect: "Partner declined (reported inbound); re-offer to another partner/independent riders or flag for manual handling."

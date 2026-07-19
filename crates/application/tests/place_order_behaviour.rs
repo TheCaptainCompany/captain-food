@@ -19,7 +19,9 @@ use application::commands::{place_order, rejection_code};
 use application::ports::{version_conflict, Actor, CreatedPaymentIntent, EventStore, PaymentGateway};
 use application::queries::{CartReadRepository, CartRow};
 use domain::generated::commands::PlaceOrder;
-use domain::generated::entities::{Address, CartLineItem, CustomerContact, Money};
+use domain::generated::entities::{
+    Address, CartLineItem, CheckoutSnapshot, CustomerContact, Money, PaymentBreakdown,
+};
 use domain::generated::events::{
     CartLineAdded, CartStarted, DomainEvent, PaymentIntentCreated, RestaurantAcceptanceModeChanged,
     RestaurantActivated, RestaurantRegistered,
@@ -237,6 +239,40 @@ fn place_cmd(order: OrderId, resto: RestaurantId, cart: CartId) -> PlaceOrder {
     }
 }
 
+/// The checkout snapshot PlaceOrderProcess freezes onto PaymentIntentCreated (best-available breakdown;
+/// items empty until server-side line pricing lands — mirrors `application::commands::place_order`).
+fn checkout_snapshot(order: OrderId, resto: RestaurantId, cart: CartId) -> CheckoutSnapshot {
+    let eur = |c: i64| Money { amount_cents: MoneyCents(c), currency: CurrencyCode("EUR".into()) };
+    CheckoutSnapshot {
+        order_id: order,
+        cart_id: cart,
+        restaurant_id: resto,
+        customer_id: None,
+        mode: None,
+        r#ref: None,
+        customer_contact: CustomerContact {
+            display_name: CustomerDisplayName("Johnny".into()),
+            email: None,
+            phone: PhoneNumber("+33612345678".into()),
+        },
+        service_type: ServiceType::DELIVERY,
+        delivery_address: None,
+        items: Vec::new(),
+        total_amount: eur(1960),
+        breakdown: PaymentBreakdown {
+            articles: eur(1960),
+            delivery: eur(0),
+            service_fee: eur(0),
+            total: eur(1960),
+            restaurant_contribution: eur(0),
+            restaurant_payout: eur(1960),
+            rider_payout: eur(0),
+            captain_net: eur(0),
+        },
+        note: None,
+    }
+}
+
 fn oid() -> OrderId {
     OrderId(uuid::Uuid::new_v4())
 }
@@ -299,6 +335,7 @@ async fn replaying_the_checkout_for_the_same_order_is_absorbed() {
             restaurant_id: resto,
             customer_id: None,
             amount: Money { amount_cents: MoneyCents(1960), currency: CurrencyCode("EUR".into()) },
+            checkout: checkout_snapshot(order, resto, cart),
         })],
     );
 

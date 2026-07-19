@@ -383,6 +383,22 @@ type OrderLineItem {
   lineTotal: Money!
 }
 
+type CheckoutSnapshot {
+  orderId: OrderId!
+  cartId: CartId!
+  restaurantId: RestaurantId!
+  customerId: CustomerId
+  mode: Mode
+  ref: ExternalReference
+  customerContact: CustomerContact!
+  serviceType: ServiceType!
+  deliveryAddress: Address
+  items: [OrderLineItem!]!
+  totalAmount: Money!
+  breakdown: PaymentBreakdown!
+  note: OrderNote
+}
+
 type Restaurant {
   id: RestaurantId!
   accountId: RestaurantAccountId

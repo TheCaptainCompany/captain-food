@@ -659,7 +659,10 @@ AddCartLine:
       $ref: 'scalars.yaml#/RestaurantId'
     line:
       $ref: '#/CartLine'
-  required: [cartId, restaurantId, line]
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "Optional session id (ADR-0038) to bind the cart to a session for test-mode carts."
+  required: [cartId, restaurantId, line, sessionId]
 
 RemoveCartLine:
   description: "Visitor removes a line from a cart."
@@ -669,7 +672,10 @@ RemoveCartLine:
       $ref: 'scalars.yaml#/CartId'
     cartLineId:
       $ref: 'scalars.yaml#/CartLineId'
-  required: [cartId, cartLineId]
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "Optional session id (ADR-0038) to bind the cart to a session for test-mode carts."
+  required: [cartId, cartLineId, sessionId]
 
 ChangeCartLineQuantity:
   description: "Visitor changes the quantity of an existing cart line."
@@ -682,7 +688,10 @@ ChangeCartLineQuantity:
     quantity:
       type: integer
       minimum: 1
-  required: [cartId, cartLineId, quantity]
+    sessionId:
+      $ref: 'scalars.yaml#/SessionId'
+      description: "Optional session id (ADR-0038) to bind the cart to a session for test-mode carts."
+  required: [cartId, cartLineId, quantity, sessionId]
 
 # =====================================================================
 # 5. Identify via phone OTP  (persona: customer)  — story-map activity 5
@@ -1119,15 +1128,7 @@ ConfirmPickup:
       $ref: 'scalars.yaml#/RiderId'
   required: [deliveryJobId, riderId]
 
-CompleteDelivery:
-  description: "The assigned rider records handing the order over to the customer."
-  type: object
-  properties:
-    deliveryJobId:
-      $ref: 'scalars.yaml#/DeliveryJobId'
-    riderId:
-      $ref: 'scalars.yaml#/RiderId'
-  required: [deliveryJobId, riderId]
+
 
 CancelDelivery:
   description: "Restaurant/admin cancels a delivery job before it completes."
@@ -1140,6 +1141,169 @@ CancelDelivery:
       maxLength: 500
       nullable: true
   required: [deliveryJobId]
+
+
+BindCartToCustomer:
+  description: >
+    Bind a cart to a customer (after phone verification). The cart is then owned by the customer and can be retrieved across sessions. This is a one-time operation per cart.
+  type: object
+  properties:
+    cartId:
+      $ref: 'scalars.yaml#/CartId'
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+  required: [cartId, customerId]
+
+# =====================================================================
+# Delivery — operational commands (DeliveryJob aggregate)
+# =====================================================================
+
+CompleteDelivery:
+  description: "The assigned rider marks the delivery complete (handed to the customer)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  required: [deliveryJobId, riderId]
+
+DeclineDelivery:
+  description: "An independent rider declines a pending delivery job (it stays PENDING, re-offerable)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId, riderId]
+
+ReportDeliveryIssue:
+  description: "Report an issue on a delivery job (rider/partner/support)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId:
+      $ref: 'scalars.yaml#/RiderId'
+      nullable: true
+    issue:
+      type: string
+      maxLength: 1000
+  required: [deliveryJobId, issue]
+
+ResolveDeliveryIssue:
+  description: "Resolve a previously reported delivery issue."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    resolution:
+      type: string
+      maxLength: 1000
+  required: [deliveryJobId, resolution]
+
+UpdateDeliveryStatus:
+  description: "Drive a delivery job's status (independent-rider path / admin correction)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+  required: [deliveryJobId, status]
+
+AssignDeliveryToPartner:
+  description: "Assign a pending delivery job to a delivery partner for fulfilment."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    partnerRef: { $ref: 'scalars.yaml#/ExternalReference' }
+  required: [deliveryJobId, partnerRef]
+
+UnassignDeliveryFromPartner:
+  description: "Unassign a delivery job from its partner (to re-offer it)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId]
+
+UpdateDeliveryPartnerStatus:
+  description: "Apply a partner-reported status change to the delivery job (from the avelo37-acl inbound report)."
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    partnerRef:
+      $ref: 'scalars.yaml#/ExternalReference'
+      nullable: true
+    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+  required: [deliveryJobId, status]
+
+# =====================================================================
+# Rider (independent Captain courier)
+# =====================================================================
+
+RegisterRider:
+  description: "Register as an independent Captain rider (linked to the auth provider user)."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+    displayName:
+      type: string
+      maxLength: 200
+    phone: { $ref: 'scalars.yaml#/PhoneNumber' }
+  required: [riderId, authRef, displayName, phone]
+
+UpdateRiderInfo:
+  description: "Update editable rider profile fields."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    displayName:
+      type: string
+      maxLength: 200
+      nullable: true
+    phone:
+      $ref: 'scalars.yaml#/PhoneNumber'
+      nullable: true
+  required: [riderId]
+
+ChangeRiderStatus:
+  description: "Change a rider's availability/lifecycle status."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    status: { $ref: 'scalars.yaml#/RiderStatus' }
+  required: [riderId, status]
+
+# =====================================================================
+# Refund (admin approval — RefundProcess state PM)
+# =====================================================================
+
+ApproveRefund:
+  description: "Admin approves a pending refund (optionally partial); the RefundProcess then drives Stripe."
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "Approved refund amount (may be partial)."
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [orderId, amount]
+
+DenyRefund:
+  description: "Admin denies a pending refund request."
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason:
+      type: string
+      maxLength: 500
+  required: [orderId, reason]
 
 # =====================================================================
 # Where the rest lives

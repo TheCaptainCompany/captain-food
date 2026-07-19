@@ -36,10 +36,10 @@ components:
     description: "Sagas coordinating aggregates + externals (checkout, refund, cart binding, delivery dispatch)."
     instrumented: true
     handles:
-      - { $ref: 'actors.yaml#/PlaceOrderProcess' }
-      - { $ref: 'actors.yaml#/RefundProcess' }
-      - { $ref: 'actors.yaml#/CartBindingProcess' }
-      - { $ref: 'actors.yaml#/DeliveryDispatchProcess' }
+      - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+      - { $ref: 'processmanager.yaml#/RefundProcess' }
+      - { $ref: 'processmanager.yaml#/CartBindingProcess' }
+      - { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
   event-store-adapter:
     description: "Appends to domain_events; span 'event.store.append' with business.event_type/stream_id."
     instrumented: true

@@ -172,6 +172,7 @@ mod tests {
             restaurant_id: RestaurantId(uid(3)),
             customer_id: None,
             amount: eur(1960),
+            checkout: snapshot(),
         })]
     }
     fn given_open_cart() -> Vec<DomainEvent> {

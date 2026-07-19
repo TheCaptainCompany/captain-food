@@ -41,22 +41,22 @@ boundedContexts:
       - { $ref: 'actors.yaml#/Cart' }
       - { $ref: 'actors.yaml#/Order' }
     processManagers:
-      - { $ref: 'actors.yaml#/PlaceOrderProcess' }
-      - { $ref: 'actors.yaml#/RefundProcess' }
+      - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+      - { $ref: 'processmanager.yaml#/RefundProcess' }
   customer:
     description: "Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding."
     roles: [CUSTOMER, PUBLIC]
     aggregates:
       - { $ref: 'actors.yaml#/Customer' }
     processManagers:
-      - { $ref: 'actors.yaml#/CartBindingProcess' }
+      - { $ref: 'processmanager.yaml#/CartBindingProcess' }
   delivery:
     description: "Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)."
     roles: [RIDER]
     aggregates:
       - { $ref: 'actors.yaml#/DeliveryJob' }
     processManagers:
-      - { $ref: 'actors.yaml#/DeliveryDispatchProcess' }
+      - { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
 
 # --- Containers (deployable / runtime units) ---
 containers:
@@ -92,11 +92,11 @@ containers:
       - { $ref: 'actors.yaml#/Cart' }
       - { $ref: 'actors.yaml#/Order' }
       - { $ref: 'actors.yaml#/Customer' }
-      - { $ref: 'actors.yaml#/PlaceOrderProcess' }
-      - { $ref: 'actors.yaml#/RefundProcess' }
-      - { $ref: 'actors.yaml#/CartBindingProcess' }
+      - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+      - { $ref: 'processmanager.yaml#/RefundProcess' }
+      - { $ref: 'processmanager.yaml#/CartBindingProcess' }
       - { $ref: 'actors.yaml#/DeliveryJob' }
-      - { $ref: 'actors.yaml#/DeliveryDispatchProcess' }
+      - { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
   event-store:
     technology: "Managed PostgreSQL (e.g. Supabase)"
     description: "Append-only domain_events table (the write model / source of truth at runtime)."

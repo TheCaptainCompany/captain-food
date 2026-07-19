@@ -12,7 +12,7 @@
 //! - `/{role}/graphql` (+ `/{role}/voyager`) — the GraphQL BFF (ADR-0006), see `graphql`.
 //! - `POST /internal/sirene/drain` — wakes the SIRENE sync worker after a CI ingestion run (ADR-0045);
 //!   secured by the `INTERNAL_TRIGGER_TOKEN` shared secret (`x-internal-token` header).
-//! - `POST /webhooks/stripe` — Stripe webhook ingestion (inbound payment facts through the ACL);
+//! - `POST /adapters/stripe/webhooks` — Stripe webhook ingestion (inbound payment facts through the ACL);
 //!   secured by `Stripe-Signature` HMAC verification against `STRIPE_WEBHOOK_SECRET` (fail-closed).
 //!
 //! The projection worker (ADR-0040) runs **in-process** here for now (Render Background Workers are paid),
@@ -221,7 +221,7 @@ pub fn router() -> Router {
                 // RUN_SIRENE_WORKER (default on) like the projector.
                 // Stripe webhook ingestor (INBOUND payment facts): records what Stripe reports through
                 // the ordinary event-store append port, idempotently by Stripe event id. The HTTP
-                // endpoint (`POST /webhooks/stripe`) is mounted below with the other non-GraphQL routes.
+                // endpoint (`POST /adapters/stripe/webhooks`) is mounted below with the other non-GraphQL routes.
                 stripe_ingestor = Some(Arc::new(StripeWebhookIngestor::new(Arc::new(
                     PgEventStore::with_bus(pool.clone(), event_bus.clone()),
                 ))));
@@ -238,7 +238,7 @@ pub fn router() -> Router {
                         )));
                     }
                     Err(_) => eprintln!(
-                        "HUBRISE_ACCESS_TOKEN unset — /webhooks/hubrise verifies callbacks but does not enrich"
+                        "HUBRISE_ACCESS_TOKEN unset — /adapters/hubrise/webhooks verifies callbacks but does not enrich"
                     ),
                 }
 
@@ -273,8 +273,8 @@ pub fn router() -> Router {
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))
         // Partner webhook adapters (ADR-20260718-213352): self-contained crates under crates/adapters/*,
-        // each mountable here (monolith) or deployable as its own web service. `POST /webhooks/stripe`
-        // (signature-verified inbound payment facts) and `POST /webhooks/hubrise` (HMAC-verified ingress).
+        // each mountable here (monolith) or deployable as its own web service. `POST /adapters/stripe/webhooks`
+        // (signature-verified inbound payment facts) and `POST /adapters/hubrise/webhooks` (HMAC-verified ingress).
         .merge(stripe_adapter::routes(stripe_ingestor))
         .merge(hubrise_adapter::routes(hubrise_enricher))
         // Host-based landing (ADR-0036): any path not matched above is dispatched by the request `Host`

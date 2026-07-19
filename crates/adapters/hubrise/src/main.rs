@@ -1,5 +1,5 @@
 //! Standalone HubRise webhook web service (ADR-20260718-213352): binds `$PORT` and serves ONLY
-//! `POST /webhooks/hubrise`. Verifies the callback (HMAC) and, when `DATABASE_URL` + `HUBRISE_ACCESS_TOKEN`
+//! `POST /adapters/hubrise/webhooks`. Verifies the callback (HMAC) and, when `DATABASE_URL` + `HUBRISE_ACCESS_TOKEN`
 //! are set, drives the domain enrichment (OAuth API pull → ACL map → `ImportCatalog` / stock updates) over
 //! a Postgres event store. Deploy as its own Render web service isolated from other partners — or mount
 //! into the monolith via [`hubrise_adapter::routes`]. Migrations stay out-of-band (ADR-0043).

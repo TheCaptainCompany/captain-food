@@ -11,6 +11,11 @@ A **process manager** (saga) is an actor that **reacts to events** (not commands
 counterpart of a projection: a projector folds events into a *read model*; a process manager folds events
 into *new facts / side-effects*. Business logic stays out of the telemetry SDK (ADR-0012).
 
+Its pure decision **owns emission**; the runtime persists the decided facts **through the write-side
+`Repository`** (the actor's journal, ADR-20260719-031136) — the runner is the imperative shell and never
+touches the raw `EventStore` port. Rehydration is always the actor's **own** write-side stream (never a
+read model), so the version for the optimistic-concurrency append is authoritative.
+
 ## Runtime — `ProcessManagerRunner` (`crates/infrastructure/src/process_manager/`)
 
 Mirrors the projection worker:
@@ -33,20 +38,26 @@ Mirrors the projection worker:
 
 ```mermaid
 sequenceDiagram
-    participant R as ProcessManagerRunner (per tick)
-    participant DB as domain_events
-    participant PM as Process manager (pure)
-    participant ES as EventStore
-    R->>DB: events WHERE event_type IN triggers AND position > pm:&lt;Name&gt; checkpoint
-    DB-->>R: pending events (ordered)
+    box application core
+        participant PM as Process manager (decides — pure)
+        participant ES as Repository (actor journal)
+    end
+    box infrastructure adapters
+        participant R as ProcessManagerRunner (per tick)
+        participant PG as PgEventStore adapter → domain_events
+    end
+    R->>PG: scan events by trigger type after pm:{Name} checkpoint
+    PG-->>R: pending events (ordered)
     loop each event
-        R->>DB: load the streams the decision needs
+        R->>ES: load the streams the decision needs
+        ES-->>R: stream slices (via PgEventStore)
         R->>PM: decide(trigger, state)
         PM-->>R: Act(emits) / Skip(reason) / Nothing
-        R->>ES: append emits (correlation propagated, cause = trigger id)
-        R->>DB: advance pm:&lt;Name&gt; checkpoint
+        R->>ES: save the decided emits (correlation propagated, cause = trigger id)
+        ES-->>PG: append (behind the port)
+        R->>PG: advance pm:{Name} checkpoint
     end
-    Note over R: poison event → log-skip + advance · version conflict → abort group, retry next tick
+    Note over PM,PG: the facts are the PM's decision — EventStore is the port, PgEventStore + domain_events the adapter/detail
 ```
 
 ## The four process managers
@@ -63,20 +74,32 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor C as Customer
-    participant GQL as GraphQL placeOrder
-    participant PG as PaymentGateway (Stripe, outbound)
-    participant ES as domain_events
-    participant SW as Stripe webhook ACL
-    participant PM as PlaceOrderProcess
-    C->>GQL: placeOrder(cart, address, paymentMethod)
-    GQL->>PG: create PaymentIntent
-    PG-->>GQL: clientSecret
-    GQL->>ES: PaymentIntentCreated (Order-&lt;id&gt;)
-    GQL-->>C: { paymentIntentId, clientSecret }
-    C->>PG: confirm payment (Stripe.js)
-    SW->>ES: PaymentCaptured  (inbound webhook fact)
-    PM->>ES: OrderPlaced (Order-&lt;id&gt;) + CartCheckedOut (Cart-&lt;id&gt;)
-    Note over PM: ⚠️ needs a checkout snapshot to rebuild OrderPlaced → fail-closes today
+    box application core (crates/application)
+        participant H as place_order handler (decides — pure)
+        participant PGW as PaymentGateway (port)
+        participant PM as PlaceOrderProcess (decides — pure)
+        participant REPO as Repository (actor journal)
+    end
+    box infrastructure adapters
+        participant R as server / runner (shell)
+        participant SA as Stripe adapter (outbound + webhook ACL)
+        participant PG as PgEventStore (→ domain_events)
+    end
+    C->>R: placeOrder(cart, address, paymentMethod)
+    R->>H: PlaceOrder command
+    H->>PGW: create_payment_intent
+    PGW->>SA: (adapter) Stripe create-intent
+    SA-->>H: clientSecret
+    H->>REPO: save PaymentIntentCreated (+ frozen checkout) on Order-{id}
+    REPO->>PG: append (behind the port)
+    R-->>C: { paymentIntentId, clientSecret }
+    C->>SA: confirm payment (Stripe.js)
+    SA->>PG: record PaymentCaptured (non-aggregate envelope — journal, not Repository)
+    R->>PM: drains PaymentCaptured → decide(state)
+    PM-->>R: Act[ OrderPlaced on Order-{id}, CartCheckedOut on Cart-{id} ]
+    R->>REPO: save the decided facts
+    REPO->>PG: append (behind the port)
+    Note over PM,PG: on PaymentFailed → Nothing (cart stays OPEN). Checkout frozen on PaymentIntentCreated (ADR-20260719-014434) — full materialization rides pricing
 ```
 
 ### 2. RefundProcess — `refund.rs`
@@ -88,14 +111,21 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant A as Restaurant / Customer
-    participant ES as domain_events
-    participant PM as RefundProcess
-    participant SA as Stripe adapter (outbound)
-    A->>ES: OrderRejectedByRestaurant / OrderCancelledBy* / RefundRequested
-    PM->>SA: request refund   (TODO saga)
-    SA->>ES: PaymentRefunded   (inbound webhook fact)
-    PM-->>PM: Nothing (fact already recorded)
+    box application core (crates/application)
+        participant PM as RefundProcess (decides — pure)
+    end
+    box infrastructure adapters
+        participant R as ProcessManagerRunner (shell)
+        participant SA as Stripe adapter (outbound + webhook ACL)
+        participant PG as PgEventStore (→ domain_events)
+    end
+    Note over R,PG: trigger already in the log — OrderRejectedByRestaurant / OrderCancelledBy* / RefundRequested
+    R->>PM: drain trigger → decide
+    PM-->>R: Skip — request the refund (emits [])
+    R->>SA: request Stripe refund (TODO saga, outbound)
+    SA->>PG: record PaymentRefunded (non-aggregate envelope — journal, not Repository)
+    R->>PM: drain PaymentRefunded → decide
+    PM-->>R: Nothing (settled fact already recorded)
 ```
 
 ### 3. CartBindingProcess — `cart_binding.rs`
@@ -105,11 +135,18 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor G as Guest → Customer
-    participant ES as domain_events
-    participant PM as CartBindingProcess
-    G->>ES: CustomerIdentified (login/verify)
-    PM-->>PM: bind guest cart → customer (TODO runtime: CartProjector cross-stream)
+    box application core (crates/application)
+        participant PM as CartBindingProcess (decides — pure)
+    end
+    box infrastructure adapters
+        participant R as ProcessManagerRunner (shell)
+        participant PROJ as CartProjector (read-model, TODO runtime)
+        participant PG as PgEventStore (→ domain_events)
+    end
+    Note over R,PG: trigger already in the log — CustomerIdentified (login / phone verify)
+    R->>PM: drain CustomerIdentified → decide
+    PM-->>R: Skip — no new domain event in V0 (emits [])
+    Note over PROJ: the actual bind is a read-model cross-stream job (CartProjector::customer_id) — no write through the Repository
 ```
 
 ### 4. DeliveryDispatchProcess — `delivery_dispatch.rs` (ADR-0031)
@@ -123,35 +160,47 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant R as Restaurant
-    participant ES as domain_events
-    participant PM as DeliveryDispatchProcess
-    participant DP as Delivery partner (ACL)
-    R->>ES: OrderMarkedReady
-    PM->>ES: DeliveryRequested (DeliveryJob-&lt;uuidv5(orderId)&gt;)  [DELIVERY only]
-    DP->>ES: DeliveryAcceptedByPartner (courier)
-    DP->>ES: DeliveryStatusUpdated(DELIVERED)
-    PM->>ES: OrderDelivered
+    box application core (crates/application)
+        participant PM as DeliveryDispatchProcess (decides — pure)
+        participant REPO as Repository (actor journal)
+    end
+    box infrastructure adapters
+        participant R as ProcessManagerRunner (shell)
+        participant DP as Delivery partner (ACL)
+        participant PG as PgEventStore (→ domain_events)
+    end
+    Note over R,PG: trigger already in the log — OrderMarkedReady (emitted by the Order aggregate)
+    R->>PM: drain OrderMarkedReady → decide(order, restaurant, job state)
+    PM-->>R: Act[ DeliveryRequested on DeliveryJob-{uuidv5(orderId)} ]  [DELIVERY only]
+    R->>REPO: save the decided fact
+    REPO->>PG: append (behind the port)
+    DP->>PG: record DeliveryAcceptedByPartner / DeliveryStatusUpdated(DELIVERED) (partner ACL — journal)
+    R->>PM: drain DELIVERED → decide
+    PM-->>R: Act[ OrderDelivered ]
+    R->>REPO: save → append (behind the port)
     Note over PM,DP: DeliveryRejectedByPartner → re-offer (TODO saga: partner ACL)
 ```
 
-## ⚠️ Open gap — checkout snapshot (needs a `specs/**` decision → plan mode)
+## ✅ Resolved — checkout snapshot on `PaymentIntentCreated` (ADR-20260719-014434)
 
-`events.yaml#/PaymentIntentCreated` carries only the payment handle (id/amount) — **not** the checkout
-contents (cartId, items, contact, serviceType, delivery address, price breakdown). So when `PaymentCaptured`
-arrives, **PlaceOrderProcess cannot reconstruct `OrderPlaced` from the event log alone**. Today it resolves
-this through a `CheckoutSnapshotSource` seam; with the stand-in it **`Skip`s** (logged, never guesses).
+`events.yaml#/PaymentIntentCreated` now carries a required `checkout` (`entities.yaml#/CheckoutSnapshot` —
+cartId, contact, serviceType, delivery address, priced items, breakdown), frozen by `commands::place_order`
+when it creates the PaymentIntent (`rules.yaml#/CheckoutSnapshotFrozenAtIntent`). So **`OrderPlaced` +
+`CartCheckedOut` are reconstructable from the `Order-{id}` stream alone** — no out-of-log store (Option 1,
+over the rejected durable pending-checkout store). `PaymentIntentCreated` is non-projected → zero read-model
+impact.
 
-**Two fixes (pick in plan mode):**
-1. **Enrich `PaymentIntentCreated`** to carry the frozen checkout snapshot (cart items + breakdown + contact
-   + service type + address) — then `OrderPlaced` rebuilds purely from the log (event-sourcing-pure).
-2. **A durable pending-checkout store** written at create-intent time (by the Stripe adapter), which the
-   saga reads on `PaymentCaptured`. Keeps the event lean; adds a store to operate.
+**Still riding on pricing (not done yet):** `place_order` freezes `items`/`breakdown` best-available until
+server-side line pricing lands (the Cart projector does not price lines yet; the ADR-0016/0017 fee/split is
+unwired). Until then the saga still resolves the snapshot through the fail-closed `CheckoutSnapshotSource`
+seam and **`Skip`s** — nothing consumes the approximate breakdown. Retiring that seam (read
+`PaymentIntentCreated.checkout` directly from the log) is a trivial follow-up once pricing makes the frozen
+data correct.
 
 ## Open `TODO(saga)` summary
 | Saga | Open item | Blocked on |
 |---|---|---|
-| PlaceOrder | materialize `OrderPlaced` in prod | the checkout-snapshot decision above |
+| PlaceOrder | materialize `OrderPlaced` in prod (retire `CheckoutSnapshotSource`) | server-side pricing (priced items + breakdown) |
 | Refund | outbound Stripe refund request | Stripe adapter (outbound) |
 | CartBinding | actually bind the cart | `CartProjector` cross-stream routing |
 | DeliveryDispatch | re-offer on partner rejection | delivery-partner ACL |

@@ -28,8 +28,8 @@ Two directions to keep distinct:
 - Adapters are **not** part of `domain` or `infrastructure`. They obey the dependency rule (they depend
   inward on `application`/`domain`, and on `infrastructure` only where a standalone binary needs a concrete
   adapter like `PgEventStore`). The ACL stays framework-free (unit-tested without axum).
-- Realized now: `crates/adapters/stripe` (ACL + `POST /webhooks/stripe`, idempotent inbound payment facts)
-  and `crates/adapters/hubrise` (ACL + `POST /webhooks/hubrise`, verified ingress). The SIRENE/Google/
+- Realized now: `crates/adapters/stripe` (ACL + `POST /adapters/stripe/webhooks`, idempotent inbound payment facts)
+  and `crates/adapters/hubrise` (ACL + `POST /adapters/hubrise/webhooks`, verified ingress). The SIRENE/Google/
   Supabase-auth seams stay in `infrastructure/integrations/` for now (scheduled pull / outbound seams, not
   partner-push webhooks); they may follow this pattern later if it helps.
 

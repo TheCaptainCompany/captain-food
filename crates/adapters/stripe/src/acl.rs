@@ -394,7 +394,9 @@ impl StripeWebhookIngestor {
         };
 
         // One stream per Stripe event id at version 0: UNIQUE(stream_name, version) IS the
-        // idempotency key — a redelivered webhook loses the race and folds to a no-op.
+        // idempotency key — a redelivered webhook loses the race and folds to a no-op. This is a
+        // non-aggregate idempotency envelope, NOT a domain aggregate — so it records the fact through the
+        // low-level EventStore journal directly and (correctly) bypasses the write-side `Repository`.
         let stream = format!("StripeEvent-{}", event.id);
         match self.store.append(&stream, 0, &[domain_event], &actor).await {
             Ok(_) => Ok(StripeIngestOutcome::Recorded { event_type: event.event_type.clone() }),

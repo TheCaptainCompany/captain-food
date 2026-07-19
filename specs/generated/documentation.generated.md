@@ -3603,7 +3603,7 @@ The customer requested a refund for an order; the RefundProcess will drive Strip
 <a id="event-paymentintentcreated"></a>
 #### ⚡ Event: `PaymentIntentCreated`
 
-A payment intent was created at checkout for a pending order.
+A payment intent was created at checkout for a pending order. Carries the full priced checkout frozen at intent creation (`checkout`), so PlaceOrderProcess can rebuild OrderPlaced + CartCheckedOut from the event log alone when PaymentCaptured arrives (no out-of-log store). `checkout.restaurantId`/`customerId` duplicate the top-level fields and `checkout.totalAmount == amount == checkout.breakdown.total`.
 
 - **Emitted by**: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Consumed by**: —
@@ -3615,6 +3615,7 @@ A payment intent was created at checkout for a pending order.
 | <a id="event-paymentintentcreated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-paymentintentcreated--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
 | <a id="event-paymentintentcreated--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
+| <a id="event-paymentintentcreated--checkout"></a>`checkout` | [📦 `CheckoutSnapshot`](#entity-checkoutsnapshot) | ✅ | The full priced checkout frozen at intent creation (rebuilds OrderPlaced/CartCheckedOut on capture). |
 
 <a id="event-paymentcaptured"></a>
 #### ⚡ Event: `PaymentCaptured`
@@ -3665,7 +3666,7 @@ A captured payment was refunded (e.g. after rejection or cancellation).
 | <a id="event-paymentrefunded--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="event-paymentrefunded--reason"></a>`reason` | `string` | ⬜ |  |
 
-### 📦 Entities _(10)_
+### 📦 Entities _(11)_
 
 <a id="entity-money"></a>
 #### 📦 Entity: `Money`
@@ -3776,6 +3777,27 @@ An option chosen by the customer on a line item, priced at order time.
 | <a id="entity-orderlineitem--selectedoptions"></a>`selectedOptions` | [[📦 `SelectedOption`](#entity-selectedoption)] | ⬜ |  |
 | <a id="entity-orderlineitem--linetotal"></a>`lineTotal` | [📦 `Money`](#entity-money) | ✅ | (unitPrice + sum(selectedOptions.price)) * quantity, computed server-side. |
 
+<a id="entity-checkoutsnapshot"></a>
+#### 📦 Entity: `CheckoutSnapshot`
+
+The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml#/PaymentIntentCreated when it creates the Stripe PaymentIntent — everything events.yaml#/OrderPlaced + events.yaml#/CartCheckedOut need beyond the inbound PaymentCaptured fact, so the order is reconstructable from the event log alone (no out-of-log store). Mirrors the application `CheckoutSnapshot` port type. Invariant: totalAmount == breakdown.total (== the PaymentIntent amount).
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-checkoutsnapshot--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="entity-checkoutsnapshot--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ |  |
+| <a id="entity-checkoutsnapshot--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="entity-checkoutsnapshot--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="entity-checkoutsnapshot--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
+| <a id="entity-checkoutsnapshot--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
+| <a id="entity-checkoutsnapshot--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
+| <a id="entity-checkoutsnapshot--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
+| <a id="entity-checkoutsnapshot--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
+| <a id="entity-checkoutsnapshot--items"></a>`items` | [[📦 `OrderLineItem`](#entity-orderlineitem)] | ✅ | Priced order lines frozen at checkout; may be empty until server-side line pricing lands. |
+| <a id="entity-checkoutsnapshot--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |  |
+| <a id="entity-checkoutsnapshot--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ✅ |  |
+| <a id="entity-checkoutsnapshot--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
+
 <a id="entity-order"></a>
 #### 📦 Entity: `Order`
 
@@ -3840,7 +3862,7 @@ An option chosen by the customer on a line item, priced at order time.
 | <a id="error-paymentdeclined"></a>⛔ `PaymentDeclined` | Stripe declined the payment synchronously at checkout (no order placed). | 🇬🇧 Payment was declined. | 🇫🇷 Le paiement a été refusé. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 
-### 📐 Business rules _(13)_
+### 📐 Business rules _(14)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -3897,6 +3919,13 @@ _A customer can request a refund for an order._
 _Checkout reads and prices the open cart and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment._
 
 - **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPlaceOrderIsRejected`](#test-testplaceorderisrejected)
+
+<a id="rule-checkoutsnapshotfrozenatintent"></a>
+#### 📐 Rule: `CheckoutSnapshotFrozenAtIntent`
+
+_When it creates the PaymentIntent, PlaceOrderProcess freezes the full priced checkout (cart, contact, service type, delivery address, priced items, breakdown) onto PaymentIntentCreated, so the order can be materialized from the event log alone on payment capture — no out-of-log store._
+
+- **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent)
 
 <a id="rule-ordertestmodeisolation"></a>
 #### 📐 Rule: `OrderTestModeIsolation`
@@ -4169,7 +4198,7 @@ _Checkout reads the open cart, prices it, and creates a Stripe payment intent_
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent), [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
 
 <a id="test-testplaceorderisrejected"></a>
 #### 🧪 Test: `TestPlaceOrderIsRejected`

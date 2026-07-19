@@ -3,7 +3,7 @@
 //! seam" the ingress ACL (`acl.rs`) and the outbound client (`api.rs`) were built for:
 //!
 //! ```text
-//! POST /webhooks/hubrise ──(verified, needs_pull)──▶ api pull ──▶ THIS ACL (map) ──▶ domain write
+//! POST /adapters/hubrise/webhooks──(verified, needs_pull)──▶ api pull ──▶ THIS ACL (map) ──▶ domain write
 //!   catalog callback   → get_catalog(catalogId)  → map_catalog  → ImportCatalog handler
 //!   inventory callback → get_inventory(locationId)→ map_inventory→ update_offer_stock handler (per sku)
 //! ```
