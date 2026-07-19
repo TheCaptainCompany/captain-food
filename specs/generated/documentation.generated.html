@@ -100,7 +100,7 @@
   participant ST as payment_process_manager (state)
   participant RM_Cart as Cart (read model)
   participant RM_Restaurant as Restaurant (read model)
-  participant PT_payment_gateway as port payment_gateway (adapter)
+  participant PT_payment as port payment (adapter)
   participant AG_Payment as Payment (aggregate)
   participant AG_Order as Order (aggregate)
   participant AG_Cart as Cart (aggregate)
@@ -115,10 +115,10 @@
   PM--xIN: throws CannotOrderTestRestaurant
   PM--xIN: throws DeliveryAddressRequired
   PM--xIN: throws OutsideDeliveryArea
-  PM-&gt;&gt;PT_payment_gateway: create_payment_intent
+  PM-&gt;&gt;PT_payment: request
   PM--xIN: throws PaymentDeclined
   PM-&gt;&gt;AG_Payment: deliver PaymentIntentCreated — the aggregate records it
-  PM-&gt;&gt;ST: set cart_id=PlaceOrder.cartId, order_id=PlaceOrder.orderId, payment_intent_id=payment_gateway.create_payment_intent, process_status=AWAITING_PAYMENT_RESULT, payment_status=PENDING
+  PM-&gt;&gt;ST: set cart_id=PlaceOrder.cartId, order_id=PlaceOrder.orderId, payment_intent_id=payment.request, process_status=AWAITING_PAYMENT_RESULT, payment_status=PENDING
   end
   rect rgb(245,245,245)
   IN-&gt;&gt;PM: PaymentCaptured (event)
@@ -144,7 +144,7 @@
   participant PM as RefundProcess (decides)
   participant ST as refund_process_manager (state)
   participant RM_OrderTracking as OrderTracking (read model)
-  participant PT_payment_gateway as port payment_gateway (adapter)
+  participant PT_payment as port payment (adapter)
   participant AG_Payment as Payment (aggregate)
   rect rgb(245,245,245)
   IN-&gt;&gt;PM: OrderRejectedByRestaurant (event)
@@ -174,7 +174,7 @@
   IN-&gt;&gt;PM: ApproveRefund (command)
   PM-&gt;&gt;ST: by order_id=ApproveRefund.orderId
   PM--xIN: throws RefundNotPending unless state.process_status == PENDING_APPROVAL
-  PM-&gt;&gt;PT_payment_gateway: request_refund
+  PM-&gt;&gt;PT_payment: refund
   PM-&gt;&gt;AG_Payment: deliver RefundApproved — the aggregate records it
   PM-&gt;&gt;ST: set process_status=APPROVED_AWAITING_SETTLEMENT, approved_amount_cents=ApproveRefund.amount, reason=ApproveRefund.reason
   end
@@ -216,7 +216,7 @@
   participant RM_OrderTracking as OrderTracking (read model)
   participant RM_Restaurant as Restaurant (read model)
   participant AG_DeliveryJob as DeliveryJob (aggregate)
-  participant PT_delivery_partner as port delivery_partner (adapter)
+  participant PT_delivery as port delivery (adapter)
   participant AG_Order as Order (aggregate)
   rect rgb(245,245,245)
   IN-&gt;&gt;PM: OrderMarkedReady (event)
@@ -224,7 +224,7 @@
   Note over PM: skip unless order.service_type == DELIVERY
   PM-&gt;&gt;RM_Restaurant: read as restaurant [restaurant_id=OrderMarkedReady.restaurantId]
   PM-&gt;&gt;AG_DeliveryJob: deliver DeliveryRequested — the aggregate records it
-  PM-&gt;&gt;PT_delivery_partner: offer_job
+  PM-&gt;&gt;PT_delivery: offer_job
   PM-&gt;&gt;ST: set order_id=OrderMarkedReady.orderId, restaurant_id=OrderMarkedReady.restaurantId, delivery_job_id=DeliveryRequested.deliveryJobId, process_status=OFFERED
   end
   rect rgb(245,245,245)
@@ -238,7 +238,7 @@
   PM-&gt;&gt;ST: by delivery_job_id=DeliveryRejectedByPartner.deliveryJobId
   PM--xIN: throws DeliveryJobNotFound
   PM-&gt;&gt;ST: set process_status=REOFFER_REQUIRED
-  PM-&gt;&gt;PT_delivery_partner: offer_job
+  PM-&gt;&gt;PT_delivery: offer_job
   end
   rect rgb(245,245,245)
   IN-&gt;&gt;PM: DeliveryStatusUpdated (event)

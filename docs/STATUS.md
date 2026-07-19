@@ -10,6 +10,7 @@
 > `ports` will `$ref` the catalog. ② **Codegen roadmap** ([docs/codegen-roadmap.md](codegen-roadmap.md)),
 > ranked: aggregate lifecycle state machines → generated behaviour-test harness from tests.yaml →
 > PM orchestrator scaffolding → the service catalog → PM state-store generation.
+> ① LANDED (2026-07-19): `specs/services.yaml` + validator §2d (`svc-*` rules) are in, PM `ports` now `$ref` the catalog (ADR Accepted); trait/client/route emitters still to come.
 >
 > ✅ **RUNTIME REIMPLEMENTED (2026-07-19 night) — the state-table PM runtime is live on this branch
 > (ADR-20260719-193500), 266 workspace tests green, `make validate` 0 errors, no drift.** Landed:

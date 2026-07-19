@@ -16,8 +16,10 @@ description: >
     - <PM>.type        : always process-manager.
     - <PM>.state_table : $ref to the PM's private state table (database/tables/process_managers.yaml).
                          Required when any leg has a `state` step.
-    - <PM>.ports       : outbound ports (application-layer traits; adapters implement them).
-                         Map port name → { description, operations: { <operation>: { description } } }.
+    - <PM>.ports       : outbound ports — each a `$ref` into the SERVICE CATALOG
+                         (services.yaml, ADR-20260719-214500): `payment: { $ref: 'services.yaml#/payment' }`.
+                         The port name is the service name; `call`/`from_port` reference
+                         `<service>.<operation>` against the catalog's declared operations.
     - <PM>.receives    : the inbox. Each entry { message, description?, steps }:
         * message : $ref to the command (commands.yaml) or event (events.yaml) received.
                     COMMAND legs reject with the thrown error. EVENT legs never reject the FACT —
@@ -78,10 +80,7 @@ PlaceOrderProcess:
     stays OPEN.
   state_table: { $ref: 'database/tables/process_managers.yaml#/payment_process_manager' }
   ports:
-    payment_gateway:
-      description: "Outbound payments port (application trait; Stripe adapter implements it)."
-      operations:
-        create_payment_intent: { description: "Create the PaymentIntent for the priced cart total; returns the intent id + client secret." }
+    payment: { $ref: 'services.yaml#/payment' }
   receives:
     - message: { $ref: 'commands.yaml#/PlaceOrder' }
       description: >
@@ -107,21 +106,21 @@ PlaceOrderProcess:
         - guard: { throws: { $ref: 'errors.yaml#/DeliveryAddressRequired' }, note: "serviceType DELIVERY requires deliveryAddress." }
         - guard: { throws: { $ref: 'errors.yaml#/OutsideDeliveryArea' }, note: "The delivery address is inside the restaurant's delivery area." }
         - call:
-            port: payment_gateway
-            operation: create_payment_intent
+            port: payment
+            operation: request
             note: "Server-side pricing feeds the intent amount; the priced checkout is frozen for the snapshot."
         - guard: { throws: { $ref: 'errors.yaml#/PaymentDeclined' }, note: "The gateway accepted the intent creation." }
         - deliver:
             event: { $ref: 'events.yaml#/PaymentIntentCreated' }
             to: { $ref: 'actors.yaml#/Payment' }
             with:
-              paymentIntentId: { from_port: payment_gateway.create_payment_intent }
+              paymentIntentId: { from_port: payment.request }
             note: "Birth of the Payment; carries the frozen checkout snapshot (ADR-20260719-014434)."
         - state:
             set:
               cart_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/cartId' } }
               order_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/orderId' } }
-              payment_intent_id: { from_port: payment_gateway.create_payment_intent }
+              payment_intent_id: { from_port: payment.request }
               process_status: { const: AWAITING_PAYMENT_RESULT }
               payment_status: { const: PENDING }
 
@@ -187,10 +186,7 @@ RefundProcess:
     enforced at approval, not a domain rule.
   state_table: { $ref: 'database/tables/process_managers.yaml#/refund_process_manager' }
   ports:
-    payment_gateway:
-      description: "Outbound payments port (application trait; Stripe adapter implements it)."
-      operations:
-        request_refund: { description: "Request a (possibly partial) refund of the captured PaymentIntent." }
+    payment: { $ref: 'services.yaml#/payment' }
   receives:
     - message: { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
       description: "The restaurant rejected a paid order — open a pending refund for a restaurant/admin decision."
@@ -275,8 +271,8 @@ RefundProcess:
             throws: { $ref: 'errors.yaml#/RefundNotPending' }
             note: "Also thrown when no run exists for the order."
         - call:
-            port: payment_gateway
-            operation: request_refund
+            port: payment
+            operation: refund
             note: "Outbound Stripe refund for the approved amount; PaymentRefunded will settle the run."
         - deliver:
             event: { $ref: 'events.yaml#/RefundApproved' }
@@ -366,10 +362,7 @@ DeliveryDispatchProcess:
     cancelled/rejected order is never resurrected.
   state_table: { $ref: 'database/tables/process_managers.yaml#/delivery_dispatch_process_manager' }
   ports:
-    delivery_partner:
-      description: "Outbound delivery-partner port (application trait; avelo37 ACL implements it)."
-      operations:
-        offer_job: { description: "Offer the delivery job to the partner (and/or publish it to independent riders)." }
+    delivery: { $ref: 'services.yaml#/delivery' }
   receives:
     - message: { $ref: 'events.yaml#/OrderMarkedReady' }
       description: >
@@ -399,7 +392,7 @@ DeliveryDispatchProcess:
               dropoff: { from_read: order.delivery_address }
             note: "Birth of the DeliveryJob; deliveryJobId = deterministic UUIDv5 of the order id (idempotent re-dispatch)."
         - call:
-            port: delivery_partner
+            port: delivery
             operation: offer_job
         - state:
             set:
@@ -434,7 +427,7 @@ DeliveryDispatchProcess:
         - state:
             set: { process_status: { const: REOFFER_REQUIRED } }
         - call:
-            port: delivery_partner
+            port: delivery
             operation: offer_job
             note: "TODO(saga): re-offer needs a partner-selection policy; REOFFER_REQUIRED flags manual handling meanwhile."
 

@@ -1,0 +1,130 @@
+version: 1
+description: >
+  Captain.Food SERVICE catalog (ADR-20260719-214500) — the abstract capabilities the DOMAIN calls,
+  deliberately SEPARATE from api.yaml: api.yaml is the PRODUCT API (GraphQL, role-filtered, for UIs
+  and external partners); this file is the INTERNAL capability catalog, consumed through generated
+  traits. GraphQL never fronts a service call and services never appear in the GraphQL schema.
+
+  Each service groups its OPERATIONS (short domain verbs, snake_case, unambiguous within the
+  service; observability always emits the qualified `service.operation` form). Provider vocabulary
+  never appears at this level — the implementation ACL translates names as well as payloads.
+
+  Field meaning:
+    - <service>.operations : map op → { description, input?, output?, errors? }. `input`/`output`
+                             fields are typed by `$ref` into scalars/entities/events; `errors` list
+                             the anticipated typed rejections ($ref errors.yaml).
+    - <service>.binding    : THE topology decision, SPEC-OWNED (agreed 2026-07-19: everything is
+                             decided in the spec): `local` = in-process call into the implementation
+                             (no self-HTTP); `http` = consumed via the DERIVED surface
+                             `POST /services/<service>/<op>` (snake_case → kebab-case), address
+                             supplied by `SERVICE_<NAME>_URL` (an address book, never a decision).
+    - <service>.expose     : whether this deployable EMITS the `/services/<service>/*` routes at
+                             all. Changing binding/expose is a reviewed spec change.
+    - <service>.implementations : provider adapters (ACLs). `routes` map each service op onto the
+                             adapter's OWN surface in the PROVIDER's vocabulary
+                             (`/adapters/<provider>/...`) — the name-level ACL as spec. Optional
+                             for external-SaaS ACLs that expose no adapter HTTP surface of ours.
+
+  V0: every service is `binding: local`, `expose: false` — one deployable, zero internal HTTP.
+  Planned entries (join when their outbound call surface is defined): catalog_sync (HubRise),
+  listing_enrichment (Sirene/Google).
+
+# --- Services (abstract capabilities; the domain never names a provider) ---
+
+payment:
+  description: >
+    Payments capability — provider-agnostic (ACL: Stripe behind it). `request` opens the payment for
+    a priced checkout (PlaceOrderProcess command leg); `refund` asks the provider to give money back
+    (RefundProcess approval leg) — settlement always comes back asynchronously as the inbound
+    PaymentCaptured / PaymentRefunded facts recorded by the Payment aggregate, never through these
+    return values.
+  operations:
+    request:
+      description: "Create the payment intent for a priced checkout; returns the intent id + the client secret the customer confirms with."
+      input:
+        amount: { $ref: 'entities.yaml#/Money' }
+        paymentMethodId: { $ref: 'scalars.yaml#/PaymentMethodId' }
+      output:
+        paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }
+        clientSecret: { type: string }
+      errors:
+        - { $ref: 'errors.yaml#/PaymentDeclined' }
+    refund:
+      description: "Request a (possibly partial) refund of a captured intent; the settled fact arrives as inbound PaymentRefunded."
+      input:
+        paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }
+        amount: { $ref: 'entities.yaml#/Money' }
+      errors:
+        - { $ref: 'errors.yaml#/PaymentDeclined' }
+  binding: local
+  expose: false
+  implementations:
+    stripe:
+      description: "Stripe ACL (crates/adapters/stripe) — fail-closed stand-in until the outbound adapter lands."
+      routes:
+        request: 'POST /adapters/stripe/payment-intents'
+        refund: 'POST /adapters/stripe/refunds'
+
+delivery:
+  description: >
+    Delivery-fulfilment capability (bounded context: delivery, ADR-0031). `offer_job` offers a
+    delivery job to the partner and/or publishes it to independent riders; the partner's answers come
+    back as the inbound DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated
+    facts recorded by the DeliveryJob aggregate — never through this return value.
+  operations:
+    offer_job:
+      description: "Offer the delivery job (its DeliveryRequested birth fact carries pickup/dropoff) for fulfilment."
+      input:
+        job: { $ref: 'events.yaml#/DeliveryRequested' }
+      errors: []
+  binding: local
+  expose: false
+  implementations:
+    avelo37:
+      description: "Avelo37 partner ACL — no-op stand-in until the adapter lands (jobs stay open to independent riders)."
+      routes:
+        offer_job: 'POST /adapters/avelo37/deliveries'
+
+identity:
+  description: >
+    Identity capability — passwordless auth wrapped behind our GraphQL (ADR-0015, Supabase ACL).
+    Consumed by the Customer command handlers (VerifyPhone / email verification), not by a process
+    manager; catalogued so the calling surface is one spec.
+  operations:
+    send_phone_otp:
+      description: "Send an SMS OTP to this phone (Twilio via the provider; mock in dev), localized."
+      input:
+        dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
+        nationalNumber: { $ref: 'scalars.yaml#/NationalPhoneNumber' }
+        locale: { $ref: 'scalars.yaml#/Locale' }
+      errors: []
+    verify_phone_otp:
+      description: "Verify an SMS OTP with the provider; resolves the provider-side auth user."
+      input:
+        dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
+        nationalNumber: { $ref: 'scalars.yaml#/NationalPhoneNumber' }
+        code: { $ref: 'scalars.yaml#/OtpCode' }
+      output:
+        authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+      errors:
+        - { $ref: 'errors.yaml#/InvalidVerificationCode' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+    send_email_magic_link:
+      description: "Email a magic link to verify/link this address, localized by the stored locale."
+      input:
+        email: { $ref: 'scalars.yaml#/EmailAddress' }
+        locale: { $ref: 'scalars.yaml#/Locale' }
+      errors: []
+    verify_email_token:
+      description: "Verify a returned magic-link token server-side with the provider."
+      input:
+        token: { $ref: 'scalars.yaml#/EmailVerificationToken' }
+      output:
+        authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+      errors:
+        - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+  binding: local
+  expose: false
+  implementations:
+    supabase:
+      description: "Supabase Auth ACL — an external SaaS; no adapter HTTP surface of ours, so no routes."

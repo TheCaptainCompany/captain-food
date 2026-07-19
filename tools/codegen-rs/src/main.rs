@@ -23,6 +23,7 @@ const SOURCE_FILES: &[&str] = &[
     "errors.yaml",
     "actors.yaml",
     "processmanager.yaml",
+    "services.yaml",
     "database/projection_views.yaml",
     "api.yaml",
     "stories.yaml",
@@ -412,6 +413,9 @@ fn validate(model: &Model) -> Report {
 
     // --- 2b. Process managers (processmanager.yaml): typed-step validation -----------------------
     validate_process_managers(model, &mut issues);
+
+    // --- 2d. Service catalog (services.yaml, ADR-20260719-214500) --------------------------------
+    validate_services(model, &mut issues);
 
     // --- 3. Coverage: derive value-objects vs commands, and orphan events ------------------------
     let mut refd_from_properties: BTreeSet<String> = BTreeSet::new();
@@ -2981,7 +2985,9 @@ fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) {
             }
         };
 
-        // Ports: name → declared operations.
+        // Ports: name → operation set, resolved THROUGH the service catalog — each entry is a
+        // `$ref` into services.yaml (ADR-20260719-214500); the port's operations are the resolved
+        // service's `operations` keys (the catalog itself is validated by §2d).
         let mut ports: HashMap<String, BTreeSet<String>> = HashMap::new();
         if let Some(pmap) = node.get("ports").and_then(|x| x.as_mapping()) {
             for (pk, pv) in pmap {
@@ -2989,14 +2995,26 @@ fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) {
                     Some(s) => s.to_string(),
                     None => continue,
                 };
-                let ops: BTreeSet<String> = pv
-                    .get("operations")
-                    .and_then(|x| x.as_mapping())
-                    .map(|m| m.iter().filter_map(|(ok, _)| ok.as_str().map(|s| s.to_string())).collect())
-                    .unwrap_or_default();
-                if ops.is_empty() {
-                    issues.push(err("pm-port", format!("{}.ports.{}", at, pname), "a port must declare at least one operation.".into()));
+                let pw = format!("{}.ports.{}", at, pname);
+                let sref = match pv.get("$ref").and_then(|x| x.as_str()) {
+                    Some(r) => r,
+                    None => {
+                        issues.push(err("pm-port", pw, "ports must $ref the service catalog (services.yaml), ADR-20260719-214500.".into()));
+                        continue;
+                    }
+                };
+                if ref_target_file(sref, CTX).as_deref() != Some("services.yaml") {
+                    issues.push(err("pm-port", pw, format!("a port must $ref a services.yaml service, got '{}'.", sref)));
+                    continue;
                 }
+                let ops: BTreeSet<String> = match resolve_ref(model, sref, CTX) {
+                    None => continue, // dangling → §1 reports it
+                    Some(svc) => svc
+                        .get("operations")
+                        .and_then(|x| x.as_mapping())
+                        .map(|m| m.iter().filter_map(|(ok, _)| ok.as_str().map(|s| s.to_string())).collect())
+                        .unwrap_or_default(),
+                };
                 ports.insert(pname, ops);
             }
         }
@@ -3228,6 +3246,158 @@ fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) {
                     }
                 }
             }
+        }
+    }
+}
+
+// ─── §2d — service-catalog validation (services.yaml, ADR-20260719-214500) ──────────────────────
+
+/// `^[a-z][a-z0-9_]*$` — a service operation name is a snake_case domain verb (never the
+/// provider's vocabulary; the qualified form is `<service>.<operation>`).
+fn svc_op_name_ok(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// `^POST /adapters/[a-z0-9-]+(/[a-z0-9-]+)+$` — adapter routes are POST and live under
+/// `/adapters/` in the PROVIDER's vocabulary (the derived `/services/*` surface is never declared).
+fn svc_adapter_route_ok(s: &str) -> bool {
+    let rest = match s.strip_prefix("POST /adapters/") {
+        Some(r) => r,
+        None => return false,
+    };
+    let segs: Vec<&str> = rest.split('/').collect();
+    segs.len() >= 2
+        && segs
+            .iter()
+            .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
+}
+
+/// §2d — validate the service catalog: snake_case operation names, typed error lists ($ref
+/// errors.yaml), a spec-owned `binding: local | http` (+ boolean `expose`), implementation routes
+/// keyed by real operations in the adapter-route format, and — for `binding: http` — at least one
+/// implementation whose routes cover EVERY operation. `input`/`output` field `$ref` resolution is
+/// §1's job (not duplicated here).
+fn validate_services(model: &Model, issues: &mut Vec<Issue>) {
+    const CTX: &str = "services.yaml";
+    let services = match model.defs.get(CTX) {
+        Some(Value::Mapping(m)) => m,
+        _ => return,
+    };
+    for (k, node) in services {
+        let name = match k.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        let at = format!("{}/{}", CTX, name);
+
+        // Operations: a non-empty mapping of snake_case domain verbs; `errors` (when present) is a
+        // list of typed $refs into errors.yaml.
+        let op_names: BTreeSet<String> = match node.get("operations").and_then(|x| x.as_mapping()) {
+            Some(m) if !m.is_empty() => {
+                let mut set = BTreeSet::new();
+                for (ok, op) in m {
+                    let oname = match ok.as_str() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    if !svc_op_name_ok(oname) {
+                        issues.push(err(
+                            "svc-op-name",
+                            format!("{}.operations.{}", at, oname),
+                            format!("operation name '{}' must be a snake_case domain verb (^[a-z][a-z0-9_]*$).", oname),
+                        ));
+                    }
+                    if let Some(errs) = op.get("errors") {
+                        match errs.as_sequence() {
+                            None => issues.push(err(
+                                "svc-op-errors",
+                                format!("{}.operations.{}.errors", at, oname),
+                                "operation errors must be a list of { $ref: 'errors.yaml#/<Error>' }.".into(),
+                            )),
+                            Some(seq) => {
+                                for (i, e) in seq.iter().enumerate() {
+                                    let ew = format!("{}.operations.{}.errors[{}]", at, oname, i);
+                                    match e.get("$ref").and_then(|x| x.as_str()) {
+                                        None => issues.push(err("svc-op-errors", ew, "each operation error must be a { $ref: 'errors.yaml#/<Error>' }.".into())),
+                                        Some(r) => {
+                                            if ref_target_file(r, CTX).as_deref() != Some("errors.yaml") {
+                                                issues.push(err("svc-op-errors", ew, format!("operation errors must reference errors.yaml, got '{}'.", r)));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    set.insert(oname.to_string());
+                }
+                set
+            }
+            _ => {
+                issues.push(err("svc-op-name", format!("{}.operations", at), "a service must declare a non-empty `operations` mapping.".into()));
+                BTreeSet::new()
+            }
+        };
+
+        // Binding & exposure: the topology decision is SPEC-OWNED — never an environment knob.
+        let binding = node.get("binding").and_then(|x| x.as_str());
+        if !matches!(binding, Some("local") | Some("http")) {
+            issues.push(err(
+                "svc-binding",
+                format!("{}.binding", at),
+                format!("binding must be exactly `local` or `http` (spec-owned topology decision), got '{}'.", binding.unwrap_or("")),
+            ));
+        }
+        if let Some(x) = node.get("expose") {
+            if x.as_bool().is_none() {
+                issues.push(err("svc-expose", format!("{}.expose", at), "expose must be a boolean.".into()));
+            }
+        }
+
+        // Implementations: `routes` keys ⊆ the service's operations, values in the adapter-route
+        // format; an http binding needs at least one implementation covering every operation.
+        let mut full_cover = false;
+        if let Some(impls) = node.get("implementations").and_then(|x| x.as_mapping()) {
+            for (ik, iv) in impls {
+                let iname = ik.as_str().unwrap_or("?");
+                let routes = match iv.get("routes").and_then(|x| x.as_mapping()) {
+                    Some(r) => r,
+                    None => continue, // routes are optional (external-SaaS ACLs with no HTTP surface of ours)
+                };
+                let mut covered: BTreeSet<String> = BTreeSet::new();
+                for (rk, rv) in routes {
+                    let op = rk.as_str().unwrap_or("?");
+                    let rw = format!("{}.implementations.{}.routes.{}", at, iname, op);
+                    if !op_names.contains(op) {
+                        issues.push(err("svc-impl-route-op", rw.clone(), format!("route key '{}' is not an operation of service '{}'.", op, name)));
+                    } else {
+                        covered.insert(op.to_string());
+                    }
+                    let route = rv.as_str().unwrap_or("");
+                    if !svc_adapter_route_ok(route) {
+                        issues.push(err(
+                            "svc-impl-route",
+                            rw,
+                            format!("route '{}' must be `POST /adapters/<provider>/<path…>` (^POST /adapters/[a-z0-9-]+(/[a-z0-9-]+)+$).", route),
+                        ));
+                    }
+                }
+                if !op_names.is_empty() && covered.len() == op_names.len() {
+                    full_cover = true;
+                }
+            }
+        }
+        if binding == Some("http") && !full_cover {
+            issues.push(err(
+                "svc-http-unroutable",
+                at.clone(),
+                format!("binding: http requires at least one implementation whose routes cover every operation of '{}'.", name),
+            ));
         }
     }
 }
@@ -7724,6 +7894,30 @@ mod tests {
     fn source_file_membership() {
         assert!(is_source_file("api.yaml"));
         assert!(is_source_file("architecture/c4-l2.yaml"));
+        assert!(is_source_file("services.yaml"));
         assert!(!is_source_file("nope.yaml"));
+    }
+
+    #[test]
+    fn svc_op_name_is_snake_case_domain_verb() {
+        assert!(svc_op_name_ok("request"));
+        assert!(svc_op_name_ok("offer_job"));
+        assert!(svc_op_name_ok("verify_phone_otp"));
+        assert!(!svc_op_name_ok("Request"));
+        assert!(!svc_op_name_ok("offer-job"));
+        assert!(!svc_op_name_ok("_request"));
+        assert!(!svc_op_name_ok("1request"));
+        assert!(!svc_op_name_ok(""));
+    }
+
+    #[test]
+    fn svc_adapter_route_is_post_under_adapters() {
+        assert!(svc_adapter_route_ok("POST /adapters/stripe/payment-intents"));
+        assert!(svc_adapter_route_ok("POST /adapters/avelo37/deliveries"));
+        assert!(!svc_adapter_route_ok("GET /adapters/stripe/refunds"));
+        assert!(!svc_adapter_route_ok("POST /adapters/stripe")); // provider alone — needs ≥1 path segment
+        assert!(!svc_adapter_route_ok("POST /services/payment/request")); // the DERIVED surface is never declared
+        assert!(!svc_adapter_route_ok("POST /adapters/Stripe/refunds"));
+        assert!(!svc_adapter_route_ok("POST /adapters/stripe/refunds/"));
     }
 }

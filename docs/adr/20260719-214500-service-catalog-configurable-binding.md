@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — direction agreed 2026-07-19; specification and implementation to follow.
+Accepted — catalog (`specs/services.yaml`) + validator wiring landed 2026-07-19; trait/client/route EMITTERS still to come (codegen-roadmap item 4).
 
 ## Context
 
