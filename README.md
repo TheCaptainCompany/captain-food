@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src=".github/assets/logo.png" alt="Captain.Food — a chef-hatted skull over a crossed golden fork and knife" width="140">
+<img src=".github/assets/logo.png" alt="Captain.Food — a mustachioed chef-hatted skull over a crossed golden fork and knife, on a white card" width="190">
 
 # Captain.Food
 
