@@ -3,7 +3,21 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-19. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 📣 **Latest on this branch (2026-07-19 evening):** ① Guard semantics hardened — **in case of error a
+> ✅ **RUNTIME REIMPLEMENTED (2026-07-19 night) — the state-table PM runtime is live on this branch
+> (ADR-20260719-193500), 266 workspace tests green, `make validate` 0 errors, no drift.** Landed:
+> the `Payment` (stream `Payment-{intentId}`) + `Rider` aggregates and DeliveryJob partner/issue
+> folds; the 4 PM state tables (migration + `pm_state` ports + Pg stores); the full missing command
+> surface (Rider ×3, DeliveryJob ops ×7, `bindCartToCustomer`); `placeOrder` delivers
+> `PaymentIntentCreated` to the Payment stream and opens the run row (concurrent checkout →
+> Conflict); all four orchestrators execute their DSL legs (guards throw typed errors —
+> `PaymentEventOrphaned`, `DeliveryJobNotFound`; refund decisions by RESTAURANT/ADMIN via
+> `approve_refund`/`deny_refund` + fail-closed `request_refund`; cart binding really binds; close
+> order via `send MarkOrderDelivered`); the runner surfaces thrown guards on `/saga`; the Stripe ACL
+> is a stateless translator (no more `StripeEvent-%` streams, `CheckoutSnapshotSource` seam
+> retired). Still open (see docs/sagas.md): real Stripe outbound adapter, refund API surface,
+> partner re-offer policy, `OrderTracking.payment_status` cross-stream feed, server-side pricing.
+>
+> 📣 **Earlier on this branch (2026-07-19 evening):** ① Guard semantics hardened — **in case of error a
 > guard always `throws` a typed exception, on EVENT legs too** (run aborts + error surfaced — e.g.
 > `PaymentEventOrphaned` for an orphan Stripe capture/failure, `DeliveryJobNotFound` for partner
 > reports on an unknown dispatch run); `skip` is strictly for benign alternatives, and the validator

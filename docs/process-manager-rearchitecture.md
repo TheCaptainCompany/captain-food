@@ -98,7 +98,16 @@ completeness gate (see "remaining").
 5. Regenerated at validate = 0. ADR-20260719-172821 written. Still open: observability contracts for
    the re-architected sagas; the Payment-aggregate/clawback ADR rides with the runtime program.
 
-## Runtime reimplementation — the big program (NOT started)
+## Runtime reimplementation — DONE (ADR-20260719-193500)
+
+Landed on this branch (266 workspace tests green): state-table orchestrators over the migrated PM
+tables (`pm_state` ports + Pg stores), the `Payment`/`Rider` aggregates + DeliveryJob partner/issue
+folds, the full missing command surface, the reworked `place_order` (Payment stream + run row), the
+stateless Stripe ACL (`record_inbound_payment_event`, `StripeEvent-%` and the snapshot seam
+retired), and the runner surfacing thrown guards on `/saga`. Remaining follow-ups are tracked in
+docs/sagas.md § Open items.
+
+## The original phase plan (historical)
 Separate from the DSL. Replace the event-sourced `ProcessManagerRunner` + saga decider wiring with
 **state-table PM orchestrators** (lock/step/unlock over `payment_process_manager` / `refund_process_manager`);
 add the `Payment`/`Rider` aggregates in `crates/domain`; make the Stripe adapter a **stateless translator**

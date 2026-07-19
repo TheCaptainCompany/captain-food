@@ -54,6 +54,10 @@ pub async fn record_inbound_payment_event(
         if domain::payment::already_records(&payment, &event) {
             return Ok(RecordOutcome::AlreadyRecorded);
         }
+    } else if events.iter().any(|e| e == &event) {
+        // Birthless (orphan) stream: no fold to consult, so a webhook re-delivery dedups by
+        // structural equality — the no-op guarantee holds even before the anomaly is resolved.
+        return Ok(RecordOutcome::AlreadyRecorded);
     }
     // No birth on the stream? Record anyway — the fact happened; the orchestrator's
     // PaymentEventOrphaned guard is what surfaces the anomaly (never this recording path).

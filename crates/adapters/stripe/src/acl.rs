@@ -31,13 +31,12 @@
 //!
 //! # Idempotency (redelivered webhooks are no-ops)
 //!
-//! Stripe retries until it sees a 2xx, so redelivery is normal. Each delivery carries a globally unique
-//! Stripe event id (`evt_…`); [`StripeWebhookIngestor`] appends the mapped fact to the dedicated stream
-//! `StripeEvent-<evt id>` at `expected_version = 0`, so the event store's UNIQUE(stream_name, version)
-//! guard makes the Stripe event id the exact idempotency key — a redelivery loses the optimistic-
-//! concurrency race and is absorbed as [`StripeIngestOutcome::Duplicate`]. (Projections fold
-//! `domain_events` by `event_type`, not by stream, so the per-webhook stream is purely an envelope
-//! concern.) The envelope `correlation_id` is the UUIDv5 of the Stripe event id for traceability.
+//! Stripe retries until it sees a 2xx, so redelivery is normal. The adapter is a STATELESS
+//! translator (ADR-20260719-193500): it maps the webhook and delivers the fact to the Payment
+//! AGGREGATE via `application::payments::record_inbound_payment_event`, which dedups by the
+//! aggregate's own fold ("already recorded?") — no `StripeEvent-%` envelope streams, no adapter
+//! idempotency table. A redelivery is absorbed as [`StripeIngestOutcome::Duplicate`]. The envelope
+//! `correlation_id` is the UUIDv5 of the Stripe event id for traceability.
 
 use std::sync::Arc;
 
@@ -393,13 +392,14 @@ impl StripeWebhookIngestor {
             cause_id: None,
         };
 
-        // One stream per Stripe event id at version 0: UNIQUE(stream_name, version) IS the
-        // idempotency key — a redelivered webhook loses the race and folds to a no-op. This is a
-        // non-aggregate idempotency envelope, NOT a domain aggregate — so it records the fact through the
-        // low-level EventStore journal directly and (correctly) bypasses the write-side `Repository`.
-        let stream = format!("StripeEvent-{}", event.id);
-        match self.store.append(&stream, 0, &[domain_event], &actor).await {
-            Ok(_) => Ok(StripeIngestOutcome::Recorded { event_type: event.event_type.clone() }),
+        // The adapter is a stateless translator (ADR-20260719-193500): the fact is delivered to the
+        // Payment AGGREGATE, which owns it — dedup is the actor's fold ("already recorded"), not an
+        // adapter envelope. No `StripeEvent-{id}` streams, nothing synthetic in the log.
+        match application::payments::record_inbound_payment_event(self.store.as_ref(), domain_event, &actor).await {
+            Ok(application::payments::RecordOutcome::Recorded) => {
+                Ok(StripeIngestOutcome::Recorded { event_type: event.event_type.clone() })
+            }
+            Ok(application::payments::RecordOutcome::AlreadyRecorded) => Ok(StripeIngestOutcome::Duplicate),
             Err(e) if is_version_conflict(&e) => Ok(StripeIngestOutcome::Duplicate),
             Err(e) => Err(e),
         }
@@ -664,11 +664,13 @@ mod tests {
             first,
             StripeIngestOutcome::Recorded { event_type: "payment_intent.succeeded".into() }
         );
-        // Stripe redelivers the SAME event id → absorbed, nothing appended twice.
+        // Stripe redelivers the SAME event → absorbed by the Payment aggregate's dedup, nothing
+        // appended twice. The fact lands on the Payment stream (ADR-20260719-193500) — no
+        // StripeEvent-% envelope streams.
         let second = ingestor.ingest(&event).await.unwrap();
         assert_eq!(second, StripeIngestOutcome::Duplicate);
 
-        let (events, version) = store.load("StripeEvent-evt_1PXsucceeded").await.unwrap();
+        let (events, version) = store.load("Payment-pi_3NabcSample").await.unwrap();
         assert_eq!(version, 1);
         assert!(matches!(events.as_slice(), [DomainEvent::PaymentCaptured(_)]));
     }
