@@ -130,6 +130,8 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 |  | SetAcceptanceMode | [✏️ `changeOrderAcceptanceMode`](#mutation-changeorderacceptancemode) |
 |  | CancelOrder | [✏️ `cancelOrderByRestaurant`](#mutation-cancelorderbyrestaurant) |
 |  | ThankRiderOrCaptain | [✏️ `tipOrder`](#mutation-tiporder) |
+|  | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
+|  | DenyRefund | [✏️ `denyRefund`](#mutation-denyrefund) |
 | 🧭 **TrackDeliveries** | ViewDeliveries | [🔎 `restaurantDeliveries`](#query-restaurantdeliveries) |
 |  | CancelDelivery | [✏️ `cancelDelivery`](#mutation-canceldelivery) |
 
@@ -162,6 +164,8 @@ A platform operator who onboards accounts and oversees the platform.
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
 | 🧭 **Prospection** | ReviewPipeline | [🔎 `prospectionPipeline`](#query-prospectionpipeline) |
 |  | LogReply | [✏️ `recordProspectReply`](#mutation-recordprospectreply) |
+| 🧭 **ArbitrateRefunds** | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
+|  | DenyRefund | [✏️ `denyRefund`](#mutation-denyrefund) |
 | 🧭 **Pricing** | ReviewPolicy | [🔎 `pricingPolicy`](#query-pricingpolicy) |
 |  | SetRestaurantMargin | [✏️ `updateRestaurant`](#mutation-updaterestaurant) |
 |  | ReviewUberEstimationPolicy | [🔎 `uberEstimationPolicy`](#query-uberestimationpolicy) |
@@ -2782,7 +2786,7 @@ _Rejects importing into a missing catalog, on a translation failure, or with a m
 
 _Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)._
 
-### 🧰 API operations _(18)_
+### 🧰 API operations _(20)_
 
 <a id="query-orders"></a>
 #### 🔎 Query: `orders`
@@ -2906,6 +2910,20 @@ Order tracking by id; owning customer or the restaurant/admin. Ownership enforce
 
 - **Command**: [📩 `RequestRefund`](#command-requestrefund) → handled by [🎭 `Order`](#actor-order)
 - **Roles**: CUSTOMER · **slice** V1
+- **Payload**: correlationId
+
+<a id="mutation-approverefund"></a>
+#### ✏️ Mutation: `approveRefund`
+
+- **Command**: [📩 `ApproveRefund`](#command-approverefund) → handled by [🎭 `RefundProcess`](#actor-refundprocess)
+- **Roles**: RESTAURANT, ADMIN · **slice** V0
+- **Payload**: correlationId
+
+<a id="mutation-denyrefund"></a>
+#### ✏️ Mutation: `denyRefund`
+
+- **Command**: [📩 `DenyRefund`](#command-denyrefund) → handled by [🎭 `RefundProcess`](#actor-refundprocess)
+- **Roles**: RESTAURANT, ADMIN · **slice** V0
 - **Payload**: correlationId
 
 <a id="subscription-orderstatuschanged"></a>
@@ -3484,7 +3502,7 @@ Bind a cart to a customer (after phone verification). The cart is then owned by 
 
 The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe.
 
-- **Dispatched by**: — · **handled by** [🎭 `RefundProcess`](#actor-refundprocess)
+- **Dispatched by**: [✏️ `approveRefund`](#mutation-approverefund) · **handled by** [🎭 `RefundProcess`](#actor-refundprocess)
 - **Emits**: [⚡ `RefundApproved`](#event-refundapproved)
 - **Throws**: [⛔ `RefundNotPending`](#error-refundnotpending)
 
@@ -3499,7 +3517,7 @@ The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionall
 
 The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
 
-- **Dispatched by**: — · **handled by** [🎭 `RefundProcess`](#actor-refundprocess)
+- **Dispatched by**: [✏️ `denyRefund`](#mutation-denyrefund) · **handled by** [🎭 `RefundProcess`](#actor-refundprocess)
 - **Emits**: [⚡ `RefundDenied`](#event-refunddenied)
 - **Throws**: [⛔ `RefundNotPending`](#error-refundnotpending)
 

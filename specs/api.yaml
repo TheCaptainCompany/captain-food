@@ -770,6 +770,16 @@ mutations:
     roles: [CUSTOMER]
     slice: V1
     payload: {}
+  approveRefund:
+    command: { $ref: 'commands.yaml#/ApproveRefund' }
+    roles: [RESTAURANT, ADMIN]   # restaurant decides its own orders; admin arbitrates
+    slice: V0
+    payload: {}
+  denyRefund:
+    command: { $ref: 'commands.yaml#/DenyRefund' }
+    roles: [RESTAURANT, ADMIN]   # restaurant decides its own orders; admin arbitrates
+    slice: V0
+    payload: {}
   acceptDelivery:
     command: { $ref: 'commands.yaml#/AcceptDelivery' }
     roles: [RIDER]

@@ -165,6 +165,8 @@ restaurant_manager:
         SetAcceptanceMode: { $ref: 'api.yaml#/mutations/changeOrderAcceptanceMode' }
         CancelOrder: { $ref: 'api.yaml#/mutations/cancelOrderByRestaurant' }
         ThankRiderOrCaptain: { $ref: 'api.yaml#/mutations/tipOrder' }   # restaurant tips the courier / Captain (ADR-012)
+        ApproveRefund: { $ref: 'api.yaml#/mutations/approveRefund' }   # decide a pending refund on my own orders (RefundProcess)
+        DenyRefund: { $ref: 'api.yaml#/mutations/denyRefund' }
     TrackDeliveries:
       description: As a manager, I track the couriers delivering my ready orders (ADR-0031).
       steps:
@@ -219,6 +221,11 @@ admin:
       steps:
         ReviewPipeline: { $ref: 'api.yaml#/queries/prospectionPipeline' }
         LogReply: { $ref: 'api.yaml#/mutations/recordProspectReply' }
+    ArbitrateRefunds:
+      description: As an admin, I arbitrate pending refund requests when the restaurant does not decide (RefundProcess).
+      steps:
+        ApproveRefund: { $ref: 'api.yaml#/mutations/approveRefund' }
+        DenyRefund: { $ref: 'api.yaml#/mutations/denyRefund' }
     Pricing:
       description: As an admin, I review the service-fee policy and set each restaurant's margin (ADR-0016/0017).
       steps:

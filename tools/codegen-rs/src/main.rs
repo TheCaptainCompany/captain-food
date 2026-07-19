@@ -7326,6 +7326,20 @@ fn wired_mutation_body(name: &str, payload: &str) -> Option<String> {
             "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;\n        let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?;\n        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?;\n        let pm_state = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?;\n        let cmd: domain::generated::commands::PlaceOrder = to_command(&input)?;\n        let actor = request_actor(ctx);\n        let intent = application::commands::place_order(store.as_ref(), carts.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, &actor)\n            .await\n            .map_err(domain_error)?;\n        Ok({payload} {{\n            correlation_id: CorrelationId(actor.correlation_id),\n            payment_intent_id: intent.payment_intent_id.into(),\n            client_secret: intent.client_secret,\n        }})"
         ));
     }
+    // The refund DECISION legs run on the RefundProcess orchestrator (application::process_managers::
+    // refund), not an aggregate command handler: they need the RefundProcessStateStore (the pending
+    // refund_process_manager row they decide on) and — for the approval — the PaymentGateway that
+    // requests the Stripe refund (fail closed). Bespoke bodies like placeOrder.
+    if name == "approveRefund" {
+        return Some(format!(
+            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;\n        let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?;\n        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?;\n        let cmd: domain::generated::commands::ApproveRefund = to_command(&input)?;\n        let actor = request_actor(ctx);\n        application::process_managers::refund::approve_refund(store.as_ref(), refund_state.as_ref(), payments.as_ref(), cmd, &actor)\n            .await\n            .map_err(domain_error)?;\n        Ok({payload} {{ correlation_id: CorrelationId(actor.correlation_id) }})"
+        ));
+    }
+    if name == "denyRefund" {
+        return Some(format!(
+            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;\n        let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?;\n        let cmd: domain::generated::commands::DenyRefund = to_command(&input)?;\n        let actor = request_actor(ctx);\n        application::process_managers::refund::deny_refund(store.as_ref(), refund_state.as_ref(), cmd, &actor)\n            .await\n            .map_err(domain_error)?;\n        Ok({payload} {{ correlation_id: CorrelationId(actor.correlation_id) }})"
+        ));
+    }
     // (domain command, application::commands handler, extra port beyond the EventStore).
     enum Extra {
         None,

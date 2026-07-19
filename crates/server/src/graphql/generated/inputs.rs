@@ -851,6 +851,29 @@ pub struct RequestRefundInput {
     pub reason: Option<String>,
 }
 
+/// The RESTAURANT (its own orders) or an ADMIN approves a pending refund (optionally partial); the RefundProcess then drives Stripe.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproveRefundInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    /// Approved refund amount (may be partial).
+    #[graphql(name = "amount")]
+    pub amount: MoneyInput,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
+}
+
+/// The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DenyRefundInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "reason")]
+    pub reason: String,
+}
+
 /// An independent Captain rider accepts a pending delivery job.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]

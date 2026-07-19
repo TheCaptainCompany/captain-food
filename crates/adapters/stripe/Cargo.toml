@@ -24,7 +24,8 @@ uuid = { workspace = true, features = ["v5"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
-
-[dev-dependencies]
-# The ACL unit tests implement the `EventStore` async-trait with an in-memory fake.
+# The outbound PaymentGateway impl is an async trait; same crate the application port uses.
 async-trait = { workspace = true }
+# Outbound Stripe API client (create PaymentIntent / request refund). Same crate + features as the
+# HubRise outbound client: default-features off + native-tls to match the workspace TLS choice.
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }

@@ -54,6 +54,7 @@ async fn reset_schema(pool: &PgPool) {
           estimated_ready_at TIMESTAMPTZ,
           placed_at TIMESTAMPTZ NOT NULL,
           status_changed_at TIMESTAMPTZ NOT NULL,
+          payment_intent_id TEXT,
           payment_status TEXT NOT NULL,
           restaurant_stars INTEGER,
           rating_comment TEXT,
@@ -232,4 +233,78 @@ async fn order_events_fold_into_the_read_model() {
         .await
         .expect("list PLACED");
     assert!(placed.is_empty());
+
+    // 4) Cross-stream feed (docs/sagas.md open item): payment facts land on Payment-{intentId}
+    //    streams, but the Order group also slices `Payment-%` and keys the row from the payload's
+    //    orderId. A capture without an orderId is log-skipped (no row, checkpoint still advances).
+    append_event(
+        &pool,
+        "Payment-pi_orphan",
+        1,
+        "PaymentCaptured",
+        serde_json::json!({
+            "paymentIntentId": "pi_orphan",
+            "orderId": null,
+            "restaurantId": restaurant_id,
+            "amount": money(2560)
+        }),
+    )
+    .await;
+    append_event(
+        &pool,
+        "Payment-pi_test_123",
+        1,
+        "PaymentCaptured",
+        serde_json::json!({
+            "paymentIntentId": "pi_test_123",
+            "orderId": order_id,
+            "restaurantId": restaurant_id,
+            "amount": money(2560)
+        }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (captured)");
+
+    let (payment_status, payment_intent_id): (String, Option<String>) = sqlx::query_as(
+        "SELECT payment_status, payment_intent_id FROM ordertracking WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("captured order row");
+    assert_eq!(payment_status, "CAPTURED");
+    assert_eq!(payment_intent_id.as_deref(), Some("pi_test_123"));
+
+    append_event(
+        &pool,
+        "Payment-pi_test_123",
+        2,
+        "PaymentRefunded",
+        serde_json::json!({
+            "refundId": "re_test_1",
+            "paymentIntentId": "pi_test_123",
+            "orderId": order_id,
+            "restaurantId": restaurant_id,
+            "amount": money(2560),
+            "reason": "restaurant rejected"
+        }),
+    )
+    .await;
+    worker.run_once().await.expect("run_once (refunded)");
+
+    let payment_status: String =
+        sqlx::query_scalar("SELECT payment_status FROM ordertracking WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .expect("refunded order row");
+    assert_eq!(payment_status, "REFUNDED");
+
+    // Both Payment-stream events advanced the shared 'Order' checkpoint (2 order + 3 payment facts).
+    let checkpoint: i64 =
+        sqlx::query_scalar("SELECT position FROM projection_checkpoint WHERE projector = 'Order'")
+            .fetch_one(&pool)
+            .await
+            .expect("Order checkpoint after payment facts");
+    assert_eq!(checkpoint, 5);
 }

@@ -6,12 +6,15 @@
 //! row (`project_prospection_pipeline` + `ProspectionPipelineProjector`). Idempotent on restart: replaying
 //! an event over the current row state is a deterministic fold (`*Updated` events carry replace semantics).
 //!
-//! Scope note: each group folds only its own stream category, so the documented cross-stream holes stay
-//! preserved by the hand-written `…Compute` impls — `Restaurant.default_currency` (owning account's
-//! currency, set on the RestaurantAccount stream), the ProspectionPipeline outreach columns fed by
-//! `Prospect-%` streams, `Cart.customer_id` from `CustomerIdentified` (Customer stream, keyed by
-//! authRef), and any Order rating/tip/delivery/payment facts that land outside the `Order-%` stream —
-//! exactly the TODO(runtime) notes in `application::projectors::*`.
+//! Scope note: a group folds its declared stream categories. Most groups slice a single
+//! `<Category>-%` prefix; the Order group also slices `Payment-%` (same checkpoint, so global
+//! `position` order is preserved across both categories) because `PaymentCaptured`/`PaymentRefunded`
+//! land on `Payment-{intentId}` streams but feed `OrderTracking.payment_status` — the row key is then
+//! resolved from the payload's `orderId`, not the stream name. The remaining documented cross-stream
+//! holes stay preserved by the hand-written `…Compute` impls — `Restaurant.default_currency` (owning
+//! account's currency, set on the RestaurantAccount stream), the ProspectionPipeline outreach columns
+//! fed by `Prospect-%` streams, and `Cart.customer_id` from `CustomerIdentified` (Customer stream,
+//! keyed by authRef) — exactly the TODO(runtime) notes in `application::projectors::*`.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -97,7 +100,25 @@ impl ReadModelProjector {
                 }
             }
             Self::OrderTracking => {
-                let id = OrderId(aggregate_uuid_of(env, "Order-", "orderId")?);
+                // Cross-stream feed: the group also slices `Payment-%`, whose facts key the Order
+                // row from the payload's `orderId` (PaymentRefunded always carries it; a
+                // PaymentCaptured not yet tied to an order has no row to feed, and PaymentFailed
+                // never references one — both are skipped with a log, not treated as poison).
+                let uuid = if env.stream_name.starts_with("Order-") {
+                    aggregate_uuid_of(env, "Order-", "orderId")?
+                } else {
+                    match payload_uuid_of(env, "orderId") {
+                        Some(uuid) => uuid,
+                        None => {
+                            eprintln!(
+                                "projection[Order]: no orderId in payload for stream {} at position {} — skipped",
+                                env.stream_name, env.position
+                            );
+                            return Ok(());
+                        }
+                    }
+                };
+                let id = OrderId(uuid);
                 let state = order_tracking_store::load(pool, id).await?;
                 if let Some(next) = project_order_tracking(&OrderTrackingProjector, state, env) {
                     order_tracking_store::upsert(pool, &next).await?;
@@ -108,13 +129,16 @@ impl ReadModelProjector {
     }
 }
 
-/// One drained unit: a stream category with its own checkpoint row and the read models it feeds.
+/// One drained unit: one or more stream categories sharing a checkpoint row and the read models
+/// they feed. A single checkpoint over several prefixes keeps the fold ordered by global
+/// `position` across those categories (no per-category race), which is exactly what the
+/// Order + Payment cross-stream feed needs.
 struct ProjectorGroup {
-    /// The `projection_checkpoint.projector` key — the stream category name.
+    /// The `projection_checkpoint.projector` key — the (primary) stream category name.
     checkpoint: &'static str,
-    /// The `stream_name LIKE '<prefix>%'` slice this group folds.
-    stream_prefix: &'static str,
-    /// Every read model fed by this stream, folded in order for each event.
+    /// The `stream_name LIKE ANY('{<prefix>%, …}')` slice this group folds.
+    stream_prefixes: &'static [&'static str],
+    /// Every read model fed by these streams, folded in order for each event.
     projectors: &'static [ReadModelProjector],
 }
 
@@ -123,27 +147,30 @@ struct ProjectorGroup {
 const REGISTRY: &[ProjectorGroup] = &[
     ProjectorGroup {
         checkpoint: "Restaurant",
-        stream_prefix: "Restaurant-",
+        stream_prefixes: &["Restaurant-"],
         projectors: &[ReadModelProjector::Restaurant, ReadModelProjector::ProspectionPipeline],
     },
     ProjectorGroup {
         checkpoint: "Customer",
-        stream_prefix: "Customer-",
+        stream_prefixes: &["Customer-"],
         projectors: &[ReadModelProjector::Customer],
     },
     ProjectorGroup {
         checkpoint: "Catalog",
-        stream_prefix: "Catalog-",
+        stream_prefixes: &["Catalog-"],
         projectors: &[ReadModelProjector::Catalog],
     },
     ProjectorGroup {
         checkpoint: "Cart",
-        stream_prefix: "Cart-",
+        stream_prefixes: &["Cart-"],
         projectors: &[ReadModelProjector::Cart],
     },
+    // The Payment-% slice closes the OrderTracking.payment_status feed gap (docs/sagas.md;
+    // ADR-20260719-193500): PaymentCaptured/PaymentRefunded live on Payment-{intentId} streams
+    // but are declared in the ordertracking fedBy. Same 'Order' checkpoint = one ordered fold.
     ProjectorGroup {
         checkpoint: "Order",
-        stream_prefix: "Order-",
+        stream_prefixes: &["Order-", "Payment-"],
         projectors: &[ReadModelProjector::OrderTracking],
     },
 ];
@@ -222,12 +249,14 @@ impl ProjectionWorker {
                 .map_err(db_err)?
                 .unwrap_or(0);
 
+        let patterns: Vec<String> =
+            group.stream_prefixes.iter().map(|prefix| format!("{prefix}%")).collect();
         let pending = sqlx::query(
             "SELECT position, stream_name, event_type, payload, occurred_at FROM domain_events \
-             WHERE position > $1 AND stream_name LIKE $2 ORDER BY position",
+             WHERE position > $1 AND stream_name LIKE ANY($2) ORDER BY position",
         )
         .bind(checkpoint)
-        .bind(format!("{}%", group.stream_prefix))
+        .bind(&patterns)
         .fetch_all(&self.pool)
         .await
         .map_err(db_err)?;
@@ -301,18 +330,108 @@ fn aggregate_uuid_of(env: &Envelope, prefix: &str, payload_key: &str) -> Result<
             return Ok(id);
         }
     }
-    serde_json::to_value(&env.event)
-        .ok()
-        .and_then(|v| {
-            v.get("payload")
-                .and_then(|p| p.get(payload_key))
-                .and_then(|id| id.as_str())
-                .and_then(|s| uuid::Uuid::parse_str(s).ok())
-        })
-        .ok_or_else(|| {
-            DomainError::Repository(format!(
-                "cannot resolve {payload_key} for stream {}",
-                env.stream_name
-            ))
-        })
+    payload_uuid_of(env, payload_key).ok_or_else(|| {
+        DomainError::Repository(format!(
+            "cannot resolve {payload_key} for stream {}",
+            env.stream_name
+        ))
+    })
+}
+
+/// The uuid carried by the event payload under `payload_key`, if any — the row key for
+/// cross-stream feeds (e.g. `Payment-%` facts keying the Order row by their `orderId`).
+fn payload_uuid_of(env: &Envelope, payload_key: &str) -> Option<uuid::Uuid> {
+    serde_json::to_value(&env.event).ok().and_then(|v| {
+        v.get("payload")
+            .and_then(|p| p.get(payload_key))
+            .and_then(|id| id.as_str())
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::generated::events::{self, DomainEvent};
+    use domain::generated::entities::Money;
+    use domain::generated::scalars::{CurrencyCode, MoneyCents, PaymentIntentId, RefundId};
+
+    fn envelope(stream_name: &str, event: DomainEvent) -> Envelope {
+        Envelope { stream_name: stream_name.to_string(), position: 1, occurred_at: Utc::now(), event }
+    }
+
+    fn money() -> Money {
+        Money { amount_cents: MoneyCents(1000), currency: CurrencyCode("EUR".to_string()) }
+    }
+
+    /// A Payment-stream capture keys the Order row from the payload's `orderId`, not the stream.
+    #[test]
+    fn payment_captured_row_id_comes_from_payload_order_id() {
+        let order_id = uuid::Uuid::new_v4();
+        let env = envelope(
+            "Payment-pi_test_123",
+            DomainEvent::PaymentCaptured(events::PaymentCaptured {
+                payment_intent_id: PaymentIntentId("pi_test_123".to_string()),
+                order_id: Some(OrderId(order_id)),
+                restaurant_id: RestaurantId(uuid::Uuid::new_v4()),
+                amount: money(),
+            }),
+        );
+        assert_eq!(payload_uuid_of(&env, "orderId"), Some(order_id));
+        // The strict resolver reaches the same id through its payload fallback.
+        assert_eq!(aggregate_uuid_of(&env, "Order-", "orderId").unwrap(), order_id);
+    }
+
+    /// A capture not (yet) tied to an order resolves to no row key — the worker log-skips it.
+    #[test]
+    fn payment_captured_without_order_id_resolves_to_none() {
+        let env = envelope(
+            "Payment-pi_test_456",
+            DomainEvent::PaymentCaptured(events::PaymentCaptured {
+                payment_intent_id: PaymentIntentId("pi_test_456".to_string()),
+                order_id: None,
+                restaurant_id: RestaurantId(uuid::Uuid::new_v4()),
+                amount: money(),
+            }),
+        );
+        assert_eq!(payload_uuid_of(&env, "orderId"), None);
+        assert!(aggregate_uuid_of(&env, "Order-", "orderId").is_err());
+    }
+
+    /// PaymentRefunded always carries its order id, so the Order row key always resolves.
+    #[test]
+    fn payment_refunded_row_id_comes_from_payload_order_id() {
+        let order_id = uuid::Uuid::new_v4();
+        let env = envelope(
+            "Payment-pi_test_789",
+            DomainEvent::PaymentRefunded(events::PaymentRefunded {
+                refund_id: RefundId("re_test_1".to_string()),
+                payment_intent_id: PaymentIntentId("pi_test_789".to_string()),
+                order_id: OrderId(order_id),
+                restaurant_id: RestaurantId(uuid::Uuid::new_v4()),
+                amount: money(),
+                reason: None,
+            }),
+        );
+        assert_eq!(payload_uuid_of(&env, "orderId"), Some(order_id));
+    }
+
+    /// Same-stream events keep keying off the stream uuid (payload untouched).
+    #[test]
+    fn order_stream_row_id_comes_from_stream_name() {
+        let order_id = uuid::Uuid::new_v4();
+        let env = envelope(
+            &format!("Order-{order_id}"),
+            // Any event will do: the stream uuid wins before the payload is consulted.
+            DomainEvent::PaymentRefunded(events::PaymentRefunded {
+                refund_id: RefundId("re_test_2".to_string()),
+                payment_intent_id: PaymentIntentId("pi_test_000".to_string()),
+                order_id: OrderId(uuid::Uuid::new_v4()),
+                restaurant_id: RestaurantId(uuid::Uuid::new_v4()),
+                amount: money(),
+                reason: None,
+            }),
+        );
+        assert_eq!(aggregate_uuid_of(&env, "Order-", "orderId").unwrap(), order_id);
+    }
 }

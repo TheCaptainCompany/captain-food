@@ -1770,7 +1770,15 @@ pub async fn place_order(
     let amount = Money { amount_cents: cart_row.total_amount_cents, currency: cart_row.currency };
     // Create the Stripe PaymentIntent through the gateway seam; a synchronous decline surfaces as the
     // canonical `PaymentDeclined` rejection (see the PaymentGateway contract).
-    let intent = payments.create_payment_intent(&amount, &cmd.payment_method_id).await?;
+    let intent = payments
+        .create_payment_intent(&crate::ports::PaymentIntentRequest {
+            amount: amount.clone(),
+            payment_method_id: cmd.payment_method_id.clone(),
+            order_id: cmd.order_id,
+            restaurant_id: cmd.restaurant_id,
+            cart_id: cmd.cart_id,
+        })
+        .await?;
     // Freeze the priced checkout onto the event so PlaceOrderProcess can rebuild OrderPlaced +
     // CartCheckedOut from the log on capture (rules.yaml#/CheckoutSnapshotFrozenAtIntent). `items` and the
     // `breakdown` split are best-available until server-side line pricing lands (TODO(pricing): a catalog

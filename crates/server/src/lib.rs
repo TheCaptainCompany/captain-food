@@ -183,13 +183,27 @@ pub fn router() -> Router {
                     ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
                     gbp_probe: Arc::new(UnverifiedGbpOrderLinkProbe),
                     auth_provider: Arc::new(FailClosedAuthProviderGateway),
-                    // Fail-closed Stripe create-intent stand-in: placeOrder is wired end-to-end but
-                    // declines every checkout until the real Stripe adapter (integration workstream)
-                    // replaces it here.
-                    payments: Arc::new(FailClosedPaymentGateway),
+                    // Real outbound Stripe gateway when STRIPE_SECRET_KEY is configured; otherwise the
+                    // fail-closed stand-in (placeOrder stays wired end-to-end but declines every checkout).
+                    payments: match std::env::var("STRIPE_SECRET_KEY") {
+                        Ok(key) if !key.is_empty() => {
+                            println!("payment gateway: StripePaymentGateway (STRIPE_SECRET_KEY set)");
+                            Arc::new(stripe_adapter::StripePaymentGateway::new(key))
+                        }
+                        _ => {
+                            println!(
+                                "payment gateway: FailClosedPaymentGateway (STRIPE_SECRET_KEY unset — every checkout declines)"
+                            );
+                            Arc::new(FailClosedPaymentGateway)
+                        }
+                    },
                     // The payment_process_manager state rows placeOrder opens/single-flights on
                     // (ADR-20260719-193500).
                     pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(
+                        pool.clone(),
+                    )),
+                    // The refund_process_manager rows the approveRefund/denyRefund decisions run on.
+                    refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(
                         pool.clone(),
                     )),
                 });

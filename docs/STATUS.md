@@ -30,8 +30,19 @@
 > `approve_refund`/`deny_refund` + fail-closed `request_refund`; cart binding really binds; close
 > order via `send MarkOrderDelivered`); the runner surfaces thrown guards on `/saga`; the Stripe ACL
 > is a stateless translator (no more `StripeEvent-%` streams, `CheckoutSnapshotSource` seam
-> retired). Still open (see docs/sagas.md): real Stripe outbound adapter, refund API surface,
-> partner re-offer policy, `OrderTracking.payment_status` cross-stream feed, server-side pricing.
+> retired). Since then, ALL THREE remaining runtime gaps closed tonight: ① the **refund decision
+> API surface** — `approveRefund`/`denyRefund` mutations (api.yaml, roles RESTAURANT+ADMIN, V0;
+> story steps in ManageOrders + admin ArbitrateRefunds), emitted resolvers calling the RefundProcess
+> orchestrator legs over the new `WriteDeps.refund_state` (`PgRefundProcessState`) + the
+> PaymentGateway. ② The **real outbound Stripe adapter** (`stripe::outbound::StripePaymentGateway`):
+> form-encoded create-intent (+ `metadata[orderId]`/`[restaurantId]`/`[cartId]`, which the webhook
+> ACL requires) and refunds; the port grew a typed `PaymentIntentRequest`; constructed when
+> `STRIPE_SECRET_KEY` is set, else the fail-closed stand-in (logged at startup). ③ The
+> **`OrderTracking.payment_status` cross-stream feed**: the projection worker's Order group slices
+> BOTH `Order-%` and `Payment-%` under its single 'Order' checkpoint (`stream_name LIKE ANY`), and
+> Payment-stream facts key the Order row from the payload's `orderId` (a capture without one is
+> log-skipped). Still open (see docs/sagas.md): partner re-offer policy, server-side pricing,
+> `pendingRefunds` read model/query.
 >
 > 📣 **Earlier on this branch (2026-07-19 evening):** ① Guard semantics hardened — **in case of error a
 > guard always `throws` a typed exception, on EVENT legs too** (run aborts + error surfaced — e.g.

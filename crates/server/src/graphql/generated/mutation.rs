@@ -502,6 +502,22 @@ pub struct RequestRefundPayload {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
+pub struct ApproveRefundPayload {
+    /// Correlates this command with the events/state it produces (matches domain_events.correlation_id).
+    #[graphql(name = "correlationId")]
+    pub correlation_id: CorrelationId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DenyRefundPayload {
+    /// Correlates this command with the events/state it produces (matches domain_events.correlation_id).
+    #[graphql(name = "correlationId")]
+    pub correlation_id: CorrelationId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct AcceptDeliveryPayload {
     /// Correlates this command with the events/state it produces (matches domain_events.correlation_id).
     #[graphql(name = "correlationId")]
@@ -1167,6 +1183,29 @@ impl MutationRoot {
             .await
             .map_err(domain_error)?;
         Ok(RequestRefundPayload { correlation_id: CorrelationId(actor.correlation_id) })
+    }
+    #[graphql(name = "approveRefund", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    async fn approve_refund(&self, ctx: &async_graphql::Context<'_>, input: ApproveRefundInput) -> async_graphql::Result<ApproveRefundPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?;
+        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?;
+        let cmd: domain::generated::commands::ApproveRefund = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::process_managers::refund::approve_refund(store.as_ref(), refund_state.as_ref(), payments.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(ApproveRefundPayload { correlation_id: CorrelationId(actor.correlation_id) })
+    }
+    #[graphql(name = "denyRefund", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    async fn deny_refund(&self, ctx: &async_graphql::Context<'_>, input: DenyRefundInput) -> async_graphql::Result<DenyRefundPayload> {
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?;
+        let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?;
+        let cmd: domain::generated::commands::DenyRefund = to_command(&input)?;
+        let actor = request_actor(ctx);
+        application::process_managers::refund::deny_refund(store.as_ref(), refund_state.as_ref(), cmd, &actor)
+            .await
+            .map_err(domain_error)?;
+        Ok(DenyRefundPayload { correlation_id: CorrelationId(actor.correlation_id) })
     }
     #[graphql(name = "acceptDelivery", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
     async fn accept_delivery(&self, ctx: &async_graphql::Context<'_>, input: AcceptDeliveryInput) -> async_graphql::Result<AcceptDeliveryPayload> {

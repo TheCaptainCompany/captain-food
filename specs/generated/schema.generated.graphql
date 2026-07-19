@@ -1053,6 +1053,17 @@ input RequestRefundInput {
   reason: String
 }
 
+input ApproveRefundInput {
+  orderId: OrderId!
+  amount: MoneyInput!
+  reason: String
+}
+
+input DenyRefundInput {
+  orderId: OrderId!
+  reason: String!
+}
+
 input AcceptDeliveryInput {
   deliveryJobId: DeliveryJobId!
   riderId: RiderId!
@@ -1521,6 +1532,14 @@ type RequestRefundPayload {
   correlationId: CorrelationId!
 }
 
+type ApproveRefundPayload {
+  correlationId: CorrelationId!
+}
+
+type DenyRefundPayload {
+  correlationId: CorrelationId!
+}
+
 type AcceptDeliveryPayload {
   correlationId: CorrelationId!
 }
@@ -1627,6 +1646,8 @@ type Mutation {
   rateRestaurant(input: RateRestaurantInput!): RateRestaurantPayload! @auth(requires: [CUSTOMER]) @command(name: "RateRestaurant")
   tipOrder(input: TipOrderInput!): TipOrderPayload! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT]) @command(name: "TipOrder")
   requestRefund(input: RequestRefundInput!): RequestRefundPayload! @auth(requires: [CUSTOMER]) @command(name: "RequestRefund")
+  approveRefund(input: ApproveRefundInput!): ApproveRefundPayload! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "ApproveRefund")
+  denyRefund(input: DenyRefundInput!): DenyRefundPayload! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "DenyRefund")
   acceptDelivery(input: AcceptDeliveryInput!): AcceptDeliveryPayload! @auth(requires: [RIDER]) @command(name: "AcceptDelivery")
   confirmPickup(input: ConfirmPickupInput!): ConfirmPickupPayload! @auth(requires: [RIDER]) @command(name: "ConfirmPickup")
   completeDelivery(input: CompleteDeliveryInput!): CompleteDeliveryPayload! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")

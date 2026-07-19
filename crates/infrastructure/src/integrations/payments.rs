@@ -8,9 +8,8 @@
 //! The former `UnavailableCheckoutSnapshotSource` stand-in is retired with its port: the capture leg
 //! now reads the frozen checkout back from the `Payment-<intentId>` stream (ADR-20260719-193500).
 
-use application::ports::{CreatedPaymentIntent, PaymentGateway};
+use application::ports::{CreatedPaymentIntent, PaymentGateway, PaymentIntentRequest};
 use async_trait::async_trait;
-use domain::generated::entities::Money;
 use domain::shared::errors::DomainError;
 
 /// Fail-closed [`PaymentGateway`]: every create-intent is refused with the canonical
@@ -24,13 +23,12 @@ pub struct FailClosedPaymentGateway;
 impl PaymentGateway for FailClosedPaymentGateway {
     async fn create_payment_intent(
         &self,
-        amount: &Money,
-        _payment_method_id: &str,
+        request: &PaymentIntentRequest,
     ) -> Result<CreatedPaymentIntent, DomainError> {
         Err(DomainError::Invariant(format!(
             "PaymentDeclined: payment gateway not configured (fail-closed stand-in; amount {} {}) — \
-             the real create-intent adapter is the Stripe integration workstream's",
-            amount.amount_cents.0, amount.currency.0
+             set STRIPE_SECRET_KEY to enable the real Stripe adapter",
+            request.amount.amount_cents.0, request.amount.currency.0
         )))
     }
 }

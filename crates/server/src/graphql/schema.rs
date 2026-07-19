@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use async_graphql::Schema;
-use application::pm_state::PaymentProcessStateStore;
+use application::pm_state::{PaymentProcessStateStore, RefundProcessStateStore};
 use application::ports::{
     AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier, PaymentGateway,
 };
@@ -57,6 +57,9 @@ pub struct WriteDeps {
     /// The `payment_process_manager` state rows `placeOrder` opens (AWAITING_PAYMENT_RESULT) and
     /// single-flights concurrent checkouts of the same cart on (ADR-20260719-193500).
     pub pm_state: Arc<dyn PaymentProcessStateStore>,
+    /// The `refund_process_manager` state rows the refund DECISION legs (`approveRefund` /
+    /// `denyRefund`) resolve the pending run on (rules.yaml#/RefundRequiresApproval).
+    pub refund_state: Arc<dyn RefundProcessStateStore>,
 }
 
 /// Build the master schema served under every role path. With `Some(deps)`/`Some(writes)` the
@@ -89,6 +92,7 @@ pub fn build_schema(
         builder = builder.data(w.auth_provider);
         builder = builder.data(w.payments);
         builder = builder.data(w.pm_state);
+        builder = builder.data(w.refund_state);
     }
     if let Some(bus) = events {
         builder = builder.data(bus);
