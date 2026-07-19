@@ -1,4 +1,4 @@
-# ADR-20260719-214500 — Service catalog with configurable binding (local | http)
+# ADR-20260719-214500 — Service catalog with spec-declared binding (local | http)
 
 ## Status
 
@@ -10,14 +10,16 @@ The process managers and command handlers call outbound capabilities through app
 traits (`PaymentGateway`, `DeliveryPartner`, `AuthProviderGateway`, …) implemented by adapter crates
 (`crates/adapters/stripe`, `hubrise`) that today are hard-wired in-process into the Axum server. The
 ports exist, but (a) they are declared ad hoc (inline `ports:` per process manager, hand-written
-traits), and (b) the local-vs-remote deployment decision is code, not configuration. Calling our own
+traits), and (b) the local-vs-remote topology decision is buried in code instead of being a reviewed
+spec declaration. Calling our own
 adapter over HTTP inside one deployable would be a useless network hop; hard-wiring it in-process
 forever blocks splitting the deployable later.
 
 ## Decision
 
 Introduce **services** — a spec-level catalog of the abstract APIs the domain calls — with the
-implementation **binding chosen by server configuration**:
+implementation **binding and exposure declared in the spec** (environment config carries only
+addresses):
 
 1. **`specs/services.yaml`** (new DSL source, deliberately SEPARATE from api.yaml): each service
    declares typed operations in the house style — `payment: { operations: { request: {input/output/
@@ -25,17 +27,18 @@ implementation **binding chosen by server configuration**:
    { verify_phone_otp, verify_email_token }`, `catalog_sync: { import_catalog, sync_inventory }`,
    `listing_enrichment: { … }`. The HTTP binding's surface is **`/services/<service>/<operation>`**
    (e.g. `/services/payment/request`, `/services/payment/refund`); provider adapters keep their own
-   surface (`/adapters/stripe/intentPayment`, `/adapters/stripe/refund`, `/adapters/avelo37/…`).
+   surface in the provider's vocabulary (`/adapters/stripe/payment-intents`,
+   `/adapters/stripe/refunds`, `/adapters/avelo37/…`).
    NOTE the namespace: `/external/*` is NOT used — `EXTERNAL` is an api.yaml ROLE, so
    `/external/graphql` is already the external partners' GraphQL endpoint (role-as-path); the
    service transport must not overload it.
 2. **processmanager.yaml `ports:` become `$ref`s into services.yaml** — the validator proves every
    `call` step against the catalog (operation exists, error set declared), same as every other ref.
-3. **Codegen emits per service**: the Rust trait (application), the HTTP client implementation
-   (infrastructure, targeting `/services/<service>/<op>` or the adapter route), the adapter-side
-   Axum routes, and the composition-root **binding switch** read from configuration
-   (`SERVICE_PAYMENT=local` → call the adapter crate in-process; `SERVICE_PAYMENT=http:<base-url>`
-   → the generated client). Splitting the monolith becomes deployment configuration, not a rewrite.
+3. **Codegen emits per service**: the Rust trait (application), and — per the spec's declared
+   `binding`/`expose` — the composition-root wiring (local → the adapter crate in-process; http →
+   the generated client reading `SERVICE_<NAME>_URL`), the adapter-side Axum routes, and the
+   `/services/*` routes when exposed. Splitting the monolith becomes a reviewed spec change plus an
+   address, not a rewrite.
 4. **The workers follow the same model**: the projector and the saga runner already toggle
    in-process vs (future) dedicated deployable via `RUN_PROJECTOR`/`RUN_PROCESS_MANAGERS` — they are
    services under this decision, not exceptions.
@@ -44,7 +47,7 @@ implementation **binding chosen by server configuration**:
 6. **Relation to the GraphQL API (api.yaml)**: no overlap by design. api.yaml is the PRODUCT API —
    GraphQL, role-filtered (`/{role}/graphql`), consumed by UIs and external partners. services.yaml
    is the INTERNAL capability catalog — consumed by the domain through generated traits, with the
-   HTTP binding as a deployment option. GraphQL never fronts a service call, and services never
+   HTTP binding as a spec-declared option. GraphQL never fronts a service call, and services never
    appear in the GraphQL schema.
 
 ## Naming & exposure convention (agreed 2026-07-19)
@@ -62,13 +65,15 @@ implementation **binding chosen by server configuration**:
 - **Adapter routes speak the provider's vocabulary** (`/adapters/stripe/payment-intents`, like
   `/adapters/stripe/webhooks` already does), and the service-op → adapter-route mapping is DECLARED
   in the spec per implementation — the name-level ACL is spec, not code.
-- **Exposure is two-level: the spec bounds, the config chooses.** `bindings:` declares what a
-  service MAY do — `[local]` = in-process only, its `/services/*` routes must never exist;
-  `[local, http]` = a deployment may consume it remotely and/or expose it. Configuration then
-  selects within those bounds per deployment: `SERVICE_<NAME>=local` (default) or
-  `http:<base-url>` for how this deployable CONSUMES the service, and
-  `EXPOSE_SERVICE_<NAME>=true` for whether it MOUNTS the `/services/<name>/*` routes.
-  Configuration exceeding the spec's `bindings` is a startup error.
+- **Binding and exposure are DECIDED IN THE SPEC (agreed: everything in the spec for now).**
+  Each service declares its chosen `binding: local | http` and `expose: true | false` — changing
+  the deployment topology is a SPEC change (reviewed, validated, regenerated), not an environment
+  knob. `binding: local` + `expose: false` (the V0 default for every service) means in-process
+  calls only and the `/services/*` routes are not emitted at all. When a service flips to
+  `binding: http`, environment configuration supplies ONLY the address
+  (`SERVICE_<NAME>_URL=<base-url>` — an address book, never a decision); a missing address for an
+  http-bound service is a startup error. Per-environment overriding of the binding itself may be
+  revisited later, as a new ADR.
 
 ### Example — the emitter's input contract (`specs/services.yaml`)
 
@@ -95,7 +100,8 @@ payment:
         paymentIntentId: { $ref: 'scalars.yaml#/PaymentIntentId' }
         amount:          { $ref: 'entities.yaml#/Money' }
       errors: []
-  bindings: [local, http]          # what deployments MAY choose; config picks within this set
+  binding: local                   # THE decision (spec-owned): local | http. V0: everything local
+  expose: false                    # whether /services/payment/* routes are emitted at all
   implementations:
     stripe:                        # the provider adapter (ACL) — translates names AND payloads
       routes:                      # service op → adapter route, in the PROVIDER's vocabulary
@@ -104,11 +110,13 @@ payment:
 ```
 
 From this one block the codegen emits: the `Payment` service trait (`request`/`refund` with the
-typed input/output/error signatures), the HTTP client (`POST /services/payment/request`, …), the
-`/services/payment/*` server routes (mounted only when exposed by config, allowed only because
-`http ∈ bindings`), the Stripe-side route mapping, and the composition-root binding switch — and the
-validator proves every processmanager.yaml `call` step against the catalog (`port: payment,
-operation: refund` must exist, with its declared errors ⊆ the leg's error surface).
+typed input/output/error signatures), the composition-root wiring for the DECLARED binding (local →
+the adapter crate in-process; http → the generated `POST /services/payment/request` client reading
+`SERVICE_PAYMENT_URL`), the `/services/payment/*` server routes ONLY when `expose: true`, and the
+Stripe-side route mapping — and the validator proves every processmanager.yaml `call` step against
+the catalog (`port: payment, operation: refund` must exist, with its declared errors ⊆ the leg's
+error surface) plus the spec's own coherence (`expose: true` requires `binding`-consumers to exist;
+an http binding with no implementation routes is an error).
 
 ## Alternatives considered
 
@@ -125,8 +133,8 @@ operation: refund` must exist, with its declared errors ⊆ the leg's error surf
 - One more hand-maintained surface (trait + client + routes + wiring) becomes generated from spec.
 
 ### Negative
-- One more DSL source file and emitter to maintain; config matrix needs CI coverage for both
-  bindings of at least one service.
+- One more DSL source file and emitter to maintain; when the first service flips to `binding:
+  http`, CI needs coverage of the http path (client + routes) in addition to local.
 
 ## Sequencing
 
