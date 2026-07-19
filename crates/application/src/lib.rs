@@ -8,6 +8,7 @@
 
 pub mod commands;
 pub mod generated;
+pub mod payments;
 pub mod pm_state;
 pub mod process_managers;
 pub mod projections;

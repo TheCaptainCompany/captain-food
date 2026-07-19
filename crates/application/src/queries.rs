@@ -9,7 +9,7 @@ use domain::generated::scalars::{
     CartId, CatalogItemAvailability, CuisineCategory, CurrencyCode, CustomerId, DeliveryJobId,
     DeliveryProvider, DeliveryStatus, EmailAddress, ExternalReference, OfferId, OfferName,
     OptionId, OptionListId, OrderId, OrderStatus, PhoneNumber, ProductId, ProductName,
-    ProspectPipelineStatus, Quantity, RestaurantAccountId, RestaurantId, RiderId, Slug,
+    ProspectPipelineStatus, Quantity, RestaurantAccountId, RestaurantId, RiderId, SessionId, Slug,
     StockStatus,
 };
 use domain::shared::errors::DomainError;
@@ -162,13 +162,23 @@ pub trait CatalogReadRepository: Send + Sync {
     }
 }
 
-/// Read port over the `Cart` projection table (ADR-0040). Backs the `carts`/`cart` GraphQL queries.
+/// Read port over the `Cart` projection table (ADR-0040). Backs the `carts`/`cart` GraphQL queries
+/// plus CartBindingProcess's session read (`specs/processmanager.yaml#/CartBindingProcess`).
 #[async_trait]
 pub trait CartReadRepository: Send + Sync {
     /// A customer's carts (one OPEN cart per restaurant), most recently updated first.
     async fn by_customer(&self, customer_id: CustomerId) -> Result<Vec<CartRow>, DomainError>;
     /// A single cart by id (session-scoped), or `None` if absent.
     async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError>;
+
+    /// The session's OPEN carts — CartBindingProcess's `read` step (`where: { session_id, status:
+    /// OPEN }`). PROVIDED, empty: existing implementations (query-side fakes owned by concurrent
+    /// workstreams) keep compiling and simply serve no carts to bind; the Pg adapter (and the saga
+    /// tests' fakes) override with the real predicate.
+    async fn open_by_session(&self, session_id: SessionId) -> Result<Vec<CartRow>, DomainError> {
+        let _ = session_id;
+        Ok(Vec::new())
+    }
 }
 
 /// Read port over the `Customer` projection table (ADR-0040) — the identity/lookup read model. Backs

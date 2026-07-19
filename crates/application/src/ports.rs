@@ -159,12 +159,13 @@ pub struct CreatedPaymentIntent {
 }
 
 /// Stripe checkout seam for the PlaceOrder saga's first leg (`commands.yaml#/PlaceOrder` →
-/// `events.yaml#/PaymentIntentCreated`, actors.yaml PlaceOrderProcess). The adapter owns the Stripe
-/// call; the handler only records the created intent. A SYNCHRONOUS decline must be returned as the
-/// canonical `errors.yaml#/PaymentDeclined` rejection (`DomainError::Invariant("PaymentDeclined: …")`).
-/// The payment OUTCOME (`PaymentCaptured`/`PaymentFailed`) is INBOUND from Stripe webhooks (CLAUDE.md
-/// "Commands vs inbound events") and never flows through this port. Until the real Stripe adapter lands
-/// the composition root injects a fail-closed stand-in (never silently accepts).
+/// `events.yaml#/PaymentIntentCreated`, actors.yaml PlaceOrderProcess) and RefundProcess's outbound
+/// refund call (`specs/processmanager.yaml#/RefundProcess`, port `payment_gateway`). The adapter owns
+/// the Stripe calls; the handlers only record the outcomes. A SYNCHRONOUS decline must be returned as
+/// the canonical `errors.yaml#/PaymentDeclined` rejection (`DomainError::Invariant("PaymentDeclined: …")`).
+/// The payment OUTCOME (`PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`) is INBOUND from Stripe
+/// webhooks (CLAUDE.md "Commands vs inbound events") and never flows through this port. Until the real
+/// Stripe adapter lands the composition root injects a fail-closed stand-in (never silently accepts).
 #[async_trait]
 pub trait PaymentGateway: Send + Sync {
     /// Create the PaymentIntent for `amount` against `payment_method_id`.
@@ -173,26 +174,67 @@ pub trait PaymentGateway: Send + Sync {
         amount: &domain::generated::entities::Money,
         payment_method_id: &str,
     ) -> Result<CreatedPaymentIntent, DomainError>;
+
+    /// Request a (possibly partial) refund of the captured PaymentIntent (RefundProcess
+    /// `approve_refund`); Stripe settles asynchronously with the inbound `PaymentRefunded` fact.
+    ///
+    /// PROVIDED, fail-closed: existing implementations (the composition root's stand-in, test fakes
+    /// owned by concurrent workstreams) keep compiling through this trait extension, and none of them
+    /// can silently pretend to refund — the default DECLINES with the same canonical rejection style
+    /// as the fail-closed create-intent stand-in. The real Stripe adapter overrides it.
+    async fn request_refund(
+        &self,
+        payment_intent_id: &domain::generated::scalars::PaymentIntentId,
+        amount: &domain::generated::entities::Money,
+    ) -> Result<(), DomainError> {
+        Err(DomainError::Invariant(format!(
+            "PaymentDeclined: refund gateway not configured (fail-closed default; intent {}, \
+             amount {} {}) — the real refund adapter is the Stripe integration workstream's",
+            payment_intent_id.0, amount.amount_cents.0, amount.currency.0
+        )))
+    }
+}
+
+/// Outbound delivery-partner port (`specs/processmanager.yaml#/DeliveryDispatchProcess`, port
+/// `delivery_partner`): offer a delivery job to the partner (e.g. the avelo37 ACL) and/or publish it
+/// to independent riders. The partner's answers come BACK as the inbound facts
+/// (`DeliveryAcceptedByPartner`/`DeliveryRejectedByPartner`/`DeliveryStatusUpdated`) recorded by the
+/// DeliveryJob aggregate — never through this port's return value.
+#[async_trait]
+pub trait DeliveryPartner: Send + Sync {
+    /// Offer the job (its `DeliveryRequested` birth fact carries pickup/dropoff) for fulfilment.
+    async fn offer_job(
+        &self,
+        job: &domain::generated::events::DeliveryRequested,
+    ) -> Result<(), DomainError>;
+}
+
+/// No-op [`DeliveryPartner`] stand-in until the avelo37 ACL lands: the offer is LOGGED (so a pending
+/// dispatch is observable, mirroring the runner's skip log) and reported successful — the job stays
+/// PENDING on its stream, open to independent riders, and the run row's OFFERED/REOFFER_REQUIRED
+/// statuses flag the manual follow-up.
+pub struct NoopDeliveryPartner;
+
+#[async_trait]
+impl DeliveryPartner for NoopDeliveryPartner {
+    async fn offer_job(
+        &self,
+        job: &domain::generated::events::DeliveryRequested,
+    ) -> Result<(), DomainError> {
+        eprintln!(
+            "delivery-partner[noop]: job {} (order {}) offered nowhere — the avelo37 ACL is the \
+             integration workstream's; independent riders can still accept from the job stream",
+            job.delivery_job_id.0, job.order_id.0
+        );
+        Ok(())
+    }
 }
 
 /// The validated, server-priced checkout PlaceOrderProcess freezes onto
 /// `events.yaml#/PaymentIntentCreated` when it creates the PaymentIntent — everything
 /// `events.yaml#/OrderPlaced` + `events.yaml#/CartCheckedOut` need beyond the inbound `PaymentCaptured`
-/// fact. It is now a generated value object (`entities.yaml#/CheckoutSnapshot`) carried ON the event and
-/// re-exported here as the single source of truth; [`CheckoutSnapshotSource`] resolves it for the saga
-/// until that seam reads it directly from the `Order-<id>` stream (the event now carries it).
+/// fact. It is a generated value object (`entities.yaml#/CheckoutSnapshot`) carried ON the event and
+/// re-exported here as the single source of truth. The capture leg reads it BACK from the
+/// `Payment-<intentId>` stream (ADR-20260719-193500) — the log alone; the interim
+/// `CheckoutSnapshotSource` port this snapshot used to flow through is retired.
 pub use domain::generated::entities::CheckoutSnapshot;
-
-/// Resolves a PaymentIntent back to its frozen [`CheckoutSnapshot`] so PlaceOrderProcess can
-/// materialize the Order on `PaymentCaptured` (actors.yaml). The real adapter belongs to the Stripe
-/// integration workstream (PaymentIntent `metadata` written at create-intent time, or a durable
-/// pending-checkout store keyed by `payment_intent_id`). Until it lands the composition root injects a
-/// fail-closed stand-in returning `None` — the saga then SKIPS (logged, never guesses a business fact).
-#[async_trait]
-pub trait CheckoutSnapshotSource: Send + Sync {
-    /// The checkout frozen for this PaymentIntent, or `None` when unknown/not yet resolvable.
-    async fn by_payment_intent(
-        &self,
-        payment_intent_id: &domain::generated::scalars::PaymentIntentId,
-    ) -> Result<Option<CheckoutSnapshot>, DomainError>;
-}

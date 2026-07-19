@@ -1,54 +1,42 @@
-//! The saga runner (process-manager runtime), mirroring `projection::worker::ProjectionWorker`:
+//! The saga runner — the RUNTIME ENVELOPE of the state-table process managers
+//! (`specs/processmanager.yaml`, ADR-20260719-193500), mirroring `projection::worker::ProjectionWorker`:
 //!
 //! - a REGISTRY of process managers, each with its OWN `projection_checkpoint` row (`pm:<Name>`) and
-//!   the trigger `event_type`s its actors.yaml inbox declares;
-//! - each tick, every PM drains `domain_events` past its checkpoint for those event types (a PM's
-//!   triggers cross stream categories — e.g. `PaymentCaptured` lands on `StripeEvent-%` streams — so
-//!   the slice is by EVENT TYPE, not stream prefix);
-//! - each pending event is dispatched to the PM's PURE decision (`application::process_managers`),
-//!   with the streams the decision needs pre-loaded through the `EventStore` port, and the returned
-//!   appends are executed under the saga's system actor (trigger-correlated envelope, ADR-0041);
-//! - the checkpoint is committed after each event; a poison event (unparseable payload, decision
-//!   plumbing error) is LOGGED and SKIPPED like the projection worker's, so it never wedges the loop.
-//!
-//! Idempotency: a PM re-reacting to the same trigger (redelivery, checkpoint replay after a crash
-//! between append and commit) is absorbed by the decisions themselves — they fold the TARGET stream
-//! first and return `Nothing` when the reaction's fact is already recorded, and stream-birthing
-//! reactions use deterministic ids (see the module doc in `application::process_managers`). A VERSION
-//! CONFLICT on an executed append is a lost race, not poison: the drain aborts WITHOUT advancing the
-//! checkpoint and the whole reaction re-runs next tick over the fresh stream state.
+//!   the trigger `event_type`s its EVENT legs declare (COMMAND legs run in the mutation handlers);
+//! - each tick, every PM drains `domain_events` past its checkpoint for those event types and
+//!   dispatches each trigger to its ORCHESTRATOR (`application::process_managers`), handing it the
+//!   event-store port, its state-table store, the read models and outbound ports its steps declare,
+//!   plus the [`TriggerEnvelope`] (the orchestrators build the saga actor from it — correlation
+//!   propagated, cause = trigger event id, ADR-0041);
+//! - guard outcomes (the DSL contract): `Ok(Completed)` advances; `Ok(Skipped)` is a benign
+//!   alternative, LOGGED and advanced; `Err` is a THROWN event-leg guard — the typed error is
+//!   surfaced on the runner status (`/saga` `last_error`) and logged, then the checkpoint advances
+//!   (poison never wedges the group, anomalies are never silently skipped);
+//! - a VERSION CONFLICT on an executed append is a lost race, not poison: the drain aborts WITHOUT
+//!   advancing the checkpoint and the whole leg re-runs next tick over fresh state (the state row's
+//!   `by`/`expect` checks and the aggregates' record-idempotency absorb the replay).
 
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use application::ports::{is_version_conflict, Actor, CheckoutSnapshotSource};
-use application::process_managers::{cart_binding, delivery_dispatch, place_order, refund, Decision};
-use application::repository::Repository;
+use application::ports::{is_version_conflict, DeliveryPartner, NoopDeliveryPartner};
+use application::process_managers::{
+    cart_binding, delivery_dispatch, place_order, refund, Outcome, TriggerEnvelope,
+};
 use chrono::Utc;
-use domain::cart::CartState;
-use domain::delivery_job::DeliveryJobState;
 use domain::generated::events::DomainEvent;
-use domain::order::OrderState;
-use domain::restaurant::RestaurantState;
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 
-use crate::persistence::{db_err, PgEventStore};
+use crate::persistence::{
+    db_err, PgCartBindingState, PgCartRepository, PgDeliveryDispatchState, PgEventStore,
+    PgOrderRepository, PgPaymentProcessState, PgRefundProcessState,
+};
 use crate::process_manager::ProcessManagerStatus;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(1500);
 
-/// `UserType::EXTERNAL` ordinal (declaration-order ints, ADR-0037): the envelope principal for
-/// non-human system appends — the same convention the SIRENE/Stripe ACLs use (scalars.yaml has no
-/// dedicated SYSTEM member; adding one would be a DSL change).
-const EXTERNAL_USER_TYPE: i32 = 6;
-
-/// Fixed system user id stamping saga-emitted events (`domain_events.user_id`, ADR-0041).
-fn saga_system_user_id() -> uuid::Uuid {
-    uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"https://captain.food/process-managers")
-}
-
-/// The registered process managers (actors.yaml `type: process-manager`).
+/// The registered process managers (`specs/processmanager.yaml`).
 #[derive(Clone, Copy, Debug)]
 enum ProcessManager {
     PlaceOrder,
@@ -58,12 +46,12 @@ enum ProcessManager {
 }
 
 /// One drained unit: a process manager with its own checkpoint row and the trigger event types its
-/// actors.yaml inbox declares (the EVENT entries only — command legs run in the mutation handlers).
+/// EVENT legs declare (the serde tags of the trigger events).
 struct PmGroup {
     /// The `projection_checkpoint.projector` key (`pm:` prefix keeps saga rows apart from projector rows).
     checkpoint: &'static str,
     pm: ProcessManager,
-    /// The `event_type` slice this PM drains (serde tags of the trigger events).
+    /// The `event_type` slice this PM drains.
     triggers: &'static [&'static str],
 }
 
@@ -102,32 +90,50 @@ const REGISTRY: &[PmGroup] = &[
     },
 ];
 
-/// One trigger row as read from `domain_events` — the envelope bits a saga reaction needs.
+/// One trigger row as read from `domain_events` — the typed event plus its envelope bits.
 struct Trigger {
-    position: i64,
-    event_id: uuid::Uuid,
-    correlation_id: uuid::Uuid,
     event_type: String,
     event: DomainEvent,
+    envelope: TriggerEnvelope,
 }
 
 pub struct ProcessManagerRunner {
     pool: PgPool,
     /// Appends/loads go through the ordinary event-store port (same adapter the command handlers use).
     store: PgEventStore,
-    /// PlaceOrderProcess's checkout-resolution seam (fail-closed stand-in until the Stripe adapter lands).
-    snapshots: Arc<dyn CheckoutSnapshotSource>,
+    // The four state-table stores (`application::pm_state` ports over `*_process_manager`).
+    payment_state: PgPaymentProcessState,
+    refund_state: PgRefundProcessState,
+    cart_binding_state: PgCartBindingState,
+    dispatch_state: PgDeliveryDispatchState,
+    // The read models the DSL `read` steps declare.
+    orders: PgOrderRepository,
+    carts: PgCartRepository,
+    /// DeliveryDispatchProcess's outbound port (no-op stand-in until the avelo37 ACL lands).
+    partner: Arc<dyn DeliveryPartner>,
     status: Arc<Mutex<ProcessManagerStatus>>,
 }
 
 impl ProcessManagerRunner {
-    pub fn new(pool: PgPool, snapshots: Arc<dyn CheckoutSnapshotSource>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self {
             store: PgEventStore::new(pool.clone()),
+            payment_state: PgPaymentProcessState::new(pool.clone()),
+            refund_state: PgRefundProcessState::new(pool.clone()),
+            cart_binding_state: PgCartBindingState::new(pool.clone()),
+            dispatch_state: PgDeliveryDispatchState::new(pool.clone()),
+            orders: PgOrderRepository::new(pool.clone()),
+            carts: PgCartRepository::new(pool.clone()),
+            partner: Arc::new(NoopDeliveryPartner),
             pool,
-            snapshots,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
         }
+    }
+
+    /// Replace the delivery-partner port (the composition root injects the real ACL when it lands).
+    pub fn with_partner(mut self, partner: Arc<dyn DeliveryPartner>) -> Self {
+        self.partner = partner;
+        self
     }
 
     /// Shared status handle — the server reads this for its `/saga` health endpoint.
@@ -139,17 +145,19 @@ impl ProcessManagerRunner {
         self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Drain every registered PM once, updating the per-PM checkpoints and the status snapshot.
+    /// Drain every registered PM once, updating the per-PM checkpoints and the status snapshot. A
+    /// surfaced event-leg guard error (thrown, checkpoint advanced) lands on `last_error` even when
+    /// the tick itself succeeds — `/saga` shows the anomaly until a fully clean tick.
     pub async fn run_once(&self) -> Result<(), DomainError> {
         let outcome = self.tick().await;
         let mut st = self.status_mut();
         st.last_tick_at = Some(Utc::now());
         match &outcome {
-            Ok((checkpoint, head)) => {
-                st.checkpoint = *checkpoint;
-                st.head = *head;
-                st.lag = (*head - *checkpoint).max(0);
-                st.last_error = None;
+            Ok(tick) => {
+                st.checkpoint = tick.checkpoint;
+                st.head = tick.head;
+                st.lag = (tick.head - tick.checkpoint).max(0);
+                st.last_error = tick.surfaced.last().cloned();
             }
             Err(e) => st.last_error = Some(e.to_string()),
         }
@@ -167,23 +175,28 @@ impl ProcessManagerRunner {
         }
     }
 
-    /// One drain pass over every PM. Returns the AGGREGATE `(checkpoint, head)` like the projection
-    /// worker: a successful pass means every PM reacted to everything pending for its triggers.
-    async fn tick(&self) -> Result<(i64, i64), DomainError> {
+    /// One drain pass over every PM. `surfaced` collects the thrown event-leg guard errors (the runs
+    /// aborted-and-advanced) so `run_once` can expose them on `/saga`.
+    async fn tick(&self) -> Result<TickOutcome, DomainError> {
         let head: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(position), 0) FROM domain_events")
             .fetch_one(&self.pool)
             .await
             .map_err(db_err)?;
+        let mut surfaced = Vec::new();
         for group in REGISTRY {
-            self.drain_group(group).await?;
+            self.drain_group(group, &mut surfaced).await?;
         }
-        Ok((head, head))
+        Ok(TickOutcome { checkpoint: head, head, surfaced })
     }
 
     /// Drain one PM's pending trigger slice, committing its checkpoint after each event. A version
-    /// conflict from an executed append PROPAGATES (abort without advancing — the reaction re-runs
-    /// next tick over fresh state); anything else per-event is logged and skipped (poison guard).
-    async fn drain_group(&self, group: &PmGroup) -> Result<(), DomainError> {
+    /// conflict from an executed append PROPAGATES (abort without advancing — the leg re-runs next
+    /// tick over fresh state); a thrown guard or poison event is logged, surfaced and advanced.
+    async fn drain_group(
+        &self,
+        group: &PmGroup,
+        surfaced: &mut Vec<String>,
+    ) -> Result<(), DomainError> {
         let checkpoint: i64 =
             sqlx::query_scalar("SELECT position FROM projection_checkpoint WHERE projector = $1")
                 .bind(group.checkpoint)
@@ -194,7 +207,7 @@ impl ProcessManagerRunner {
 
         let triggers: Vec<String> = group.triggers.iter().map(|t| t.to_string()).collect();
         let pending = sqlx::query(
-            "SELECT position, id, correlation_id, event_type, payload FROM domain_events \
+            "SELECT position, id, correlation_id, occurred_at, event_type, payload FROM domain_events \
              WHERE position > $1 AND event_type = ANY($2) ORDER BY position",
         )
         .bind(checkpoint)
@@ -206,16 +219,29 @@ impl ProcessManagerRunner {
         for record in pending {
             let position: i64 = record.try_get("position").map_err(db_err)?;
             match self.apply_record(group, &record).await {
-                Ok(()) => {}
-                // Lost optimistic-concurrency race: retry the WHOLE reaction next tick (the pure
-                // decision then folds the fresh stream state — idempotent by construction).
-                Err(e) if is_version_conflict(&e) => return Err(e),
-                Err(e) => {
-                    let event_type: String = record.try_get("event_type").unwrap_or_default();
+                Ok(Outcome::Completed) => {}
+                Ok(Outcome::Skipped(reason)) => {
+                    // Benign expected alternative (idempotent re-delivery, COLLECTION no-op, failed
+                    // state.expect) — logged, never an error.
                     eprintln!(
-                        "saga[{}]: skipped position {position} ({event_type}): {e}",
+                        "saga[{}]: position {position} skipped — {reason}",
                         group.checkpoint
                     );
+                }
+                // Lost optimistic-concurrency race: retry the WHOLE leg next tick (the state row's
+                // expect and the aggregates' record-idempotency absorb the replay).
+                Err(e) if is_version_conflict(&e) => return Err(e),
+                Err(e) => {
+                    // A THROWN event-leg guard (typed anomaly, e.g. PaymentEventOrphaned) or a poison
+                    // event: the recorded fact stands, the run aborts, the error is SURFACED on the
+                    // group status and the checkpoint advances — never wedging, never silent.
+                    let event_type: String = record.try_get("event_type").unwrap_or_default();
+                    let msg = format!(
+                        "saga[{}]: position {position} ({event_type}) aborted: {e}",
+                        group.checkpoint
+                    );
+                    eprintln!("{msg}");
+                    surfaced.push(msg);
                 }
             }
             self.commit_checkpoint(group.checkpoint, position).await?;
@@ -223,16 +249,17 @@ impl ProcessManagerRunner {
         Ok(())
     }
 
-    /// Rebuild the typed trigger from one `domain_events` row, dispatch it to the PM, and execute the
-    /// decision. Returns a per-event error so the caller can poison-skip (or retry, for conflicts).
+    /// Rebuild the typed trigger (+ its envelope) from one `domain_events` row and dispatch it to the
+    /// PM's orchestrator.
     async fn apply_record(
         &self,
         group: &PmGroup,
         record: &sqlx::postgres::PgRow,
-    ) -> Result<(), DomainError> {
+    ) -> Result<Outcome, DomainError> {
         let position: i64 = record.try_get("position").map_err(db_err)?;
         let event_id: uuid::Uuid = record.try_get("id").map_err(db_err)?;
         let correlation_id: uuid::Uuid = record.try_get("correlation_id").map_err(db_err)?;
+        let occurred_at: chrono::DateTime<Utc> = record.try_get("occurred_at").map_err(db_err)?;
         let event_type: String = record.try_get("event_type").map_err(db_err)?;
         let payload: serde_json::Value = record.try_get("payload").map_err(db_err)?;
         let event: DomainEvent = serde_json::from_value(serde_json::json!({
@@ -241,160 +268,90 @@ impl ProcessManagerRunner {
         }))
         .map_err(|e| db_err(format!("position {position} ({event_type}): {e}")))?;
 
-        let trigger = Trigger { position, event_id, correlation_id, event_type, event };
-        let decision = self.decide(group.pm, &trigger).await?;
-        self.execute(group, &trigger, decision).await
+        let trigger = Trigger {
+            event_type,
+            event,
+            envelope: TriggerEnvelope { event_id, correlation_id, occurred_at },
+        };
+        self.dispatch(group.pm, &trigger).await
     }
 
-    /// Load whatever streams the PM's pure decision needs, then take the decision. Mirrors the
-    /// projection worker's per-read-model dispatch, but over the saga inboxes (actors.yaml).
-    async fn decide(&self, pm: ProcessManager, trigger: &Trigger) -> Result<Decision, DomainError> {
-        Ok(match (pm, &trigger.event) {
+    /// Route one trigger to its orchestrator EVENT leg with the ports/stores/read models the DSL
+    /// steps declare (registry and dispatch must agree).
+    async fn dispatch(&self, pm: ProcessManager, trigger: &Trigger) -> Result<Outcome, DomainError> {
+        let env = &trigger.envelope;
+        match (pm, &trigger.event) {
             // --- PlaceOrderProcess ---------------------------------------------------------------
             (ProcessManager::PlaceOrder, DomainEvent::PaymentCaptured(e)) => {
-                let snapshot = self.snapshots.by_payment_intent(&e.payment_intent_id).await?;
-                match &snapshot {
-                    None => place_order::on_payment_captured(e, None, &[], 0, &[], 0),
-                    Some(snap) => {
-                        let (order_events, order_version) =
-                            Repository::new(&self.store).events::<OrderState>(snap.order_id).await?;
-                        let (cart_events, cart_version) =
-                            Repository::new(&self.store).events::<CartState>(snap.cart_id).await?;
-                        place_order::on_payment_captured(
-                            e,
-                            Some(snap),
-                            &order_events,
-                            order_version,
-                            &cart_events,
-                            cart_version,
-                        )
-                    }
-                }
+                place_order::on_payment_captured(&self.store, &self.payment_state, e, env).await
             }
             (ProcessManager::PlaceOrder, DomainEvent::PaymentFailed(e)) => {
-                place_order::on_payment_failed(e)
+                place_order::on_payment_failed(&self.payment_state, e, env).await
             }
             // --- RefundProcess -------------------------------------------------------------------
             (ProcessManager::Refund, DomainEvent::OrderRejectedByRestaurant(e)) => {
-                refund::on_order_rejected(e)
+                refund::on_order_rejected(&self.refund_state, &self.orders, e).await
             }
             (ProcessManager::Refund, DomainEvent::OrderCancelledByCustomer(e)) => {
-                refund::on_order_cancelled_by_customer(e)
+                refund::on_order_cancelled_by_customer(&self.refund_state, &self.orders, e).await
             }
             (ProcessManager::Refund, DomainEvent::OrderCancelledByRestaurant(e)) => {
-                refund::on_order_cancelled_by_restaurant(e)
+                refund::on_order_cancelled_by_restaurant(&self.refund_state, &self.orders, e).await
             }
             (ProcessManager::Refund, DomainEvent::RefundRequested(e)) => {
-                refund::on_refund_requested(e)
+                refund::on_refund_requested(&self.refund_state, &self.orders, e).await
             }
             (ProcessManager::Refund, DomainEvent::PaymentRefunded(e)) => {
-                refund::on_payment_refunded(e)
+                refund::on_payment_refunded(&self.refund_state, e).await
             }
             // --- CartBindingProcess --------------------------------------------------------------
             (ProcessManager::CartBinding, DomainEvent::CustomerIdentified(e)) => {
-                cart_binding::on_customer_identified(e)
+                cart_binding::on_customer_identified(
+                    &self.store,
+                    &self.cart_binding_state,
+                    &self.carts,
+                    e,
+                    env,
+                )
+                .await
             }
             // --- DeliveryDispatchProcess ---------------------------------------------------------
             (ProcessManager::DeliveryDispatch, DomainEvent::OrderMarkedReady(e)) => {
-                let (order_events, _) =
-                    Repository::new(&self.store).events::<OrderState>(e.order_id).await?;
-                let (restaurant_events, _) =
-                    Repository::new(&self.store).events::<RestaurantState>(e.restaurant_id).await?;
-                let job_id = delivery_dispatch::delivery_job_id_for(&e.order_id);
-                let (job_events, _) =
-                    Repository::new(&self.store).events::<DeliveryJobState>(job_id).await?;
                 delivery_dispatch::on_order_marked_ready(
+                    &self.store,
+                    &self.dispatch_state,
+                    &self.orders,
+                    self.partner.as_ref(),
                     e,
-                    &order_events,
-                    &restaurant_events,
-                    &job_events,
+                    env,
                 )
+                .await
             }
             (ProcessManager::DeliveryDispatch, DomainEvent::DeliveryAcceptedByPartner(e)) => {
-                delivery_dispatch::on_delivery_accepted_by_partner(e)
+                delivery_dispatch::on_delivery_accepted_by_partner(&self.dispatch_state, e).await
             }
             (ProcessManager::DeliveryDispatch, DomainEvent::DeliveryRejectedByPartner(e)) => {
-                delivery_dispatch::on_delivery_rejected_by_partner(e)
+                delivery_dispatch::on_delivery_rejected_by_partner(
+                    &self.store,
+                    &self.dispatch_state,
+                    self.partner.as_ref(),
+                    e,
+                )
+                .await
             }
             (ProcessManager::DeliveryDispatch, DomainEvent::DeliveryStatusUpdated(e)) => {
-                let (job_events, _) =
-                    Repository::new(&self.store).events::<DeliveryJobState>(e.delivery_job_id).await?;
-                let (order_events, order_version) =
-                    self.load_job_order(&job_events).await?;
-                delivery_dispatch::on_delivery_status_updated(
-                    e,
-                    &job_events,
-                    &order_events,
-                    order_version,
-                )
+                delivery_dispatch::on_delivery_status_updated(&self.store, &self.dispatch_state, e, env)
+                    .await
             }
             (ProcessManager::DeliveryDispatch, DomainEvent::DeliveryCompleted(e)) => {
-                let (job_events, _) =
-                    Repository::new(&self.store).events::<DeliveryJobState>(e.delivery_job_id).await?;
-                let (order_events, order_version) =
-                    self.load_job_order(&job_events).await?;
-                delivery_dispatch::on_delivery_completed(
-                    e,
-                    &job_events,
-                    &order_events,
-                    order_version,
-                )
+                delivery_dispatch::on_delivery_completed(&self.store, &self.dispatch_state, e, env)
+                    .await
             }
             // A trigger type outside this PM's inbox (registry and dispatch must agree).
-            (pm, event) => {
-                return Err(DomainError::Repository(format!(
-                    "saga registry/dispatch mismatch: {pm:?} does not handle {}",
-                    event_type_of(event)
-                )))
-            }
-        })
-    }
-
-    /// The order stream a delivery job points at (via its `DeliveryRequested` birth event); an
-    /// unresolvable job yields an empty stream so the pure decision reports the precise Skip.
-    async fn load_job_order(
-        &self,
-        job_events: &[DomainEvent],
-    ) -> Result<(Vec<DomainEvent>, i64), DomainError> {
-        match delivery_dispatch::requested_order(job_events) {
-            Some((order_id, _)) => Repository::new(&self.store).events::<OrderState>(order_id).await,
-            None => Ok((Vec::new(), 0)),
-        }
-    }
-
-    /// Execute one decision: run the appends under the saga's system actor — trigger-correlated and
-    /// caused-by the trigger event (ADR-0041) — or log the Skip.
-    async fn execute(
-        &self,
-        group: &PmGroup,
-        trigger: &Trigger,
-        decision: Decision,
-    ) -> Result<(), DomainError> {
-        match decision {
-            Decision::Nothing => Ok(()),
-            Decision::Skip(reason) => {
-                eprintln!(
-                    "saga[{}]: position {} ({}) — {reason}",
-                    group.checkpoint, trigger.position, trigger.event_type
-                );
-                Ok(())
-            }
-            Decision::Act(appends) => {
-                let actor = Actor {
-                    user_id: saga_system_user_id(),
-                    user_type: EXTERNAL_USER_TYPE,
-                    correlation_id: trigger.correlation_id,
-                    cause_id: Some(trigger.event_id),
-                };
-                let repo = Repository::new(&self.store);
-                for append in appends {
-                    // The actor's decided facts go to the actor's journal THROUGH the repository — the
-                    // runner (imperative shell) never touches the EventStore directly.
-                    repo.save(&append.stream_name, append.expected_version, &append.events, &actor)
-                        .await?;
-                }
-                Ok(())
-            }
+            (pm, _) => Err(DomainError::Repository(format!(
+                "saga registry/dispatch mismatch: {pm:?} does not handle {}",
+                trigger.event_type
+            ))),
         }
     }
 
@@ -412,10 +369,10 @@ impl ProcessManagerRunner {
     }
 }
 
-/// The serde tag of a domain event (its `event_type` column value) — for the mismatch diagnostic.
-fn event_type_of(event: &DomainEvent) -> String {
-    serde_json::to_value(event)
-        .ok()
-        .and_then(|v| v.get("eventType").and_then(|t| t.as_str()).map(str::to_owned))
-        .unwrap_or_else(|| "<unknown>".to_string())
+/// What one tick reports back to `run_once`.
+struct TickOutcome {
+    checkpoint: i64,
+    head: i64,
+    /// Thrown event-leg guard errors surfaced during the pass (runs aborted, checkpoints advanced).
+    surfaced: Vec<String>,
 }

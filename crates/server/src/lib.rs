@@ -46,7 +46,7 @@ use infrastructure::{
     PgOrderRepository, PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
     PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, ProcessManagerRunner,
     ProcessManagerStatus, ProjectionStatus, ProjectionWorker, SireneSyncWorker,
-    UnavailableCheckoutSnapshotSource, UnverifiedGbpOrderLinkProbe,
+    UnverifiedGbpOrderLinkProbe,
 };
 use stripe_adapter::StripeWebhookIngestor;
 use shared_types::HealthDto;
@@ -204,15 +204,13 @@ pub fn router() -> Router {
                     println!("RUN_PROJECTOR=false — projection worker not started in-process");
                 }
 
-                // In-process saga runner (process managers, actors.yaml) — same pattern as the
-                // projection worker: RUN_PROCESS_MANAGERS=false hands it to a dedicated worker.
-                // PlaceOrderProcess's checkout-snapshot seam is the fail-closed stand-in until the
-                // Stripe adapter provides the real source.
+                // In-process saga runner (the state-table process managers of
+                // specs/processmanager.yaml, ADR-20260719-193500) — same pattern as the projection
+                // worker: RUN_PROCESS_MANAGERS=false hands it to a dedicated worker. The runner
+                // builds its state-table stores and read models over the pool; the delivery-partner
+                // port stays the no-op stand-in until the avelo37 ACL lands (`with_partner`).
                 if std::env::var("RUN_PROCESS_MANAGERS").map(|v| v != "false").unwrap_or(true) {
-                    let runner = ProcessManagerRunner::new(
-                        pool.clone(),
-                        Arc::new(UnavailableCheckoutSnapshotSource),
-                    );
+                    let runner = ProcessManagerRunner::new(pool.clone());
                     saga_status = Some(runner.status());
                     tokio::spawn(runner.run_loop());
                     println!("saga runner: running in-process (set RUN_PROCESS_MANAGERS=false to disable)");
