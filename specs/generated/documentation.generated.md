@@ -3164,15 +3164,15 @@ sequenceDiagram
 
 - **Source**: [🎭 `Cart`](#actor-cart) · 🛶 V0
 - **Note**: Joined with the catalog for pricing (secondary source).
-- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout. `estimated_breakdown` applies PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown. `uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + UberEstimationPolicy[restaurant.cuisine_category] + UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred).
-- **Fed by**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved), [⚡ `CartCheckedOut`](#event-cartcheckedout), [⚡ `CustomerIdentified`](#event-customeridentified)
+- **Rules**: Prices are computed by the projection from the current catalog, never trusted from the client. `customer_id` is NULL while the cart is owned by a guest; bound when CartBindingProcess reacts to CustomerIdentified by sending BindCartToCustomer to each OPEN cart of the session (same-stream CartBoundToCustomer), or at checkout. `estimated_breakdown` applies PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown. `uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + UberEstimationPolicy[restaurant.cuisine_category] + UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred).
+- **Fed by**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved), [⚡ `CartCheckedOut`](#event-cartcheckedout), [⚡ `CartBoundToCustomer`](#event-cartboundtocustomer)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `cart_id` | [🔤 `CartId`](#scalar-cartid) _(derived)_ | [⚡ `CartStarted`.`cartId`](#event-cartstarted--cartid) | PK |  |
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `CartStarted`.`restaurantId`](#event-cartstarted--restaurantid) | — |  |
 | `session_id` | [🔤 `SessionId`](#scalar-sessionid) _(derived)_ | [⚡ `CartStarted`.`sessionId`](#event-cartstarted--sessionid) | index | The visitor session that started the cart; CartBindingProcess binds all OPEN carts of a session on CustomerIdentified. |
-| `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ → [🗄️ `Customer`](#view-customer) | [⚡ `CartStarted`.`customerId`](#event-cartstarted--customerid), [⚡ `CustomerIdentified`.`customerId`](#event-customeridentified--customerid) | nullable | NULL while guest; bound by CustomerIdentified or at checkout. |
+| `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ → [🗄️ `Customer`](#view-customer) | [⚡ `CartStarted`.`customerId`](#event-cartstarted--customerid), [⚡ `CartBoundToCustomer`.`customerId`](#event-cartboundtocustomer--customerid) | nullable | NULL while guest; bound by CartBoundToCustomer (CartBindingProcess sends BindCartToCustomer per open cart of the identified session) or at checkout. |
 | `status` | [🔤 `CartStatus`](#scalar-cartstatus) | [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartCheckedOut`](#event-cartcheckedout) | — | Derived from event type: OPEN on CartStarted, CHECKED_OUT on CartCheckedOut. |
 | `lines` | `jsonb` | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | Priced by the projection from the live catalog: [{ cart_line_id, offer_id, product_id, name, offer_name, quantity, unit_price_cents, selected_options, line_total_cents }]. |
 | `total_amount_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged), [⚡ `CartLineRemoved`](#event-cartlineremoved) | — | COMPUTED by the projection from the live catalog (never trusted from the client). |
@@ -3517,7 +3517,7 @@ A cart that was started by a guest visitor (no customerId) was bound to a Custom
 
 - **Emitted by**: [🎭 `Cart`](#actor-cart), [🎭 `CartBindingProcess`](#actor-cartbindingprocess)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `Cart`](#view-cart)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5251,7 +5251,7 @@ A returning visitor signed in and was resolved to an existing Customer (authRef 
 
 - **Emitted by**: [🎭 `Customer`](#actor-customer)
 - **Consumed by**: [🎭 `CartBindingProcess`](#actor-cartbindingprocess)
-- **Projected into**: [🗄️ `Cart`](#view-cart)
+- **Projected into**: —
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

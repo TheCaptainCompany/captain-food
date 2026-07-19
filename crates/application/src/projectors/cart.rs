@@ -1,23 +1,19 @@
-//! Hand-written `CartCompute` (ADR-0040). `status`/`customer_id` fold from the events; the priced columns
+//! Hand-written `CartCompute` (ADR-0040). `status` folds from the events; the priced columns
 //! need the live catalog + pricing policies, which arrive with the runtime read-side.
 #![allow(unused_variables)]
 
 use crate::projections::{CartCompute, CartRow, Envelope};
 use domain::generated::events::DomainEvent;
-use domain::generated::scalars::{CartStatus, CurrencyCode, CustomerId, MoneyCents};
+use domain::generated::scalars::{CartStatus, CurrencyCode, MoneyCents};
 use serde_json::Value;
 
 pub struct CartProjector;
 
 impl CartCompute for CartProjector {
-    /// Cart owner: from CartStarted; CustomerIdentified is cross-stream (keyed by authRef, no cart id) and
-    /// is routed to a visitor's carts by the runtime — preserved here. TODO(runtime).
-    fn customer_id(&self, prev: Option<&CartRow>, env: &Envelope) -> Option<CustomerId> {
-        match &env.event {
-            DomainEvent::CartStarted(e) => e.customer_id.clone(),
-            _ => prev.and_then(|r| r.customer_id.clone()),
-        }
-    }
+    // customer_id is now MECHANICAL: CartStarted.customer_id / CartBoundToCustomer.customer_id are
+    // same-stream properties (CartBindingProcess sends BindCartToCustomer per open cart), so the
+    // generated projector maps them without a Compute hook — the old cross-stream CustomerIdentified
+    // routing gap is gone.
 
     /// OPEN while active, CHECKED_OUT once the cart is checked out.
     fn status(&self, prev: Option<&CartRow>, env: &Envelope) -> CartStatus {

@@ -360,10 +360,10 @@ Cart:
     - { $ref: 'events.yaml#/CartLineQuantityChanged' }
     - { $ref: 'events.yaml#/CartLineRemoved' }
     - { $ref: 'events.yaml#/CartCheckedOut' }
-    - { $ref: 'events.yaml#/CustomerIdentified' }
+    - { $ref: 'events.yaml#/CartBoundToCustomer' }
   rules:
     - "Prices are computed by the projection from the current catalog, never trusted from the client."
-    - "`customer_id` is NULL while the cart is owned by a guest; bound when CustomerIdentified resolves authRef → customerId, or at checkout."
+    - "`customer_id` is NULL while the cart is owned by a guest; bound when CartBindingProcess reacts to CustomerIdentified by sending BindCartToCustomer to each OPEN cart of the session (same-stream CartBoundToCustomer), or at checkout."
     - "`estimated_breakdown` applies PricingPolicy (fee_rate/buyer_share/margin band) + the restaurant's margin_rate to the food total: serviceFee_buyer = buyer_share·fee_rate·articles; restaurantContribution = (1−buyer_share)·clamp((margin−margin_low)/(margin_high−margin_low),0,1)·fee_rate·articles; total = articles + delivery + serviceFee_buyer. Recomputed authoritatively on OrderPlaced.breakdown."
     - "`uber_comparison` is the UberComparison (ADR-0022/0025), COMPUTED by the projection from the cart food total + UberEstimationPolicy[restaurant.cuisine_category] + UberSplitPolicy. Null when the restaurant has no cuisine_category. Basis ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred)."
   columns:
@@ -380,10 +380,10 @@ Cart:
     customer_id:
       from:
         - { $ref: 'events.yaml#/CartStarted/properties/customerId' }
-        - { $ref: 'events.yaml#/CustomerIdentified/properties/customerId' }
+        - { $ref: 'events.yaml#/CartBoundToCustomer/properties/customerId' }
       nullable: true
       fk: { $ref: '#/Customer/columns/customer_id' }
-      note: "NULL while guest; bound by CustomerIdentified or at checkout."
+      note: "NULL while guest; bound by CartBoundToCustomer (CartBindingProcess sends BindCartToCustomer per open cart of the identified session) or at checkout."
     status:
       type: { $ref: 'scalars.yaml#/CartStatus' }
       from:

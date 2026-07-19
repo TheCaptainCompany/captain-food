@@ -48,7 +48,6 @@ mod projector_dispatch_tests {
     // The hand-written business logic — only Cart's complex columns; the mechanical ones are generated.
     struct Compute;
     impl CartCompute for Compute {
-        fn customer_id(&self, _p: Option<&CartRow>, _e: &Envelope) -> Option<CustomerId> { None }
         fn status(&self, _p: Option<&CartRow>, _e: &Envelope) -> CartStatus { CartStatus::OPEN }
         fn lines(&self, _p: Option<&CartRow>, _e: &Envelope) -> serde_json::Value { serde_json::json!([]) }
         fn total_amount_cents(&self, _p: Option<&CartRow>, _e: &Envelope) -> MoneyCents { MoneyCents(0) }

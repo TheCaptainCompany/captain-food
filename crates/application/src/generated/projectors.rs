@@ -199,7 +199,6 @@ pub fn project_catalog<C: CatalogCompute>(c: &C, state: Option<CatalogRow>, env:
 /// Hand-written business logic for `Cart`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait CartCompute {
-    fn customer_id(&self, prev: Option<&CartRow>, env: &Envelope) -> Option<CustomerId>;
     fn status(&self, prev: Option<&CartRow>, env: &Envelope) -> CartStatus;
     fn lines(&self, prev: Option<&CartRow>, env: &Envelope) -> serde_json::Value;
     fn total_amount_cents(&self, prev: Option<&CartRow>, env: &Envelope) -> MoneyCents;
@@ -215,7 +214,7 @@ pub fn project_cart<C: CartCompute>(c: &C, state: Option<CartRow>, env: &Envelop
             cart_id: e.cart_id.clone(),
             restaurant_id: e.restaurant_id.clone(),
             session_id: e.session_id.clone(),
-            customer_id: c.customer_id(None, env),
+            customer_id: e.customer_id.clone(),
             status: c.status(None, env),
             lines: c.lines(None, env),
             total_amount_cents: c.total_amount_cents(None, env),
@@ -229,7 +228,7 @@ pub fn project_cart<C: CartCompute>(c: &C, state: Option<CartRow>, env: &Envelop
         DomainEvent::CartLineQuantityChanged(_) => { let mut row = state?; let v = c.lines(Some(&row), env); row.lines = v; let v = c.total_amount_cents(Some(&row), env); row.total_amount_cents = v; let v = c.estimated_breakdown(Some(&row), env); row.estimated_breakdown = v; let v = c.uber_comparison(Some(&row), env); row.uber_comparison = v; Some(row) },
         DomainEvent::CartLineRemoved(_) => { let mut row = state?; let v = c.lines(Some(&row), env); row.lines = v; let v = c.total_amount_cents(Some(&row), env); row.total_amount_cents = v; let v = c.estimated_breakdown(Some(&row), env); row.estimated_breakdown = v; let v = c.uber_comparison(Some(&row), env); row.uber_comparison = v; Some(row) },
         DomainEvent::CartCheckedOut(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
-        DomainEvent::CustomerIdentified(_) => { let mut row = state?; let v = c.customer_id(Some(&row), env); row.customer_id = v; Some(row) },
+        DomainEvent::CartBoundToCustomer(e) => { let mut row = state?; row.customer_id = Some(e.customer_id.clone()); Some(row) },
         _ => return state,
     };
     next.map(|mut row| {
