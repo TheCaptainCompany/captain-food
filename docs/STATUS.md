@@ -223,7 +223,11 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 
 > **⚠️ TRACKING MOVED (2026-07-20, user-directed): remaining work now lives in
 > [GitHub issues](https://github.com/Captain-Food/captain-food/issues) (#12–#28, typed
-> Task/Bug/Feature) managed on the GitHub Project board — not in this file.** New work items get an
+> Task/Bug/Feature) managed on the **org-level GitHub Project**
+> ([github.com/orgs/Captain-Food/projects](https://github.com/orgs/Captain-Food/projects),
+> created 2026-07-20) — not in this file.** Issues carry `size/*` labels + org issue fields
+> Priority/Effort (mapping recorded in ADR-20260720-143000); the project's views read those
+> directly, so triage state lives on the issue, never in a board-only field. New work items get an
 > issue, not a table row; this file stays the narrative deployment/architecture snapshot. The table
 > below is the last pre-migration snapshot, kept for history.
 >
