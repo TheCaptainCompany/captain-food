@@ -31,6 +31,24 @@
 > Rider/DeliveryJob/Restaurant lifecycle adoption, worker `DeliveryJob-%` drain, roadmap items 2–7,
 > GitHub repo secrets for the smoke workflow.
 
+> ✅ **2026-07-20 (early, cont.) — PRODUCTION SMOKE GREEN (all 4 layers):** `make smoke-prod` passes
+> end-to-end against api.captain.food — cart → server-priced `placeOrder` → Stripe TEST confirm →
+> webhook → PlaceOrderProcess → order **PLACED / CAPTURED**. Getting there surfaced and fixed five
+> production defects: ① deployed schema drift — `Cart.session_id` and
+> `OrderTracking.payment_intent_id` never had catch-up migrations, so the projectors skipped every
+> Cart/Order event (migrations added + Order/Cart checkpoints refolded); ② the refold exposed a
+> panicking generated accessor (legacy `OrderPlaced` without `ref`) that froze the projection worker
+> at boot — the projector emitter now emits total folds (`unwrap_or_default`), string scalars derive
+> `Default`, and both worker loops panic-isolate every tick (a poison event can no longer kill
+> projection or sagas); ③ `payment_status` ordering hole — `PaymentCaptured` always precedes the
+> `OrderPlaced` row it should fold into, so the creation arm now seeds CAPTURED (the PlaceOrderProcess
+> invariant, recorded in the projection DSL lineage + DB-gated test); ④ smoke confirm needed a
+> `return_url` (account has redirect payment methods enabled); ⑤ **Sirene sync idempotency** — prod
+> listings predate the UUIDv5(SIRET) derivation, so every pass re-derived colliding ids and retried
+> 605 `SlugAlreadyTaken` rejections forever; the worker now adopts the aggregate id the projection
+> names via `external_identifiers` (register + close paths) and checkpoints deterministic rejections
+> instead of retrying (DB-gated tests: adoption, legacy close, no-churn).
+
 > 🔀 **Parallel session engaged: command sourcing + inbound-event sourcing** (infrastructure
 > journals, branched from main after this branch merges). Two constraints agreed here carry over:
 > journals NEVER write `domain_events` (aggregates own the log — ADR-20260719-193500; hook points =
