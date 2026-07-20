@@ -1,0 +1,29 @@
+# Production E2E smoke (Stripe TEST mode) against the live deployment — tools/smoke/prod-smoke.sh.
+# Manual (workflow_dispatch) + daily. Requires repo secrets STRIPE_SECRET_KEY (sk_test) and
+# RENDER_API_KEY (used to read the deployed Supabase URL/secret so role JWTs can be minted).
+name: prod-smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * *" # daily 06:17 UTC (off the top of the hour)
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run production smoke (Stripe TEST mode)
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          if [ -z "$STRIPE_SECRET_KEY" ] || [ -z "$RENDER_API_KEY" ]; then
+            echo "::error::repo secrets STRIPE_SECRET_KEY / RENDER_API_KEY are not configured"
+            exit 1
+          fi
+          bash tools/smoke/prod-smoke.sh
