@@ -266,7 +266,7 @@ impl CartBindingStateStore for PgCartBindingState {
 
 /// Column list of `delivery_dispatch_process_manager`, in [`DeliveryDispatchRow`] field order.
 const DISPATCH_COLUMNS: &str =
-    "order_id, restaurant_id, delivery_job_id, process_status, last_update_utc";
+    "order_id, restaurant_id, delivery_job_id, process_status, offer_attempts, last_update_utc";
 
 fn decode_dispatch(row: &PgRow) -> Result<DeliveryDispatchRow, DomainError> {
     Ok(DeliveryDispatchRow {
@@ -274,6 +274,7 @@ fn decode_dispatch(row: &PgRow) -> Result<DeliveryDispatchRow, DomainError> {
         restaurant_id: RestaurantId(row.try_get("restaurant_id").map_err(db_err)?),
         delivery_job_id: DeliveryJobId(row.try_get("delivery_job_id").map_err(db_err)?),
         process_status: EnumOrd::from_ord(row.try_get::<i32, _>("process_status").map_err(db_err)?)?,
+        offer_attempts: row.try_get("offer_attempts").map_err(db_err)?,
         last_update_utc: row.try_get("last_update_utc").map_err(db_err)?,
     })
 }
@@ -322,11 +323,12 @@ impl DeliveryDispatchStateStore for PgDeliveryDispatchState {
     async fn upsert(&self, row: &DeliveryDispatchRow) -> Result<(), DomainError> {
         let sql = format!(
             "INSERT INTO delivery_dispatch_process_manager ({DISPATCH_COLUMNS}) \
-             VALUES ($1,$2,$3,$4,now()) \
+             VALUES ($1,$2,$3,$4,$5,now()) \
              ON CONFLICT (order_id) DO UPDATE SET \
              restaurant_id = EXCLUDED.restaurant_id, \
              delivery_job_id = EXCLUDED.delivery_job_id, \
              process_status = EXCLUDED.process_status, \
+             offer_attempts = EXCLUDED.offer_attempts, \
              last_update_utc = now()"
         );
         sqlx::query(&sql)
@@ -334,6 +336,7 @@ impl DeliveryDispatchStateStore for PgDeliveryDispatchState {
             .bind(row.restaurant_id.0)
             .bind(row.delivery_job_id.0)
             .bind(row.process_status.to_ord())
+            .bind(row.offer_attempts)
             .execute(&self.pool)
             .await
             .map_err(db_err)?;

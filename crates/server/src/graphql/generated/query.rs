@@ -314,6 +314,19 @@ impl QueryRoot {
         }
         Ok(out)
     }
+    /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+    #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    async fn pending_refunds(&self, ctx: &async_graphql::Context<'_>, input: Option<PendingRefundsQueryInput>) -> async_graphql::Result<Vec<Refund>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;
+        let filter = input
+            .map(|i| application::queries::RefundFilter {
+                restaurant_id: i.restaurant_id.map(Into::into),
+                status: i.status.map(Into::into),
+            })
+            .unwrap_or_default();
+        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(Refund::from).collect())
+    }
     /// All restaurant locations under an account (back-office; ownership enforced server-side).
     #[graphql(name = "restaurantLocationsByAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
     async fn restaurant_locations_by_account(&self, ctx: &async_graphql::Context<'_>, input: RestaurantLocationsByAccountQueryInput) -> async_graphql::Result<Vec<Restaurant>> {

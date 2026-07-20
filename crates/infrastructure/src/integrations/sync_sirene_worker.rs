@@ -167,7 +167,7 @@ impl SireneSyncWorker {
         }
 
         // 2) Deletion reconciliation by absence (debounced, freshness-guarded, partner-gated).
-        self.reconcile_absent(&store, &actor, &mut summary).await?;
+        self.reconcile_absent(&store, &restaurants, &actor, &mut summary).await?;
 
         Ok(summary)
     }
@@ -204,7 +204,7 @@ impl SireneSyncWorker {
         let explicitly_closed = etat == "F" || matches!(etablissement.etat(), Some("F") | Some("C"));
         if explicitly_closed {
             match self
-                .close_if_prospect(store, actor, siret, "SIRENE: establishment administratively closed (etat=F)", summary)
+                .close_if_prospect(store, restaurants, actor, siret, "SIRENE: establishment administratively closed (etat=F)", summary)
                 .await
             {
                 Ok(()) => return self.mark_processed(siret, last_seen_at).await,
@@ -218,17 +218,36 @@ impl SireneSyncWorker {
 
         // Active record → ACL → the ordinary registration write path (idempotent by UUIDv5 id).
         match etablissement_to_command(&etablissement) {
-            Ok(cmd) => match register_restaurant(store, restaurants, cmd, actor).await {
-                Ok(()) => {
-                    summary.registered += 1;
-                    self.mark_processed(siret, last_seen_at).await
+            Ok(mut cmd) => {
+                // Legacy-id adoption: listings registered before today's UUIDv5(SIRET) derivation
+                // exist under other aggregate ids. The projection's external_identifiers is the
+                // source of truth — a row already carrying this SIRET means "already registered
+                // under THAT id", so the replay targets it (and the slug check sees its own row)
+                // instead of deriving a colliding sibling.
+                if let Some(existing) = restaurants.by_external_identifier("siret", siret).await? {
+                    cmd.restaurant_id = existing.restaurant_id;
                 }
-                Err(e) => {
-                    summary.failed += 1; // left pending → retried next pass
-                    eprintln!("sirene sync worker: register failed for siret {siret}: {e}");
-                    Ok(())
+                match register_restaurant(store, restaurants, cmd, actor).await {
+                    Ok(()) => {
+                        summary.registered += 1;
+                        self.mark_processed(siret, last_seen_at).await
+                    }
+                    Err(e @ DomainError::Rejected { .. }) => {
+                        // A catalogued invariant rejection is DETERMINISTIC — replaying the same
+                        // staged row can only be rejected again, so retrying forever is pure churn
+                        // (the 605-row SlugAlreadyTaken log storm). Mark processed; the next
+                        // ingestion refresh re-pends the row if the data changes.
+                        summary.skipped += 1;
+                        eprintln!("sirene sync worker: register rejected for siret {siret} (permanent, not retried): {e}");
+                        self.mark_processed(siret, last_seen_at).await
+                    }
+                    Err(e) => {
+                        summary.failed += 1; // infra failure — left pending → retried next pass
+                        eprintln!("sirene sync worker: register failed for siret {siret}: {e}");
+                        Ok(())
+                    }
                 }
-            },
+            }
             Err(e) => {
                 // Unusable record (redacted, nameless, no address…) — log + mark processed; the next
                 // ingestion refresh re-pends it if INSEE's data improves.
@@ -258,6 +277,7 @@ impl SireneSyncWorker {
     async fn reconcile_absent(
         &self,
         store: &PgEventStore,
+        restaurants: &PgRestaurantRepository,
         actor: &Actor,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
@@ -287,6 +307,7 @@ impl SireneSyncWorker {
             if let Err(e) = self
                 .close_if_prospect(
                     store,
+                    restaurants,
                     actor,
                     &siret,
                     "SIRENE: establishment disappeared from the active registry (detect-by-absence)",
@@ -307,12 +328,19 @@ impl SireneSyncWorker {
     async fn close_if_prospect(
         &self,
         store: &PgEventStore,
+        restaurants: &PgRestaurantRepository,
         actor: &Actor,
         siret: &str,
         reason: &str,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
-        let restaurant_id = restaurant_id_for_siret(siret);
+        // Same legacy-id adoption as the register path: the projection row carrying this SIRET
+        // names the real aggregate; the UUIDv5 derivation is only the fallback for never-projected
+        // listings (where the load finds nothing and the close is a no-op anyway).
+        let restaurant_id = match restaurants.by_external_identifier("siret", siret).await? {
+            Some(row) => row.restaurant_id,
+            None => restaurant_id_for_siret(siret),
+        };
         let (state, _version) =
             Repository::new(store).load::<RestaurantState>(restaurant_id).await?;
         let Some(state) = state else {

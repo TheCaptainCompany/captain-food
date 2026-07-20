@@ -45,18 +45,19 @@ The process managers run as **state-table orchestrators executing their DSL legs
 | Saga | Legs | Status |
 |---|---|---|
 | PlaceOrderProcess | `PlaceOrder` cmd → intent + run row; `PaymentCaptured` → `OrderPlaced` + `CartCheckedOut` from the frozen snapshot; `PaymentFailed` → run FAILED, cart stays OPEN; orphans throw | ✅ implemented (Stripe create-intent still the fail-closed stand-in gateway) |
-| RefundProcess | refundable facts open PENDING_APPROVAL (payment CAPTURED only); `ApproveRefund`/`DenyRefund` (RESTAURANT own orders / ADMIN) → Stripe `request_refund` + decision on the Payment; `PaymentRefunded` settles | ✅ implemented (outbound `request_refund` fail-closed until the Stripe adapter lands; `pendingRefunds`/approve/deny API surface still to add in api.yaml) |
+| RefundProcess | refundable facts open PENDING_APPROVAL (payment CAPTURED only) + deliver `RefundOpened` to the Payment stream; `ApproveRefund`/`DenyRefund` (RESTAURANT own orders / ADMIN) → Stripe `request_refund` + decision on the Payment; `PaymentRefunded` settles | ✅ implemented end-to-end (real Stripe outbound; `pendingRefunds` query over `View_PendingRefunds`, approve/deny mutations + story steps — ADR-20260720-003142) |
 | CartBindingProcess | `CustomerIdentified` → `BindCartToCustomer` per OPEN cart of the session (Cart emits `CartBoundToCustomer`; projection folds same-stream) | ✅ implemented — the old cross-stream projector gap is gone |
-| DeliveryDispatchProcess | `OrderMarkedReady` (DELIVERY) → `DeliveryRequested` birth (UUIDv5 job id) + partner `offer_job`; partner accept/reject; DELIVERED/`DeliveryCompleted` → send `MarkOrderDelivered` | ✅ implemented (`offer_job` = no-op stand-in; re-offer policy still TODO) |
+| DeliveryDispatchProcess | `OrderMarkedReady` (DELIVERY) → `DeliveryRequested` birth (UUIDv5 job id) + partner `offer_job` (attempt 1); decline → bounded re-offer (cap 3, `offer_attempts` in the run row), exhaustion → `DeliveryDispatchFailed` + run FAILED; DELIVERED/`DeliveryCompleted` → send `MarkOrderDelivered` | ✅ implemented (`offer_job` = no-op stand-in; offer **timeouts** deferred — ADR-20260720-004556) |
 
 ## Open items
 
 | Item | Blocked on |
 |---|---|
 | ~~Real Stripe create-intent + outbound refund~~ ✅ landed: `stripe::outbound::StripePaymentGateway` (env-gated by `STRIPE_SECRET_KEY`; fail-closed stand-in otherwise) | — |
-| ~~`approveRefund`/`denyRefund` mutations~~ ✅ landed (roles [RESTAURANT, ADMIN] + story steps); still open: the `pendingRefunds` query + its read model | read-model design |
-| Partner re-offer policy on `DeliveryRejectedByPartner` (row flags REOFFER_REQUIRED) | delivery-partner ACL |
-| Server-side line pricing (frozen snapshot carries best-available amounts) | pricing program (ADR-0016/0017) |
+| ~~`approveRefund`/`denyRefund` mutations + `pendingRefunds` query/read model~~ ✅ landed (`RefundOpened` event + `View_PendingRefunds`, ADR-20260720-003142) | — |
+| ~~Partner re-offer policy~~ ✅ landed (bounded cap 3 → `DeliveryDispatchFailed`, status `FAILED` replaces `REOFFER_REQUIRED`, ADR-20260720-004556); offer **timeouts** deferred (needs a time-based sweep — mechanism named in the ADR) | scheduler/sweep host |
+| ~~Server-side line pricing~~ ✅ landed fail-closed (`application::pricing::price_cart` from the live catalog → PaymentIntent amount + frozen snapshot; `PriceMismatch`/`PriceUnresolvable`, ADR-20260720-002217); fee/split breakdown still articles=total | fee policy (ADR-0016/0017) |
+| Projection worker never drains `DeliveryJob-%` streams — `OrderTracking.delivery_status` mirror columns spec'd but unfed (`View_DeliveryJob` surfaces delivery state live regardless) | worker stream-group extension |
 
 ## References
 

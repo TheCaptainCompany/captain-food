@@ -166,11 +166,17 @@ impl ProcessManagerRunner {
 
     /// Poll forever: `run_once` then sleep ~1.5s. Consumes the runner (spawn it as a task); the shared
     /// [`ProcessManagerStatus`] handle stays readable through [`Self::status`] clones taken before.
+    /// Each tick runs in its own task so a PANIC escaping a drain (poison event, legacy payload in a
+    /// fold) kills only that tick, never the loop — a dead saga runner silently stops the money path.
     pub async fn run_loop(self) {
         self.status_mut().running = true;
+        let runner = std::sync::Arc::new(self);
         loop {
             // Errors are recorded on the status snapshot by run_once; the loop keeps polling.
-            let _ = self.run_once().await;
+            let r = std::sync::Arc::clone(&runner);
+            if let Err(join) = tokio::spawn(async move { let _ = r.run_once().await; }).await {
+                eprintln!("saga runner: tick panicked — resuming next tick: {join}");
+            }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     }
@@ -290,16 +296,32 @@ impl ProcessManagerRunner {
             }
             // --- RefundProcess -------------------------------------------------------------------
             (ProcessManager::Refund, DomainEvent::OrderRejectedByRestaurant(e)) => {
-                refund::on_order_rejected(&self.refund_state, &self.orders, e).await
+                refund::on_order_rejected(&self.store, &self.refund_state, &self.orders, e, env)
+                    .await
             }
             (ProcessManager::Refund, DomainEvent::OrderCancelledByCustomer(e)) => {
-                refund::on_order_cancelled_by_customer(&self.refund_state, &self.orders, e).await
+                refund::on_order_cancelled_by_customer(
+                    &self.store,
+                    &self.refund_state,
+                    &self.orders,
+                    e,
+                    env,
+                )
+                .await
             }
             (ProcessManager::Refund, DomainEvent::OrderCancelledByRestaurant(e)) => {
-                refund::on_order_cancelled_by_restaurant(&self.refund_state, &self.orders, e).await
+                refund::on_order_cancelled_by_restaurant(
+                    &self.store,
+                    &self.refund_state,
+                    &self.orders,
+                    e,
+                    env,
+                )
+                .await
             }
             (ProcessManager::Refund, DomainEvent::RefundRequested(e)) => {
-                refund::on_refund_requested(&self.refund_state, &self.orders, e).await
+                refund::on_refund_requested(&self.store, &self.refund_state, &self.orders, e, env)
+                    .await
             }
             (ProcessManager::Refund, DomainEvent::PaymentRefunded(e)) => {
                 refund::on_payment_refunded(&self.refund_state, e).await
@@ -336,6 +358,7 @@ impl ProcessManagerRunner {
                     &self.dispatch_state,
                     self.partner.as_ref(),
                     e,
+                    env,
                 )
                 .await
             }

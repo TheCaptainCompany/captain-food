@@ -226,8 +226,8 @@ pub trait DeliveryPartner: Send + Sync {
 
 /// No-op [`DeliveryPartner`] stand-in until the avelo37 ACL lands: the offer is LOGGED (so a pending
 /// dispatch is observable, mirroring the runner's skip log) and reported successful — the job stays
-/// PENDING on its stream, open to independent riders, and the run row's OFFERED/REOFFER_REQUIRED
-/// statuses flag the manual follow-up.
+/// PENDING on its stream, open to independent riders, and the run row's OFFERED/FAILED statuses flag
+/// the follow-up (FAILED = the bounded re-offer cap was exhausted, ADR-20260720-004556).
 pub struct NoopDeliveryPartner;
 
 #[async_trait]

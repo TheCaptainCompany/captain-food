@@ -1290,6 +1290,29 @@ DeliveryCancelled:
       nullable: true
   required: [deliveryJobId]
 
+DeliveryDispatchFailed:
+  description: >
+    Dispatch failed terminally: the delivery partner declined the job at every offer attempt (cap of 3
+    total offers, ADR-20260720-004556). Emitted by DeliveryDispatchProcess (like DeliveryRequested) so
+    read models surface the failed job to the restaurant for manual handling; no automatic retry follows.
+  type: object
+  properties:
+    deliveryJobId:
+      $ref: 'scalars.yaml#/DeliveryJobId'
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    attempts:
+      type: integer
+      description: "Total offer attempts made before giving up (the cap; the birth offer counts as 1)."
+    lastReason:
+      type: string
+      maxLength: 500
+      nullable: true
+      description: "Reason carried by the final partner decline, when the partner gave one."
+  required: [deliveryJobId, orderId, restaurantId, attempts]
+
 # NOTE: DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated are INBOUND
 # integration events — reported by the delivery partner (e.g. Avelo37) through the avelo37-acl and
 # recorded as facts, NOT emitted by a command (nothing to validate/reject). Idempotent on partnerRef.
@@ -1475,6 +1498,25 @@ RiderStatusChanged:
 # =====================================================================
 # Refund (restaurant- or admin-approved; RefundProcess state PM)
 # =====================================================================
+
+RefundOpened:
+  description: >
+    A refundable fact on a paid order (rejection, cancellation, customer request) opened a refund for a
+    restaurant/admin decision. Delivered by RefundProcess to the Payment aggregate ONLY when the payment
+    is CAPTURED, so the refund queue (View_PendingRefunds) folds from the log, not from PM state.
+    `amount` is the captured order total eligible for refund (an approval may still be partial).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "The captured order total eligible for refund (the decision may approve less)."
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [orderId, restaurantId, amount]
 
 RefundApproved:
   description: "The restaurant or an admin approved a refund; the RefundProcess will drive the Stripe refund for this amount."

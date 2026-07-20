@@ -95,8 +95,9 @@ View_DeliveryJob:
     - { $ref: 'events.yaml#/DeliveryPickedUp' }
     - { $ref: 'events.yaml#/DeliveryCompleted' }
     - { $ref: 'events.yaml#/DeliveryCancelled' }
+    - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
   rules:
-    - "`status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED)."
+    - "`status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556)."
     - "`provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts."
   indexes:
     - [restaurant_id, status]   # restaurant delivery board
@@ -124,6 +125,7 @@ View_DeliveryJob:
         DeliveryStatusUpdated: { from: status }
         DeliveryCompleted: DELIVERED
         DeliveryCancelled: CANCELLED
+        DeliveryDispatchFailed: FAILED
       from:
         - { $ref: 'events.yaml#/DeliveryRequested' }
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
@@ -132,7 +134,8 @@ View_DeliveryJob:
         - { $ref: 'events.yaml#/DeliveryStatusUpdated' }
         - { $ref: 'events.yaml#/DeliveryCompleted' }
         - { $ref: 'events.yaml#/DeliveryCancelled' }
-      note: "Derived from the lifecycle event type / DeliveryStatusUpdated.status."
+        - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+      note: "Derived from the lifecycle event type / DeliveryStatusUpdated.status (DeliveryDispatchFailed → FAILED, the offer-cap exhaustion)."
     provider:
       type: { $ref: 'scalars.yaml#/DeliveryProvider' }
       derive:
@@ -196,4 +199,81 @@ View_DeliveryJob:
       type: text
       from: [{ $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/reason' }]
       nullable: true
-      note: "Reason of the latest partner decline (the job stays PENDING and is re-offered); null if never rejected."
+      note: "Reason of the latest partner decline (the job stays PENDING and is re-offered, up to the 3-offer cap — ADR-20260720-004556); null if never rejected."
+# Refund queue (RefundProcess) — the pendingRefunds read model. One row per refund opened on a captured
+# payment (RefundOpened, delivered by RefundProcess to the Payment aggregate), folded with the decision
+# and settlement facts recorded on the same Payment stream. The full lifecycle stays in the view
+# (REQUESTED → APPROVED/DENIED → REFUNDED); a "pending" consumer filters status = REQUESTED.
+View_PendingRefunds:
+  aggregate: Payment
+  slice: V0
+  fedBy:
+    - { $ref: 'events.yaml#/RefundOpened' }
+    - { $ref: 'events.yaml#/RefundApproved' }
+    - { $ref: 'events.yaml#/RefundDenied' }
+    - { $ref: 'events.yaml#/PaymentRefunded' }
+  rules:
+    - "A row exists only for a refund actually opened for decision: RefundOpened is delivered by RefundProcess ONLY when the order's payment is CAPTURED (the guard lives in the saga, so the fold needs no payment-status filter)."
+    - "`status` is derived from the lifecycle events: REQUESTED on RefundOpened → APPROVED on RefundApproved (Stripe refund requested) or DENIED on RefundDenied → REFUNDED on PaymentRefunded (Stripe settled)."
+    - "`amount_cents` is the captured order total eligible for refund; `approved_amount_cents` is the (possibly partial) approved amount, null until approved."
+  indexes:
+    - [restaurant_id, status]   # the restaurant's refund queue (pendingRefunds, status = REQUESTED)
+  columns:
+    order_id:
+      from: [{ $ref: 'events.yaml#/RefundOpened/properties/orderId' }]
+      pk: true
+      fk: { $ref: 'database/tables/projection_tables.yaml#/OrderTracking/columns/order_id' }
+    restaurant_id:
+      from: [{ $ref: 'events.yaml#/RefundOpened/properties/restaurantId' }]
+      index: true
+      fk: { $ref: 'database/tables/projection_tables.yaml#/Restaurant/columns/restaurant_id' }
+    status:
+      type: { $ref: 'scalars.yaml#/RefundStatus' }
+      derive:
+        RefundOpened: REQUESTED
+        RefundApproved: APPROVED
+        RefundDenied: DENIED
+        PaymentRefunded: REFUNDED
+      from:
+        - { $ref: 'events.yaml#/RefundOpened' }
+        - { $ref: 'events.yaml#/RefundApproved' }
+        - { $ref: 'events.yaml#/RefundDenied' }
+        - { $ref: 'events.yaml#/PaymentRefunded' }
+      note: "Derived from the latest lifecycle event type."
+    amount_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/RefundOpened/properties/amount' }]
+      note: "amountCents of RefundOpened.amount (Money) — the captured total eligible for refund."
+    currency:
+      type: { $ref: 'scalars.yaml#/CurrencyCode' }
+      from: [{ $ref: 'events.yaml#/RefundOpened/properties/amount' }]
+      note: "currency of RefundOpened.amount (Money)."
+    approved_amount_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/RefundApproved/properties/amount' }]
+      nullable: true
+      note: "amountCents of RefundApproved.amount (Money — may be partial); null until approved."
+    reason:
+      type: text
+      from:
+        - { $ref: 'events.yaml#/RefundOpened/properties/reason' }
+        - { $ref: 'events.yaml#/RefundApproved/properties/reason' }
+        - { $ref: 'events.yaml#/RefundDenied/properties/reason' }
+      nullable: true
+      note: "The latest recorded reason: the opening fact's, then the decision's."
+    refund_id:
+      type: { $ref: 'scalars.yaml#/RefundId' }
+      from: [{ $ref: 'events.yaml#/PaymentRefunded/properties/refundId' }]
+      nullable: true
+      note: "The Stripe Refund id once settled; null before PaymentRefunded."
+    requested_at:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/RefundOpened' }]
+      note: "RefundOpened occurrence time."
+    decided_at:
+      type: timestamptz
+      from:
+        - { $ref: 'events.yaml#/RefundApproved' }
+        - { $ref: 'events.yaml#/RefundDenied' }
+      nullable: true
+      note: "The decision's occurrence time (approval or denial); null while REQUESTED."

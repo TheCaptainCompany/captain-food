@@ -450,6 +450,7 @@ OrderTracking:
     - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
     - { $ref: 'events.yaml#/DeliveryStatusUpdated' }
     - { $ref: 'events.yaml#/DeliveryCompleted' }
+    - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
   rules:
     - "`payment_status` is folded from the Stripe payment facts."
     - "`delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob."
@@ -573,9 +574,13 @@ OrderTracking:
     payment_status:
       type: text
       from:
+        - { $ref: 'events.yaml#/OrderPlaced' }
         - { $ref: 'events.yaml#/PaymentCaptured' }
         - { $ref: 'events.yaml#/PaymentRefunded' }
-      note: "Folded from Stripe facts; candidate for a PaymentStatus enum."
+      note: >
+        Folded from Stripe facts; candidate for a PaymentStatus enum. OrderPlaced seeds CAPTURED:
+        PlaceOrderProcess emits it only in reaction to PaymentCaptured (V0 prepaid-online), and that
+        capture sits earlier in the log than the row it would fold into.
     restaurant_stars:
       from: [{ $ref: 'events.yaml#/RestaurantRated/properties/stars' }]
       nullable: true
@@ -616,8 +621,9 @@ OrderTracking:
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
         - { $ref: 'events.yaml#/DeliveryStatusUpdated' }
         - { $ref: 'events.yaml#/DeliveryCompleted' }
+        - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
       nullable: true
-      note: "Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch."
+      note: "Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556)."
     courier:
       type: jsonb
       from:

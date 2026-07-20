@@ -105,6 +105,8 @@ PlaceOrderProcess:
         - guard: { throws: { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }, note: "A LIVE order never targets a TEST restaurant (ADR-0038)." }
         - guard: { throws: { $ref: 'errors.yaml#/DeliveryAddressRequired' }, note: "serviceType DELIVERY requires deliveryAddress." }
         - guard: { throws: { $ref: 'errors.yaml#/OutsideDeliveryArea' }, note: "The delivery address is inside the restaurant's delivery area." }
+        - guard: { throws: { $ref: 'errors.yaml#/PriceUnresolvable' }, note: "Fail-closed pricing: every cart line's price resolves from the live catalog; otherwise reject — never fall back to a client amount." }
+        - guard: { throws: { $ref: 'errors.yaml#/PriceMismatch' }, note: "If the client sent expectedTotal (confirmation only), it must equal the server-recomputed total — the server is the only price authority." }
         - call:
             port: payment
             operation: request
@@ -179,11 +181,12 @@ RefundProcess:
   type: process-manager
   description: >
     Approved refunds. A refundable fact (rejection, cancellation, customer request) OPENS a
-    pending refund on the state row; the RESTAURANT (its own orders) or an ADMIN decides with
-    ApproveRefund / DenyRefund (authz = api.yaml roles when the mutations land); on approval the
-    outbound Stripe refund is requested and the run settles when Stripe reports PaymentRefunded (the
-    fact itself is recorded by the Payment aggregate). The refund-eligibility window is a config value
-    enforced at approval, not a domain rule.
+    pending refund: RefundOpened is delivered to the Payment aggregate (so the refund queue,
+    View_PendingRefunds, folds from the log) and the state row goes PENDING_APPROVAL; the RESTAURANT
+    (its own orders) or an ADMIN decides with ApproveRefund / DenyRefund (authz = api.yaml roles); on
+    approval the outbound Stripe refund is requested and the run settles when Stripe reports
+    PaymentRefunded (the fact itself is recorded by the Payment aggregate). The refund-eligibility
+    window is a config value enforced at approval, not a domain rule.
   state_table: { $ref: 'database/tables/process_managers.yaml#/refund_process_manager' }
   ports:
     payment: { $ref: 'services.yaml#/payment' }
@@ -199,6 +202,15 @@ RefundProcess:
             that: { order: { payment_status: { const: CAPTURED } } }
             skip: true
             note: "Nothing captured → nothing to refund."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundOpened' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              orderId: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/orderId' } }
+              restaurantId: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/restaurantId' } }
+              amount: { from_read: order.total_amount_cents }
+              reason: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/reason' } }
+            note: "The refund queue fact (View_PendingRefunds); the Payment records it idempotently."
         - state:
             set:
               order_id: { from: { $ref: 'events.yaml#/OrderRejectedByRestaurant/properties/orderId' } }
@@ -216,6 +228,15 @@ RefundProcess:
             that: { order: { payment_status: { const: CAPTURED } } }
             skip: true
             note: "Nothing captured → nothing to refund."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundOpened' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              orderId: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/orderId' } }
+              restaurantId: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/restaurantId' } }
+              amount: { from_read: order.total_amount_cents }
+              reason: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/reason' } }
+            note: "The refund queue fact (View_PendingRefunds); the Payment records it idempotently."
         - state:
             set:
               order_id: { from: { $ref: 'events.yaml#/OrderCancelledByCustomer/properties/orderId' } }
@@ -233,6 +254,15 @@ RefundProcess:
             that: { order: { payment_status: { const: CAPTURED } } }
             skip: true
             note: "Nothing captured → nothing to refund."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundOpened' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              orderId: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/orderId' } }
+              restaurantId: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/restaurantId' } }
+              amount: { from_read: order.total_amount_cents }
+              reason: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/reason' } }
+            note: "The refund queue fact (View_PendingRefunds); the Payment records it idempotently."
         - state:
             set:
               order_id: { from: { $ref: 'events.yaml#/OrderCancelledByRestaurant/properties/orderId' } }
@@ -252,6 +282,15 @@ RefundProcess:
             that: { order: { payment_status: { const: CAPTURED } } }
             skip: true
             note: "Nothing captured → nothing to refund."
+        - deliver:
+            event: { $ref: 'events.yaml#/RefundOpened' }
+            to: { $ref: 'actors.yaml#/Payment' }
+            with:
+              orderId: { from: { $ref: 'events.yaml#/RefundRequested/properties/orderId' } }
+              restaurantId: { from: { $ref: 'events.yaml#/RefundRequested/properties/restaurantId' } }
+              amount: { from_read: order.total_amount_cents }
+              reason: { from: { $ref: 'events.yaml#/RefundRequested/properties/reason' } }
+            note: "The refund queue fact (View_PendingRefunds); the Payment records it idempotently."
         - state:
             set:
               order_id: { from: { $ref: 'events.yaml#/RefundRequested/properties/orderId' } }
@@ -357,9 +396,11 @@ DeliveryDispatchProcess:
     Dispatches and tracks deliveries (bounded context: delivery, ADR-0031). When a DELIVERY order is
     marked ready, delivers the DeliveryRequested birth to the DeliveryJob (deterministic UUIDv5 job id
     from the order id = idempotency key) and offers the job to the partner and/or independent riders.
-    Reacts to partner-reported facts (recorded by the DeliveryJob aggregate) and closes the order on
-    delivery by sending MarkOrderDelivered — the Order validates the transition, so a terminal
-    cancelled/rejected order is never resurrected.
+    Reacts to partner-reported facts (recorded by the DeliveryJob aggregate): a partner decline
+    re-offers the job up to 3 TOTAL offers (offer_attempts on the state row; V0 has a single partner —
+    multi-partner ranking is the extension point), then fails closed with DeliveryDispatchFailed
+    (ADR-20260720-004556). Closes the order on delivery by sending MarkOrderDelivered — the Order
+    validates the transition, so a terminal cancelled/rejected order is never resurrected.
   state_table: { $ref: 'database/tables/process_managers.yaml#/delivery_dispatch_process_manager' }
   ports:
     delivery: { $ref: 'services.yaml#/delivery' }
@@ -400,6 +441,8 @@ DeliveryDispatchProcess:
               restaurant_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/restaurantId' } }
               delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryRequested/properties/deliveryJobId' } }
               process_status: { const: OFFERED }
+              offer_attempts: { const: 1 }
+            note: "The birth offer counts as attempt 1 of the bounded re-offer policy (cap 3, ADR-20260720-004556)."
 
     - message: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
       description: >
@@ -416,7 +459,12 @@ DeliveryDispatchProcess:
             set: { process_status: { const: ACCEPTED } }
 
     - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
-      description: "The partner declined (inbound): re-offer, or flag for manual handling."
+      description: >
+        The partner declined (inbound): bounded re-offer (ADR-20260720-004556). While the run has made
+        fewer than 3 total offers, re-offer the job (V0 single partner — the same partner; multi-partner
+        ranking is the extension point) and stay OFFERED; the 3rd decline exhausts the cap and fails the
+        dispatch closed with DeliveryDispatchFailed. The linear step list carries the two branches with
+        notes — the cap comparison (an integer bound) is not expressible in guard `that` consts.
       steps:
         - state:
             by: { delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/deliveryJobId' } } }
@@ -425,11 +473,33 @@ DeliveryDispatchProcess:
             throws: { $ref: 'errors.yaml#/DeliveryJobNotFound' }
             note: "ERROR — a rejection for an unknown dispatch run; abort and surface."
         - state:
-            set: { process_status: { const: REOFFER_REQUIRED } }
+            expect: { process_status: { const: OFFERED } }
+            note: "Only an outstanding offer can be declined — a decline on a resolved/terminal run skips (benign re-delivery)."
         - call:
             port: delivery
             operation: offer_job
-            note: "TODO(saga): re-offer needs a partner-selection policy; REOFFER_REQUIRED flags manual handling meanwhile."
+            note: "RE-OFFER branch (offer_attempts < 3 only — skipped on the exhausted run): offer the job again to the single V0 partner."
+        - state:
+            set:
+              offer_attempts: { from_state: offer_attempts }
+              process_status: { const: OFFERED }
+            note: "RE-OFFER branch: offer_attempts := offer_attempts + 1 (the orchestrator increments — arithmetic the value forms cannot carry); the run stays OFFERED awaiting the partner's answer."
+        - guard:
+            skip: true
+            note: "offer_attempts stayed under the cap (3) → the job was re-offered; the run ends here. Otherwise (3rd decline) fall through to the terminal failure."
+        - deliver:
+            event: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+            to: { $ref: 'actors.yaml#/DeliveryJob' }
+            with:
+              deliveryJobId: { from: { $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/deliveryJobId' } }
+              orderId: { from_state: order_id }
+              restaurantId: { from_state: restaurant_id }
+              attempts: { from_state: offer_attempts }
+              lastReason: { from: { $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/reason' } }
+            note: "EXHAUSTED branch: the terminal dispatch-failure fact — View_DeliveryJob/OrderTracking surface it to the restaurant for manual handling."
+        - state:
+            set: { process_status: { const: FAILED } }
+            note: "The run closes FAILED — fail-closed, never a retry loop beyond the cap (rules.yaml#/DispatchRetriesAreBounded)."
 
     - message: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
       description: "Partner-reported progress: only the terminal DELIVERED report closes the order."

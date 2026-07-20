@@ -19,6 +19,7 @@ pub mod pm_state;
 pub mod prospection;
 pub mod prospection_store;
 pub mod referential;
+pub mod refund_queue;
 pub mod restaurant;
 pub mod restaurant_store;
 pub mod status_bus;
@@ -40,6 +41,7 @@ pub use prospection::PgProspectionRepository;
 pub use referential::{
     PgPricingPolicyRepository, PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
 };
+pub use refund_queue::PgRefundQueueRepository;
 pub use restaurant::PgRestaurantRepository;
 
 use domain::shared::errors::DomainError;

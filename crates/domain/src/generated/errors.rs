@@ -546,6 +546,22 @@ pub const PAYMENT_DECLINED: ErrorDef = ErrorDef {
     message_fr: "Le paiement a été refusé.",
 };
 
+/// The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the server recomputed from the live catalog. The server is the only price authority: the checkout is rejected so the customer is never charged an amount other than the one they were shown.
+/// Context: `cartId`, `expectedAmountCents`, `submittedAmountCents`, `currency`.
+pub const PRICE_MISMATCH: ErrorDef = ErrorDef {
+    code: "PriceMismatch",
+    message_en: "Prices have changed since you loaded the menu. Please review your cart and try again.",
+    message_fr: "Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer.",
+};
+
+/// A cart line's price could not be resolved from the live catalog at checkout (offer or selected option no longer present). Fail-closed: the checkout is rejected — the server never falls back to a client-supplied amount.
+/// Context: `cartId`, `offerId`.
+pub const PRICE_UNRESOLVABLE: ErrorDef = ErrorDef {
+    code: "PriceUnresolvable",
+    message_en: "An item in your cart is no longer available at a known price. Please review your cart.",
+    message_fr: "Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier.",
+};
+
 /// A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.
 /// Context: `paymentIntentId`.
 pub const PAYMENT_EVENT_ORPHANED: ErrorDef = ErrorDef {
@@ -640,6 +656,8 @@ pub const ERRORS: &[ErrorDef] = &[
     RIDER_NOT_FOUND,
     INVALID_RIDER_STATUS_TRANSITION,
     PAYMENT_DECLINED,
+    PRICE_MISMATCH,
+    PRICE_UNRESOLVABLE,
     PAYMENT_EVENT_ORPHANED,
     REFUND_NOT_PENDING,
     CANNOT_ORDER_TEST_RESTAURANT,

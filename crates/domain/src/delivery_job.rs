@@ -79,6 +79,9 @@ fn apply(state: Option<DeliveryJobState>, event: &DomainEvent) -> Option<Deliver
         DomainEvent::DeliveryCancelled(_) => s.status = DeliveryStatus::CANCELLED,
         // A rider decline leaves the job PENDING and re-offerable — nothing to fold.
         DomainEvent::DeliveryDeclinedByRider(_) => {}
+        // Terminal dispatch failure (offer cap exhausted, ADR-20260720-004556): the job is FAILED
+        // and surfaced for manual handling.
+        DomainEvent::DeliveryDispatchFailed(_) => s.status = DeliveryStatus::FAILED,
         DomainEvent::DeliveryIssueReported(_) => s.open_issue = true,
         DomainEvent::DeliveryIssueResolved(_) => s.open_issue = false,
         _ => {}

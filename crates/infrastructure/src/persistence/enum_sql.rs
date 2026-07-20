@@ -10,8 +10,8 @@ use domain::generated::scalars::{
     CartStatus, CommandChannel, CommandJournalStatus, ComparisonBasis, CuisineCategory,
     DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus, GbpLinkStatus,
     InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
-    ProspectPipelineStatus, RefundProcessStatus, RestaurantListingStatus, RestaurantStatus,
-    ServiceType, ThumbRating,
+    ProspectPipelineStatus, RefundProcessStatus, RefundStatus, RestaurantListingStatus,
+    RestaurantStatus, ServiceType, ThumbRating,
 };
 use domain::shared::errors::DomainError;
 
@@ -84,6 +84,12 @@ enum_ord!(ComparisonBasis { ESTIMATED => 0, REAL => 1 });
 enum_ord!(ThumbRating { UP => 0, DOWN => 1 });
 enum_ord!(PaymentStatus { PENDING => 0, CAPTURED => 1, FAILED => 2, REFUNDED => 3 });
 enum_ord!(PaymentProcessStatus { AWAITING_PAYMENT_RESULT => 0, ORDER_PLACED => 1, FAILED => 2 });
+enum_ord!(RefundStatus {
+    REQUESTED => 0,
+    APPROVED => 1,
+    DENIED => 2,
+    REFUNDED => 3,
+});
 enum_ord!(RefundProcessStatus {
     PENDING_APPROVAL => 0,
     APPROVED_AWAITING_SETTLEMENT => 1,
@@ -93,7 +99,8 @@ enum_ord!(RefundProcessStatus {
 enum_ord!(DeliveryDispatchProcessStatus {
     OFFERED => 0,
     ACCEPTED => 1,
-    REOFFER_REQUIRED => 2,
+    // FAILED keeps retired REOFFER_REQUIRED's slot (both flag manual handling; ADR-20260720-004556).
+    FAILED => 2,
     COMPLETED => 3,
 });
 enum_ord!(CommandJournalStatus { RECEIVED => 0, SUCCEEDED => 1, REJECTED => 2, FAILED => 3 });
@@ -154,7 +161,7 @@ mod tests {
         assert_eq!(DeliveryDispatchProcessStatus::COMPLETED.to_ord(), 3);
         assert_eq!(
             DeliveryDispatchProcessStatus::from_ord(2).unwrap(),
-            DeliveryDispatchProcessStatus::REOFFER_REQUIRED
+            DeliveryDispatchProcessStatus::FAILED
         );
         assert_eq!(CommandJournalStatus::FAILED.to_ord(), 3);
         assert_eq!(CommandJournalStatus::from_ord(0).unwrap(), CommandJournalStatus::RECEIVED);

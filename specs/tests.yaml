@@ -321,6 +321,9 @@ fixtures:
   paymentRefunded:
     type: { $ref: 'events.yaml#/PaymentRefunded' }
     data: { refundId: "re_1", paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }
+  refundOpened:
+    type: { $ref: 'events.yaml#/RefundOpened' }
+    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Out of ingredients" }
   refundApproved:
     type: { $ref: 'events.yaml#/RefundApproved' }
     data: { orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order rejected by the restaurant" }
@@ -355,6 +358,9 @@ fixtures:
   deliveryRejectedByPartner:
     type: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
     data: { deliveryJobId: "deliv-1", reason: "No courier available" }
+  deliveryDispatchFailed:
+    type: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", restaurantId: "resto-1", attempts: 3, lastReason: "No courier available" }
   deliveryStatusUpdatedDelivered:
     type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
     data: { deliveryJobId: "deliv-1", status: "DELIVERED" }
@@ -1590,6 +1596,37 @@ tests:
     then:
       - { $ref: '#/fixtures/orderCancelledByRestaurant' }
 
+  TestOrderLifecycleRejectsSkippedTransition:
+    name: "Rejects a move the declared Order state machine does not contain (accepting an already-accepted order)"
+    rules:
+      - { $ref: 'rules.yaml#/OrderLifecycleIsExplicit' }
+      - { $ref: 'rules.yaml#/OrderLifecycleStatusMachine' }
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderAcceptedByRestaurant' }
+    when:
+      type: { $ref: 'commands.yaml#/AcceptOrder' }
+      data: { orderId: "order-1", restaurantId: "resto-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+
+  TestOrderLifecycleTerminalStateRefusesTransitions:
+    name: "Rejects any lifecycle transition out of a terminal state (cancelling a delivered order)"
+    rules:
+      - { $ref: 'rules.yaml#/OrderLifecycleIsExplicit' }
+      - { $ref: 'rules.yaml#/OrderLifecycleStatusMachine' }
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderMarkedReady' }
+      - { $ref: '#/fixtures/orderDelivered' }
+    when:
+      type: { $ref: 'commands.yaml#/CancelOrderByRestaurant' }
+      data: { orderId: "order-1", restaurantId: "resto-1", reason: "Too late" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+
   TestOrderRated:
     name: "Customer rates the delivery (rider thumb) after delivery"
     rules: [{ $ref: 'rules.yaml#/OrderRatedOnceWhenDelivered' }]
@@ -1718,6 +1755,70 @@ tests:
     then:
       - { $ref: '#/fixtures/paymentIntentCreated' }
 
+  TestPlaceOrderRecomputesPriceServerSide:
+    name: "Checkout recomputes every line total and the order total from the live catalog; a matching client confirmation total passes"
+    rules: [{ $ref: 'rules.yaml#/ServerPriceAuthority' }]
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "PICKUP"
+        expectedTotal: { amountCents: 1960, currency: "EUR" }
+        paymentMethodId: "pm_123"
+    then:
+      - { $ref: '#/fixtures/paymentIntentCreated' }
+
+  TestPlaceOrderRejectsPriceMismatch:
+    name: "A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)"
+    rules: [{ $ref: 'rules.yaml#/ServerPriceAuthority' }]
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "PICKUP"
+        expectedTotal: { amountCents: 100, currency: "EUR" }
+        paymentMethodId: "pm_123"
+    thrown:
+      - { $ref: 'errors.yaml#/PriceMismatch' }
+
+  TestPlaceOrderRejectsUnresolvablePrice:
+    name: "A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)"
+    rules: [{ $ref: 'rules.yaml#/ServerPriceAuthority' }]
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      # No catalog facts: the cart's offer resolves to no live price.
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "PICKUP"
+        paymentMethodId: "pm_123"
+    thrown:
+      - { $ref: 'errors.yaml#/PriceUnresolvable' }
+
   TestPlaceOrderIsRejected:
     name: "Rejects checkout when the restaurant is paused, the cart is empty, the delivery address is missing or out of area, or the payment is declined"
     rules: [{ $ref: 'rules.yaml#/CheckoutPricesCartCreatesPaymentIntent' }]
@@ -1794,7 +1895,8 @@ tests:
     when:
       type: { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
       data: { orderId: "order-1", restaurantId: "resto-1", reason: "Out of ingredients" }
-    then: []
+    then:
+      - { $ref: '#/fixtures/refundOpened' }   # the refund-queue fact, delivered to the Payment (View_PendingRefunds)
 
   TestRefundOnOrderCancelledByCustomer:
     name: "Requests a Stripe refund when the customer cancels the order"
@@ -1955,8 +2057,10 @@ tests:
     then: []
 
   TestDispatchPartnerRejected:
-    name: "Re-offers or flags for manual handling when the partner declines (inbound)"
-    rules: [{ $ref: 'rules.yaml#/PartnerRejectionReoffers' }]
+    name: "Re-offers the declined job to the partner while under the 3-offer cap (inbound decline)"
+    rules:
+      - { $ref: 'rules.yaml#/PartnerRejectionReoffers' }
+      - { $ref: 'rules.yaml#/DispatchRetriesAreBounded' }
     actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
     given:
       - { $ref: '#/fixtures/deliveryRequested' }
@@ -1964,6 +2068,34 @@ tests:
       type: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
       data: { deliveryJobId: "deliv-1", reason: "No courier available" }
     then: []
+
+  TestDispatchAcceptedAfterReoffer:
+    name: "The partner accepts a re-offered job: the run advances to ACCEPTED (happy path after a decline)"
+    rules:
+      - { $ref: 'rules.yaml#/DispatchRetriesAreBounded' }
+      - { $ref: 'rules.yaml#/PartnerAcceptanceRecordsCourier' }
+    actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryRejectedByPartner' }
+    when:
+      type: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
+      data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", courier: { displayName: "Léa", phone: "+33611223344" } }
+    then: []
+
+  TestDispatchFailsAfterOfferCap:
+    name: "The 3rd partner decline exhausts the offer cap: DeliveryDispatchFailed is recorded and the run closes FAILED"
+    rules: [{ $ref: 'rules.yaml#/DispatchRetriesAreBounded' }]
+    actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryRejectedByPartner' }
+      - { $ref: '#/fixtures/deliveryRejectedByPartner' }
+    when:
+      type: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
+      data: { deliveryJobId: "deliv-1", reason: "No courier available" }
+    then:
+      - { $ref: '#/fixtures/deliveryDispatchFailed' }
 
   TestDispatchClosesOrderOnPartnerDelivered:
     name: "Closes the order when the partner reports DELIVERED (inbound)"
@@ -2116,6 +2248,19 @@ tests:
     then:
       - { $ref: '#/fixtures/paymentRefunded' }
 
+  TestPendingRefundVisibleUntilDecided:
+    name: "The Payment records the opened refund (RefundOpened, idempotent) so the refund queue folds it as REQUESTED until decided"
+    rules: [{ $ref: 'rules.yaml#/PendingRefundVisibleUntilDecided' }]
+    actor: { $ref: 'actors.yaml#/Payment' }
+    given:
+      - { $ref: '#/fixtures/paymentIntentCreated' }
+      - { $ref: '#/fixtures/paymentCaptured' }
+    when:
+      type: { $ref: 'events.yaml#/RefundOpened' }
+      data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Out of ingredients" }
+    then:
+      - { $ref: '#/fixtures/refundOpened' }
+
   TestPaymentRefundApprovedRecorded:
     name: "The Payment records the refund approval (restaurant or admin) delivered by RefundProcess"
     rules: [{ $ref: 'rules.yaml#/RefundRequiresApproval' }]
@@ -2208,7 +2353,7 @@ tests:
       - { $ref: '#/fixtures/deliveryAcceptedByPartner' }
 
   TestDeliveryJobRecordsPartnerRejection:
-    name: "The DeliveryJob records the inbound partner rejection (the dispatcher re-offers)"
+    name: "The DeliveryJob records the inbound partner rejection (the dispatcher re-offers, bounded)"
     rules: [{ $ref: 'rules.yaml#/PartnerRejectionReoffers' }]
     actor: { $ref: 'actors.yaml#/DeliveryJob' }
     given:
@@ -2218,6 +2363,18 @@ tests:
       data: { deliveryJobId: "deliv-1", reason: "No courier available" }
     then:
       - { $ref: '#/fixtures/deliveryRejectedByPartner' }
+
+  TestDeliveryJobRecordsDispatchFailure:
+    name: "The DeliveryJob records the terminal dispatch failure delivered by DeliveryDispatchProcess (job → FAILED)"
+    rules: [{ $ref: 'rules.yaml#/DispatchRetriesAreBounded' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+    when:
+      type: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+      data: { deliveryJobId: "deliv-1", orderId: "order-1", restaurantId: "resto-1", attempts: 3, lastReason: "No courier available" }
+    then:
+      - { $ref: '#/fixtures/deliveryDispatchFailed' }
 
   TestDeliveryStatusUpdatedByCommand:
     name: "The delivery status is driven through valid transitions to DELIVERED"

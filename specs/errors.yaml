@@ -626,6 +626,32 @@ PaymentDeclined:
     en: "Payment was declined."
     fr: "Le paiement a été refusé."
 
+PriceMismatch:
+  description: >
+    The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the
+    server recomputed from the live catalog. The server is the only price authority: the checkout is
+    rejected so the customer is never charged an amount other than the one they were shown.
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+    expectedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+    submittedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+    currency: { $ref: 'scalars.yaml#/CurrencyCode' }
+  messages:
+    en: "Prices have changed since you loaded the menu. Please review your cart and try again."
+    fr: "Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer."
+
+PriceUnresolvable:
+  description: >
+    A cart line's price could not be resolved from the live catalog at checkout (offer or selected
+    option no longer present). Fail-closed: the checkout is rejected — the server never falls back
+    to a client-supplied amount.
+  context:
+    cartId: { $ref: 'scalars.yaml#/CartId' }
+    offerId: { $ref: 'scalars.yaml#/OfferId' }
+  messages:
+    en: "An item in your cart is no longer available at a known price. Please review your cart."
+    fr: "Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier."
+
 PaymentEventOrphaned:
   description: >
     A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known

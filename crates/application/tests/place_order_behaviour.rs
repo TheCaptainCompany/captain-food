@@ -3,8 +3,9 @@
 //! command (ADR-0032: each test cites the `specs/rules.yaml` rule it asserts).
 //!
 //! Pure and offline: an in-memory [`EventStore`] (holding the Restaurant, Cart and Payment streams the
-//! saga touches), a fake `CartReadRepository` standing in for the priced Cart projection, a fake
-//! `PaymentGateway` (declines `pm_declined`, accepts anything else as `pi_123`), and the in-memory
+//! saga touches), a fake `CatalogReadRepository` standing in for the LIVE catalog the handler reprices
+//! every cart line from (rules.yaml#/ServerPriceAuthority — the server is the only price authority), a
+//! fake `PaymentGateway` (declines `pm_declined`, accepts anything else as `pi_123`), and the in-memory
 //! `payment_process_manager` state store (`application::pm_state::mem`) the handler opens the run on
 //! (ADR-20260719-193500: PaymentIntentCreated is DELIVERED to `Payment-<intentId>` — the aggregate's
 //! birth — and the run row goes AWAITING_PAYMENT_RESULT). The event-driven saga legs
@@ -21,7 +22,9 @@ use application::commands::{place_order, rejection_code};
 use application::pm_state::mem::MemPaymentProcessState;
 use application::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
 use application::ports::{version_conflict, Actor, CreatedPaymentIntent, EventStore, PaymentGateway};
-use application::queries::{CartReadRepository, CartRow};
+use application::queries::{
+    CatalogReadRepository, CatalogRow, OfferOptionListView, OfferOptionView, OfferView,
+};
 use domain::generated::commands::PlaceOrder;
 use domain::generated::entities::{
     Address, CartLineItem, CheckoutSnapshot, CustomerContact, Money, PaymentBreakdown,
@@ -81,21 +84,33 @@ impl EventStore for MemStore {
     }
 }
 
-/// Fake priced Cart projection: `by_id` answers from at most one configured row (the total the saga
-/// prices the PaymentIntent from — server-computed, never trusted from the client).
+/// Fake LIVE catalog: `offer_by_id` answers from the configured offer views — the prices the handler
+/// recomputes every line from (rules.yaml#/ServerPriceAuthority). An offer absent here has NO
+/// resolvable price, so checkout must reject fail-closed (`PriceUnresolvable`).
 #[derive(Default)]
-struct FakeCarts {
-    row: Option<CartRow>,
+struct FakeCatalogs {
+    restaurant_id: Option<RestaurantId>,
+    offers: Vec<OfferView>,
 }
 
 #[async_trait]
-impl CartReadRepository for FakeCarts {
-    async fn by_customer(&self, _customer_id: CustomerId) -> Result<Vec<CartRow>, DomainError> {
-        Ok(self.row.clone().into_iter().collect())
+impl CatalogReadRepository for FakeCatalogs {
+    async fn by_restaurant(
+        &self,
+        _restaurant_id: RestaurantId,
+    ) -> Result<Option<CatalogRow>, DomainError> {
+        Ok(None) // offer-level double — `offer_by_id` is overridden below
     }
 
-    async fn by_id(&self, id: CartId) -> Result<Option<CartRow>, DomainError> {
-        Ok(self.row.clone().filter(|r| r.cart_id == id))
+    async fn offer_by_id(
+        &self,
+        restaurant_id: RestaurantId,
+        offer_id: OfferId,
+    ) -> Result<Option<OfferView>, DomainError> {
+        if self.restaurant_id != Some(restaurant_id) {
+            return Ok(None);
+        }
+        Ok(self.offers.iter().find(|o| o.offer_id == offer_id).cloned())
     }
 }
 
@@ -193,37 +208,45 @@ fn paused(id: RestaurantId) -> DomainEvent {
     })
 }
 
-/// Fixtures `cartStarted` + `cartLineAdded` — an OPEN cart holding one line.
-fn open_cart_with_line(cart: CartId, resto: RestaurantId) -> Vec<DomainEvent> {
+/// Fixtures `cartStarted` + `cartLineAdded` — an OPEN cart holding one line of `offer` × 2 (with
+/// optional selected options).
+fn open_cart_with_line(
+    cart: CartId,
+    resto: RestaurantId,
+    offer: OfferId,
+    selected_option_ids: Vec<OptionId>,
+) -> Vec<DomainEvent> {
     vec![
         DomainEvent::CartStarted(CartStarted { cart_id: cart, restaurant_id: resto, session_id: SessionId(uuid::Uuid::new_v4()), customer_id: None }),
         DomainEvent::CartLineAdded(CartLineAdded {
             cart_id: cart,
             line: CartLineItem {
                 cart_line_id: CartLineId(uuid::Uuid::new_v4()),
-                offer_id: OfferId(uuid::Uuid::new_v4()),
+                offer_id: offer,
                 quantity: 2,
-                selected_option_ids: vec![],
+                selected_option_ids,
             },
         }),
     ]
 }
 
-/// The priced `cart` projection row the saga reads the server-computed total from (19.60 EUR).
-fn priced_row(cart: CartId, resto: RestaurantId) -> CartRow {
-    CartRow {
-        cart_id: cart,
-        restaurant_id: resto,
-        session_id: SessionId(uuid::Uuid::new_v4()),
-        customer_id: None,
-        status: CartStatus::OPEN,
-        lines: serde_json::json!([]),
-        total_amount_cents: MoneyCents(1960),
-        currency: CurrencyCode("EUR".into()),
-        estimated_breakdown: None,
-        uber_comparison: None,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
+fn eur(cents: i64) -> Money {
+    Money { amount_cents: MoneyCents(cents), currency: CurrencyCode("EUR".into()) }
+}
+
+/// The live-catalog offer view checkout reprices the fixture line from: 'Margherita' at 9.80 EUR
+/// (tests.yaml `productAdded` fixture), with the given option lists.
+fn offer_view(offer: OfferId, option_lists: Vec<OfferOptionListView>) -> OfferView {
+    OfferView {
+        offer_id: offer,
+        product_id: ProductId(uuid::Uuid::new_v4()),
+        product_name: ProductName("Margherita".into()),
+        offer_name: OfferName("Default".into()),
+        price: eur(980),
+        availability: CatalogItemAvailability::AVAILABLE,
+        stock_status: StockStatus::IN_STOCK,
+        stock_quantity: None,
+        option_lists,
     }
 }
 
@@ -244,6 +267,7 @@ fn place_cmd(order: OrderId, resto: RestaurantId, cart: CartId) -> PlaceOrder {
         delivery_address: Some(address()),
         note: None,
         payment_method_id: "pm_123".into(),
+        expected_total: None,
     }
 }
 
@@ -291,11 +315,13 @@ fn cid() -> CartId {
     CartId(uuid::Uuid::new_v4())
 }
 
-/// GIVEN an ACTIVE restaurant + an OPEN one-line cart, priced in the projection.
-fn checkout_given(store: &MemStore, resto: RestaurantId, cart: CartId) -> FakeCarts {
+/// GIVEN an ACTIVE restaurant + an OPEN cart holding 2 × the 9.80 EUR offer, live in the catalog —
+/// the server-recomputed total is 19.60 EUR.
+fn checkout_given(store: &MemStore, resto: RestaurantId, cart: CartId) -> FakeCatalogs {
+    let offer = OfferId(uuid::Uuid::new_v4());
     store.seed(&restaurant_stream(resto), vec![registered(resto, None), activated(resto)]);
-    store.seed(&cart_stream(cart), open_cart_with_line(cart, resto));
-    FakeCarts { row: Some(priced_row(cart, resto)) }
+    store.seed(&cart_stream(cart), open_cart_with_line(cart, resto, offer, vec![]));
+    FakeCatalogs { restaurant_id: Some(resto), offers: vec![offer_view(offer, vec![])] }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -309,9 +335,9 @@ async fn checkout_prices_the_open_cart_and_creates_a_payment_intent() {
     let store = MemStore::default();
     let pm = MemPaymentProcessState::default();
     let (order, resto, cart) = (oid(), rid(), cid());
-    let carts = checkout_given(&store, resto, cart);
+    let catalogs = checkout_given(&store, resto, cart);
 
-    let intent = place_order(&store, &carts, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+    let intent = place_order(&store, &catalogs, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
         .await
         .expect("checkout");
 
@@ -341,6 +367,113 @@ async fn checkout_prices_the_open_cart_and_creates_a_payment_intent() {
     assert_eq!(store.stream(&cart_stream(cart)).len(), 2);
 }
 
+// ------------------------------------------------------------------------------------------------
+// Server-side pricing (rules.yaml#/ServerPriceAuthority) — the server is the only price authority.
+// ------------------------------------------------------------------------------------------------
+
+/// tests.yaml#/cases/TestPlaceOrderRecomputesPriceServerSide — rules.yaml#/ServerPriceAuthority:
+/// every line (offer + selected options) is repriced from the LIVE catalog into the payment-intent
+/// amount and the frozen snapshot's items/breakdown; a MATCHING client confirmation total passes.
+#[tokio::test]
+async fn checkout_reprices_lines_and_options_from_the_live_catalog() {
+    let store = MemStore::default();
+    let pm = MemPaymentProcessState::default();
+    let (order, resto, cart) = (oid(), rid(), cid());
+    // GIVEN: 2 × (9.80 EUR offer + 1.00 EUR selected option) — server total 21.60 EUR.
+    let (offer, option, list) =
+        (OfferId(uuid::Uuid::new_v4()), OptionId(uuid::Uuid::new_v4()), OptionListId(uuid::Uuid::new_v4()));
+    let option_lists = vec![OfferOptionListView {
+        id: list,
+        min_selections: 0,
+        max_selections: Some(1),
+        multiple_selection: false,
+        option_ids: vec![option],
+        options: vec![OfferOptionView { id: option, name: OptionName("Extra".into()), price: eur(100) }],
+    }];
+    store.seed(&restaurant_stream(resto), vec![registered(resto, None), activated(resto)]);
+    store.seed(&cart_stream(cart), open_cart_with_line(cart, resto, offer, vec![option]));
+    let catalogs = FakeCatalogs { restaurant_id: Some(resto), offers: vec![offer_view(offer, option_lists)] };
+
+    // WHEN: the client confirms the total it displayed (21.60 EUR) — equality, so the checkout passes.
+    let mut cmd = place_cmd(order, resto, cart);
+    cmd.expected_total = Some(eur(2160));
+    place_order(&store, &catalogs, &FakeGateway, &pm, cmd, &actor()).await.expect("checkout");
+
+    // THEN: the intent amount and the frozen snapshot carry ONLY server-recomputed money.
+    let events = store.stream(&payment_stream());
+    let DomainEvent::PaymentIntentCreated(e) = &events[0] else { panic!("PaymentIntentCreated") };
+    assert_eq!(e.amount, eur(2160));
+    assert_eq!(e.checkout.total_amount, eur(2160));
+    assert_eq!(e.checkout.breakdown.total, eur(2160));
+    assert_eq!(e.checkout.breakdown.articles, eur(2160));
+    assert_eq!(e.checkout.items.len(), 1);
+    let item = &e.checkout.items[0];
+    assert_eq!(item.offer_id, offer);
+    assert_eq!(item.name, ProductName("Margherita".into()));
+    assert_eq!(item.quantity, 2);
+    assert_eq!(item.unit_price, eur(980));
+    assert_eq!(item.line_total, eur(2160)); // (980 + 100) × 2
+    assert_eq!(item.selected_options.len(), 1);
+    assert_eq!(item.selected_options[0].option_id, option);
+    assert_eq!(item.selected_options[0].price, eur(100));
+}
+
+/// tests.yaml#/cases/TestPlaceOrderRejectsPriceMismatch — rules.yaml#/ServerPriceAuthority: a client
+/// confirmation total diverging from the server-recomputed total rejects the checkout — the client
+/// number is NEVER charged, no intent is created, no run is opened.
+#[tokio::test]
+async fn a_diverging_client_total_is_rejected_with_price_mismatch() {
+    let store = MemStore::default();
+    let pm = MemPaymentProcessState::default();
+    let (order, resto, cart) = (oid(), rid(), cid());
+    let catalogs = checkout_given(&store, resto, cart); // server total: 19.60 EUR
+
+    let mut cmd = place_cmd(order, resto, cart);
+    cmd.expected_total = Some(eur(100)); // the client claims 1.00 EUR
+    let err = place_order(&store, &catalogs, &FakeGateway, &pm, cmd, &actor())
+        .await
+        .expect_err("price mismatch");
+    assert_eq!(rejection_code(&err), Some("PriceMismatch"));
+    assert!(store.stream(&payment_stream()).is_empty(), "no intent on rejection");
+    assert!(pm.by_cart(cart).await.unwrap().is_none(), "no run row on rejection");
+}
+
+/// tests.yaml#/cases/TestPlaceOrderRejectsUnresolvablePrice — rules.yaml#/ServerPriceAuthority
+/// (fail-closed): a line whose offer — or selected option — has no resolvable live-catalog price
+/// rejects the checkout; the server never falls back to a client amount.
+#[tokio::test]
+async fn an_unresolvable_line_price_rejects_the_checkout_fail_closed() {
+    let pm = MemPaymentProcessState::default();
+
+    // The cart's offer is not in the live catalog anymore → PriceUnresolvable.
+    let store = MemStore::default();
+    let (order, resto, cart) = (oid(), rid(), cid());
+    store.seed(&restaurant_stream(resto), vec![registered(resto, None), activated(resto)]);
+    store.seed(&cart_stream(cart), open_cart_with_line(cart, resto, OfferId(uuid::Uuid::new_v4()), vec![]));
+    let empty = FakeCatalogs { restaurant_id: Some(resto), offers: vec![] };
+    let err = place_order(&store, &empty, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+        .await
+        .expect_err("offer gone");
+    assert_eq!(rejection_code(&err), Some("PriceUnresolvable"));
+    assert!(store.stream(&payment_stream()).is_empty(), "no intent on rejection");
+
+    // The offer resolves but a SELECTED OPTION does not → same fail-closed rejection.
+    let store = MemStore::default();
+    let (order, resto, cart) = (oid(), rid(), cid());
+    let offer = OfferId(uuid::Uuid::new_v4());
+    store.seed(&restaurant_stream(resto), vec![registered(resto, None), activated(resto)]);
+    store.seed(
+        &cart_stream(cart),
+        open_cart_with_line(cart, resto, offer, vec![OptionId(uuid::Uuid::new_v4())]),
+    );
+    let catalogs = FakeCatalogs { restaurant_id: Some(resto), offers: vec![offer_view(offer, vec![])] };
+    let err = place_order(&store, &catalogs, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+        .await
+        .expect_err("option gone");
+    assert_eq!(rejection_code(&err), Some("PriceUnresolvable"));
+    assert!(store.stream(&payment_stream()).is_empty(), "no intent on rejection");
+}
+
 /// A re-delivered checkout whose intent already birthed the Payment stream is absorbed instead of
 /// duplicating the fact (the `create` version-0 clash = re-delivered birth) —
 /// rules.yaml#/CheckoutPricesCartCreatesPaymentIntent.
@@ -349,7 +482,7 @@ async fn replaying_the_checkout_onto_an_existing_payment_stream_is_absorbed() {
     let store = MemStore::default();
     let pm = MemPaymentProcessState::default();
     let (order, resto, cart) = (oid(), rid(), cid());
-    let carts = checkout_given(&store, resto, cart);
+    let catalogs = checkout_given(&store, resto, cart);
     store.seed(
         &payment_stream(),
         vec![DomainEvent::PaymentIntentCreated(PaymentIntentCreated {
@@ -361,7 +494,7 @@ async fn replaying_the_checkout_onto_an_existing_payment_stream_is_absorbed() {
         })],
     );
 
-    place_order(&store, &carts, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+    place_order(&store, &catalogs, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
         .await
         .expect("replay absorbed");
     assert_eq!(store.stream(&payment_stream()).len(), 1, "no duplicate fact");
@@ -379,7 +512,7 @@ async fn a_second_concurrent_checkout_of_the_same_cart_is_rejected() {
     let store = MemStore::default();
     let pm = MemPaymentProcessState::default();
     let (order, resto, cart) = (oid(), rid(), cid());
-    let carts = checkout_given(&store, resto, cart);
+    let catalogs = checkout_given(&store, resto, cart);
     pm.upsert(&PaymentProcessRow {
         cart_id: cart,
         order_id: oid(), // the FIRST checkout's order — still awaiting its Stripe outcome
@@ -395,7 +528,7 @@ async fn a_second_concurrent_checkout_of_the_same_cart_is_rejected() {
     .await
     .unwrap();
 
-    let err = place_order(&store, &carts, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+    let err = place_order(&store, &catalogs, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
         .await
         .expect_err("second checkout in flight");
     assert_eq!(rejection_code(&err), Some("Conflict"));
@@ -419,9 +552,9 @@ async fn rejects_checkout_when_paused_empty_addressless_or_declined() {
     // Paused restaurant → RestaurantPaused.
     let store = MemStore::default();
     let (order, resto, cart) = (oid(), rid(), cid());
-    let carts = checkout_given(&store, resto, cart);
+    let catalogs = checkout_given(&store, resto, cart);
     store.seed(&restaurant_stream(resto), vec![registered(resto, None), activated(resto), paused(resto)]);
-    let err = place_order(&store, &carts, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+    let err = place_order(&store, &catalogs, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
         .await
         .expect_err("paused");
     assert_eq!(rejection_code(&err), Some("RestaurantPaused"));
@@ -429,12 +562,12 @@ async fn rejects_checkout_when_paused_empty_addressless_or_declined() {
     // Empty cart (started, no line) → CartEmpty.
     let store = MemStore::default();
     let (order, resto, cart) = (oid(), rid(), cid());
-    let carts = checkout_given(&store, resto, cart);
+    let catalogs = checkout_given(&store, resto, cart);
     store.seed(
         &cart_stream(cart),
         vec![DomainEvent::CartStarted(CartStarted { cart_id: cart, restaurant_id: resto, session_id: SessionId(uuid::Uuid::new_v4()), customer_id: None })],
     );
-    let err = place_order(&store, &carts, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+    let err = place_order(&store, &catalogs, &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
         .await
         .expect_err("empty cart");
     assert_eq!(rejection_code(&err), Some("CartEmpty"));
@@ -442,19 +575,19 @@ async fn rejects_checkout_when_paused_empty_addressless_or_declined() {
     // DELIVERY without an address → DeliveryAddressRequired.
     let store = MemStore::default();
     let (order, resto, cart) = (oid(), rid(), cid());
-    let carts = checkout_given(&store, resto, cart);
+    let catalogs = checkout_given(&store, resto, cart);
     let mut cmd = place_cmd(order, resto, cart);
     cmd.delivery_address = None;
-    let err = place_order(&store, &carts, &FakeGateway, &pm, cmd, &actor()).await.expect_err("no address");
+    let err = place_order(&store, &catalogs, &FakeGateway, &pm, cmd, &actor()).await.expect_err("no address");
     assert_eq!(rejection_code(&err), Some("DeliveryAddressRequired"));
 
     // Synchronous Stripe decline → PaymentDeclined; nothing is recorded and no run is opened.
     let store = MemStore::default();
     let (order, resto, cart) = (oid(), rid(), cid());
-    let carts = checkout_given(&store, resto, cart);
+    let catalogs = checkout_given(&store, resto, cart);
     let mut cmd = place_cmd(order, resto, cart);
     cmd.payment_method_id = "pm_declined".into();
-    let err = place_order(&store, &carts, &FakeGateway, &pm, cmd, &actor()).await.expect_err("declined");
+    let err = place_order(&store, &catalogs, &FakeGateway, &pm, cmd, &actor()).await.expect_err("declined");
     assert_eq!(rejection_code(&err), Some("PaymentDeclined"));
     assert!(store.stream(&payment_stream()).is_empty(), "no event on rejection");
     assert!(store.stream(&order_stream(order)).is_empty(), "no event on rejection");
@@ -469,7 +602,7 @@ async fn rejects_checkout_against_a_missing_or_inactive_restaurant_or_an_invalid
 
     // Unknown restaurant → RestaurantNotFound.
     let store = MemStore::default();
-    let err = place_order(&store, &FakeCarts::default(), &FakeGateway, &pm, place_cmd(oid(), rid(), cid()), &actor())
+    let err = place_order(&store, &FakeCatalogs::default(), &FakeGateway, &pm, place_cmd(oid(), rid(), cid()), &actor())
         .await
         .expect_err("missing restaurant");
     assert_eq!(rejection_code(&err), Some("RestaurantNotFound"));
@@ -478,7 +611,7 @@ async fn rejects_checkout_against_a_missing_or_inactive_restaurant_or_an_invalid
     let store = MemStore::default();
     let (order, resto, cart) = (oid(), rid(), cid());
     store.seed(&restaurant_stream(resto), vec![registered(resto, None)]);
-    let err = place_order(&store, &FakeCarts::default(), &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+    let err = place_order(&store, &FakeCatalogs::default(), &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
         .await
         .expect_err("not active");
     assert_eq!(rejection_code(&err), Some("RestaurantNotActive"));
@@ -487,7 +620,7 @@ async fn rejects_checkout_against_a_missing_or_inactive_restaurant_or_an_invalid
     let store = MemStore::default();
     let (order, resto, cart) = (oid(), rid(), cid());
     store.seed(&restaurant_stream(resto), vec![registered(resto, None), activated(resto)]);
-    let err = place_order(&store, &FakeCarts::default(), &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+    let err = place_order(&store, &FakeCatalogs::default(), &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
         .await
         .expect_err("missing cart");
     assert_eq!(rejection_code(&err), Some("CartNotFound"));
@@ -497,8 +630,8 @@ async fn rejects_checkout_against_a_missing_or_inactive_restaurant_or_an_invalid
     let (order, resto, cart) = (oid(), rid(), cid());
     let other = rid();
     store.seed(&restaurant_stream(resto), vec![registered(resto, None), activated(resto)]);
-    store.seed(&cart_stream(cart), open_cart_with_line(cart, other));
-    let err = place_order(&store, &FakeCarts::default(), &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
+    store.seed(&cart_stream(cart), open_cart_with_line(cart, other, OfferId(uuid::Uuid::new_v4()), vec![]));
+    let err = place_order(&store, &FakeCatalogs::default(), &FakeGateway, &pm, place_cmd(order, resto, cart), &actor())
         .await
         .expect_err("mismatched cart");
     assert_eq!(rejection_code(&err), Some("CartRestaurantMismatch"));
@@ -511,18 +644,18 @@ async fn a_live_order_against_a_test_restaurant_is_rejected() {
     let store = MemStore::default();
     let pm = MemPaymentProcessState::default();
     let (order, resto, cart) = (oid(), rid(), cid());
-    let carts = checkout_given(&store, resto, cart);
+    let catalogs = checkout_given(&store, resto, cart);
     store.seed(&restaurant_stream(resto), vec![registered(resto, Some(Mode::TEST)), activated(resto)]);
 
     // LIVE (mode absent = LIVE) against TEST → CannotOrderTestRestaurant.
     let mut cmd = place_cmd(order, resto, cart);
     cmd.mode = Some(Mode::LIVE);
-    let err = place_order(&store, &carts, &FakeGateway, &pm, cmd, &actor()).await.expect_err("live on test");
+    let err = place_order(&store, &catalogs, &FakeGateway, &pm, cmd, &actor()).await.expect_err("live on test");
     assert_eq!(rejection_code(&err), Some("CannotOrderTestRestaurant"));
 
     // A TEST order MAY target the TEST restaurant (receipt-path validation).
     let mut cmd = place_cmd(order, resto, cart);
     cmd.mode = Some(Mode::TEST);
-    place_order(&store, &carts, &FakeGateway, &pm, cmd, &actor()).await.expect("test on test");
+    place_order(&store, &catalogs, &FakeGateway, &pm, cmd, &actor()).await.expect("test on test");
     assert_eq!(store.stream(&payment_stream()).len(), 1);
 }

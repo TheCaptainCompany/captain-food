@@ -11,6 +11,7 @@ pub mod generated;
 pub mod journal;
 pub mod payments;
 pub mod pm_state;
+pub mod pricing;
 pub mod process_managers;
 pub mod projections;
 pub mod projectors;

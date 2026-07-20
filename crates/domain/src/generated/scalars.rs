@@ -61,7 +61,7 @@ pub struct CauseId(pub uuid::Uuid);
 pub struct MessageId(pub uuid::Uuid);
 
 /// W3C trace-id (from the inbound `traceparent` header, or server-started). Response-only technical tracing identifier — never client-suppliable, never a substitute for correlationId (P-02).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TraceId(pub String);
 
 /// Identifies one DeliveryJob (a single delivery of an order from restaurant to customer).
@@ -73,11 +73,11 @@ pub struct DeliveryJobId(pub uuid::Uuid);
 pub struct RiderId(pub uuid::Uuid);
 
 /// Stripe PaymentIntent id (provider reference). Example: 'pi_3Nabc...'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PaymentIntentId(pub String);
 
 /// Stripe Refund id (provider reference). Example: 're_3Nabc...'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RefundId(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -88,22 +88,22 @@ pub struct UserId(pub uuid::Uuid);
 pub struct AddressId(pub uuid::Uuid);
 
 /// Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PaymentMethodId(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ImageId(pub uuid::Uuid);
 
 /// External reference code (HubRise `ref`), unique within its scope. Used for idempotent import/sync and as a stable reference inside orders. Example: 'MARGHERITA', 'CAT-PIZZAS'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ExternalReference(pub String);
 
 /// Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ExternalIdentifierKey(pub String);
 
 /// Google Maps Place id identifying the establishment (enrichment / Business Profile).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GooglePlaceId(pub String);
 
 /// WGS84 latitude in decimal degrees.
@@ -119,93 +119,93 @@ pub struct Longitude(pub f64);
 pub struct GoogleRating(pub f64);
 
 /// An http(s) URL — restaurant website or the Google Business Profile 'Order online' link.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WebUrl(pub String);
 
 /// URL-safe identifier for restaurants. Lowercase, dash-separated. Example: 'chez-marco', 'tokyo-sushi'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Slug(pub String);
 
 /// Public label shown to customers. Can be short and brand-oriented. Example: 'Chez Marco', 'Tokyo Sushi'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RestaurantDisplayName(pub String);
 
 /// Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RestaurantLegalName(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CatalogName(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CatalogCategoryName(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProductName(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProductDescription(pub String);
 
 /// Offer label, unique within a product (HubRise SKU name). Example: 'Small', 'Large', 'Default'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OfferName(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OptionListName(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OptionName(pub String);
 
 /// Free-form label (HubRise: tags). Example: 'vegan', 'spicy', 'eco'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Tag(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EmailAddress(pub String);
 
 /// Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber and stored on events/views. Validation enforced at application level.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PhoneNumber(pub String);
 
 /// Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DialingCode(pub String);
 
 /// National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NationalPhoneNumber(pub String);
 
 /// One-time SMS code from Supabase Auth (sent via Twilio; a mock provider in dev).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OtpCode(pub String);
 
 /// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EmailVerificationToken(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AddressLine(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CityName(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PostalCode(pub String);
 
 /// ISO 3166-1 alpha-2 country code. Example: 'FR'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CountryCode(pub String);
 
 /// IANA timezone. Example: 'Europe/Paris'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TimeZone(pub String);
 
 /// i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Locale(pub String);
 
 /// ISO 4217 currency code. Example: 'EUR'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CurrencyCode(pub String);
 
 /// Monetary amount in minor units (e.g. cents).
@@ -224,10 +224,10 @@ pub struct MarginPercent(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Quantity(pub f64);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CustomerDisplayName(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OrderNote(pub String);
 
 /// Restaurant rating in stars (0–5), given by the customer on a delivered order.
@@ -243,7 +243,7 @@ pub enum ThumbRating {
 }
 
 /// Free-text comment accompanying a restaurant rating.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RatingComment(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -259,7 +259,7 @@ pub enum Weekday {
 }
 
 /// Local time of day, HH:mm (HubRise opening_hours format).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TimeOfDay(pub String);
 
 /// Aligned with HubRise service types. COLLECTION == customer pickup. (EAT_IN is not offered by Captain.Food but is kept in TaxRate for catalog fidelity.)
@@ -410,6 +410,16 @@ pub enum PaymentStatus {
     REFUNDED,
 }
 
+/// Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum RefundStatus {
+    REQUESTED,
+    APPROVED,
+    DENIED,
+    REFUNDED,
+}
+
 /// Live status of a command/operation streamed by the operationStatusChanged subscription: PENDING (accepted, in flight), SUCCEEDED, REJECTED (business invariant), FAILED (technical error)."
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
@@ -467,13 +477,13 @@ pub enum RefundProcessStatus {
     REFUNDED,
 }
 
-/// State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order).
+/// State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED keeps REOFFER_REQUIRED's ordinal slot (both flag manual handling; ADR-20260720-004556).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum DeliveryDispatchProcessStatus {
     OFFERED,
     ACCEPTED,
-    REOFFER_REQUIRED,
+    FAILED,
     COMPLETED,
 }
 

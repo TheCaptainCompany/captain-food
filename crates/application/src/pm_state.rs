@@ -81,6 +81,10 @@ pub struct DeliveryDispatchRow {
     pub restaurant_id: RestaurantId,
     pub delivery_job_id: DeliveryJobId,
     pub process_status: DeliveryDispatchProcessStatus,
+    /// TOTAL offers made to the delivery channel (the birth offer = 1). Capped at 3
+    /// (rules.yaml#/DispatchRetriesAreBounded, ADR-20260720-004556): the 3rd partner decline closes
+    /// the run FAILED instead of re-offering.
+    pub offer_attempts: i32,
     /// Maintained by the runtime envelope — ignored on write, stamped `now()` by `upsert`.
     pub last_update_utc: DateTime<Utc>,
 }
@@ -336,6 +340,7 @@ mod tests {
             restaurant_id: RestaurantId(uuid::Uuid::new_v4()),
             delivery_job_id: DeliveryJobId(job),
             process_status: DeliveryDispatchProcessStatus::OFFERED,
+            offer_attempts: 1,
             last_update_utc: DateTime::<Utc>::MIN_UTC,
         };
         store.upsert(&row).await.unwrap();

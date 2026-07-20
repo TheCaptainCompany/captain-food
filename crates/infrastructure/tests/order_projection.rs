@@ -163,7 +163,9 @@ async fn order_events_fold_into_the_read_model() {
     worker.run_once().await.expect("run_once (placed)");
 
     // The row materialized, enums stored as declaration-order ordinals, breakdown leaves extracted,
-    // payment PENDING until a Stripe fact lands — under the group's own 'Order' checkpoint.
+    // payment already CAPTURED: PlaceOrderProcess emits OrderPlaced only in reaction to
+    // PaymentCaptured (V0 prepaid-online), and that capture sits EARLIER in the log than the row it
+    // would fold into — the creation arm carries the saga invariant instead of losing it.
     let (status, service_type, total, articles, payment_status): (i32, i32, i64, i64, String) =
         sqlx::query_as(
             "SELECT status, service_type, total_amount_cents, articles_cents, payment_status \
@@ -177,7 +179,7 @@ async fn order_events_fold_into_the_read_model() {
     assert_eq!(service_type, 0); // ServiceType::DELIVERY ordinal
     assert_eq!(total, 2560);
     assert_eq!(articles, 1960);
-    assert_eq!(payment_status, "PENDING");
+    assert_eq!(payment_status, "CAPTURED");
     let checkpoint: i64 =
         sqlx::query_scalar("SELECT position FROM projection_checkpoint WHERE projector = 'Order'")
             .fetch_one(&pool)

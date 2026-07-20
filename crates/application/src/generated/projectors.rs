@@ -270,7 +270,7 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
     let next = match &env.event {
         DomainEvent::OrderPlaced(e) => Some(OrderTrackingRow {
             order_id: e.order_id.clone(),
-            r#ref: e.r#ref.clone().expect("ref required on OrderPlaced"),
+            r#ref: e.r#ref.clone().unwrap_or_default(),
             restaurant_id: e.restaurant_id.clone(),
             customer_id: e.customer_id.clone(),
             status: c.status(None, env),
@@ -324,6 +324,7 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
         DomainEvent::DeliveryAcceptedByRider(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; Some(row) },
         DomainEvent::DeliveryStatusUpdated(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryCompleted(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
+        DomainEvent::DeliveryDispatchFailed(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         _ => return state,
     };
     next.map(|mut row| {

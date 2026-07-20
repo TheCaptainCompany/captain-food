@@ -131,6 +131,7 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 |  | SetAcceptanceMode | [✏️ `changeOrderAcceptanceMode`](#mutation-changeorderacceptancemode) |
 |  | CancelOrder | [✏️ `cancelOrderByRestaurant`](#mutation-cancelorderbyrestaurant) |
 |  | ThankRiderOrCaptain | [✏️ `tipOrder`](#mutation-tiporder) |
+|  | ReviewPendingRefunds | [🔎 `pendingRefunds`](#query-pendingrefunds) |
 |  | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
 |  | DenyRefund | [✏️ `denyRefund`](#mutation-denyrefund) |
 | 🧭 **TrackDeliveries** | ViewDeliveries | [🔎 `restaurantDeliveries`](#query-restaurantdeliveries) |
@@ -165,7 +166,8 @@ A platform operator who onboards accounts and oversees the platform.
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
 | 🧭 **Prospection** | ReviewPipeline | [🔎 `prospectionPipeline`](#query-prospectionpipeline) |
 |  | LogReply | [✏️ `recordProspectReply`](#mutation-recordprospectreply) |
-| 🧭 **ArbitrateRefunds** | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
+| 🧭 **ArbitrateRefunds** | ReviewPendingRefunds | [🔎 `pendingRefunds`](#query-pendingrefunds) |
+|  | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
 |  | DenyRefund | [✏️ `denyRefund`](#mutation-denyrefund) |
 | 🧭 **Pricing** | ReviewPolicy | [🔎 `pricingPolicy`](#query-pricingpolicy) |
 |  | SetRestaurantMargin | [✏️ `updateRestaurant`](#mutation-updaterestaurant) |
@@ -191,7 +193,7 @@ The Sirene/Google sync ACL (a scheduled worker) acting as an EXTERNAL caller. It
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(22)_
+### 🧰 API operations _(23)_
 
 <a id="query-restaurantdeliveries"></a>
 #### 🔎 Query: `restaurantDeliveries`
@@ -201,6 +203,16 @@ A restaurant's active delivery jobs (delivery board; ownership enforced server-s
 - **Input**: 🧩 `RestaurantDeliveriesQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `DeliveryStatus`](#scalar-deliverystatus)
 - **Returns**: [🧩 `DeliveryJob`](#type-deliveryjob) (list) · **reads** [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
 - **Roles**: RESTAURANT, RESTAURANT_ACCOUNT · **slice** V0
+
+<a id="query-pendingrefunds"></a>
+#### 🔎 Query: `pendingRefunds`
+
+The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+
+
+- **Input**: 🧩 `PendingRefundsQueryInput` — `restaurantId?`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `RefundStatus`](#scalar-refundstatus)
+- **Returns**: [🧩 `Refund`](#type-refund) (list) · **reads** [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
+- **Roles**: RESTAURANT, ADMIN · **slice** V0
 
 <a id="query-restaurantlocationsbyaccount"></a>
 #### 🔎 Query: `restaurantLocationsByAccount`
@@ -2936,7 +2948,7 @@ Order status change events (for the owning customer or restaurant).
 - **Streams**: [🧩 `Order`](#type-order)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT · **slice** V0
 
-### 🧩 Output types _(2)_
+### 🧩 Output types _(3)_
 
 <a id="type-cart"></a>
 #### 🧩 Type: `Cart`
@@ -2992,6 +3004,26 @@ An order with its tracking status and payment state.
 | <a id="type-order--estimateddropoffat"></a>`estimatedDropoffAt` | `string` _date-time_ | ⬜ |
 | <a id="type-order--ratedat"></a>`ratedAt` | `string` _date-time_ | ⬜ |
 
+<a id="type-refund"></a>
+#### 🧩 Type: `Refund`
+
+A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin decides, then APPROVED (Stripe refund requested) or DENIED, and REFUNDED once Stripe settles. Serves the restaurant's and admin's refund queue (filter status = REQUESTED for pending ones).
+
+
+- **Read model**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-refund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
+| <a id="type-refund--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |
+| <a id="type-refund--status"></a>`status` | [🔤 `RefundStatus`](#scalar-refundstatus) | ✅ |
+| <a id="type-refund--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |
+| <a id="type-refund--approvedamount"></a>`approvedAmount` | [📦 `Money`](#entity-money) | ⬜ |
+| <a id="type-refund--reason"></a>`reason` | `string` | ⬜ |
+| <a id="type-refund--refundid"></a>`refundId` | [🔤 `RefundId`](#scalar-refundid) | ⬜ |
+| <a id="type-refund--requestedat"></a>`requestedAt` | `string` _date-time_ | ✅ |
+| <a id="type-refund--decidedat"></a>`decidedAt` | `string` _date-time_ | ⬜ |
+
 ### 🎭 Actors _(5)_
 
 <a id="actor-cart"></a>
@@ -3006,6 +3038,15 @@ _🧩 aggregate_ — A visitor's in-progress selection for one restaurant, built
 | [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity) | [⚡ `CartLineQuantityChanged`](#event-cartlinequantitychanged) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartLineNotFound`](#error-cartlinenotfound), [⛔ `InsufficientStock`](#error-insufficientstock), [⛔ `QuantityExceedsLimit`](#error-quantityexceedslimit) |
 | [📩 `BindCartToCustomer`](#command-bindcarttocustomer) | [⚡ `CartBoundToCustomer`](#event-cartboundtocustomer) | [⛔ `CartNotFound`](#error-cartnotfound) |
 | [⚡ `CartCheckedOut`](#event-cartcheckedout) | [⚡ `CartCheckedOut`](#event-cartcheckedout) | — |
+
+Lifecycle (generated from the declared state machine):
+
+```mermaid
+stateDiagram-v2
+  [*] --> OPEN : CartStarted
+  OPEN --> CHECKED_OUT : CartCheckedOut
+  CHECKED_OUT --> [*]
+```
 
 <a id="actor-order"></a>
 #### 🎭 Actor: `Order`
@@ -3027,6 +3068,27 @@ _🧩 aggregate_ — A single order through its lifecycle. Born from OrderPlaced
 | [📩 `TipOrder`](#command-tiporder) | [⚡ `OrderTipped`](#event-ordertipped) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `InvalidTipRecipient`](#error-invalidtiprecipient) |
 | [📩 `RequestRefund`](#command-requestrefund) | [⚡ `RefundRequested`](#event-refundrequested) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 
+Lifecycle (generated from the declared state machine):
+
+```mermaid
+stateDiagram-v2
+  [*] --> PLACED : OrderPlaced
+  PLACED --> ACCEPTED : OrderAcceptedByRestaurant
+  ACCEPTED --> PREPARING : OrderPreparationStarted
+  ACCEPTED --> READY : OrderMarkedReady
+  PREPARING --> READY : OrderMarkedReady
+  READY --> DELIVERED : OrderDelivered
+  PLACED --> REJECTED : OrderRejectedByRestaurant
+  PLACED --> CANCELLED_BY_CUSTOMER : OrderCancelledByCustomer
+  ACCEPTED --> CANCELLED_BY_RESTAURANT : OrderCancelledByRestaurant
+  PREPARING --> CANCELLED_BY_RESTAURANT : OrderCancelledByRestaurant
+  READY --> CANCELLED_BY_RESTAURANT : OrderCancelledByRestaurant
+  DELIVERED --> [*]
+  REJECTED --> [*]
+  CANCELLED_BY_CUSTOMER --> [*]
+  CANCELLED_BY_RESTAURANT --> [*]
+```
+
 <a id="actor-payment"></a>
 #### 🎭 Actor: `Payment`
 
@@ -3038,8 +3100,21 @@ _🧩 aggregate_ — A payment for an order, driven to a terminal state. Born fr
 | [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `PaymentCaptured`](#event-paymentcaptured) | — |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | [⚡ `PaymentFailed`](#event-paymentfailed) | — |
 | [⚡ `PaymentRefunded`](#event-paymentrefunded) | [⚡ `PaymentRefunded`](#event-paymentrefunded) | — |
+| [⚡ `RefundOpened`](#event-refundopened) | [⚡ `RefundOpened`](#event-refundopened) | — |
 | [⚡ `RefundApproved`](#event-refundapproved) | [⚡ `RefundApproved`](#event-refundapproved) | — |
 | [⚡ `RefundDenied`](#event-refunddenied) | [⚡ `RefundDenied`](#event-refunddenied) | — |
+
+Lifecycle (generated from the declared state machine):
+
+```mermaid
+stateDiagram-v2
+  [*] --> PENDING : PaymentIntentCreated
+  PENDING --> CAPTURED : PaymentCaptured
+  PENDING --> FAILED : PaymentFailed
+  CAPTURED --> REFUNDED : PaymentRefunded
+  FAILED --> [*]
+  REFUNDED --> [*]
+```
 
 <a id="actor-placeorderprocess"></a>
 #### 🎭 Actor: `PlaceOrderProcess`
@@ -3049,7 +3124,7 @@ _⚙️ process manager_ — The checkout saga. On PlaceOrder: reads the OPEN ca
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
+| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
 | [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | _Payment failed: resolve the run; no order is placed and the cart stays OPEN._ | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 
@@ -3078,6 +3153,8 @@ sequenceDiagram
   PM--xIN: throws CannotOrderTestRestaurant
   PM--xIN: throws DeliveryAddressRequired
   PM--xIN: throws OutsideDeliveryArea
+  PM--xIN: throws PriceUnresolvable
+  PM--xIN: throws PriceMismatch
   PM->>PT_payment: request
   PM--xIN: throws PaymentDeclined
   PM->>AG_Payment: deliver PaymentIntentCreated — the aggregate records it
@@ -3104,16 +3181,15 @@ sequenceDiagram
 <a id="actor-refundprocess"></a>
 #### 🎭 Actor: `RefundProcess`
 
-_⚙️ process manager_ — Approved refunds. A refundable fact (rejection, cancellation, customer request) OPENS a pending refund on the state row; the RESTAURANT (its own orders) or an ADMIN decides with ApproveRefund / DenyRefund (authz = api.yaml roles when the mutations land); on approval the outbound Stripe refund is requested and the run settles when Stripe reports PaymentRefunded (the fact itself is recorded by the Payment aggregate). The refund-eligibility window is a config value enforced at approval, not a domain rule.
+_⚙️ process manager_ — Approved refunds. A refundable fact (rejection, cancellation, customer request) OPENS a pending refund: RefundOpened is delivered to the Payment aggregate (so the refund queue, View_PendingRefunds, folds from the log) and the state row goes PENDING_APPROVAL; the RESTAURANT (its own orders) or an ADMIN decides with ApproveRefund / DenyRefund (authz = api.yaml roles); on approval the outbound Stripe refund is requested and the run settles when Stripe reports PaymentRefunded (the fact itself is recorded by the Payment aggregate). The refund-eligibility window is a config value enforced at approval, not a domain rule.
 
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant) | _The restaurant rejected a paid order — open a pending refund for a restaurant/admin decision._ | — |
-| [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer) | _The customer cancelled a paid order — open a pending refund for a restaurant/admin decision._ | — |
-| [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | _The restaurant cancelled a paid order — open a pending refund for a restaurant/admin decision._ | — |
-| [⚡ `RefundRequested`](#event-refundrequested) | _The customer asked for a refund (the Order aggregate already validated RequestRefund) — open a pending refund for a restaurant/admin decision.
-_ | — |
+| [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant) | [⚡ `RefundOpened`](#event-refundopened) | — |
+| [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer) | [⚡ `RefundOpened`](#event-refundopened) | — |
+| [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | [⚡ `RefundOpened`](#event-refundopened) | — |
+| [⚡ `RefundRequested`](#event-refundrequested) | [⚡ `RefundOpened`](#event-refundopened) | — |
 | [📩 `ApproveRefund`](#command-approverefund) | [⚡ `RefundApproved`](#event-refundapproved) | [⛔ `RefundNotPending`](#error-refundnotpending) |
 | [📩 `DenyRefund`](#command-denyrefund) | [⚡ `RefundDenied`](#event-refunddenied) | [⛔ `RefundNotPending`](#error-refundnotpending) |
 | [⚡ `PaymentRefunded`](#event-paymentrefunded) | _Stripe reported the settled refund (recorded by the Payment aggregate) — close the run. The fact is already in the log; nothing to emit.
@@ -3128,30 +3204,34 @@ sequenceDiagram
   participant PM as RefundProcess (decides)
   participant ST as refund_process_manager (state)
   participant RM_OrderTracking as OrderTracking (read model)
-  participant PT_payment as port payment (adapter)
   participant AG_Payment as Payment (aggregate)
+  participant PT_payment as port payment (adapter)
   rect rgb(245,245,245)
   IN->>PM: OrderRejectedByRestaurant (event)
   PM->>RM_OrderTracking: read as order [order_id=OrderRejectedByRestaurant.orderId]
   Note over PM: skip unless order.payment_status == CAPTURED
+  PM->>AG_Payment: deliver RefundOpened — the aggregate records it
   PM->>ST: set order_id=OrderRejectedByRestaurant.orderId, payment_intent_id=order.payment_intent_id, process_status=PENDING_APPROVAL, reason=OrderRejectedByRestaurant.reason
   end
   rect rgb(245,245,245)
   IN->>PM: OrderCancelledByCustomer (event)
   PM->>RM_OrderTracking: read as order [order_id=OrderCancelledByCustomer.orderId]
   Note over PM: skip unless order.payment_status == CAPTURED
+  PM->>AG_Payment: deliver RefundOpened — the aggregate records it
   PM->>ST: set order_id=OrderCancelledByCustomer.orderId, payment_intent_id=order.payment_intent_id, process_status=PENDING_APPROVAL, reason=OrderCancelledByCustomer.reason
   end
   rect rgb(245,245,245)
   IN->>PM: OrderCancelledByRestaurant (event)
   PM->>RM_OrderTracking: read as order [order_id=OrderCancelledByRestaurant.orderId]
   Note over PM: skip unless order.payment_status == CAPTURED
+  PM->>AG_Payment: deliver RefundOpened — the aggregate records it
   PM->>ST: set order_id=OrderCancelledByRestaurant.orderId, payment_intent_id=order.payment_intent_id, process_status=PENDING_APPROVAL, reason=OrderCancelledByRestaurant.reason
   end
   rect rgb(245,245,245)
   IN->>PM: RefundRequested (event)
   PM->>RM_OrderTracking: read as order [order_id=RefundRequested.orderId]
   Note over PM: skip unless order.payment_status == CAPTURED
+  PM->>AG_Payment: deliver RefundOpened — the aggregate records it
   PM->>ST: set order_id=RefundRequested.orderId, payment_intent_id=order.payment_intent_id, process_status=PENDING_APPROVAL, reason=RefundRequested.reason
   end
   rect rgb(245,245,245)
@@ -3176,7 +3256,29 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(2)_
+### 🗄️ Views (read models) _(3)_
+
+<a id="view-view_pendingrefunds"></a>
+#### 🗄️ View: `View_PendingRefunds`
+
+- **Source**: [🎭 `Payment`](#actor-payment) · 🛶 V0
+- **Rules**: A row exists only for a refund actually opened for decision: RefundOpened is delivered by RefundProcess ONLY when the order's payment is CAPTURED (the guard lives in the saga, so the fold needs no payment-status filter). `status` is derived from the lifecycle events: REQUESTED on RefundOpened → APPROVED on RefundApproved (Stripe refund requested) or DENIED on RefundDenied → REFUNDED on PaymentRefunded (Stripe settled). `amount_cents` is the captured order total eligible for refund; `approved_amount_cents` is the (possibly partial) approved amount, null until approved.
+- **Fed by**: [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved), [⚡ `RefundDenied`](#event-refunddenied), [⚡ `PaymentRefunded`](#event-paymentrefunded)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `order_id` | [🔤 `OrderId`](#scalar-orderid) _(derived)_ → [🗄️ `OrderTracking`](#view-ordertracking) | [⚡ `RefundOpened`.`orderId`](#event-refundopened--orderid) | PK |  |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `RefundOpened`.`restaurantId`](#event-refundopened--restaurantid) | index |  |
+| `status` | [🔤 `RefundStatus`](#scalar-refundstatus) | [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved), [⚡ `RefundDenied`](#event-refunddenied), [⚡ `PaymentRefunded`](#event-paymentrefunded) | — | Derived from the latest lifecycle event type. |
+| `amount_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `RefundOpened`.`amount`](#event-refundopened--amount) | — | amountCents of RefundOpened.amount (Money) — the captured total eligible for refund. |
+| `currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | [⚡ `RefundOpened`.`amount`](#event-refundopened--amount) | — | currency of RefundOpened.amount (Money). |
+| `approved_amount_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `RefundApproved`.`amount`](#event-refundapproved--amount) | nullable | amountCents of RefundApproved.amount (Money — may be partial); null until approved. |
+| `reason` | `text` | [⚡ `RefundOpened`.`reason`](#event-refundopened--reason), [⚡ `RefundApproved`.`reason`](#event-refundapproved--reason), [⚡ `RefundDenied`.`reason`](#event-refunddenied--reason) | nullable | The latest recorded reason: the opening fact's, then the decision's. |
+| `refund_id` | [🔤 `RefundId`](#scalar-refundid) | [⚡ `PaymentRefunded`.`refundId`](#event-paymentrefunded--refundid) | nullable | The Stripe Refund id once settled; null before PaymentRefunded. |
+| `requested_at` | `timestamptz` | [⚡ `RefundOpened`](#event-refundopened) | — | RefundOpened occurrence time. |
+| `decided_at` | `timestamptz` | [⚡ `RefundApproved`](#event-refundapproved), [⚡ `RefundDenied`](#event-refunddenied) | nullable | The decision's occurrence time (approval or denial); null while REQUESTED. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
 <a id="view-cart"></a>
 #### 🗄️ View: `Cart`
@@ -3207,7 +3309,7 @@ sequenceDiagram
 - **Source**: [🎭 `Order`](#actor-order) · 🛶 V0
 - **Note**: The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status (back-office queue) — via the indexes below; there is no separate per-persona order projection. 
 - **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
-- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted)
+- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -3236,7 +3338,7 @@ sequenceDiagram
 | `placed_at` | `timestamptz` | [⚡ `OrderPlaced`](#event-orderplaced) | — | OrderPlaced occurrence time. |
 | `status_changed_at` | `timestamptz` | [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | — | Occurrence time of the latest status-changing event. |
 | `payment_intent_id` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) _(derived)_ | [⚡ `PaymentCaptured`.`paymentIntentId`](#event-paymentcaptured--paymentintentid) | nullable | The captured Stripe PaymentIntent; RefundProcess reads it to open a pending refund. |
-| `payment_status` | `text` | [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded) | — | Folded from Stripe facts; candidate for a PaymentStatus enum. |
+| `payment_status` | `text` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded) | — | Folded from Stripe facts; candidate for a PaymentStatus enum. OrderPlaced seeds CAPTURED: PlaceOrderProcess emits it only in reaction to PaymentCaptured (V0 prepaid-online), and that capture sits earlier in the log than the row it would fold into.  |
 | `restaurant_stars` | [🔤 `StarRating`](#scalar-starrating) _(derived)_ | [⚡ `RestaurantRated`.`stars`](#event-restaurantrated--stars) | nullable | Customer's 0–5 rating of the restaurant; null until rated. |
 | `rating_comment` | [🔤 `RatingComment`](#scalar-ratingcomment) _(derived)_ | [⚡ `RestaurantRated`.`comment`](#event-restaurantrated--comment) | nullable |  |
 | `rider_thumb` | [🔤 `ThumbRating`](#scalar-thumbrating) _(derived)_ | [⚡ `OrderRated`.`riderThumb`](#event-orderrated--riderthumb) | nullable |  |
@@ -3244,7 +3346,7 @@ sequenceDiagram
 | `restaurant_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==RESTAURANT].amount; null if none. |
 | `captain_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==CAPTAIN].amount; null if none. |
 | `rated_at` | `timestamptz` | [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `OrderTipped`](#event-ordertipped) | nullable | Occurrence time of the latest rating/tip event. |
-| `delivery_status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted) | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. |
+| `delivery_status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556). |
 | `courier` | `jsonb` | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider) | nullable | Assigned Courier { displayName, phone?, riderId? } once accepted; null before. |
 | `estimated_dropoff_at` | `timestamptz` | [⚡ `DeliveryAcceptedByPartner`.`estimatedDropoffAt`](#event-deliveryacceptedbypartner--estimateddropoffat) | nullable | Partner-reported ETA to the customer; null when unknown. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
@@ -3306,7 +3408,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 
 - **Dispatched by**: [✏️ `placeOrder`](#mutation-placeorder) · **handled by** [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Emits**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **Throws**: [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PaymentDeclined`](#error-paymentdeclined)
+- **Throws**: [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3320,6 +3422,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 | <a id="command-placeorder--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
 | <a id="command-placeorder--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 | <a id="command-placeorder--paymentmethodid"></a>`paymentMethodId` | `string` | ✅ | Stripe PaymentMethod / client secret reference for the payment step. The wallet behind it (card, Apple Pay, Google Pay) is a client-side/Stripe concern and does not change the domain: every method yields a standard Stripe PaymentMethod and the same saga.  |
+| <a id="command-placeorder--expectedtotal"></a>`expectedTotal` | [📦 `Money`](#entity-money) | ⬜ | OPTIONAL confirmation of the total the client displayed at checkout. NEVER used to price anything — the server recomputes the total from the live catalog (the only price authority) and rejects with errors.yaml#/PriceMismatch when the two diverge, so a customer is never charged an amount other than the one they were shown.  |
 
 <a id="command-acceptorder"></a>
 #### 📩 Command: `AcceptOrder`
@@ -3527,7 +3630,7 @@ The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
 | <a id="command-denyrefund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="command-denyrefund--reason"></a>`reason` | `string` | ✅ |  |
 
-### ⚡ Events _(24)_
+### ⚡ Events _(25)_
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -3864,7 +3967,7 @@ A captured payment was refunded (e.g. after rejection or cancellation).
 
 - **Emitted by**: [🎭 `Payment`](#actor-payment)
 - **Consumed by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds), [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3875,6 +3978,22 @@ A captured payment was refunded (e.g. after rejection or cancellation).
 | <a id="event-paymentrefunded--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="event-paymentrefunded--reason"></a>`reason` | `string` | ⬜ |  |
 
+<a id="event-refundopened"></a>
+#### ⚡ Event: `RefundOpened`
+
+A refundable fact on a paid order (rejection, cancellation, customer request) opened a refund for a restaurant/admin decision. Delivered by RefundProcess to the Payment aggregate ONLY when the payment is CAPTURED, so the refund queue (View_PendingRefunds) folds from the log, not from PM state. `amount` is the captured order total eligible for refund (an approval may still be partial).
+
+- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
+- **Consumed by**: [🎭 `Payment`](#actor-payment)
+- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-refundopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-refundopened--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-refundopened--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The captured order total eligible for refund (the decision may approve less). |
+| <a id="event-refundopened--reason"></a>`reason` | `string` | ⬜ |  |
+
 <a id="event-refundapproved"></a>
 #### ⚡ Event: `RefundApproved`
 
@@ -3882,7 +4001,7 @@ The restaurant or an admin approved a refund; the RefundProcess will drive the S
 
 - **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
 - **Consumed by**: [🎭 `Payment`](#actor-payment)
-- **Projected into**: —
+- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3897,7 +4016,7 @@ The restaurant or an admin denied a pending refund request.
 
 - **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
 - **Consumed by**: [🎭 `Payment`](#actor-payment)
-- **Projected into**: —
+- **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4031,7 +4150,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-checkoutsnapshot--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
 | <a id="entity-checkoutsnapshot--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
 | <a id="entity-checkoutsnapshot--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
-| <a id="entity-checkoutsnapshot--items"></a>`items` | [[📦 `OrderLineItem`](#entity-orderlineitem)] | ✅ | Priced order lines frozen at checkout; may be empty until server-side line pricing lands. |
+| <a id="entity-checkoutsnapshot--items"></a>`items` | [[📦 `OrderLineItem`](#entity-orderlineitem)] | ✅ | Priced order lines frozen at checkout — recomputed server-side from the live catalog (rules.yaml#/ServerPriceAuthority). |
 | <a id="entity-checkoutsnapshot--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="entity-checkoutsnapshot--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ✅ |  |
 | <a id="entity-checkoutsnapshot--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
@@ -4054,7 +4173,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
 | <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
-### 🔤 Scalars _(17)_
+### 🔤 Scalars _(18)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -4074,9 +4193,10 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="scalar-tipper"></a>🔤 `Tipper` | enum (CUSTOMER \| RESTAURANT) | Who gives a tip: the CUSTOMER (may tip rider/restaurant/Captain) or the RESTAURANT (may tip rider/ Captain — e.g. thanking the courier). Derived server-side from the caller's role, not client-supplied.  |
 | <a id="scalar-cartstatus"></a>🔤 `CartStatus` | enum (OPEN \| CHECKED_OUT) | Lifecycle of a cart. Only an OPEN cart accepts line edits or checkout. Carts are never abandoned/expired — they persist until checked out, so there is no abandonment state.  |
 | <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| CAPTURED \| FAILED \| REFUNDED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded). |
+| <a id="scalar-refundstatus"></a>🔤 `RefundStatus` | enum (REQUESTED \| APPROVED \| DENIED \| REFUNDED) | Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.  |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
 
-### ⛔ Errors _(20)_
+### ⛔ Errors _(22)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -4098,10 +4218,12 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="error-deliveryaddressrequired"></a>⛔ `DeliveryAddressRequired` | serviceType is DELIVERY but no delivery address was provided. | 🇬🇧 A delivery address is required for delivery. | 🇫🇷 Une adresse de livraison est requise pour la livraison. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-outsidedeliveryarea"></a>⛔ `OutsideDeliveryArea` | Delivery address is outside the restaurant's delivery area. | 🇬🇧 This address is outside the delivery area of '{restaurantName}'. | 🇫🇷 Cette adresse est en dehors de la zone de livraison de '{restaurantName}'. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-paymentdeclined"></a>⛔ `PaymentDeclined` | Stripe declined the payment synchronously at checkout (no order placed). | 🇬🇧 Payment was declined. | 🇫🇷 Le paiement a été refusé. | [📩 `PlaceOrder`](#command-placeorder) |
+| <a id="error-pricemismatch"></a>⛔ `PriceMismatch` | The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the server recomputed from the live catalog. The server is the only price authority: the checkout is rejected so the customer is never charged an amount other than the one they were shown.  | 🇬🇧 Prices have changed since you loaded the menu. Please review your cart and try again. | 🇫🇷 Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer. | [📩 `PlaceOrder`](#command-placeorder) |
+| <a id="error-priceunresolvable"></a>⛔ `PriceUnresolvable` | A cart line's price could not be resolved from the live catalog at checkout (offer or selected option no longer present). Fail-closed: the checkout is rejected — the server never falls back to a client-supplied amount.  | 🇬🇧 An item in your cart is no longer available at a known price. Please review your cart. | 🇫🇷 Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 
-### 📐 Business rules _(16)_
+### 📐 Business rules _(19)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -4122,7 +4244,14 @@ _Adding an unorderable offer or operating on an invalid/absent line is rejected.
 
 _An order advances accept → prepare → ready → delivered (or reject/cancel), each transition allowed only from the correct status._
 
-- **Verified by**: [🧪 `TestOrderAcceptedByRestaurant`](#test-testorderacceptedbyrestaurant), [🧪 `TestOrderAcceptIsRejected`](#test-testorderacceptisrejected), [🧪 `TestOrderPreparationStarted`](#test-testorderpreparationstarted), [🧪 `TestOrderMarkedReady`](#test-testordermarkedready), [🧪 `TestOrderDelivered`](#test-testorderdelivered), [🧪 `TestOrderRejected`](#test-testorderrejected), [🧪 `TestOrderCancelledByCustomer`](#test-testordercancelledbycustomer), [🧪 `TestOrderCancelledByRestaurant`](#test-testordercancelledbyrestaurant)
+- **Verified by**: [🧪 `TestOrderAcceptedByRestaurant`](#test-testorderacceptedbyrestaurant), [🧪 `TestOrderAcceptIsRejected`](#test-testorderacceptisrejected), [🧪 `TestOrderPreparationStarted`](#test-testorderpreparationstarted), [🧪 `TestOrderMarkedReady`](#test-testordermarkedready), [🧪 `TestOrderDelivered`](#test-testorderdelivered), [🧪 `TestOrderRejected`](#test-testorderrejected), [🧪 `TestOrderCancelledByCustomer`](#test-testordercancelledbycustomer), [🧪 `TestOrderCancelledByRestaurant`](#test-testordercancelledbyrestaurant), [🧪 `TestOrderLifecycleRejectsSkippedTransition`](#test-testorderlifecyclerejectsskippedtransition), [🧪 `TestOrderLifecycleTerminalStateRefusesTransitions`](#test-testorderlifecycleterminalstaterefusestransitions)
+
+<a id="rule-orderlifecycleisexplicit"></a>
+#### 📐 Rule: `OrderLifecycleIsExplicit`
+
+_The Order status machine is the DECLARED lifecycle (actors.yaml#/Order/lifecycle, ADR-20260720-004419), not implicit code: a move the declared transition table does not contain — a skipped/repeated step, or any transition out of a terminal state (DELIVERED, REJECTED, CANCELLED_BY_CUSTOMER, CANCELLED_BY_RESTAURANT) — is rejected with InvalidOrderStatus._
+
+- **Verified by**: [🧪 `TestOrderLifecycleRejectsSkippedTransition`](#test-testorderlifecyclerejectsskippedtransition), [🧪 `TestOrderLifecycleTerminalStateRefusesTransitions`](#test-testorderlifecycleterminalstaterefusestransitions)
 
 <a id="rule-orderratedoncewhendelivered"></a>
 #### 📐 Rule: `OrderRatedOnceWhenDelivered`
@@ -4151,6 +4280,13 @@ _Tips (rider/restaurant/Captain, by customer or restaurant) are additive and sep
 _A customer can request a refund for an order._
 
 - **Verified by**: [🧪 `TestOrderRefundRequested`](#test-testorderrefundrequested)
+
+<a id="rule-serverpriceauthority"></a>
+#### 📐 Rule: `ServerPriceAuthority`
+
+_The server is the only price authority on the write path: order line totals, the order total and the payment-intent amount are recomputed at checkout from the live catalog (Offer prices, Option prices) — no client-supplied amount is ever trusted. A client-submitted expectedTotal is a confirmation only, checked for equality (divergence rejects with PriceMismatch), and a cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (PriceUnresolvable) — never a fallback to the client's number._
+
+- **Verified by**: [🧪 `TestPlaceOrderRecomputesPriceServerSide`](#test-testplaceorderrecomputespriceserverside), [🧪 `TestPlaceOrderRejectsPriceMismatch`](#test-testplaceorderrejectspricemismatch), [🧪 `TestPlaceOrderRejectsUnresolvablePrice`](#test-testplaceorderrejectsunresolvableprice)
 
 <a id="rule-checkoutpricescartcreatespaymentintent"></a>
 #### 📐 Rule: `CheckoutPricesCartCreatesPaymentIntent`
@@ -4207,6 +4343,13 @@ _Only an explicit decision — by the RESTAURANT for its own orders, or by an AD
 _The settled refund fact reported back by Stripe is recorded._
 
 - **Verified by**: [🧪 `TestRefundSettledFactRecorded`](#test-testrefundsettledfactrecorded), [🧪 `TestPaymentRefundedRecorded`](#test-testpaymentrefundedrecorded)
+
+<a id="rule-pendingrefundvisibleuntildecided"></a>
+#### 📐 Rule: `PendingRefundVisibleUntilDecided`
+
+_A refund opened for decision is recorded as a domain fact (RefundOpened on the Payment) and stays visible in the refund queue (pendingRefunds) as REQUESTED until an explicit decision resolves it; the decision and the Stripe settlement update its status (APPROVED/DENIED, then REFUNDED) instead of dropping it._
+
+- **Verified by**: [🧪 `TestPendingRefundVisibleUntilDecided`](#test-testpendingrefundvisibleuntildecided)
 
 <a id="rule-orphanpaymenteventflagged"></a>
 #### 📐 Rule: `OrphanPaymentEventFlagged`
@@ -4381,6 +4524,26 @@ _Restaurant cancels an order it had accepted_
 - **Then**: [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
 - **Verifies**: [📐 `OrderLifecycleStatusMachine`](#rule-orderlifecyclestatusmachine)
 
+<a id="test-testorderlifecyclerejectsskippedtransition"></a>
+#### 🧪 Test: `TestOrderLifecycleRejectsSkippedTransition`
+
+_Rejects a move the declared Order state machine does not contain (accepting an already-accepted order)_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant)
+- **When**: [📩 `AcceptOrder`](#command-acceptorder)
+- **Thrown**: [⛔ `InvalidOrderStatus`](#error-invalidorderstatus)
+- **Verifies**: [📐 `OrderLifecycleIsExplicit`](#rule-orderlifecycleisexplicit), [📐 `OrderLifecycleStatusMachine`](#rule-orderlifecyclestatusmachine)
+
+<a id="test-testorderlifecycleterminalstaterefusestransitions"></a>
+#### 🧪 Test: `TestOrderLifecycleTerminalStateRefusesTransitions`
+
+_Rejects any lifecycle transition out of a terminal state (cancelling a delivered order)_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered)
+- **When**: [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant)
+- **Thrown**: [⛔ `InvalidOrderStatus`](#error-invalidorderstatus)
+- **Verifies**: [📐 `OrderLifecycleIsExplicit`](#rule-orderlifecycleisexplicit), [📐 `OrderLifecycleStatusMachine`](#rule-orderlifecyclestatusmachine)
+
 <a id="test-testorderrated"></a>
 #### 🧪 Test: `TestOrderRated`
 
@@ -4513,6 +4676,16 @@ _The Payment records the settled refund fact reported by Stripe (idempotent)_
 - **Then**: [⚡ `PaymentRefunded`](#event-paymentrefunded)
 - **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
 
+<a id="test-testpendingrefundvisibleuntildecided"></a>
+#### 🧪 Test: `TestPendingRefundVisibleUntilDecided`
+
+_The Payment records the opened refund (RefundOpened, idempotent) so the refund queue folds it as REQUESTED until decided_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
+- **When**: [📩 `RefundOpened`](#command-refundopened)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `PendingRefundVisibleUntilDecided`](#rule-pendingrefundvisibleuntildecided)
+
 <a id="test-testpaymentrefundapprovedrecorded"></a>
 #### 🧪 Test: `TestPaymentRefundApprovedRecorded`
 
@@ -4544,6 +4717,36 @@ _Checkout reads the open cart, prices it, and creates a Stripe payment intent_
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
 - **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent), [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
+
+<a id="test-testplaceorderrecomputespriceserverside"></a>
+#### 🧪 Test: `TestPlaceOrderRecomputesPriceServerSide`
+
+_Checkout recomputes every line total and the order total from the live catalog; a matching client confirmation total passes_
+
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderrejectspricemismatch"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsPriceMismatch`
+
+_A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)_
+
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `PriceMismatch`](#error-pricemismatch)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderrejectsunresolvableprice"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsUnresolvablePrice`
+
+_A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)_
+
+- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `PriceUnresolvable`](#error-priceunresolvable)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
 
 <a id="test-testplaceorderisrejected"></a>
 #### 🧪 Test: `TestPlaceOrderIsRejected`
@@ -4604,7 +4807,7 @@ _Requests a Stripe refund when an order is rejected by the restaurant_
 
 - **Given**: _(none)_
 - **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
-- **Then**: ∅ _no event (idempotent no-op)_
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
 <a id="test-testrefundonordercancelledbycustomer"></a>
@@ -5909,6 +6112,7 @@ _🧩 aggregate_ — One delivery of an order (bounded context: delivery). Born 
 | [⚡ `DeliveryRequested`](#event-deliveryrequested) | [⚡ `DeliveryRequested`](#event-deliveryrequested) | — |
 | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | — |
 | [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | — |
+| [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — |
 | [📩 `AcceptDelivery`](#command-acceptdelivery) | [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned) |
 | [📩 `ConfirmPickup`](#command-confirmpickup) | [⚡ `DeliveryPickedUp`](#event-deliverypickedup) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `CompleteDelivery`](#command-completedelivery) | [⚡ `DeliveryCompleted`](#event-deliverycompleted) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
@@ -5935,7 +6139,7 @@ _🧩 aggregate_ — A rider identity, linked to the auth provider user (authRef
 <a id="actor-deliverydispatchprocess"></a>
 #### 🎭 Actor: `DeliveryDispatchProcess`
 
-_⚙️ process manager_ — Dispatches and tracks deliveries (bounded context: delivery, ADR-0031). When a DELIVERY order is marked ready, delivers the DeliveryRequested birth to the DeliveryJob (deterministic UUIDv5 job id from the order id = idempotency key) and offers the job to the partner and/or independent riders. Reacts to partner-reported facts (recorded by the DeliveryJob aggregate) and closes the order on delivery by sending MarkOrderDelivered — the Order validates the transition, so a terminal cancelled/rejected order is never resurrected.
+_⚙️ process manager_ — Dispatches and tracks deliveries (bounded context: delivery, ADR-0031). When a DELIVERY order is marked ready, delivers the DeliveryRequested birth to the DeliveryJob (deterministic UUIDv5 job id from the order id = idempotency key) and offers the job to the partner and/or independent riders. Reacts to partner-reported facts (recorded by the DeliveryJob aggregate): a partner decline re-offers the job up to 3 TOTAL offers (offer_attempts on the state row; V0 has a single partner — multi-partner ranking is the extension point), then fails closed with DeliveryDispatchFailed (ADR-20260720-004556). Closes the order on delivery by sending MarkOrderDelivered — the Order validates the transition, so a terminal cancelled/rejected order is never resurrected.
 
 
 | Receives | Emits → | Throws |
@@ -5943,7 +6147,7 @@ _⚙️ process manager_ — Dispatches and tracks deliveries (bounded context: 
 | [⚡ `OrderMarkedReady`](#event-ordermarkedready) | [⚡ `DeliveryRequested`](#event-deliveryrequested) | — |
 | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | _The partner accepted (inbound, recorded by the DeliveryJob aggregate — the courier lives on the job): just advance the run.
 _ | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
-| [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | _The partner declined (inbound): re-offer, or flag for manual handling._ | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
+| [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 | [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⚡ `OrderDelivered`](#event-orderdelivered) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 | [⚡ `DeliveryCompleted`](#event-deliverycompleted) | [⚡ `OrderDelivered`](#event-orderdelivered) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 
@@ -5967,7 +6171,7 @@ sequenceDiagram
   PM->>RM_Restaurant: read as restaurant [restaurant_id=OrderMarkedReady.restaurantId]
   PM->>AG_DeliveryJob: deliver DeliveryRequested — the aggregate records it
   PM->>PT_delivery: offer_job
-  PM->>ST: set order_id=OrderMarkedReady.orderId, restaurant_id=OrderMarkedReady.restaurantId, delivery_job_id=DeliveryRequested.deliveryJobId, process_status=OFFERED
+  PM->>ST: set order_id=OrderMarkedReady.orderId, restaurant_id=OrderMarkedReady.restaurantId, delivery_job_id=DeliveryRequested.deliveryJobId, process_status=OFFERED, offer_attempts=?
   end
   rect rgb(245,245,245)
   IN->>PM: DeliveryAcceptedByPartner (event)
@@ -5979,8 +6183,12 @@ sequenceDiagram
   IN->>PM: DeliveryRejectedByPartner (event)
   PM->>ST: by delivery_job_id=DeliveryRejectedByPartner.deliveryJobId
   PM--xIN: throws DeliveryJobNotFound
-  PM->>ST: set process_status=REOFFER_REQUIRED
+  PM->>ST: expect process_status=OFFERED
   PM->>PT_delivery: offer_job
+  PM->>ST: set offer_attempts=state.offer_attempts, process_status=OFFERED
+  Note over PM: skip unless precondition holds
+  PM->>AG_DeliveryJob: deliver DeliveryDispatchFailed — the aggregate records it
+  PM->>ST: set process_status=FAILED
   end
   rect rgb(245,245,245)
   IN->>PM: DeliveryStatusUpdated (event)
@@ -6005,15 +6213,15 @@ sequenceDiagram
 #### 🗄️ View: `View_DeliveryJob`
 
 - **Source**: [🎭 `DeliveryJob`](#actor-deliveryjob) · 🛶 V0
-- **Rules**: `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
-- **Fed by**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled)
+- **Rules**: `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
+- **Fed by**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `delivery_job_id` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) _(derived)_ | [⚡ `DeliveryRequested`.`deliveryJobId`](#event-deliveryrequested--deliveryjobid) | PK |  |
 | `order_id` | [🔤 `OrderId`](#scalar-orderid) _(derived)_ → [🗄️ `OrderTracking`](#view-ordertracking) | [⚡ `DeliveryRequested`.`orderId`](#event-deliveryrequested--orderid) | index |  |
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `DeliveryRequested`.`restaurantId`](#event-deliveryrequested--restaurantid) | — |  |
-| `status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled) | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status. |
+| `status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status (DeliveryDispatchFailed → FAILED, the offer-cap exhaustion). |
 | `provider` | [🔤 `DeliveryProvider`](#scalar-deliveryprovider) | [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | nullable | INDEPENDENT (rider accepted) or PARTNER (partner accepted); null while PENDING. |
 | `rider_id` | [🔤 `RiderId`](#scalar-riderid) | [⚡ `DeliveryAcceptedByRider`.`riderId`](#event-deliveryacceptedbyrider--riderid) | nullable | Set for an independent-rider delivery; null for a partner delivery. |
 | `courier` | `jsonb` | [⚡ `DeliveryAcceptedByPartner`.`courier`](#event-deliveryacceptedbypartner--courier) | nullable | Courier { displayName, phone?, riderId? }; from the partner on acceptance (independent rider is in rider_id). |
@@ -6025,7 +6233,7 @@ sequenceDiagram
 | `requested_at` | `timestamptz` | [⚡ `DeliveryRequested`](#event-deliveryrequested) | — | DeliveryRequested occurrence time. |
 | `picked_up_at` | `timestamptz` | [⚡ `DeliveryPickedUp`](#event-deliverypickedup) | nullable |  |
 | `delivered_at` | `timestamptz` | [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | nullable | Set on DeliveryCompleted or DeliveryStatusUpdated=DELIVERED (conditional occurrence). |
-| `last_partner_rejection` | `text` | [⚡ `DeliveryRejectedByPartner`.`reason`](#event-deliveryrejectedbypartner--reason) | nullable | Reason of the latest partner decline (the job stays PENDING and is re-offered); null if never rejected. |
+| `last_partner_rejection` | `text` | [⚡ `DeliveryRejectedByPartner`.`reason`](#event-deliveryrejectedbypartner--reason) | nullable | Reason of the latest partner decline (the job stays PENDING and is re-offered, up to the 3-offer cap — ADR-20260720-004556); null if never rejected. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -6233,7 +6441,7 @@ Change a rider's availability/lifecycle status.
 | <a id="command-changeriderstatus--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="command-changeriderstatus--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### ⚡ Events _(17)_
+### ⚡ Events _(18)_
 
 <a id="event-deliveryrequested"></a>
 #### ⚡ Event: `DeliveryRequested`
@@ -6310,6 +6518,23 @@ A delivery job was cancelled before delivery (e.g. by the restaurant or admin).
 | --- | --- | --- | --- |
 | <a id="event-deliverycancelled--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="event-deliverycancelled--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="event-deliverydispatchfailed"></a>
+#### ⚡ Event: `DeliveryDispatchFailed`
+
+Dispatch failed terminally: the delivery partner declined the job at every offer attempt (cap of 3 total offers, ADR-20260720-004556). Emitted by DeliveryDispatchProcess (like DeliveryRequested) so read models surface the failed job to the restaurant for manual handling; no automatic retry follows.
+
+- **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
+- **Consumed by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-deliverydispatchfailed--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="event-deliverydispatchfailed--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-deliverydispatchfailed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-deliverydispatchfailed--attempts"></a>`attempts` | `integer` | ✅ | Total offer attempts made before giving up (the cap; the birth offer counts as 1). |
+| <a id="event-deliverydispatchfailed--lastreason"></a>`lastReason` | `string` | ⬜ | Reason carried by the final partner decline, when the partner gave one. |
 
 <a id="event-deliveryacceptedbypartner"></a>
 #### ⚡ Event: `DeliveryAcceptedByPartner`
@@ -6516,7 +6741,7 @@ A rider's availability/lifecycle status changed.
 | <a id="error-ridernotfound"></a>⛔ `RiderNotFound` | No rider with this id. | 🇬🇧 Rider not found. | 🇫🇷 Livreur introuvable. | [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-invalidriderstatustransition"></a>⛔ `InvalidRiderStatusTransition` | The rider is not in a status that allows this transition. | 🇬🇧 A rider cannot move from '{currentStatus}' to '{targetStatus}'. | 🇫🇷 Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 
-### 📐 Business rules _(11)_
+### 📐 Business rules _(12)_
 
 <a id="rule-deliveryacceptedonlywhenpending"></a>
 #### 📐 Rule: `DeliveryAcceptedOnlyWhenPending`
@@ -6551,7 +6776,7 @@ _A ready DELIVERY order triggers creation of a delivery job (dispatch)._
 
 _When the partner accepts (inbound), the assigned courier is recorded on the job._
 
-- **Verified by**: [🧪 `TestDispatchPartnerAccepted`](#test-testdispatchpartneraccepted), [🧪 `TestDeliveryJobRecordsPartnerAcceptance`](#test-testdeliveryjobrecordspartneracceptance)
+- **Verified by**: [🧪 `TestDispatchPartnerAccepted`](#test-testdispatchpartneraccepted), [🧪 `TestDispatchAcceptedAfterReoffer`](#test-testdispatchacceptedafterreoffer), [🧪 `TestDeliveryJobRecordsPartnerAcceptance`](#test-testdeliveryjobrecordspartneracceptance)
 
 <a id="rule-partnerrejectionreoffers"></a>
 #### 📐 Rule: `PartnerRejectionReoffers`
@@ -6559,6 +6784,13 @@ _When the partner accepts (inbound), the assigned courier is recorded on the job
 _When the partner declines (inbound), the job is re-offered or flagged for manual handling._
 
 - **Verified by**: [🧪 `TestDispatchPartnerRejected`](#test-testdispatchpartnerrejected), [🧪 `TestDeliveryJobRecordsPartnerRejection`](#test-testdeliveryjobrecordspartnerrejection)
+
+<a id="rule-dispatchretriesarebounded"></a>
+#### 📐 Rule: `DispatchRetriesAreBounded`
+
+_A delivery job is offered at most 3 times in total (the birth offer + 2 re-offers); when the partner declines the last allowed offer the dispatch fails terminally (DeliveryDispatchFailed, run FAILED) and is surfaced to the restaurant for manual handling — never an unbounded retry loop (ADR-20260720-004556)._
+
+- **Verified by**: [🧪 `TestDispatchPartnerRejected`](#test-testdispatchpartnerrejected), [🧪 `TestDispatchAcceptedAfterReoffer`](#test-testdispatchacceptedafterreoffer), [🧪 `TestDispatchFailsAfterOfferCap`](#test-testdispatchfailsafteroffercap), [🧪 `TestDeliveryJobRecordsDispatchFailure`](#test-testdeliveryjobrecordsdispatchfailure)
 
 <a id="rule-orderclosedondeliverycompletion"></a>
 #### 📐 Rule: `OrderClosedOnDeliveryCompletion`
@@ -6682,12 +6914,22 @@ _The DeliveryJob records the inbound partner acceptance with its courier (idempo
 <a id="test-testdeliveryjobrecordspartnerrejection"></a>
 #### 🧪 Test: `TestDeliveryJobRecordsPartnerRejection`
 
-_The DeliveryJob records the inbound partner rejection (the dispatcher re-offers)_
+_The DeliveryJob records the inbound partner rejection (the dispatcher re-offers, bounded)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **When**: [📩 `DeliveryRejectedByPartner`](#command-deliveryrejectedbypartner)
 - **Then**: [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
 - **Verifies**: [📐 `PartnerRejectionReoffers`](#rule-partnerrejectionreoffers)
+
+<a id="test-testdeliveryjobrecordsdispatchfailure"></a>
+#### 🧪 Test: `TestDeliveryJobRecordsDispatchFailure`
+
+_The DeliveryJob records the terminal dispatch failure delivered by DeliveryDispatchProcess (job → FAILED)_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
+- **When**: [📩 `DeliveryDispatchFailed`](#command-deliverydispatchfailed)
+- **Then**: [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
+- **Verifies**: [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded)
 
 <a id="test-testdeliverystatusupdatedbycommand"></a>
 #### 🧪 Test: `TestDeliveryStatusUpdatedByCommand`
@@ -6846,12 +7088,32 @@ _Records the assigned courier when the partner accepts (inbound)_
 <a id="test-testdispatchpartnerrejected"></a>
 #### 🧪 Test: `TestDispatchPartnerRejected`
 
-_Re-offers or flags for manual handling when the partner declines (inbound)_
+_Re-offers the declined job to the partner while under the 3-offer cap (inbound decline)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **When**: [📩 `DeliveryRejectedByPartner`](#command-deliveryrejectedbypartner)
 - **Then**: ∅ _no event (idempotent no-op)_
-- **Verifies**: [📐 `PartnerRejectionReoffers`](#rule-partnerrejectionreoffers)
+- **Verifies**: [📐 `PartnerRejectionReoffers`](#rule-partnerrejectionreoffers), [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded)
+
+<a id="test-testdispatchacceptedafterreoffer"></a>
+#### 🧪 Test: `TestDispatchAcceptedAfterReoffer`
+
+_The partner accepts a re-offered job: the run advances to ACCEPTED (happy path after a decline)_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
+- **When**: [📩 `DeliveryAcceptedByPartner`](#command-deliveryacceptedbypartner)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded), [📐 `PartnerAcceptanceRecordsCourier`](#rule-partneracceptancerecordscourier)
+
+<a id="test-testdispatchfailsafteroffercap"></a>
+#### 🧪 Test: `TestDispatchFailsAfterOfferCap`
+
+_The 3rd partner decline exhausts the offer cap: DeliveryDispatchFailed is recorded and the run closes FAILED_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
+- **When**: [📩 `DeliveryRejectedByPartner`](#command-deliveryrejectedbypartner)
+- **Then**: [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
+- **Verifies**: [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded)
 
 <a id="test-testdispatchclosesorderonpartnerdelivered"></a>
 #### 🧪 Test: `TestDispatchClosesOrderOnPartnerDelivered`
@@ -7159,7 +7421,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-inboundeventstatus"></a>🔤 `InboundEventStatus` | enum (RECEIVED \| DELIVERED \| FAILED) | Lifecycle of an adapted inbound business event (inbound_events row): RECEIVED (staged by the adapter ACL), DELIVERED (appended through the normal write path — includes the aggregate's already-recorded no-op), FAILED (delivery error, left for retry/inspection).  |
 | <a id="scalar-paymentprocessstatus"></a>🔤 `PaymentProcessStatus` | enum (AWAITING_PAYMENT_RESULT \| ORDER_PLACED \| FAILED) | State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart). |
 | <a id="scalar-refundprocessstatus"></a>🔤 `RefundProcessStatus` | enum (PENDING_APPROVAL \| APPROVED_AWAITING_SETTLEMENT \| DENIED \| REFUNDED) | State of one RefundProcess run (refund_process_manager row, keyed by order). Refunds are approved by the restaurant (own orders) or an admin. |
-| <a id="scalar-deliverydispatchprocessstatus"></a>🔤 `DeliveryDispatchProcessStatus` | enum (OFFERED \| ACCEPTED \| REOFFER_REQUIRED \| COMPLETED) | State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). |
+| <a id="scalar-deliverydispatchprocessstatus"></a>🔤 `DeliveryDispatchProcessStatus` | enum (OFFERED \| ACCEPTED \| FAILED \| COMPLETED) | State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED keeps REOFFER_REQUIRED's ordinal slot (both flag manual handling; ADR-20260720-004556). |
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 

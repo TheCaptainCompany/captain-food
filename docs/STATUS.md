@@ -1,7 +1,53 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-19. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-20 (early). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-20 (early) — post-merge wave, all landed directly on `main` (user-directed), each
+> workstream gated in an isolated worktree then re-gated integrated (final: 29x tests green,
+> validate 0 errors, drift clean):** ① **Production JWT bug fixed** — `jsonwebtoken` v10 had no
+> crypto backend selected → every authenticated GraphQL request panicked (502) in prod; fixed with
+> the `rust_crypto` feature. ② **Automated prod E2E smoke test (Stripe TEST mode)** —
+> `tools/smoke/prod-smoke.sh` (`make smoke-prod`, `.github/workflows/prod-smoke.yml`
+> workflow_dispatch + daily cron; needs repo secrets `STRIPE_SECRET_KEY`/`RENDER_API_KEY`, not yet
+> configured): layered ping/health → public GraphQL → idempotent `smoke-test` tenant fixture →
+> full checkout with `pm_card_visa` confirmed server-side → poll until captured. Stripe test
+> webhook endpoint created → `https://api.captain.food/adapters/stripe/webhooks`
+> (`payment_intent.succeeded`/`payment_intent.payment_failed`/`charge.refunded`), signature
+> verified live; `STRIPE_WEBHOOK_SECRET` set in Render. ③ **Server-side pricing, fail-closed**
+> (ADR-20260720-002217): `place_order` reprices every folded cart line from the live catalog
+> (`application::pricing::price_cart`) → PaymentIntent amount + frozen snapshot; optional
+> `PlaceOrder.expectedTotal` equality check; `PriceMismatch`/`PriceUnresolvable`; rule
+> `ServerPriceAuthority`. ④ **`pendingRefunds` read model** (ADR-20260720-003142): new
+> `RefundOpened` event on the Payment stream, `View_PendingRefunds` fold view + migration,
+> `pendingRefunds` query (RESTAURANT+ADMIN) + story steps, rule `PendingRefundVisibleUntilDecided`.
+> ⑤ **Bounded partner re-offer policy** (ADR-20260720-004556): decline → re-offer, cap 3
+> (`offer_attempts` in the run row), exhaustion → `DeliveryDispatchFailed` + run FAILED (status
+> `FAILED` replaces `REOFFER_REQUIRED`); offer timeouts deferred (no time-based sweep host yet).
+> ⑥ **Codegen roadmap item 1, first slice** (ADR-20260720-004419): `lifecycle:` DSL in actors.yaml
+> (event-keyed), 8 `lc-*` validator rules + coverage warning, generated
+> `domain/src/generated/lifecycles.rs` transition tables + mermaid state diagrams in the docs;
+> Order wired end-to-end. Remaining open: fee/split breakdown (ADR-0016/0017), offer timeouts,
+> Rider/DeliveryJob/Restaurant lifecycle adoption, worker `DeliveryJob-%` drain, roadmap items 2–7,
+> GitHub repo secrets for the smoke workflow.
+
+> ✅ **2026-07-20 (early, cont.) — PRODUCTION SMOKE GREEN (all 4 layers):** `make smoke-prod` passes
+> end-to-end against api.captain.food — cart → server-priced `placeOrder` → Stripe TEST confirm →
+> webhook → PlaceOrderProcess → order **PLACED / CAPTURED**. Getting there surfaced and fixed five
+> production defects: ① deployed schema drift — `Cart.session_id` and
+> `OrderTracking.payment_intent_id` never had catch-up migrations, so the projectors skipped every
+> Cart/Order event (migrations added + Order/Cart checkpoints refolded); ② the refold exposed a
+> panicking generated accessor (legacy `OrderPlaced` without `ref`) that froze the projection worker
+> at boot — the projector emitter now emits total folds (`unwrap_or_default`), string scalars derive
+> `Default`, and both worker loops panic-isolate every tick (a poison event can no longer kill
+> projection or sagas); ③ `payment_status` ordering hole — `PaymentCaptured` always precedes the
+> `OrderPlaced` row it should fold into, so the creation arm now seeds CAPTURED (the PlaceOrderProcess
+> invariant, recorded in the projection DSL lineage + DB-gated test); ④ smoke confirm needed a
+> `return_url` (account has redirect payment methods enabled); ⑤ **Sirene sync idempotency** — prod
+> listings predate the UUIDv5(SIRET) derivation, so every pass re-derived colliding ids and retried
+> 605 `SlugAlreadyTaken` rejections forever; the worker now adopts the aggregate id the projection
+> names via `external_identifiers` (register + close paths) and checkpoints deterministic rejections
+> instead of retrying (DB-gated tests: adoption, legacy close, no-churn).
 
 > ✅ **LANDED (2026-07-20): command sourcing + inbound-event sourcing + ACCEPTANCE-FIRST GraphQL**
 > (ADR-20260720-015300/-015400/-015500, branch `claude/clarification-needed-5si77x`). The two

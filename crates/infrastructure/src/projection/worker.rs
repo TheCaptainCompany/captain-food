@@ -214,11 +214,17 @@ impl ProjectionWorker {
 
     /// Poll forever: `run_once` then sleep ~1.5s. Consumes the worker (spawn it as a task); the shared
     /// [`ProjectionStatus`] handle stays readable through [`Self::status`] clones taken before spawning.
+    /// Each tick runs in its own task so a PANIC escaping a drain (poison event) kills only that tick,
+    /// never the loop — the production alternative was a projector frozen until the next deploy.
     pub async fn run_loop(self) {
         self.status_mut().running = true;
+        let worker = Arc::new(self);
         loop {
             // Errors are recorded on the status snapshot by run_once; the loop keeps polling.
-            let _ = self.run_once().await;
+            let w = Arc::clone(&worker);
+            if let Err(join) = tokio::spawn(async move { let _ = w.run_once().await; }).await {
+                eprintln!("projection worker: tick panicked — resuming next tick: {join}");
+            }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     }
@@ -302,10 +308,26 @@ impl ProjectionWorker {
         .map_err(|e| db_err(format!("position {position} ({event_type}): {e}")))?;
 
         let env = Envelope { stream_name, position, occurred_at, event };
-        for projector in group.projectors {
-            projector.apply(&self.pool, &env).await?;
+        // Spawned so a PANIC inside a fold degrades to a per-event error the caller log-skips —
+        // an unwinding panic would otherwise kill the whole worker task and freeze projection at
+        // this position forever (the production refold wedge: a legacy payload hitting a panicking
+        // accessor on every boot). The JoinError carries the panic; checkpointing then proceeds.
+        let pool = self.pool.clone();
+        let projectors = group.projectors;
+        let spawned_env = env.clone();
+        match tokio::spawn(async move {
+            for projector in projectors {
+                projector.apply(&pool, &spawned_env).await?;
+            }
+            Ok::<(), DomainError>(())
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(join) => Err(DomainError::Repository(format!(
+                "projector panicked at position {position}: {join}"
+            ))),
         }
-        Ok(())
     }
 
     async fn commit_checkpoint(&self, projector: &str, position: i64) -> Result<(), DomainError> {

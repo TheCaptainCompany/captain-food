@@ -25,6 +25,29 @@ impl PgRestaurantRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// Resolve a listing by one of its `external_identifiers` entries (JSONB containment on the
+    /// projection). NOT part of the query/port surface: integration synchronizers use it to find the
+    /// aggregate that already represents an external record — production predates today's
+    /// deterministic id derivations, so the projection, not the derivation, is the source of truth
+    /// for "is this SIRET/place already registered, and under which id".
+    pub async fn by_external_identifier(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<Option<RestaurantRow>, DomainError> {
+        let sql = format!(
+            "SELECT {} FROM restaurant WHERE external_identifiers @> $1 LIMIT 1",
+            restaurant_store::COLUMNS
+        );
+        let needle = serde_json::json!([{ "key": key, "value": value }]);
+        let row = sqlx::query(&sql)
+            .bind(needle)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+        row.as_ref().map(restaurant_store::decode).transpose()
+    }
 }
 
 #[async_trait]

@@ -9,6 +9,12 @@ use infrastructure::integrations::sirene::restaurant_id_for_siret;
 use infrastructure::SireneSyncWorker;
 use sqlx::PgPool;
 
+/// The tests in this file share one DATABASE_URL and reset the same tables — serialize them.
+static DB_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+fn db_lock() -> &'static tokio::sync::Mutex<()> {
+    DB_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Fresh copies of the tables the slice touches: the staging table (mirrors
 /// migrations/20260718100000) + the write path's `domain_events` + the `restaurant` projection table
 /// backing register_restaurant's SlugAlreadyTaken check (empty is fine — the worker does not project).
@@ -130,6 +136,7 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
         );
         return;
     };
+    let _guard = db_lock().lock().await;
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
     let restaurant_id = restaurant_id_for_siret("85242109900021").0;
@@ -210,4 +217,106 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
         .await
         .expect("final event count");
     assert_eq!(events, 2, "register + one close, no matter how often the signal repeats");
+}
+
+/// Seed the `restaurant` projection the way production looks for pre-derivation listings: a row
+/// owning the slug under an arbitrary legacy aggregate id, carrying (or not) the SIRET identifier.
+async fn seed_projection_row(pool: &PgPool, id: uuid::Uuid, slug: &str, identifiers: serde_json::Value) {
+    sqlx::query(
+        "INSERT INTO restaurant (restaurant_id, listing_status, external_identifiers, slug, \
+           display_name, address, opening_hours, status, order_acceptance, default_currency, \
+           created_at, updated_at) \
+         VALUES ($1, 0, $2, $3, 'CHEZ MARCO', '{}'::jsonb, '[]'::jsonb, 0, 0, 'EUR', now(), now())",
+    )
+    .bind(id)
+    .bind(identifiers)
+    .bind(slug)
+    .execute(pool)
+    .await
+    .expect("seed projection row");
+}
+
+/// Production predates the UUIDv5(SIRET) derivation: the projection row carrying the SIRET names the
+/// real aggregate, so the worker must adopt ITS id (register replay + close both target it) instead
+/// of deriving a slug-colliding sibling and retrying forever.
+#[tokio::test]
+async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_siret() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP worker_adopts_the_legacy_aggregate_id...: DATABASE_URL not set");
+        return;
+    };
+    let _guard = db_lock().lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    let legacy_id = uuid::Uuid::new_v4();
+    assert_ne!(legacy_id, restaurant_id_for_siret("85242109900021").0);
+    seed_projection_row(
+        &pool,
+        legacy_id,
+        "chez-marco-00021",
+        serde_json::json!([{ "key": "siret", "value": "85242109900021" }]),
+    )
+    .await;
+    let worker = SireneSyncWorker::new(pool.clone());
+
+    // The register replay adopts the legacy id — no SlugAlreadyTaken, no derived sibling.
+    stage_row(&pool, "A").await;
+    let summary = worker.run_once().await.expect("adoption drain");
+    assert_eq!((summary.registered, summary.skipped, summary.failed), (1, 0, 0));
+    let (stream,): (String,) =
+        sqlx::query_as("SELECT stream_name FROM domain_events ORDER BY position LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("registered event");
+    assert_eq!(stream, format!("Restaurant-{legacy_id}"));
+
+    // The close path resolves the SAME id, so legacy listings are closable too.
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    stage_row(&pool, "F").await;
+    let closing = worker.run_once().await.expect("closing drain");
+    assert_eq!(closing.closed, 1);
+    let (stream, event_type): (String, String) = sqlx::query_as(
+        "SELECT stream_name, event_type FROM domain_events ORDER BY position DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("close event");
+    assert_eq!((stream.as_str(), event_type.as_str()), (format!("Restaurant-{legacy_id}").as_str(), "RestaurantMarkedClosed"));
+}
+
+/// A catalogued rejection (here a REAL slug conflict — same slug, different establishment) is
+/// deterministic: the worker must mark the row processed and move on, not retry it every pass
+/// (the production 605-row SlugAlreadyTaken log storm).
+#[tokio::test]
+async fn worker_marks_a_deterministically_rejected_row_processed_instead_of_retrying_forever() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP worker_marks_a_deterministically_rejected_row...: DATABASE_URL not set");
+        return;
+    };
+    let _guard = db_lock().lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    // The slug is owned by a DIFFERENT establishment (different SIRET identifier): a true conflict
+    // the sync can never resolve by itself.
+    seed_projection_row(
+        &pool,
+        uuid::Uuid::new_v4(),
+        "chez-marco-00021",
+        serde_json::json!([{ "key": "siret", "value": "11111111100021" }]),
+    )
+    .await;
+    let worker = SireneSyncWorker::new(pool.clone());
+
+    stage_row(&pool, "A").await;
+    let summary = worker.run_once().await.expect("rejected drain");
+    assert_eq!((summary.registered, summary.skipped, summary.failed), (0, 1, 0));
+    let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM domain_events")
+        .fetch_one(&pool)
+        .await
+        .expect("count events");
+    assert_eq!(events, 0);
+
+    // The row is checkpointed: the next pass has nothing to do — the churn is gone.
+    let replay = worker.run_once().await.expect("no-op drain");
+    assert_eq!(replay.processed, 0);
 }

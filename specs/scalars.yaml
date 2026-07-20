@@ -508,6 +508,15 @@ PaymentStatus:
   enum: [PENDING, CAPTURED, FAILED, REFUNDED]
   description: "Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded)."
 
+RefundStatus:
+  type: string
+  enum: [REQUESTED, APPROVED, DENIED, REFUNDED]
+  description: >
+    Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds):
+    REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved
+    (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded).
+    Distinct from RefundProcessStatus, the RefundProcess state-table run status.
+
 OperationStatus:
   type: string
   enum: [PENDING, SUCCEEDED, REJECTED, FAILED]
@@ -565,11 +574,11 @@ RefundProcessStatus:
 DeliveryDispatchProcessStatus:
   type: string
   enum:
-    - OFFERED           # DeliveryRequested delivered to the DeliveryJob; job offered to partner/riders
+    - OFFERED           # DeliveryRequested delivered to the DeliveryJob; job offered to partner/riders (a bounded re-offer returns here)
     - ACCEPTED          # a partner/rider accepted the job
-    - REOFFER_REQUIRED  # partner declined; job must be re-offered or handled manually
+    - FAILED            # offer attempts exhausted (cap 3, ADR-20260720-004556): DeliveryDispatchFailed recorded — terminal (manual handling)
     - COMPLETED         # delivery done and order closed — terminal
-  description: "State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order)."
+  description: "State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED keeps REOFFER_REQUIRED's ordinal slot (both flag manual handling; ADR-20260720-004556)."
 
 # Manual listing flag, set by the restaurant/admin. Useful for UI.
 # Orthogonal to StockStatus: an item is orderable when AVAILABLE *and* stock > 0.

@@ -7,22 +7,14 @@
 //! The lifecycle mapping mirrors the read-side `CartProjector` so write-side decisions and the projected
 //! `status` column can never disagree: `CartStarted` → OPEN, `CartCheckedOut` → CHECKED_OUT.
 
+use crate::generated::entities::CartLineItem;
 use crate::generated::events::DomainEvent;
-use crate::generated::scalars::{CartLineId, CartStatus, CustomerId, OfferId, RestaurantId};
+use crate::generated::scalars::{CartLineId, CartStatus, CustomerId, RestaurantId};
 
 /// Per-line quantity cap enforced on AddCartLine / ChangeCartLineQuantity
 /// (`errors.yaml#/QuantityExceedsLimit`). V0 policy default: the spec declares the error but no
 /// configurable limit; promote to a seeded referential policy table when one lands (ADR-0037).
 pub const MAX_LINE_QUANTITY: i64 = 50;
-
-/// A line currently in the cart, as the write side needs it: the client-generated line id plus the
-/// offer it points at — `ChangeCartLineQuantity` re-checks the new quantity against that offer's LIVE
-/// stock (`errors.yaml#/InsufficientStock`), so the fold must remember which offer each line holds.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CartLineRef {
-    pub cart_line_id: CartLineId,
-    pub offer_id: OfferId,
-}
 
 /// What the Cart command handlers need to know about the aggregate to accept or reject a command.
 /// `None` (from [`fold`]) means the cart does not exist yet — for `AddCartLine` that is the
@@ -36,8 +28,11 @@ pub struct CartState {
     /// Ids of the lines currently in the cart — `CartLineNotFound`, `CartEmpty`, idempotent re-adds.
     /// (Derivable from [`Self::lines`]; kept as its own field so existing call sites stay stable.)
     pub line_ids: Vec<CartLineId>,
-    /// The lines with the offer each points at — the live-stock re-check on quantity changes.
-    pub lines: Vec<CartLineRef>,
+    /// The full lines (offer, current quantity, selected options): `ChangeCartLineQuantity`
+    /// re-checks the new quantity against the offer's LIVE stock, and checkout reprices the whole
+    /// selection from the live catalog (rules.yaml#/ServerPriceAuthority — the cart events carry no
+    /// money, so the fold must remember the complete selection for the server to price).
+    pub lines: Vec<CartLineItem>,
     /// The customer the cart belongs to — set at `CartStarted` for a signed-in visitor, or later by
     /// `CartBoundToCustomer` when a guest cart is claimed after sign-in; `None` on a guest cart.
     pub customer_id: Option<CustomerId>,
@@ -66,10 +61,12 @@ fn apply(state: Option<CartState>, event: &DomainEvent) -> Option<CartState> {
         DomainEvent::CartLineAdded(e) => {
             if !s.line_ids.contains(&e.line.cart_line_id) {
                 s.line_ids.push(e.line.cart_line_id);
-                s.lines.push(CartLineRef {
-                    cart_line_id: e.line.cart_line_id,
-                    offer_id: e.line.offer_id,
-                });
+                s.lines.push(e.line.clone());
+            }
+        }
+        DomainEvent::CartLineQuantityChanged(e) => {
+            if let Some(line) = s.lines.iter_mut().find(|l| l.cart_line_id == e.cart_line_id) {
+                line.quantity = e.quantity;
             }
         }
         DomainEvent::CartLineRemoved(e) => {

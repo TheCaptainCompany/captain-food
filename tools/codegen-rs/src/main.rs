@@ -203,6 +203,8 @@ struct Coverage {
     screens: usize,
     screen_bindings: usize,
     screen_gaps: usize,
+    lifecycles: usize,
+    lifecycle_transitions: usize,
 }
 
 struct Report {
@@ -413,6 +415,15 @@ fn validate(model: &Model) -> Report {
 
     // --- 2b. Process managers (processmanager.yaml): typed-step validation -----------------------
     validate_process_managers(model, &mut issues);
+
+    // --- 2c. Aggregate lifecycle state machines (actors.yaml `lifecycle`, ADR-20260720-004419) ---
+    validate_lifecycles(model, &mut issues);
+    {
+        let lcs = parse_lifecycles(model);
+        cov.lifecycles = lcs.len();
+        cov.lifecycle_transitions =
+            lcs.iter().map(|l| l.transitions.iter().map(|t| t.from.len()).sum::<usize>()).sum();
+    }
 
     // --- 2d. Service catalog (services.yaml, ADR-20260719-214500) --------------------------------
     validate_services(model, &mut issues);
@@ -1887,6 +1898,31 @@ fn payload_extract(alias: &str, prop: &str, pgty: &str) -> String {
     }
 }
 
+/// The Money-value-object subfield a `*_cents`/currency column extracts (the projection convention:
+/// `Money = { amountCents, currency }` becomes a `MoneyCents` column + a `CurrencyCode` column).
+/// `Some` only when the column's `from` property is `$ref: entities.yaml#/Money` AND the declared
+/// column type picks a subfield — `MoneyCents` → `amountCents`, `CurrencyCode` → `currency`.
+fn money_subfield(model: &Model, evt: &str, prop: &str, col_ty: &str) -> Option<&'static str> {
+    let sub = match col_ty {
+        "MoneyCents" => "amountCents",
+        "CurrencyCode" => "currency",
+        _ => return None,
+    };
+    let r = model
+        .defs
+        .get("events.yaml")?
+        .get(evt)?
+        .get("properties")?
+        .get(prop)?
+        .get("$ref")?
+        .as_str()?;
+    if r == "entities.yaml#/Money" {
+        Some(sub)
+    } else {
+        None
+    }
+}
+
 /// The values of a scalars.yaml enum, in declared (ordinal) order — `Some` only for an enum scalar.
 fn enum_values(model: &Model, ty: &str) -> Option<Vec<String>> {
     model
@@ -2000,12 +2036,25 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
                         types.join(", ")
                     )
                 }
-            } else if let Some((_, prop)) = carrying.first() {
+            } else if let Some((first_evt, prop)) = carrying.first() {
                 // scalar "latest carrying event": the newest event whose payload holds this property.
-                // An enum column stores the ordinal (value→ordinal CASE); others extract+cast by type.
-                let val_expr = |alias: &str| match &enum_vals {
-                    Some(vals) => enum_ordinal_case(&format!("{}.payload->>'{}'", alias, prop), vals),
-                    None => payload_extract(alias, prop, &pgty),
+                // An enum column stores the ordinal (value→ordinal CASE); a Money property splits into
+                // its `amountCents`/`currency` subfield by declared column type; others extract+cast.
+                let money_sub = money_subfield(model, first_evt, prop, &c.ty);
+                let val_expr = |alias: &str| {
+                    if let Some(sub) = money_sub {
+                        let cast = pg_cast(&pgty);
+                        if cast.is_empty() {
+                            format!("{}.payload->'{}'->>'{}'", alias, prop, sub)
+                        } else {
+                            format!("({}.payload->'{}'->>'{}'){}", alias, prop, sub, cast)
+                        }
+                    } else {
+                        match &enum_vals {
+                            Some(vals) => enum_ordinal_case(&format!("{}.payload->>'{}'", alias, prop), vals),
+                            None => payload_extract(alias, prop, &pgty),
+                        }
+                    }
                 };
                 let only_creation = carrying.iter().all(|(e, _)| e == &creation);
                 if only_creation {
@@ -3279,6 +3328,288 @@ fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) {
     }
 }
 
+// ─── §2c — aggregate lifecycle state machines (actors.yaml `lifecycle`, ADR-20260720-004419) ────
+
+/// One `{ from: [states], event, to }` transition of a declared lifecycle.
+struct LifecycleTransition {
+    from: Vec<String>,
+    event_ref: String,
+    to: String,
+}
+
+/// One `{ event, to }` birth entry of a declared lifecycle.
+struct LifecycleInitial {
+    event_ref: String,
+    to: String,
+}
+
+/// A parsed `lifecycle:` block of an actors.yaml aggregate: the status machine as declared data.
+/// Tolerant parsing (missing pieces → empty); `validate_lifecycles` reports the holes.
+struct Lifecycle {
+    aggregate: String,
+    status_ref: String,
+    initial: Vec<LifecycleInitial>,
+    transitions: Vec<LifecycleTransition>,
+    terminal: Vec<String>,
+}
+
+/// Parse every aggregate's `lifecycle:` block, in actors.yaml order.
+fn parse_lifecycles(model: &Model) -> Vec<Lifecycle> {
+    let mut out = Vec::new();
+    let actors = match model.defs.get("actors.yaml") {
+        Some(Value::Mapping(m)) => m,
+        _ => return out,
+    };
+    for (k, node) in actors {
+        let name = match k.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        if node.get("type").and_then(|x| x.as_str()) != Some("aggregate") {
+            continue;
+        }
+        let lc = match node.get("lifecycle") {
+            Some(v) => v,
+            None => continue,
+        };
+        let str_seq = |v: Option<&Value>| -> Vec<String> {
+            v.and_then(|x| x.as_sequence())
+                .map(|s| s.iter().filter_map(|it| it.as_str().map(|x| x.to_string())).collect())
+                .unwrap_or_default()
+        };
+        let event_ref =
+            |e: &Value| e.get("event").and_then(|x| x.get("$ref")).and_then(|r| r.as_str()).unwrap_or("").to_string();
+        let initial = lc
+            .get("initial")
+            .and_then(|x| x.as_sequence())
+            .map(|s| {
+                s.iter()
+                    .map(|e| LifecycleInitial {
+                        event_ref: event_ref(e),
+                        to: e.get("to").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let transitions = lc
+            .get("transitions")
+            .and_then(|x| x.as_sequence())
+            .map(|s| {
+                s.iter()
+                    .map(|t| LifecycleTransition {
+                        from: str_seq(t.get("from")),
+                        event_ref: event_ref(t),
+                        to: t.get("to").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(Lifecycle {
+            aggregate: name.to_string(),
+            status_ref: lc
+                .get("status")
+                .and_then(|x| x.get("$ref"))
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_string(),
+            initial,
+            transitions,
+            terminal: str_seq(lc.get("terminal")),
+        });
+    }
+    out
+}
+
+/// The enum values of a scalars.yaml enum scalar, or `None` when the name is not an enum scalar.
+fn scalar_enum_values(model: &Model, scalar: &str) -> Option<Vec<String>> {
+    model
+        .defs
+        .get("scalars.yaml")
+        .and_then(|s| s.get(scalar))
+        .and_then(|n| n.get("enum"))
+        .and_then(|e| e.as_sequence())
+        .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect())
+}
+
+/// §2c — validate the declared aggregate lifecycles (ADR-20260720-004419): the status is an enum
+/// scalar; every named state is a member of it; every claimed event is emitted by THIS aggregate;
+/// the machine is deterministic (no two transitions from one state on one event); terminal states
+/// have no outgoing transition; every named state is reachable from an initial state. An aggregate
+/// whose `<Name>Status` scalar exists (trailing `Job` stripped, so DeliveryJob ↔ DeliveryStatus)
+/// but that declares no lifecycle WARNS (`lc-missing`) — adoption is incremental.
+fn validate_lifecycles(model: &Model, issues: &mut Vec<Issue>) {
+    let actors = match model.defs.get("actors.yaml") {
+        Some(Value::Mapping(m)) => m,
+        _ => return,
+    };
+    let lifecycles: BTreeSet<String> = parse_lifecycles(model).into_iter().map(|l| l.aggregate).collect();
+    // Coverage: an aggregate with a status scalar but no declared lifecycle.
+    for (k, node) in actors {
+        let name = match k.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        if node.get("type").and_then(|x| x.as_str()) != Some("aggregate") || lifecycles.contains(name) {
+            continue;
+        }
+        let base = name.strip_suffix("Job").unwrap_or(name);
+        for candidate in [format!("{}Status", name), format!("{}Status", base)] {
+            if scalar_enum_values(model, &candidate).is_some() {
+                issues.push(warn(
+                    "lc-missing",
+                    format!("actors.yaml/{}", name),
+                    format!(
+                        "aggregate '{}' has a status scalar (scalars.yaml#/{}) but declares no `lifecycle` — its status machine stays implicit code (ADR-20260720-004419).",
+                        name, candidate
+                    ),
+                ));
+                break;
+            }
+        }
+    }
+    for lc in parse_lifecycles(model) {
+        let at = format!("actors.yaml/{}.lifecycle", lc.aggregate);
+        // status → a scalars.yaml ENUM scalar.
+        let enum_values: Vec<String> = match ref_name(&lc.status_ref) {
+            Some(scalar)
+                if ref_target_file(&lc.status_ref, "actors.yaml").as_deref() == Some("scalars.yaml") =>
+            {
+                match scalar_enum_values(model, &scalar) {
+                    Some(vals) => vals,
+                    None => {
+                        issues.push(err(
+                            "lc-status",
+                            format!("{}.status", at),
+                            format!("'{}' is not an enum scalar — the lifecycle status must enumerate its states.", scalar),
+                        ));
+                        continue;
+                    }
+                }
+            }
+            _ => {
+                issues.push(err(
+                    "lc-status",
+                    format!("{}.status", at),
+                    "status must be a { $ref: 'scalars.yaml#/<EnumScalar>' }.".into(),
+                ));
+                continue;
+            }
+        };
+        let state_set: BTreeSet<&str> = enum_values.iter().map(|s| s.as_str()).collect();
+        let check_state = |issues: &mut Vec<Issue>, state: &str, where_: String| {
+            if !state_set.contains(state) {
+                issues.push(err(
+                    "lc-state",
+                    where_,
+                    format!("'{}' is not a member of {} ({}).", state, ref_name(&lc.status_ref).unwrap_or_default(), enum_values.join(", ")),
+                ));
+            }
+        };
+        // The events THIS aggregate emits, per its receives[].emits (actors.yaml stays the wiring truth).
+        let emitted: BTreeSet<String> = actors
+            .get(lc.aggregate.as_str())
+            .and_then(|n| n.get("receives"))
+            .and_then(|r| r.as_sequence())
+            .map(|seq| {
+                seq.iter()
+                    .flat_map(|e| ref_strings(e.get("emits")))
+                    .filter_map(|r| ref_name(&r))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let check_event = |issues: &mut Vec<Issue>, event_ref: &str, where_: String| -> Option<String> {
+            if ref_target_file(event_ref, "actors.yaml").as_deref() != Some("events.yaml") {
+                issues.push(err(
+                    "lc-event",
+                    where_,
+                    format!("event must be a {{ $ref: 'events.yaml#/<Event>' }}, got '{}'.", event_ref),
+                ));
+                return None;
+            }
+            let name = ref_name(event_ref)?; // resolution itself is §1's job (ref-dangling)
+            if !emitted.contains(&name) {
+                issues.push(err(
+                    "lc-event-not-emitted",
+                    where_,
+                    format!("event '{}' is not emitted by aggregate '{}' (per its receives[].emits) — the machine may only claim its own facts.", name, lc.aggregate),
+                ));
+            }
+            Some(name)
+        };
+        // initial — at least one birth entry; unique events; states in the enum.
+        if lc.initial.is_empty() {
+            issues.push(err("lc-shape", format!("{}.initial", at), "lifecycle must declare at least one `initial` { event, to } entry.".into()));
+        }
+        let mut initial_events: BTreeSet<String> = BTreeSet::new();
+        for (i, ini) in lc.initial.iter().enumerate() {
+            let w = format!("{}.initial[{}]", at, i);
+            check_state(issues, &ini.to, w.clone());
+            if let Some(name) = check_event(issues, &ini.event_ref, w.clone()) {
+                if !initial_events.insert(name.clone()) {
+                    issues.push(err("lc-ambiguous", w, format!("duplicate initial event '{}' — the machine must be deterministic.", name)));
+                }
+            }
+        }
+        // transitions — states/events valid, deterministic per (from, event).
+        let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+        for (i, t) in lc.transitions.iter().enumerate() {
+            let w = format!("{}.transitions[{}]", at, i);
+            if t.from.is_empty() {
+                issues.push(err("lc-shape", w.clone(), "a transition must declare a non-empty `from: [states]`.".into()));
+            }
+            check_state(issues, &t.to, w.clone());
+            let ev = check_event(issues, &t.event_ref, w.clone());
+            for f in &t.from {
+                check_state(issues, f, w.clone());
+                if let Some(name) = &ev {
+                    if !seen.insert((f.clone(), name.clone())) {
+                        issues.push(err(
+                            "lc-ambiguous",
+                            w.clone(),
+                            format!("two transitions from '{}' on '{}' — the machine must be deterministic.", f, name),
+                        ));
+                    }
+                }
+            }
+        }
+        // terminal — in the enum, and with NO outgoing transition.
+        for (i, s) in lc.terminal.iter().enumerate() {
+            let w = format!("{}.terminal[{}]", at, i);
+            check_state(issues, s, w.clone());
+            if lc.transitions.iter().any(|t| t.from.iter().any(|f| f == s)) {
+                issues.push(err("lc-terminal-outgoing", w, format!("terminal state '{}' has an outgoing transition.", s)));
+            }
+        }
+        // reachability — every state the lifecycle names is reachable from an initial state.
+        let mut reachable: BTreeSet<String> = lc.initial.iter().map(|i| i.to.clone()).collect();
+        loop {
+            let before = reachable.len();
+            for t in &lc.transitions {
+                if t.from.iter().any(|f| reachable.contains(f)) {
+                    reachable.insert(t.to.clone());
+                }
+            }
+            if reachable.len() == before {
+                break;
+            }
+        }
+        let mut named: BTreeSet<String> = lc.terminal.iter().cloned().collect();
+        for t in &lc.transitions {
+            named.extend(t.from.iter().cloned());
+            named.insert(t.to.clone());
+        }
+        for s in named {
+            if state_set.contains(s.as_str()) && !reachable.contains(&s) {
+                issues.push(err(
+                    "lc-unreachable",
+                    at.clone(),
+                    format!("state '{}' is named by the lifecycle but not reachable from an initial state.", s),
+                ));
+            }
+        }
+    }
+}
+
 // ─── §2d — service-catalog validation (services.yaml, ADR-20260719-214500) ──────────────────────
 
 /// `^[a-z][a-z0-9_]*$` — a service operation name is a snake_case domain verb (never the
@@ -4061,7 +4392,10 @@ fn nav_add(
     seen: &mut HashMap<String, HashSet<String>>,
     out: &mut HashMap<String, Vec<NavField>>,
 ) {
-    if !entity_names.contains(entity) {
+    // Both ends must be registered API types: a navigation field TO an unregistered aggregate (e.g.
+    // Payment, whose View_PendingRefunds fk only documents read lineage) would emit an SDL/Rust
+    // reference to a type that does not exist.
+    if !entity_names.contains(entity) || !entity_names.contains(&nf.target) {
         return;
     }
     let s = seen.entry(entity.to_string()).or_default();
@@ -4666,8 +5000,10 @@ fn emit_documentation(model: &Model) -> String {
         ].join("\n") }
     }).collect();
 
-    // actorDocs — process managers also embed their saga sequence diagram (typed steps).
+    // actorDocs — process managers also embed their saga sequence diagram (typed steps); aggregates
+    // with a declared `lifecycle` embed their state diagram (ADR-20260720-004419).
     let pm_seq: HashMap<String, String> = pm_sequence_map(model).into_iter().collect();
+    let lc_state: HashMap<String, String> = lifecycle_state_map(model).into_iter().collect();
     let actor_docs: Vec<Doc> = actors.iter().map(|a| {
         let rows: Vec<Vec<String>> = a.receives.iter().map(|e| {
             let msg_name = ref_name(&e.message_ref).unwrap_or_else(|| "?".to_string());
@@ -4689,10 +5025,12 @@ fn emit_documentation(model: &Model) -> String {
             format!("\n_{}_{}\n", kind, a.description.as_deref().map(|d| format!(" — {}", d)).unwrap_or_default()),
             md_table(&["Receives", "Emits →", "Throws"], &rows),
         ];
-        if a.kind != "aggregate" {
-            if let Some(d) = pm_seq.get(&a.name) {
-                parts.push(format!("\nSequence (generated from the typed steps):\n\n```mermaid\n{}\n```", d));
+        if a.kind == "aggregate" {
+            if let Some(d) = lc_state.get(&a.name) {
+                parts.push(format!("\nLifecycle (generated from the declared state machine):\n\n```mermaid\n{}\n```", d));
             }
+        } else if let Some(d) = pm_seq.get(&a.name) {
+            parts.push(format!("\nSequence (generated from the typed steps):\n\n```mermaid\n{}\n```", d));
         }
         Doc { ctx: cx.of_actor(&a.name), md: parts.join("\n") }
     }).collect();
@@ -5328,9 +5666,11 @@ fn emit_documentation_html(model: &Model) -> String {
         HDoc { ctx: cx.of_type(&t.name), html: h_item("type", "Type", &t.name, &body, t.description.as_deref()) }
     }).collect();
 
-    // 3. Actors — process managers also embed their saga sequence diagram; the <pre class="mermaid">
+    // 3. Actors — process managers also embed their saga sequence diagram, aggregates with a declared
+    // `lifecycle` their state diagram (ADR-20260720-004419); the <pre class="mermaid">
     // source is rendered client-side by MERMAID_JS and stays readable as text when offline.
     let pm_seq: HashMap<String, String> = pm_sequence_map(model).into_iter().collect();
+    let lc_state: HashMap<String, String> = lifecycle_state_map(model).into_iter().collect();
     let actor_docs: Vec<HDoc> = actors.iter().map(|a| {
         let kind = if a.kind == "aggregate" { "🧩 aggregate" } else { "⚙️ process manager" };
         let rows: Vec<Vec<String>> = a.receives.iter().map(|e| {
@@ -5339,7 +5679,9 @@ fn emit_documentation_html(model: &Model) -> String {
             let throws = { let s = e.throws.iter().map(|r| h_link("error", &ref_name(r).unwrap_or_default())).collect::<Vec<_>>().join(", "); if s.is_empty() { "—".to_string() } else { s } };
             vec![h_link(if is_cmd { "command" } else { "event" }, &ref_name(&e.message_ref).unwrap_or_else(|| "?".to_string())), emits, throws]
         }).collect();
-        let seq = if a.kind == "aggregate" { String::new() } else {
+        let seq = if a.kind == "aggregate" {
+            lc_state.get(&a.name).map(|d| format!("<div class=\"pm-seq\"><pre class=\"mermaid\">{}</pre></div>", h_esc(d))).unwrap_or_default()
+        } else {
             pm_seq.get(&a.name).map(|d| format!("<div class=\"pm-seq\"><pre class=\"mermaid\">{}</pre></div>", h_esc(d))).unwrap_or_default()
         };
         HDoc { ctx: cx.of_actor(&a.name), html: h_item("actor", "Actor", &a.name, &format!("<div class=\"rel muted\">{}</div>{}{}", kind, h_table(&["Receives", "Emits →", "Throws"], &rows), seq), a.description.as_deref()) }
@@ -6095,7 +6437,10 @@ fn emit_domain_scalars(model: &Model) -> String {
             } else if ty == "number" {
                 ("Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize", "f64")
             } else {
-                ("Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize", "String")
+                // Default: a projection folding a legacy event that predates a required property
+                // falls back to the empty value instead of panicking the worker (see the
+                // ScalarLatest required-on-creation arm of the projector emitter).
+                ("Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize", "String")
             };
             out.push_str(&format!("#[derive({})]\n", derives));
             out.push_str(&format!("pub struct {}(pub {});\n", name, inner));
@@ -6507,7 +6852,11 @@ fn emit_projectors(model: &Model) -> String {
                             let ev_opt = event_prop_optional(model, &creation, prop);
                             match (ev_opt, opt) {
                                 (true, true) => format!("e.{}.clone()", field),
-                                (true, false) => format!("e.{}.clone().expect(\"{} required on {}\")", field, c.name, creation),
+                                // Optional on the event but NOT NULL in the row: legacy production
+                                // events can predate the property — defaulting keeps the projection
+                                // total (a panicking accessor wedges the whole worker at that
+                                // position forever).
+                                (true, false) => format!("e.{}.clone().unwrap_or_default()", field),
                                 (false, true) => format!("Some(e.{}.clone())", field),
                                 (false, false) => format!("e.{}.clone()", field),
                             }
@@ -6696,6 +7045,115 @@ fn emit_domain_errors(model: &Model) -> String {
         "\n/// Look up an anticipated error by its stable PascalCase code.\npub fn find(code: &str) -> Option<&'static ErrorDef> {\n    ERRORS.iter().find(|e| e.code == code)\n}\n\n/// Interpolate the `{placeholder}` tokens of `template` from the rejection's JSON `context` object:\n/// a token naming a context field renders its value (strings verbatim, other JSON values via their\n/// canonical JSON form); a token with no matching field is left as-is (a visible spec/context gap,\n/// never a panic).\npub fn interpolate(template: &str, context: &serde_json::Value) -> String {\n    let mut out = String::with_capacity(template.len());\n    let mut rest = template;\n    while let Some(start) = rest.find('{') {\n        out.push_str(&rest[..start]);\n        let after = &rest[start + 1..];\n        match after.find('}') {\n            Some(end) => {\n                let key = &after[..end];\n                match context.get(key) {\n                    Some(serde_json::Value::String(s)) => out.push_str(s),\n                    Some(v) => out.push_str(&v.to_string()),\n                    None => {\n                        out.push('{');\n                        out.push_str(key);\n                        out.push('}');\n                    }\n                }\n                rest = &after[end + 1..];\n            }\n            None => {\n                out.push('{');\n                rest = after;\n            }\n        }\n    }\n    out.push_str(rest);\n    out\n}\n\n/// The interpolated English message for `code`, if it is a catalogued error.\npub fn message_en(code: &str, context: &serde_json::Value) -> Option<String> {\n    find(code).map(|e| interpolate(e.message_en, context))\n}\n\n/// The interpolated French message for `code`, if it is a catalogued error.\npub fn message_fr(code: &str, context: &serde_json::Value) -> Option<String> {\n    find(code).map(|e| interpolate(e.message_fr, context))\n}\n",
     );
     out
+}
+
+// ─── crates/domain/src/generated/lifecycles.rs (aggregate lifecycle tables, ADR-20260720-004419) ──
+
+/// Emit `crates/domain/src/generated/lifecycles.rs` — one module per aggregate declaring a
+/// `lifecycle:` block in actors.yaml (ADR-20260720-004419): the status machine as plain data/match
+/// (no SDK, no I/O — the domain stays dependency-free). `initial` maps a birth event to its entry
+/// state; `transition` is the declared table (`Some(next)` iff legal — `None` = illegal move OR an
+/// event outside the machine, a status no-op for the fold); `TERMINAL`/`is_terminal` close it.
+fn emit_domain_lifecycles(model: &Model) -> String {
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/actors.yaml `lifecycle` blocks (ADR-20260720-004419)\n// — do not edit by hand. Aggregate lifecycle state machines as plain data/match: the fold and the\n// command handlers consult `transition` so the write side can never disagree with the declared spec.\n",
+    );
+    for lc in parse_lifecycles(model) {
+        let status = ref_name(&lc.status_ref).unwrap_or_default();
+        let module = snake_type(&lc.aggregate);
+        out.push_str(&format!(
+            "\n/// {} lifecycle over [`{}`] (specs/actors.yaml#/{}/lifecycle).\npub mod {} {{\n    use crate::generated::events::DomainEvent;\n    use crate::generated::scalars::{};\n\n",
+            lc.aggregate, status, lc.aggregate, module, status
+        ));
+        let terminal: Vec<String> = lc.terminal.iter().map(|s| format!("{}::{}", status, s)).collect();
+        out.push_str(&format!(
+            "    /// Terminal states — no outgoing transitions.\n    pub const TERMINAL: &[{}] = &[{}];\n\n",
+            status,
+            terminal.join(", ")
+        ));
+        out.push_str(&format!(
+            "    /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.\n    pub fn initial(event: &DomainEvent) -> Option<{}> {{\n        match event {{\n",
+            status
+        ));
+        for ini in &lc.initial {
+            out.push_str(&format!(
+                "            DomainEvent::{}(_) => Some({}::{}),\n",
+                ref_name(&ini.event_ref).unwrap_or_default(),
+                status,
+                ini.to
+            ));
+        }
+        out.push_str("            _ => None,\n        }\n    }\n\n");
+        out.push_str(&format!(
+            "    /// The declared transition table: `Some(next)` iff `event` legally moves the machine from\n    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op).\n    pub fn transition(from: {}, event: &DomainEvent) -> Option<{}> {{\n        match (from, event) {{\n",
+            status, status
+        ));
+        for t in &lc.transitions {
+            let ev = ref_name(&t.event_ref).unwrap_or_default();
+            for f in &t.from {
+                out.push_str(&format!(
+                    "            ({}::{}, DomainEvent::{}(_)) => Some({}::{}),\n",
+                    status, f, ev, status, t.to
+                ));
+            }
+        }
+        out.push_str("            _ => None,\n        }\n    }\n\n");
+        // target: the state an event drives the machine to IRRESPECTIVE of the current state — at
+        // fold time the recorded fact wins (legality was enforced at append time by `transition`).
+        // Only emitted for events with a single target across all their transitions.
+        let mut targets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for t in &lc.transitions {
+            if let Some(ev) = ref_name(&t.event_ref) {
+                targets.entry(ev).or_default().insert(t.to.clone());
+            }
+        }
+        out.push_str(&format!(
+            "    /// The state `event` drives the machine to, irrespective of the current state — at fold\n    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`\n    /// for an event outside the machine (or whose target depends on the current state).\n    pub fn target(event: &DomainEvent) -> Option<{}> {{\n        match event {{\n",
+            status
+        ));
+        for t in &lc.transitions {
+            let ev = match ref_name(&t.event_ref) {
+                Some(e) => e,
+                None => continue,
+            };
+            if targets.get(&ev).map(|s| s.len()) != Some(1) {
+                continue;
+            }
+            targets.remove(&ev); // emit each single-target event once, in declaration order
+            out.push_str(&format!("            DomainEvent::{}(_) => Some({}::{}),\n", ev, status, t.to));
+        }
+        out.push_str("            _ => None,\n        }\n    }\n\n");
+        out.push_str(&format!(
+            "    /// Whether `state` is terminal (no outgoing transitions).\n    pub fn is_terminal(state: {}) -> bool {{\n        TERMINAL.contains(&state)\n    }}\n}}\n",
+            status
+        ));
+    }
+    out
+}
+
+/// Per-aggregate lifecycle state diagrams (mermaid `stateDiagram-v2`) from the declared `lifecycle`
+/// blocks — (aggregate → diagram body), in actors.yaml order. Mirrors [`pm_sequence_map`]: callers
+/// add their own framing (Markdown fence, HTML `<pre>`), so one source feeds every artifact.
+fn lifecycle_state_map(model: &Model) -> Vec<(String, String)> {
+    parse_lifecycles(model)
+        .into_iter()
+        .map(|lc| {
+            let mut lines: Vec<String> = vec!["stateDiagram-v2".into()];
+            for ini in &lc.initial {
+                lines.push(format!("  [*] --> {} : {}", ini.to, ref_name(&ini.event_ref).unwrap_or_default()));
+            }
+            for t in &lc.transitions {
+                let ev = ref_name(&t.event_ref).unwrap_or_default();
+                for f in &t.from {
+                    lines.push(format!("  {} --> {} : {}", f, t.to, ev));
+                }
+            }
+            for s in &lc.terminal {
+                lines.push(format!("  {} --> [*]", s));
+            }
+            (lc.aggregate, lines.join("\n"))
+        })
+        .collect()
 }
 
 // ─── crates/server/src/graphql/generated/ (Stage 1a — async-graphql type layer from api.yaml) ───
@@ -6926,7 +7384,7 @@ fn emit_server_types(model: &Model) -> String {
     let registered: HashSet<String> = api.types.iter().map(|t| t.name.clone()).collect();
     let nav = nav_fields(&views, &registered);
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/api.yaml + specs/entities.yaml — do not edit by hand.\n// GraphQL output types (async-graphql SimpleObject), mirroring the generated SDL: entities.yaml types\n// not registered as api.yaml projections, then the api.yaml types, each with its FK-derived navigation\n// fields (plain data fields for now — resolved empty until the read resolvers land).\n#![allow(dead_code)]\n#![allow(non_camel_case_types)]\n\nuse application::projections::{CartRow, CatalogRow, CustomerRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};\nuse application::queries::{DeliveryJobRow, PricingPolicyRow, UberEstimationPolicyRow, UberSplitPolicyRow};\nuse domain::generated::scalars as ds;\n\nuse super::scalars::*;\n",
+        "// GENERATED by the Captain.Food codegen from specs/api.yaml + specs/entities.yaml — do not edit by hand.\n// GraphQL output types (async-graphql SimpleObject), mirroring the generated SDL: entities.yaml types\n// not registered as api.yaml projections, then the api.yaml types, each with its FK-derived navigation\n// fields (plain data fields for now — resolved empty until the read resolvers land).\n#![allow(dead_code)]\n#![allow(non_camel_case_types)]\n\nuse application::projections::{CartRow, CatalogRow, CustomerRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};\nuse application::queries::{DeliveryJobRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};\nuse domain::generated::scalars as ds;\n\nuse super::scalars::*;\n",
     );
     let push_nav = |out: &mut String, name: &str| {
         if let Some(nfs) = nav.get(name) {
@@ -6999,6 +7457,11 @@ fn emit_server_types(model: &Model) -> String {
     // Restaurant rows (the resolver performs the joins).
     out.push_str(
         "\n/// Read-model rows → API type: the `View_DeliveryJob` row (ADR-0031/0039) plus the joined\n/// OrderTracking + Restaurant rows (the FK-derived `order`/`restaurant` navigation fields are\n/// non-null, so the resolver hydrates them — all three are projections of the same domain log).\n/// Addresses and the courier deserialize out of the view's jsonb columns.\nimpl From<(DeliveryJobRow, OrderTrackingRow, RestaurantRow)> for DeliveryJob {\n    fn from((row, order, restaurant): (DeliveryJobRow, OrderTrackingRow, RestaurantRow)) -> Self {\n        Self {\n            id: row.delivery_job_id.into(),\n            order_id: row.order_id.into(),\n            restaurant_id: row.restaurant_id.into(),\n            status: row.status.into(),\n            provider: row.provider.map(Into::into),\n            courier: row.courier.and_then(|v| serde_json::from_value(v).ok()),\n            pickup_address: serde_json::from_value(row.pickup_address)\n                .expect(\"DeliveryJob.pickupAddress: invalid jsonb\"),\n            dropoff_address: serde_json::from_value(row.dropoff_address)\n                .expect(\"DeliveryJob.dropoffAddress: invalid jsonb\"),\n            estimated_pickup_at: row.estimated_pickup_at,\n            estimated_dropoff_at: row.estimated_dropoff_at,\n            requested_at: row.requested_at,\n            picked_up_at: row.picked_up_at,\n            delivered_at: row.delivered_at,\n            order: (order, restaurant.clone()).into(),\n            restaurant: restaurant.into(),\n        }\n    }\n}\n",
+    );
+    // Refund: the View_PendingRefunds fold-view row (hand-written DTO — view-backed read models get
+    // no generated row). Minor-units columns + the row currency rebuild the Money values, like Order.
+    out.push_str(
+        "\n/// Read-model row → API type: the `View_PendingRefunds` fold-view row (the refund queue —\n/// RefundOpened/RefundApproved/RefundDenied/PaymentRefunded folded on the Payment stream). The\n/// minor-units columns + the row currency rebuild the Money values (`approvedAmount` only once a\n/// possibly-partial approval is recorded).\nimpl From<RefundRow> for Refund {\n    fn from(row: RefundRow) -> Self {\n        let currency = row.currency.clone();\n        Self {\n            order_id: row.order_id.into(),\n            restaurant_id: row.restaurant_id.into(),\n            status: row.status.into(),\n            amount: order_money(row.amount_cents, &currency),\n            approved_amount: row.approved_amount_cents.map(|c| order_money(c, &currency)),\n            reason: row.reason,\n            refund_id: row.refund_id.map(Into::into),\n            requested_at: row.requested_at,\n            decided_at: row.decided_at,\n        }\n    }\n}\n",
     );
     // CustomerProfile: the `me` query's projection of the Customer identity row — only the profile
     // surface; the jsonb accumulation columns (ratings/favorites/preferences/addresses) stay internal.
@@ -7288,6 +7751,11 @@ fn wired_query_body(name: &str) -> Option<&'static str> {
         "restaurantDeliveries" => Some(
             "        let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;\n        let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;\n        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;\n        let restaurant_id: domain::generated::scalars::RestaurantId = input.restaurant_id.into();\n        let rows = deliveries\n            .by_restaurant(restaurant_id, input.status.map(Into::into))\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        if rows.is_empty() {\n            return Ok(Vec::new());\n        }\n        // One board = one restaurant: hydrate the non-null `restaurant` navigation target once.\n        let restaurant = restaurants\n            .by_id(restaurant_id)\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n            .ok_or_else(|| async_graphql::Error::new(\"delivery references an unknown restaurant\"))?;\n        let mut out = Vec::new();\n        for job in rows {\n            let Some(order) = orders.by_id(job.order_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else { continue };\n            out.push(DeliveryJob::from((job, order, restaurant.clone())));\n        }\n        Ok(out)",
         ),
+        // The refund queue reads the View_PendingRefunds fold view (RefundProcess). Rows map 1:1 —
+        // no navigation fields (the Payment aggregate is not a registered API type), so no joins.
+        "pendingRefunds" => Some(
+            "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;\n        let filter = input\n            .map(|i| application::queries::RefundFilter {\n                restaurant_id: i.restaurant_id.map(Into::into),\n                status: i.status.map(Into::into),\n            })\n            .unwrap_or_default();\n        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Refund::from).collect())",
+        ),
         "prospectionPipeline" => Some(
             "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ProspectionReadRepository>>()?;\n        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;\n        let filter = input\n            .map(|i| application::queries::ProspectFilter {\n                min_score: i.min_score.map(|s| s.0 as i32),\n                status: i.status.map(Into::into),\n            })\n            .unwrap_or_default();\n        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory\n        // (both rows are folded from the same Restaurant-stream events, so a match always exists).\n        let by_id: std::collections::HashMap<_, _> = restaurants\n            .list(application::queries::RestaurantFilter::default())\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n            .into_iter()\n            .map(|r| (r.restaurant_id.0, r))\n            .collect();\n        Ok(rows\n            .into_iter()\n            .filter_map(|p| by_id.get(&p.restaurant_id.0).cloned().map(|r| Prospect::from((p, r))))\n            .collect())",
         ),
@@ -7360,15 +7828,16 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
             "application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ())".into(),
         ));
     }
-    // placeOrder needs the CartReadRepository (server-side pricing) + PaymentGateway (create-intent
+    // placeOrder needs the CatalogReadRepository (server-side line pricing from the live catalog —
+    // the only price authority, rules.yaml#/ServerPriceAuthority) + PaymentGateway (create-intent
     // seam) + PaymentProcessStateStore (the payment_process_manager row it opens and single-flights
     // on, ADR-20260719-193500). Its CreatedPaymentIntent is no longer returned — the checkout reads
     // queries/paymentStatus (+ paymentStatusChanged) off the run row. The saga's event legs
     // (PaymentCaptured/PaymentFailed) run in the infrastructure ProcessManagerRunner, not here.
     if name == "placeOrder" {
         return Some((
-            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();\n        let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?.clone();\n        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?.clone();\n        let pm_state = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();\n".into(),
-            "application::commands::place_order(store.as_ref(), carts.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, &actor).await.map(|_| ())".into(),
+            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();\n        let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?.clone();\n        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?.clone();\n        let pm_state = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();\n".into(),
+            "application::commands::place_order(store.as_ref(), catalogs.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, &actor).await.map(|_| ())".into(),
         ));
     }
     // The refund DECISION legs run on the RefundProcess orchestrator (application::process_managers::
@@ -7909,6 +8378,7 @@ fn main() {
     eprintln!("• validated against specs:");
     eprintln!("    - {} $refs resolve (scalars/entities/events/commands/errors/views/api)", coverage.refs);
     eprintln!("    - actor wiring: messages→commands/events, emits→events, throws→errors");
+    eprintln!("    - lifecycles: {} aggregate state machines, {} transitions (lc-*: states∈enum, events emitted, deterministic, terminal closed, reachable)", coverage.lifecycles, coverage.lifecycle_transitions);
     eprintln!("    - api↔model: {} command links→commands, {} reads→views, roles→UserType", coverage.mutation_links, coverage.reads_links);
     eprintln!("    - views: aggregate→actors, fedBy→events, column types→scalars, indexes→columns, fk→views");
     eprintln!("    - stories: {} step→op links resolve, persona role authorized, every mutation/query reached by a story step", coverage.story_links);
@@ -7995,7 +8465,8 @@ fn main() {
         ("events.rs", emit_domain_events(&model)),
         ("commands.rs", emit_domain_commands(&model)),
         ("errors.rs", emit_domain_errors(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod entities;\npub mod events;\npub mod commands;\npub mod errors;\n".to_string()),
+        ("lifecycles.rs", emit_domain_lifecycles(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod entities;\npub mod events;\npub mod commands;\npub mod errors;\npub mod lifecycles;\n".to_string()),
     ] {
         let path = gen_dir.join(name);
         if let Err(e) = fs::write(&path, content) {
@@ -8084,6 +8555,13 @@ mod tests {
         assert!(is_source_file("architecture/c4-l2.yaml"));
         assert!(is_source_file("services.yaml"));
         assert!(!is_source_file("nope.yaml"));
+    }
+
+    #[test]
+    fn snake_type_is_module_case() {
+        assert_eq!(snake_type("Order"), "order");
+        assert_eq!(snake_type("DeliveryJob"), "delivery_job");
+        assert_eq!(snake_type("RestaurantAccount"), "restaurant_account");
     }
 
     #[test]

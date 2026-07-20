@@ -720,6 +720,9 @@ pub struct PlaceOrderInput {
     /// Stripe PaymentMethod / client secret reference for the payment step. The wallet behind it (card, Apple Pay, Google Pay) is a client-side/Stripe concern and does not change the domain: every method yields a standard Stripe PaymentMethod and the same saga.
     #[graphql(name = "paymentMethodId")]
     pub payment_method_id: String,
+    /// OPTIONAL confirmation of the total the client displayed at checkout. NEVER used to price anything — the server recomputes the total from the live catalog (the only price authority) and rejects with errors.yaml#/PriceMismatch when the two diverge, so a customer is never charged an amount other than the one they were shown.
+    #[graphql(name = "expectedTotal")]
+    pub expected_total: Option<MoneyInput>,
 }
 
 /// Restaurant accepts an order and commits to preparing it.
@@ -1032,6 +1035,15 @@ pub struct RestaurantDeliveriesQueryInput {
     pub restaurant_id: RestaurantId,
     #[graphql(name = "status")]
     pub status: Option<DeliveryStatus>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRefundsQueryInput {
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: Option<RestaurantId>,
+    #[graphql(name = "status")]
+    pub status: Option<RefundStatus>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

@@ -2206,7 +2206,7 @@ impl MutationRoot {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
-        let carts = ctx.data::<std::sync::Arc<dyn application::queries::CartReadRepository>>()?.clone();
+        let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?.clone();
         let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?.clone();
         let pm_state = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();
         let payload_json = command_payload(&input)?;
@@ -2244,7 +2244,7 @@ impl MutationRoot {
         };
         let (message_id, correlation_id) = (env.message_id, env.correlation_id);
         tokio::spawn(async move {
-            let outcome = application::commands::place_order(store.as_ref(), carts.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, &actor).await.map(|_| ());
+            let outcome = application::commands::place_order(store.as_ref(), catalogs.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, &actor).await.map(|_| ());
             complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))

@@ -676,7 +676,7 @@ CheckoutSnapshot:
       type: array
       items:
         $ref: '#/OrderLineItem'
-      description: "Priced order lines frozen at checkout; may be empty until server-side line pricing lands."
+      description: "Priced order lines frozen at checkout — recomputed server-side from the live catalog (rules.yaml#/ServerPriceAuthority)."
     totalAmount:
       $ref: '#/Money'
     breakdown:

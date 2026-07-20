@@ -194,6 +194,13 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  DENIED
+  REFUNDED
+}
+
 enum OperationStatus {
   PENDING
   SUCCEEDED
@@ -236,7 +243,7 @@ enum RefundProcessStatus {
 enum DeliveryDispatchProcessStatus {
   OFFERED
   ACCEPTED
-  REOFFER_REQUIRED
+  FAILED
   COMPLETED
 }
 
@@ -646,6 +653,18 @@ type DeliveryJob {
   restaurant: Restaurant!
 }
 
+type Refund {
+  orderId: OrderId!
+  restaurantId: RestaurantId!
+  status: RefundStatus!
+  amount: Money!
+  approvedAmount: Money
+  reason: String
+  refundId: RefundId
+  requestedAt: DateTime!
+  decidedAt: DateTime
+}
+
 type Prospect {
   restaurantId: RestaurantId!
   score: ProspectionScore!
@@ -1022,6 +1041,7 @@ input PlaceOrderInput {
   deliveryAddress: AddressInput
   note: OrderNote
   paymentMethodId: String!
+  expectedTotal: MoneyInput
 }
 
 input AcceptOrderInput {
@@ -1184,6 +1204,11 @@ input MyDeliveriesQueryInput {
 input RestaurantDeliveriesQueryInput {
   restaurantId: RestaurantId!
   status: DeliveryStatus
+}
+
+input PendingRefundsQueryInput {
+  restaurantId: RestaurantId
+  status: RefundStatus
 }
 
 input RestaurantLocationsByAccountQueryInput {
@@ -1354,6 +1379,7 @@ type Query {
   delivery(input: DeliveryQueryInput!): DeliveryJob @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["View_DeliveryJob"])
   myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
+  pendingRefunds(input: PendingRefundsQueryInput): [Refund!]! @auth(requires: [RESTAURANT, ADMIN]) @reads(views: ["View_PendingRefunds"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
   prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
   pricingPolicy: [PricingPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["PricingPolicy"])

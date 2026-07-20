@@ -6,7 +6,7 @@
 #![allow(non_camel_case_types)]
 
 use application::projections::{CartRow, CatalogRow, CustomerRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
-use application::queries::{DeliveryJobRow, PricingPolicyRow, UberEstimationPolicyRow, UberSplitPolicyRow};
+use application::queries::{DeliveryJobRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
 use super::scalars::*;
@@ -312,7 +312,7 @@ pub struct CheckoutSnapshot {
     pub service_type: ServiceType,
     #[graphql(name = "deliveryAddress")]
     pub delivery_address: Option<Address>,
-    /// Priced order lines frozen at checkout; may be empty until server-side line pricing lands.
+    /// Priced order lines frozen at checkout — recomputed server-side from the live catalog (rules.yaml#/ServerPriceAuthority).
     #[graphql(name = "items")]
     #[serde(default)]
     pub items: Vec<OrderLineItem>,
@@ -738,6 +738,30 @@ pub struct DeliveryJob {
     pub restaurant: Restaurant,
 }
 
+/// A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin decides, then APPROVED (Stripe refund requested) or DENIED, and REFUNDED once Stripe settles. Serves the restaurant's and admin's refund queue (filter status = REQUESTED for pending ones).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Refund {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "status")]
+    pub status: RefundStatus,
+    #[graphql(name = "amount")]
+    pub amount: Money,
+    #[graphql(name = "approvedAmount")]
+    pub approved_amount: Option<Money>,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
+    #[graphql(name = "refundId")]
+    pub refund_id: Option<RefundId>,
+    #[graphql(name = "requestedAt")]
+    pub requested_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "decidedAt")]
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -1024,6 +1048,27 @@ impl From<(DeliveryJobRow, OrderTrackingRow, RestaurantRow)> for DeliveryJob {
             delivered_at: row.delivered_at,
             order: (order, restaurant.clone()).into(),
             restaurant: restaurant.into(),
+        }
+    }
+}
+
+/// Read-model row → API type: the `View_PendingRefunds` fold-view row (the refund queue —
+/// RefundOpened/RefundApproved/RefundDenied/PaymentRefunded folded on the Payment stream). The
+/// minor-units columns + the row currency rebuild the Money values (`approvedAmount` only once a
+/// possibly-partial approval is recorded).
+impl From<RefundRow> for Refund {
+    fn from(row: RefundRow) -> Self {
+        let currency = row.currency.clone();
+        Self {
+            order_id: row.order_id.into(),
+            restaurant_id: row.restaurant_id.into(),
+            status: row.status.into(),
+            amount: order_money(row.amount_cents, &currency),
+            approved_amount: row.approved_amount_cents.map(|c| order_money(c, &currency)),
+            reason: row.reason,
+            refund_id: row.refund_id.map(Into::into),
+            requested_at: row.requested_at,
+            decided_at: row.decided_at,
         }
     }
 }

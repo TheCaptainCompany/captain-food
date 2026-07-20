@@ -166,6 +166,7 @@ restaurant_manager:
         SetAcceptanceMode: { $ref: 'api.yaml#/mutations/changeOrderAcceptanceMode' }
         CancelOrder: { $ref: 'api.yaml#/mutations/cancelOrderByRestaurant' }
         ThankRiderOrCaptain: { $ref: 'api.yaml#/mutations/tipOrder' }   # restaurant tips the courier / Captain (ADR-012)
+        ReviewPendingRefunds: { $ref: 'api.yaml#/queries/pendingRefunds' }   # my orders' refund queue (status REQUESTED = awaiting my decision)
         ApproveRefund: { $ref: 'api.yaml#/mutations/approveRefund' }   # decide a pending refund on my own orders (RefundProcess)
         DenyRefund: { $ref: 'api.yaml#/mutations/denyRefund' }
     TrackDeliveries:
@@ -225,6 +226,7 @@ admin:
     ArbitrateRefunds:
       description: As an admin, I arbitrate pending refund requests when the restaurant does not decide (RefundProcess).
       steps:
+        ReviewPendingRefunds: { $ref: 'api.yaml#/queries/pendingRefunds' }   # the cross-restaurant refund queue
         ApproveRefund: { $ref: 'api.yaml#/mutations/approveRefund' }
         DenyRefund: { $ref: 'api.yaml#/mutations/denyRefund' }
     Pricing:

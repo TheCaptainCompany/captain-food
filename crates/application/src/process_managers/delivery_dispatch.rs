@@ -6,7 +6,11 @@
 //!   `DeliveryRequested` birth to `DeliveryJob-<uuidv5(orderId)>` (the DETERMINISTIC id IS the
 //!   idempotency key), offer the job through the [`DeliveryPartner`] port, row → OFFERED.
 //! - `DeliveryAcceptedByPartner` / `DeliveryRejectedByPartner` (inbound, recorded by the DeliveryJob
-//!   aggregate) → advance the run (ACCEPTED / REOFFER_REQUIRED + re-offer); an unknown run throws
+//!   aggregate) → advance the run: acceptance → ACCEPTED; a decline re-offers the job up to
+//!   [`OFFER_ATTEMPT_CAP`] TOTAL offers (V0 single partner — the re-offer targets the same partner;
+//!   multi-partner ranking is the extension point), then delivers the terminal
+//!   `DeliveryDispatchFailed` fact and closes the run FAILED (ADR-20260720-004556,
+//!   rules.yaml#/DispatchRetriesAreBounded). An unknown run throws
 //!   `errors.yaml#/DeliveryJobNotFound` (abort and surface, never a silent skip).
 //! - `DeliveryStatusUpdated` (only DELIVERED) / `DeliveryCompleted` → SEND
 //!   `commands.yaml#/MarkOrderDelivered` — the Order validates the transition, so a terminal
@@ -16,8 +20,9 @@
 use domain::generated::commands::MarkOrderDelivered;
 use domain::generated::entities::Address;
 use domain::generated::events::{
-    DeliveryAcceptedByPartner, DeliveryCompleted, DeliveryRejectedByPartner, DeliveryRequested,
-    DeliveryStatusUpdated, DomainEvent, OrderMarkedReady,
+    DeliveryAcceptedByPartner, DeliveryCompleted, DeliveryDispatchFailed,
+    DeliveryRejectedByPartner, DeliveryRequested, DeliveryStatusUpdated, DomainEvent,
+    OrderMarkedReady,
 };
 use domain::generated::scalars::{
     DeliveryDispatchProcessStatus, DeliveryJobId, DeliveryStatus, OrderId, ServiceType,
@@ -32,6 +37,11 @@ use crate::process_managers::{
 };
 use crate::queries::OrderReadRepository;
 use crate::repository::Repository;
+
+/// The bounded re-offer cap (ADR-20260720-004556, rules.yaml#/DispatchRetriesAreBounded): at most
+/// this many TOTAL offers per dispatch run (the birth offer counts as 1). The decline that finds the
+/// counter already at the cap fails the dispatch closed — never a retry loop beyond it.
+pub const OFFER_ATTEMPT_CAP: i32 = 3;
 
 /// Fixed UUIDv5 namespace for the ids this saga derives. NEVER change it: derived job ids must stay
 /// stable across re-reactions and deployments (they ARE the idempotency key).
@@ -147,13 +157,14 @@ pub async fn on_order_marked_ready(
     }
     // call delivery_partner.offer_job (the no-op stand-in logs until the avelo37 ACL lands).
     partner.offer_job(&requested).await?;
-    // state.set — the run is OFFERED.
+    // state.set — the run is OFFERED; the birth offer is attempt 1 of the bounded policy.
     state
         .upsert(&DeliveryDispatchRow {
             order_id: event.order_id,
             restaurant_id: event.restaurant_id,
             delivery_job_id: job_id,
             process_status: DeliveryDispatchProcessStatus::OFFERED,
+            offer_attempts: 1,
             last_update_utc: chrono::Utc::now(), // ignored on write; stamped by the store
         })
         .await?;
@@ -178,32 +189,80 @@ pub async fn on_delivery_accepted_by_partner(
     Ok(Outcome::Completed)
 }
 
-/// EVENT leg `events.yaml#/DeliveryRejectedByPartner` (rules.yaml#/PartnerRejectionReoffers): flag
-/// the run REOFFER_REQUIRED and re-offer through the port.
+/// EVENT leg `events.yaml#/DeliveryRejectedByPartner` (rules.yaml#/PartnerRejectionReoffers +
+/// rules.yaml#/DispatchRetriesAreBounded, ADR-20260720-004556): bounded re-offer. While the run has
+/// made fewer than [`OFFER_ATTEMPT_CAP`] total offers, re-offer the job (V0 single partner — the
+/// same partner; multi-partner ranking is the extension point) and stay OFFERED; the decline that
+/// finds the counter at the cap delivers the terminal `DeliveryDispatchFailed` fact to the
+/// DeliveryJob (read models surface it to the restaurant for manual handling) and closes the run
+/// FAILED — fail-closed, no retry loop beyond the cap.
 pub async fn on_delivery_rejected_by_partner(
     store: &dyn EventStore,
     state: &dyn DeliveryDispatchStateStore,
     partner: &dyn DeliveryPartner,
     event: &DeliveryRejectedByPartner,
+    env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
     let Some(row) = state.by_job(event.delivery_job_id).await? else {
         return Err(job_not_found(&event.delivery_job_id));
     };
+    // state.expect process_status = OFFERED — only an outstanding offer can be declined; a decline
+    // on a resolved/terminal run is a benign skip (idempotent re-delivery, late report).
+    if row.process_status != DeliveryDispatchProcessStatus::OFFERED {
+        return Ok(Outcome::Skipped(format!(
+            "job {} declined but the run is {:?} — only an outstanding offer can be declined",
+            event.delivery_job_id.0, row.process_status
+        )));
+    }
+
+    if row.offer_attempts < OFFER_ATTEMPT_CAP {
+        // RE-OFFER branch: offer the job again (the birth fact carries the offer) and count it.
+        let (job_events, _) = store.load(&delivery_job_stream(&event.delivery_job_id)).await?;
+        if let Some(requested) = job_events.iter().find_map(|e| match e {
+            DomainEvent::DeliveryRequested(r) => Some(r.clone()),
+            _ => None,
+        }) {
+            partner.offer_job(&requested).await?;
+        }
+        state
+            .upsert(&DeliveryDispatchRow {
+                offer_attempts: row.offer_attempts + 1,
+                process_status: DeliveryDispatchProcessStatus::OFFERED,
+                ..row
+            })
+            .await?;
+        return Ok(Outcome::Completed);
+    }
+
+    // EXHAUSTED branch: every allowed offer was declined — deliver the terminal failure fact to the
+    // DeliveryJob (idempotent: skipped when the job already folds FAILED) and close the run FAILED.
+    let stream = delivery_job_stream(&event.delivery_job_id);
+    let (job_events, job_version) = store.load(&stream).await?;
+    let already_failed = domain::delivery_job::fold(&job_events)
+        .map(|s| s.status == DeliveryStatus::FAILED)
+        .unwrap_or(false);
+    if !already_failed {
+        Repository::new(store)
+            .save(
+                &stream,
+                job_version,
+                &[DomainEvent::DeliveryDispatchFailed(DeliveryDispatchFailed {
+                    delivery_job_id: event.delivery_job_id,
+                    order_id: row.order_id,
+                    restaurant_id: row.restaurant_id,
+                    attempts: i64::from(row.offer_attempts),
+                    last_reason: event.reason.clone(),
+                })],
+                &saga_actor(env),
+            )
+            .await?;
+    }
     state
         .upsert(&DeliveryDispatchRow {
-            process_status: DeliveryDispatchProcessStatus::REOFFER_REQUIRED,
+            process_status: DeliveryDispatchProcessStatus::FAILED,
             ..row
         })
         .await?;
-    // call delivery_partner.offer_job — TODO(saga): re-offer needs a partner-selection policy;
-    // REOFFER_REQUIRED flags manual handling meanwhile. The job's birth fact carries the offer.
-    let (job_events, _) = store.load(&delivery_job_stream(&event.delivery_job_id)).await?;
-    if let Some(requested) = job_events.iter().find_map(|e| match e {
-        DomainEvent::DeliveryRequested(r) => Some(r.clone()),
-        _ => None,
-    }) {
-        partner.offer_job(&requested).await?;
-    }
     Ok(Outcome::Completed)
 }
 
@@ -567,10 +626,19 @@ mod tests {
         assert_eq!(row.process_status, DeliveryDispatchProcessStatus::ACCEPTED);
     }
 
-    /// tests.yaml#/TestDispatchPartnerRejected — rules.yaml#/PartnerRejectionReoffers: the run flags
-    /// REOFFER_REQUIRED (re-offer policy is the delivery-partner ACL's TODO).
+    fn declined(reason: &str) -> DeliveryRejectedByPartner {
+        DeliveryRejectedByPartner {
+            delivery_job_id: job_id(),
+            partner_ref: None,
+            reason: Some(reason.into()),
+        }
+    }
+
+    /// tests.yaml#/TestDispatchPartnerRejected — rules.yaml#/PartnerRejectionReoffers +
+    /// rules.yaml#/DispatchRetriesAreBounded: a decline under the cap re-offers the job — the run
+    /// stays OFFERED, the attempt counter increments, and no failure fact is recorded.
     #[tokio::test]
-    async fn partner_rejection_flags_the_reoffer() {
+    async fn partner_rejection_reoffers_while_under_the_cap() {
         let store = MemStore::default();
         let state = MemDeliveryDispatchState::default();
         given_offered(&store, &state).await;
@@ -579,17 +647,128 @@ mod tests {
             &store,
             &state,
             &NoopDeliveryPartner,
-            &DeliveryRejectedByPartner {
+            &declined("No courier available"),
+            &envelope(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, Outcome::Completed);
+        let row = state.by_job(job_id()).await.unwrap().unwrap();
+        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::OFFERED);
+        assert_eq!(row.offer_attempts, 2);
+        assert!(!store
+            .stream(&format!("DeliveryJob-{}", job_id().0))
+            .iter()
+            .any(|e| matches!(e, DomainEvent::DeliveryDispatchFailed(_))));
+    }
+
+    /// tests.yaml#/TestDispatchAcceptedAfterReoffer — rules.yaml#/DispatchRetriesAreBounded +
+    /// rules.yaml#/PartnerAcceptanceRecordsCourier: the happy path after a retry — the partner
+    /// accepts the re-offered job and the run advances to ACCEPTED.
+    #[tokio::test]
+    async fn partner_acceptance_after_reoffer_advances_the_run() {
+        let store = MemStore::default();
+        let state = MemDeliveryDispatchState::default();
+        given_offered(&store, &state).await;
+        on_delivery_rejected_by_partner(
+            &store,
+            &state,
+            &NoopDeliveryPartner,
+            &declined("No courier available"),
+            &envelope(),
+        )
+        .await
+        .unwrap();
+
+        let outcome = on_delivery_accepted_by_partner(
+            &state,
+            &DeliveryAcceptedByPartner {
                 delivery_job_id: job_id(),
-                partner_ref: None,
-                reason: Some("No courier available".into()),
+                partner_ref: ExternalReference("avelo-77".into()),
+                courier: Courier { display_name: "Léa".into(), phone: None, rider_id: None },
+                estimated_pickup_at: None,
+                estimated_dropoff_at: None,
             },
         )
         .await
         .unwrap();
         assert_eq!(outcome, Outcome::Completed);
         let row = state.by_job(job_id()).await.unwrap().unwrap();
-        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::REOFFER_REQUIRED);
+        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::ACCEPTED);
+        assert_eq!(row.offer_attempts, 2); // the retry stays counted
+    }
+
+    /// tests.yaml#/TestDispatchFailsAfterOfferCap — rules.yaml#/DispatchRetriesAreBounded: the 3rd
+    /// decline exhausts the cap ([`OFFER_ATTEMPT_CAP`] total offers): DeliveryDispatchFailed is
+    /// recorded on the job stream (job folds FAILED) and the run closes FAILED; a re-delivered
+    /// decline after that is a benign skip and appends nothing (fail-closed, no retry loop).
+    #[tokio::test]
+    async fn third_decline_fails_the_dispatch_closed() {
+        let store = MemStore::default();
+        let state = MemDeliveryDispatchState::default();
+        given_offered(&store, &state).await;
+
+        // Declines 1 and 2 re-offer (offers 2 and 3).
+        for n in [2, 3] {
+            let outcome = on_delivery_rejected_by_partner(
+                &store,
+                &state,
+                &NoopDeliveryPartner,
+                &declined("No courier available"),
+                &envelope(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(outcome, Outcome::Completed);
+            let row = state.by_job(job_id()).await.unwrap().unwrap();
+            assert_eq!(row.process_status, DeliveryDispatchProcessStatus::OFFERED);
+            assert_eq!(row.offer_attempts, n);
+        }
+
+        // Decline 3 (the cap is exhausted): terminal failure, no 4th offer.
+        let outcome = on_delivery_rejected_by_partner(
+            &store,
+            &state,
+            &NoopDeliveryPartner,
+            &declined("Storm — no couriers tonight"),
+            &envelope(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, Outcome::Completed);
+        let row = state.by_job(job_id()).await.unwrap().unwrap();
+        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::FAILED);
+        assert_eq!(row.offer_attempts, 3);
+        let job_events = store.stream(&format!("DeliveryJob-{}", job_id().0));
+        let failed = job_events
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::DeliveryDispatchFailed(f) => Some(f.clone()),
+                _ => None,
+            })
+            .expect("DeliveryDispatchFailed recorded");
+        assert_eq!(failed.order_id, order_id());
+        assert_eq!(failed.restaurant_id, restaurant_id());
+        assert_eq!(failed.attempts, 3);
+        assert_eq!(failed.last_reason.as_deref(), Some("Storm — no couriers tonight"));
+        // The job folds FAILED — the restaurant board (View_DeliveryJob) surfaces it.
+        assert_eq!(
+            domain::delivery_job::fold(&job_events).unwrap().status,
+            DeliveryStatus::FAILED
+        );
+
+        // Re-delivered decline on the FAILED run: benign skip, nothing appended.
+        let again = on_delivery_rejected_by_partner(
+            &store,
+            &state,
+            &NoopDeliveryPartner,
+            &declined("No courier available"),
+            &envelope(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(again, Outcome::Skipped(_)), "{again:?}");
+        assert_eq!(store.stream(&format!("DeliveryJob-{}", job_id().0)), job_events);
     }
 
     /// Error guard shared by the partner/rider legs: an unknown dispatch run throws

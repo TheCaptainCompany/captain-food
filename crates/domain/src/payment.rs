@@ -45,6 +45,9 @@ pub struct PaymentState {
     pub amount: Money,
     /// PENDING → CAPTURED | FAILED, CAPTURED → REFUNDED — folded from the Stripe facts.
     pub status: PaymentStatus,
+    /// Whether RefundProcess opened a refund for decision on this payment (`RefundOpened` recorded —
+    /// the refund-queue fact View_PendingRefunds folds; rules.yaml#/PendingRefundVisibleUntilDecided).
+    pub refund_opened: bool,
     /// The recorded refund decision, if RefundProcess delivered one.
     pub refund_decision: Option<RefundDecision>,
     /// The Stripe Refund id once `PaymentRefunded` settled.
@@ -71,6 +74,7 @@ fn apply(state: Option<PaymentState>, event: &DomainEvent) -> Option<PaymentStat
             restaurant_id: e.restaurant_id,
             amount: e.amount.clone(),
             status: PaymentStatus::PENDING,
+            refund_opened: false,
             refund_decision: None,
             refund_id: None,
         });
@@ -83,6 +87,7 @@ fn apply(state: Option<PaymentState>, event: &DomainEvent) -> Option<PaymentStat
             s.status = PaymentStatus::REFUNDED;
             s.refund_id = Some(e.refund_id.clone());
         }
+        DomainEvent::RefundOpened(_) => s.refund_opened = true,
         DomainEvent::RefundApproved(_) => s.refund_decision = Some(RefundDecision::Approved),
         DomainEvent::RefundDenied(_) => s.refund_decision = Some(RefundDecision::Denied),
         _ => {}
@@ -101,6 +106,7 @@ pub fn already_records(state: &PaymentState, event: &DomainEvent) -> bool {
         DomainEvent::PaymentFailed(_) => state.status == PaymentStatus::FAILED,
         // Keyed by the Stripe Refund id, not just the status — a different refund is a new fact.
         DomainEvent::PaymentRefunded(e) => state.refund_id.as_ref() == Some(&e.refund_id),
+        DomainEvent::RefundOpened(_) => state.refund_opened,
         DomainEvent::RefundApproved(_) => state.refund_decision == Some(RefundDecision::Approved),
         DomainEvent::RefundDenied(_) => state.refund_decision == Some(RefundDecision::Denied),
         _ => false,
@@ -115,7 +121,7 @@ mod tests {
     };
     use crate::generated::events::{
         PaymentCaptured, PaymentFailed, PaymentIntentCreated, PaymentRefunded, RefundApproved,
-        RefundDenied,
+        RefundDenied, RefundOpened,
     };
     use crate::generated::scalars::{
         CartId, CurrencyCode, CustomerDisplayName, MoneyCents, PhoneNumber, ServiceType,
@@ -196,6 +202,14 @@ mod tests {
             reason: None,
         })
     }
+    fn refund_opened() -> DomainEvent {
+        DomainEvent::RefundOpened(RefundOpened {
+            order_id: order_id(),
+            restaurant_id: restaurant_id(),
+            amount: money(1000),
+            reason: Some("Out of ingredients".into()),
+        })
+    }
     fn refund_approved() -> DomainEvent {
         DomainEvent::RefundApproved(RefundApproved {
             order_id: order_id(),
@@ -240,6 +254,25 @@ mod tests {
         let s = fold(&[intent_created(), captured(), refund_approved(), refunded("re_1")]).unwrap();
         assert_eq!(s.status, PaymentStatus::REFUNDED);
         assert_eq!(s.refund_id, Some(RefundId("re_1".into())));
+    }
+
+    /// tests.yaml#/TestPendingRefundVisibleUntilDecided — rules.yaml#/PendingRefundVisibleUntilDecided:
+    /// the opened refund is recorded on the Payment (idempotent), so the refund queue
+    /// (View_PendingRefunds) folds it as REQUESTED until a decision resolves it.
+    #[test]
+    fn opened_refund_is_recorded_idempotently_until_decided() {
+        let s = fold(&[intent_created(), captured(), refund_opened()]).unwrap();
+        assert!(s.refund_opened);
+        assert_eq!(s.status, PaymentStatus::CAPTURED); // opening decides nothing
+        assert_eq!(s.refund_decision, None);
+        assert!(already_records(&s, &refund_opened())); // re-delivered opening appends nothing
+        // Undecided before the fact, so a fresh capture does not "already record" an opening.
+        let fresh = fold(&[intent_created(), captured()]).unwrap();
+        assert!(!already_records(&fresh, &refund_opened()));
+        // The decision resolves the request without erasing the opened fact.
+        let s = fold(&[intent_created(), captured(), refund_opened(), refund_denied()]).unwrap();
+        assert!(s.refund_opened);
+        assert_eq!(s.refund_decision, Some(RefundDecision::Denied));
     }
 
     #[test]

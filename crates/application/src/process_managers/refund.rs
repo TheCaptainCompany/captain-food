@@ -4,7 +4,8 @@
 //! - The refundable facts (`OrderRejectedByRestaurant`, `OrderCancelledByCustomer`,
 //!   `OrderCancelledByRestaurant`, `RefundRequested`) OPEN a pending run when the order's payment is
 //!   CAPTURED (read from the OrderTracking read model, per the DSL `read` step) — nothing captured is
-//!   the benign skip.
+//!   the benign skip. Opening also delivers the `RefundOpened` refund-queue fact to the Payment
+//!   aggregate (idempotent), so `View_PendingRefunds` folds the queue from the log, not PM state.
 //! - The RESTAURANT (its own orders) or an ADMIN decides with the COMMAND legs [`approve_refund`] /
 //!   [`deny_refund`] (authz = api.yaml roles): a non-pending run rejects with
 //!   `errors.yaml#/RefundNotPending`; approval requests the outbound Stripe refund
@@ -14,9 +15,10 @@
 //!   refunds are benign per the DSL note).
 
 use domain::generated::commands::{ApproveRefund, DenyRefund};
+use domain::generated::entities::Money;
 use domain::generated::events::{
     DomainEvent, OrderCancelledByCustomer, OrderCancelledByRestaurant, OrderRejectedByRestaurant,
-    PaymentRefunded, RefundApproved, RefundDenied, RefundRequested,
+    PaymentRefunded, RefundApproved, RefundDenied, RefundOpened, RefundRequested,
 };
 use domain::generated::scalars::{OrderId, PaymentIntentId, RefundProcessStatus};
 use domain::shared::errors::DomainError;
@@ -24,6 +26,7 @@ use serde_json::json;
 
 use crate::pm_state::{RefundProcessRow, RefundProcessStateStore};
 use crate::ports::{Actor, EventStore, PaymentGateway};
+use crate::process_managers::{saga_actor, TriggerEnvelope};
 use crate::queries::OrderReadRepository;
 use crate::repository::Repository;
 
@@ -35,13 +38,18 @@ const CAPTURED: &str = "CAPTURED";
 /// `read` step — NOTE the known feed gap: payment facts land on `Payment-%` streams the projection
 /// worker does not yet route to OrderTracking, so `payment_status` may lag; ADR-20260719-193500
 /// flags the cross-stream projector route as the follow-up), guard `payment_status = CAPTURED`
-/// (benign skip otherwise), then upsert the PENDING_APPROVAL run. A run that was already DECIDED
-/// (approved/denied/refunded) is NEVER regressed to pending — re-opening skips.
+/// (benign skip otherwise), then deliver the `RefundOpened` refund-queue fact to the Payment (the
+/// DSL `deliver` step — idempotent via the Payment's fold, so `View_PendingRefunds` shows the
+/// request; rules.yaml#/PendingRefundVisibleUntilDecided) and upsert the PENDING_APPROVAL run. A run
+/// that was already DECIDED (approved/denied/refunded) is NEVER regressed to pending — re-opening
+/// skips.
 async fn open_refund(
+    store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
     orders: &dyn OrderReadRepository,
     order_id: OrderId,
     reason: Option<String>,
+    env: &TriggerEnvelope,
 ) -> Result<crate::process_managers::Outcome, DomainError> {
     use crate::process_managers::Outcome;
     // read OrderTracking by order_id.
@@ -68,6 +76,25 @@ async fn open_refund(
             )));
         }
     }
+    // deliver RefundOpened → Payment: the refund-queue fact View_PendingRefunds folds (the Payment
+    // records it idempotently, so a re-delivered opening appends nothing).
+    if let Some(intent) = order.payment_intent_id.clone() {
+        deliver_to_payment(
+            store,
+            &intent,
+            DomainEvent::RefundOpened(RefundOpened {
+                order_id,
+                restaurant_id: order.restaurant_id,
+                amount: Money {
+                    amount_cents: order.total_amount_cents,
+                    currency: order.currency.clone(),
+                },
+                reason: reason.clone(),
+            }),
+            &saga_actor(env),
+        )
+        .await?;
+    }
     state
         .upsert(&RefundProcessRow {
             order_id,
@@ -85,39 +112,47 @@ async fn open_refund(
 /// EVENT leg `events.yaml#/OrderRejectedByRestaurant` (rules.yaml#/RefundOnRejectionOrCancellation):
 /// the restaurant rejected a paid order — open a pending refund for a restaurant/admin decision.
 pub async fn on_order_rejected(
+    store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
     orders: &dyn OrderReadRepository,
     event: &OrderRejectedByRestaurant,
+    env: &TriggerEnvelope,
 ) -> Result<crate::process_managers::Outcome, DomainError> {
-    open_refund(state, orders, event.order_id, Some(event.reason.clone())).await
+    open_refund(store, state, orders, event.order_id, Some(event.reason.clone()), env).await
 }
 
 /// EVENT leg `events.yaml#/OrderCancelledByCustomer` (rules.yaml#/RefundOnRejectionOrCancellation).
 pub async fn on_order_cancelled_by_customer(
+    store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
     orders: &dyn OrderReadRepository,
     event: &OrderCancelledByCustomer,
+    env: &TriggerEnvelope,
 ) -> Result<crate::process_managers::Outcome, DomainError> {
-    open_refund(state, orders, event.order_id, event.reason.clone()).await
+    open_refund(store, state, orders, event.order_id, event.reason.clone(), env).await
 }
 
 /// EVENT leg `events.yaml#/OrderCancelledByRestaurant` (rules.yaml#/RefundOnRejectionOrCancellation).
 pub async fn on_order_cancelled_by_restaurant(
+    store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
     orders: &dyn OrderReadRepository,
     event: &OrderCancelledByRestaurant,
+    env: &TriggerEnvelope,
 ) -> Result<crate::process_managers::Outcome, DomainError> {
-    open_refund(state, orders, event.order_id, Some(event.reason.clone())).await
+    open_refund(store, state, orders, event.order_id, Some(event.reason.clone()), env).await
 }
 
 /// EVENT leg `events.yaml#/RefundRequested` (rules.yaml#/RefundOnRejectionOrCancellation): the
 /// customer asked (the Order aggregate already validated RequestRefund) — open a pending refund.
 pub async fn on_refund_requested(
+    store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
     orders: &dyn OrderReadRepository,
     event: &RefundRequested,
+    env: &TriggerEnvelope,
 ) -> Result<crate::process_managers::Outcome, DomainError> {
-    open_refund(state, orders, event.order_id, event.reason.clone()).await
+    open_refund(store, state, orders, event.order_id, event.reason.clone(), env).await
 }
 
 /// `state.by` the order and require a PENDING_APPROVAL run, or reject with
@@ -266,7 +301,7 @@ pub async fn on_payment_refunded(
 mod tests {
     use super::*;
     use crate::pm_state::mem::MemRefundProcessState;
-    use crate::process_managers::test_support::MemStore;
+    use crate::process_managers::test_support::{envelope, MemStore};
     use crate::process_managers::Outcome;
     use crate::queries::{OrderFilter, OrderTrackingRow};
     use async_trait::async_trait;
@@ -444,35 +479,61 @@ mod tests {
         state.by_order(order_id()).await.unwrap().expect("refund run row")
     }
 
-    /// tests.yaml#/TestRefundOnOrderRejected — rules.yaml#/RefundOnRejectionOrCancellation: a
-    /// rejection of a CAPTURED order opens a PENDING_APPROVAL run (no domain event emitted).
+    /// tests.yaml#/TestRefundOnOrderRejected — rules.yaml#/RefundOnRejectionOrCancellation +
+    /// rules.yaml#/PendingRefundVisibleUntilDecided: a rejection of a CAPTURED order opens a
+    /// PENDING_APPROVAL run AND records the RefundOpened refund-queue fact on the Payment
+    /// (View_PendingRefunds folds it as REQUESTED), idempotently under re-delivery.
     #[tokio::test]
     async fn rejection_of_a_captured_order_opens_a_pending_refund() {
+        let store = MemStore::default();
         let state = MemRefundProcessState::default();
-        let outcome = on_order_rejected(
-            &state,
-            &captured_orders(),
-            &OrderRejectedByRestaurant {
-                order_id: order_id(),
-                restaurant_id: restaurant_id(),
-                reason: "Out of ingredients".into(),
-            },
-        )
-        .await
-        .unwrap();
+        seed_payment(&store);
+        let rejected = OrderRejectedByRestaurant {
+            order_id: order_id(),
+            restaurant_id: restaurant_id(),
+            reason: "Out of ingredients".into(),
+        };
+        let outcome = on_order_rejected(&store, &state, &captured_orders(), &rejected, &envelope())
+            .await
+            .unwrap();
         assert_eq!(outcome, Outcome::Completed);
         let row = pending_row(&state).await;
         assert_eq!(row.process_status, RefundProcessStatus::PENDING_APPROVAL);
         assert_eq!(row.payment_intent_id, Some(PaymentIntentId("pi_123".into())));
         assert_eq!(row.reason.as_deref(), Some("Out of ingredients"));
+        // The refund-queue fact landed on the Payment stream (tests.yaml then: refundOpened).
+        let stream = store.stream(&domain::payment::stream(&PaymentIntentId("pi_123".into())));
+        let opened: Vec<_> = stream
+            .iter()
+            .filter_map(|e| match e {
+                DomainEvent::RefundOpened(o) => Some(o.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(opened.len(), 1);
+        assert_eq!(opened[0].order_id, order_id());
+        assert_eq!(opened[0].restaurant_id, restaurant_id());
+        assert_eq!(opened[0].amount, eur(1960));
+        assert_eq!(opened[0].reason.as_deref(), Some("Out of ingredients"));
+        // Re-delivered opening fact: the Payment already records it — nothing appended twice.
+        on_order_rejected(&store, &state, &captured_orders(), &rejected, &envelope())
+            .await
+            .unwrap();
+        let stream = store.stream(&domain::payment::stream(&PaymentIntentId("pi_123".into())));
+        assert_eq!(
+            stream.iter().filter(|e| matches!(e, DomainEvent::RefundOpened(_))).count(),
+            1
+        );
     }
 
     /// rules.yaml#/RefundOnRejectionOrCancellation (nothing-captured corollary): no captured payment →
     /// benign skip, no run opened.
     #[tokio::test]
     async fn rejection_with_nothing_captured_skips() {
+        let store = MemStore::default();
         let state = MemRefundProcessState::default();
         let outcome = on_order_rejected(
+            &store,
             &state,
             &pending_orders(),
             &OrderRejectedByRestaurant {
@@ -480,18 +541,26 @@ mod tests {
                 restaurant_id: restaurant_id(),
                 reason: "Out of ingredients".into(),
             },
+            &envelope(),
         )
         .await
         .unwrap();
         assert!(matches!(outcome, Outcome::Skipped(ref m) if m.contains("nothing captured")), "{outcome:?}");
         assert!(state.by_order(order_id()).await.unwrap().is_none());
+        // No refund-queue fact either — nothing captured, nothing opened.
+        assert!(store
+            .stream(&domain::payment::stream(&PaymentIntentId("pi_123".into())))
+            .is_empty());
     }
 
     /// tests.yaml#/TestRefundOnOrderCancelledByCustomer — rules.yaml#/RefundOnRejectionOrCancellation.
     #[tokio::test]
     async fn customer_cancellation_opens_a_pending_refund() {
+        let store = MemStore::default();
         let state = MemRefundProcessState::default();
+        seed_payment(&store);
         let outcome = on_order_cancelled_by_customer(
+            &store,
             &state,
             &captured_orders(),
             &OrderCancelledByCustomer {
@@ -499,6 +568,7 @@ mod tests {
                 restaurant_id: restaurant_id(),
                 reason: Some("Changed my mind".into()),
             },
+            &envelope(),
         )
         .await
         .unwrap();
@@ -509,8 +579,11 @@ mod tests {
     /// tests.yaml#/TestRefundOnOrderCancelledByRestaurant — rules.yaml#/RefundOnRejectionOrCancellation.
     #[tokio::test]
     async fn restaurant_cancellation_opens_a_pending_refund() {
+        let store = MemStore::default();
         let state = MemRefundProcessState::default();
+        seed_payment(&store);
         let outcome = on_order_cancelled_by_restaurant(
+            &store,
             &state,
             &captured_orders(),
             &OrderCancelledByRestaurant {
@@ -518,6 +591,7 @@ mod tests {
                 restaurant_id: restaurant_id(),
                 reason: "Kitchen closed".into(),
             },
+            &envelope(),
         )
         .await
         .unwrap();
@@ -528,8 +602,11 @@ mod tests {
     /// tests.yaml#/TestRefundOnRefundRequested — rules.yaml#/RefundOnRejectionOrCancellation.
     #[tokio::test]
     async fn customer_refund_request_opens_a_pending_refund() {
+        let store = MemStore::default();
         let state = MemRefundProcessState::default();
+        seed_payment(&store);
         let outcome = on_refund_requested(
+            &store,
             &state,
             &captured_orders(),
             &RefundRequested {
@@ -538,6 +615,7 @@ mod tests {
                 customer_id: None,
                 reason: Some("Late delivery".into()),
             },
+            &envelope(),
         )
         .await
         .unwrap();
@@ -554,6 +632,7 @@ mod tests {
         let gateway = RecordingGateway::default();
         seed_payment(&store);
         on_order_rejected(
+            &store,
             &state,
             &captured_orders(),
             &OrderRejectedByRestaurant {
@@ -561,6 +640,7 @@ mod tests {
                 restaurant_id: restaurant_id(),
                 reason: "Out of ingredients".into(),
             },
+            &envelope(),
         )
         .await
         .unwrap();
@@ -598,6 +678,7 @@ mod tests {
         let state = MemRefundProcessState::default();
         seed_payment(&store);
         on_refund_requested(
+            &store,
             &state,
             &captured_orders(),
             &RefundRequested {
@@ -606,6 +687,7 @@ mod tests {
                 customer_id: None,
                 reason: Some("Late delivery".into()),
             },
+            &envelope(),
         )
         .await
         .unwrap();
@@ -667,6 +749,7 @@ mod tests {
         let gateway = RecordingGateway::default();
         seed_payment(&store);
         on_order_rejected(
+            &store,
             &state,
             &captured_orders(),
             &OrderRejectedByRestaurant {
@@ -674,6 +757,7 @@ mod tests {
                 restaurant_id: restaurant_id(),
                 reason: "Out of ingredients".into(),
             },
+            &envelope(),
         )
         .await
         .unwrap();
@@ -719,6 +803,7 @@ mod tests {
         let state = MemRefundProcessState::default();
         seed_payment(&store);
         on_order_rejected(
+            &store,
             &state,
             &captured_orders(),
             &OrderRejectedByRestaurant {
@@ -726,6 +811,7 @@ mod tests {
                 restaurant_id: restaurant_id(),
                 reason: "Out of ingredients".into(),
             },
+            &envelope(),
         )
         .await
         .unwrap();
@@ -739,6 +825,7 @@ mod tests {
         .unwrap();
 
         let outcome = on_order_rejected(
+            &store,
             &state,
             &captured_orders(),
             &OrderRejectedByRestaurant {
@@ -746,6 +833,7 @@ mod tests {
                 restaurant_id: restaurant_id(),
                 reason: "Out of ingredients".into(),
             },
+            &envelope(),
         )
         .await
         .unwrap();

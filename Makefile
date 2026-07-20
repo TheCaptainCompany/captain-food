@@ -7,7 +7,7 @@
 
 CODEGEN_RS = tools/codegen-rs
 
-.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test
+.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test smoke-prod
 
 help:
 	@echo "targets: validate generate typecheck review gate night-loop budgeted-loop budget-check docs"
@@ -15,6 +15,11 @@ help:
 	@echo "         (validate-schema test-behaviour test-observability c4-validate -> all fold into 'validate')"
 	@echo "         budgeted-loop runs the night loop under a 30-min/week budget (.claude/loop-budget.json)"
 	@echo "         codegen = tools/codegen-rs (Rust, ADR-0034); needs cargo. 'rust' = build+test alias."
+
+# Production E2E smoke (Stripe TEST mode) against the live deployment — tools/smoke/README.md.
+# Needs: STRIPE_SECRET_KEY (sk_test), RENDER_API_KEY (or SUPABASE_URL+SUPABASE_SECRET_KEY).
+smoke-prod:
+	bash tools/smoke/prod-smoke.sh
 
 # `typecheck` = the Rust compiler is the type gate (build must succeed).
 typecheck:

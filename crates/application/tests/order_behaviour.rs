@@ -654,3 +654,50 @@ async fn customer_requests_a_refund_for_a_delivered_order() {
     .expect_err("not delivered");
     assert_eq!(rejection_code(&err), Some("InvalidOrderStatus"));
 }
+
+/// tests.yaml#/cases/TestOrderLifecycleRejectsSkippedTransition —
+/// rules.yaml#/OrderLifecycleIsExplicit (+ #/OrderLifecycleStatusMachine): the handlers guard with
+/// the GENERATED transition table (actors.yaml#/Order/lifecycle, ADR-20260720-004419), so a move the
+/// declared machine does not contain — here re-accepting an already-accepted order — rejects with
+/// InvalidOrderStatus.
+#[tokio::test]
+async fn rejects_a_move_the_declared_machine_does_not_contain() {
+    let store = MemStore::default();
+    let (order, resto) = (oid(), rid());
+    store.seed(&stream(order), vec![order_placed(order, resto, None), accepted(order, resto)]);
+
+    let err = accept_order(
+        &store,
+        AcceptOrder { order_id: order, restaurant_id: resto, estimated_ready_at: None },
+        &actor_as(3),
+    )
+    .await
+    .expect_err("re-accept");
+    assert_eq!(rejection_code(&err), Some("InvalidOrderStatus"));
+    // Nothing was appended — the stream still ends at the acceptance.
+    assert_eq!(store.stream(&stream(order)).len(), 2);
+}
+
+/// tests.yaml#/cases/TestOrderLifecycleTerminalStateRefusesTransitions —
+/// rules.yaml#/OrderLifecycleIsExplicit: DELIVERED is a declared terminal state
+/// (`domain::order::lifecycle::TERMINAL`), so every lifecycle transition out of it — here a
+/// restaurant cancellation — rejects with InvalidOrderStatus.
+#[tokio::test]
+async fn terminal_state_refuses_every_lifecycle_transition() {
+    let store = MemStore::default();
+    let (order, resto) = (oid(), rid());
+    store.seed(
+        &stream(order),
+        vec![order_placed(order, resto, None), ready(order, resto), delivered(order, resto)],
+    );
+
+    let err = cancel_order_by_restaurant(
+        &store,
+        CancelOrderByRestaurant { order_id: order, restaurant_id: resto, reason: "Too late".into() },
+        &actor_as(3),
+    )
+    .await
+    .expect_err("cancel after delivery");
+    assert_eq!(rejection_code(&err), Some("InvalidOrderStatus"));
+    assert!(domain::order::lifecycle::is_terminal(domain::generated::scalars::OrderStatus::DELIVERED));
+}

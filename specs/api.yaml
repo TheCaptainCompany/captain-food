@@ -262,6 +262,22 @@ types:
       requestedAt: { type: string, format: date-time }
       pickedUpAt: { type: string, format: date-time, nullable: true }
       deliveredAt: { type: string, format: date-time, nullable: true }
+  Refund:
+    description: >
+      A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin
+      decides, then APPROVED (Stripe refund requested) or DENIED, and REFUNDED once Stripe settles.
+      Serves the restaurant's and admin's refund queue (filter status = REQUESTED for pending ones).
+    reads: [{ $ref: 'database/projection_views.yaml#/View_PendingRefunds' }]
+    properties:
+      orderId: { $ref: 'scalars.yaml#/OrderId' }
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      status: { $ref: 'scalars.yaml#/RefundStatus' }
+      amount: { $ref: 'entities.yaml#/Money' }   # the captured total eligible for refund
+      approvedAmount: { $ref: 'entities.yaml#/Money', nullable: true }   # the (possibly partial) approved amount
+      reason: { type: string, nullable: true }   # free text — the opening fact's reason, then the decision's
+      refundId: { $ref: 'scalars.yaml#/RefundId', nullable: true }   # Stripe Refund id once settled
+      requestedAt: { type: string, format: date-time }
+      decidedAt: { type: string, format: date-time, nullable: true }
   Prospect:
     description: "A B2B prospect (NON_PARTNER listing) with its computed score and outreach state (admin pipeline)."
     reads: [{ $ref: 'database/tables/projection_tables.yaml#/ProspectionPipeline' }]
@@ -468,6 +484,18 @@ queries:
       status: { $ref: 'scalars.yaml#/DeliveryStatus' }
     returns: { $ref: '#/types/DeliveryJob', array: true }
     roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    slice: V0
+
+  pendingRefunds:
+    description: >
+      The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status
+      (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders'
+      refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
+    args:
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      status: { $ref: 'scalars.yaml#/RefundStatus' }
+    returns: { $ref: '#/types/Refund', array: true }
+    roles: [RESTAURANT, ADMIN]
     slice: V0
 
   restaurantLocationsByAccount:

@@ -27,8 +27,8 @@ SELECT
   (c.payload->>'deliveryJobId')::uuid AS delivery_job_id,
   (c.payload->>'orderId')::uuid AS order_id,
   (c.payload->>'restaurantId')::uuid AS restaurant_id,
-  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 0 WHEN 'DeliveryAcceptedByRider' THEN 1 WHEN 'DeliveryAcceptedByPartner' THEN 1 WHEN 'DeliveryPickedUp' THEN 2 WHEN 'DeliveryStatusUpdated' THEN (CASE e.payload->>'status' WHEN 'PENDING' THEN 0 WHEN 'ASSIGNED' THEN 1 WHEN 'PICKED_UP' THEN 2 WHEN 'OUT_FOR_DELIVERY' THEN 3 WHEN 'DELIVERED' THEN 4 WHEN 'FAILED' THEN 5 WHEN 'CANCELLED' THEN 6 END) WHEN 'DeliveryCompleted' THEN 4 WHEN 'DeliveryCancelled' THEN 6 END FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryPickedUp', 'DeliveryStatusUpdated', 'DeliveryCompleted', 'DeliveryCancelled')
+  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 0 WHEN 'DeliveryAcceptedByRider' THEN 1 WHEN 'DeliveryAcceptedByPartner' THEN 1 WHEN 'DeliveryPickedUp' THEN 2 WHEN 'DeliveryStatusUpdated' THEN (CASE e.payload->>'status' WHEN 'PENDING' THEN 0 WHEN 'ASSIGNED' THEN 1 WHEN 'PICKED_UP' THEN 2 WHEN 'OUT_FOR_DELIVERY' THEN 3 WHEN 'DELIVERED' THEN 4 WHEN 'FAILED' THEN 5 WHEN 'CANCELLED' THEN 6 END) WHEN 'DeliveryCompleted' THEN 4 WHEN 'DeliveryCancelled' THEN 6 WHEN 'DeliveryDispatchFailed' THEN 5 END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryPickedUp', 'DeliveryStatusUpdated', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed')
      ORDER BY e.position DESC LIMIT 1) AS status,
   (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 1 WHEN 'DeliveryAcceptedByPartner' THEN 0 END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner')
@@ -60,6 +60,33 @@ SELECT
      ORDER BY e.position DESC LIMIT 1) AS last_partner_rejection,
   c.occurred_at AS created_at,
   (SELECT max(e.occurred_at) FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByPartner', 'DeliveryRejectedByPartner', 'DeliveryStatusUpdated', 'DeliveryAcceptedByRider', 'DeliveryPickedUp', 'DeliveryCompleted', 'DeliveryCancelled')) AS updated_at
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByPartner', 'DeliveryRejectedByPartner', 'DeliveryStatusUpdated', 'DeliveryAcceptedByRider', 'DeliveryPickedUp', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed')) AS updated_at
 FROM domain_events c
 WHERE c.event_type = 'DeliveryRequested';
+
+CREATE OR REPLACE VIEW View_PendingRefunds AS
+SELECT
+  (c.payload->>'orderId')::uuid AS order_id,
+  (c.payload->>'restaurantId')::uuid AS restaurant_id,
+  (SELECT CASE e.event_type WHEN 'RefundOpened' THEN 0 WHEN 'RefundApproved' THEN 1 WHEN 'RefundDenied' THEN 2 WHEN 'PaymentRefunded' THEN 3 END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')
+     ORDER BY e.position DESC LIMIT 1) AS status,
+  (c.payload->'amount'->>'amountCents')::bigint AS amount_cents,
+  c.payload->'amount'->>'currency' AS currency,
+  (SELECT (e.payload->'amount'->>'amountCents')::bigint FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundApproved') AND e.payload ? 'amount'
+     ORDER BY e.position DESC LIMIT 1) AS approved_amount_cents,
+  (SELECT e.payload->>'reason' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied') AND e.payload ? 'reason'
+     ORDER BY e.position DESC LIMIT 1) AS reason,
+  (SELECT e.payload->>'refundId' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('PaymentRefunded') AND e.payload ? 'refundId'
+     ORDER BY e.position DESC LIMIT 1) AS refund_id,
+  c.occurred_at AS requested_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundApproved', 'RefundDenied')) AS decided_at,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'RefundOpened';

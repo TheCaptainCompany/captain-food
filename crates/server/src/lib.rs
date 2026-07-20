@@ -38,13 +38,14 @@ use sqlx::{PgPool, Row};
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository, DeliveryReadRepository,
     OrderReadRepository, PricingPolicyReadRepository, ProspectionReadRepository,
-    RestaurantReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
+    RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
+    UberSplitPolicyReadRepository,
 };
 use infrastructure::{
     EventBus, FailClosedAuthProviderGateway, FailClosedGoogleOwnershipVerifier, FailClosedPaymentGateway,
     PgCartRepository, PgCatalogRepository, PgCustomerRepository, PgDeliveryRepository, PgEventStore,
-    PgOrderRepository, PgPricingPolicyRepository, PgProspectionRepository, PgRestaurantRepository,
-    PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, ProcessManagerRunner,
+    PgOrderRepository, PgPricingPolicyRepository, PgProspectionRepository, PgRefundQueueRepository,
+    PgRestaurantRepository, PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, ProcessManagerRunner,
     ProcessManagerStatus, ProjectionStatus, ProjectionWorker, SireneSyncWorker,
     UnverifiedGbpOrderLinkProbe,
 };
@@ -168,6 +169,8 @@ pub fn router() -> Router {
                     Arc::new(PgCustomerRepository::new(pool.clone()));
                 let deliveries: Arc<dyn DeliveryReadRepository> =
                     Arc::new(PgDeliveryRepository::new(pool.clone()));
+                let refunds: Arc<dyn RefundReadRepository> =
+                    Arc::new(PgRefundQueueRepository::new(pool.clone()));
                 read_deps = Some(ReadDeps {
                     restaurants,
                     prospection,
@@ -179,6 +182,7 @@ pub fn router() -> Router {
                     orders,
                     customers,
                     deliveries,
+                    refunds,
                 });
 
                 // Write side (CQRS commands): the event store behind the mutation resolvers, plus the

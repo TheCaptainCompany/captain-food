@@ -1,4 +1,4 @@
-version: 4
+version: 5
 description: >
   Captain.Food ACTOR catalog (actor-model). Its goal is to be a CODE-GENERATION SOURCE: from it a
   generator can scaffold the in-domain message handlers — aggregates with command handlers that emit
@@ -27,6 +27,19 @@ description: >
 
   Field meaning:
     - <Actor>.type       : aggregate | process-manager (selects the generated base class).
+    - <Actor>.lifecycle  : OPTIONAL declared status machine (ADR-20260720-004419). The aggregate's
+      status lifecycle as explicit, validated data — generated into
+      crates/domain/src/generated/lifecycles.rs (fold + handlers consult the table) and a mermaid
+      state diagram in the generated documentation. Shape:
+        * status      : $ref to the scalars.yaml ENUM the machine runs over (e.g. OrderStatus).
+        * initial     : list of { event, to } — the birth event(s) and the state each enters.
+        * transitions : list of { from: [states], event, to } — the legal moves, keyed by the EVENT
+                        that effects them (events, not commands: inbound facts have no command, and
+                        command→event wiring already lives in `receives`). Every event must be
+                        emitted by THIS aggregate. Events not listed do not touch the status.
+        * terminal    : states with no outgoing transitions.
+      Validated by the lc-* rules; an aggregate with a <Name>Status scalar but no lifecycle warns
+      (lc-missing) so adoption is incremental.
     - <Actor>.receives   : the actor's inbox. Each entry { message, emits[, throws][, effect] }:
         * message : $ref to the command (commands.yaml) or event (events.yaml) received.
         * emits   : list of $refs to events (events.yaml) appended in response (may be empty).
@@ -304,6 +317,16 @@ Customer:
 Cart:
   type: aggregate
   description: "A visitor's in-progress selection for one restaurant, built (possibly as a guest) before checkout. Validated incrementally; converted to an Order by PlaceOrderProcess."
+  # Line edits and the customer bind do not touch the status — only checkout closes the cart
+  # (carts never expire, so there is no abandonment state).
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/CartStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/CartStarted' }
+        to: OPEN
+    transitions:
+      - { from: [OPEN], event: { $ref: 'events.yaml#/CartCheckedOut' }, to: CHECKED_OUT }
+    terminal: [CHECKED_OUT]
   receives:
     - message: { $ref: 'commands.yaml#/AddCartLine' }
       emits: [{ $ref: 'events.yaml#/CartStarted' }, { $ref: 'events.yaml#/CartLineAdded' }]
@@ -344,6 +367,23 @@ Cart:
 Order:
   type: aggregate
   description: "A single order through its lifecycle. Born from OrderPlaced (delivered by PlaceOrderProcess and recorded here), then driven to a terminal state."
+  # OUT_FOR_DELIVERY is deliberately absent: no Order event enters it — it is a read-side
+  # presentation status derived by the OrderTracking projection from delivery facts (ADR-20260720-004419).
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/OrderStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/OrderPlaced' }
+        to: PLACED
+    transitions:
+      - { from: [PLACED], event: { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }, to: ACCEPTED }
+      - { from: [ACCEPTED], event: { $ref: 'events.yaml#/OrderPreparationStarted' }, to: PREPARING }
+      # A restaurant may skip the explicit preparation step (ready straight from ACCEPTED).
+      - { from: [ACCEPTED, PREPARING], event: { $ref: 'events.yaml#/OrderMarkedReady' }, to: READY }
+      - { from: [READY], event: { $ref: 'events.yaml#/OrderDelivered' }, to: DELIVERED }
+      - { from: [PLACED], event: { $ref: 'events.yaml#/OrderRejectedByRestaurant' }, to: REJECTED }
+      - { from: [PLACED], event: { $ref: 'events.yaml#/OrderCancelledByCustomer' }, to: CANCELLED_BY_CUSTOMER }
+      - { from: [ACCEPTED, PREPARING, READY], event: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }, to: CANCELLED_BY_RESTAURANT }
+    terminal: [DELIVERED, REJECTED, CANCELLED_BY_CUSTOMER, CANCELLED_BY_RESTAURANT]
   receives:
     - message: { $ref: 'events.yaml#/OrderPlaced' }
       emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
@@ -410,6 +450,18 @@ Order:
 Payment:
   type: aggregate
   description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state."
+  # The refund decision facts (RefundOpened/Approved/Denied) do not move the payment status —
+  # only the settled Stripe fact (PaymentRefunded) does.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/PaymentStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/PaymentIntentCreated' }
+        to: PENDING
+    transitions:
+      - { from: [PENDING], event: { $ref: 'events.yaml#/PaymentCaptured' }, to: CAPTURED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/PaymentFailed' }, to: FAILED }
+      - { from: [CAPTURED], event: { $ref: 'events.yaml#/PaymentRefunded' }, to: REFUNDED }
+    terminal: [FAILED, REFUNDED]
   receives:
     - message: 
         $ref: 'events.yaml#/PaymentIntentCreated'
@@ -421,6 +473,9 @@ Payment:
     - message:
         $ref: 'events.yaml#/PaymentRefunded'
       emits: [{ $ref: 'events.yaml#/PaymentRefunded' }]
+    - message: { $ref: 'events.yaml#/RefundOpened' }
+      emits: [{ $ref: 'events.yaml#/RefundOpened' }]
+      effect: "RefundProcess opened a refund on this captured payment for a restaurant/admin decision; the Payment records it (idempotent) so View_PendingRefunds folds the queue from the log."
     - message: { $ref: 'events.yaml#/RefundApproved' }
       emits: [{ $ref: 'events.yaml#/RefundApproved' }]
       effect: "RefundProcess delivers the approval decision (restaurant or admin); the Payment records it (idempotent)."
@@ -445,7 +500,10 @@ DeliveryJob:
       effect: "Inbound partner acceptance (via the avelo37 ACL use case): the DeliveryJob records the assigned courier (idempotent by partnerRef)."
     - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
       emits: [{ $ref: 'events.yaml#/DeliveryRejectedByPartner' }]
-      effect: "Inbound partner rejection (via the avelo37 ACL use case): the DeliveryJob records it; DeliveryDispatchProcess re-offers."
+      effect: "Inbound partner rejection (via the avelo37 ACL use case): the DeliveryJob records it; DeliveryDispatchProcess re-offers (bounded, ADR-20260720-004556)."
+    - message: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+      emits: [{ $ref: 'events.yaml#/DeliveryDispatchFailed' }]
+      effect: "DeliveryDispatchProcess delivers the terminal dispatch failure (offer cap of 3 exhausted): the DeliveryJob records it (status → FAILED) so the restaurant board surfaces it for manual handling (idempotent)."
     - message: { $ref: 'commands.yaml#/AcceptDelivery' }
       emits: [{ $ref: 'events.yaml#/DeliveryAcceptedByRider' }]
       throws:

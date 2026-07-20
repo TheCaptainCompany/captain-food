@@ -8,9 +8,9 @@ use domain::generated::entities::{Money, OptionList, Product};
 use domain::generated::scalars::{
     CartId, CatalogItemAvailability, CuisineCategory, CurrencyCode, CustomerId, DeliveryJobId,
     DeliveryProvider, DeliveryStatus, EmailAddress, ExternalReference, OfferId, OfferName,
-    OptionId, OptionListId, OrderId, OrderStatus, PhoneNumber, ProductId, ProductName,
-    ProspectPipelineStatus, Quantity, RestaurantAccountId, RestaurantId, RiderId, SessionId, Slug,
-    StockStatus,
+    OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId, ProductName,
+    ProspectPipelineStatus, Quantity, RefundId, RefundStatus, RestaurantAccountId, RestaurantId,
+    RiderId, SessionId, Slug, StockStatus,
 };
 use domain::shared::errors::DomainError;
 
@@ -56,9 +56,20 @@ pub trait RestaurantReadRepository: Send + Sync {
     }
 }
 
+/// One selectable option with its LIVE name and price — checkout prices each `SelectedOption` from
+/// this (rules.yaml#/ServerPriceAuthority: option prices are read from the live catalog, never from
+/// the client).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OfferOptionView {
+    pub id: OptionId,
+    pub name: OptionName,
+    pub price: Money,
+}
+
 /// One option list (modifier group) as the Cart line checks need it: the selection bounds plus the
 /// member option ids — enough to prove `selectedOptionIds` ⊆ the offer's lists and within min/max
-/// (`errors.yaml#/InvalidOptionSelection`).
+/// (`errors.yaml#/InvalidOptionSelection`) — and the priced options checkout resolves
+/// `selectedOptionIds` against.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OfferOptionListView {
     pub id: OptionListId,
@@ -70,6 +81,8 @@ pub struct OfferOptionListView {
     pub multiple_selection: bool,
     /// The options belonging to this list.
     pub option_ids: Vec<OptionId>,
+    /// The same options with their live name and price (what checkout prices selections from).
+    pub options: Vec<OfferOptionView>,
 }
 
 /// Offer-level slice of the projected `Catalog.tree` — what the Cart write side validates a line
@@ -120,6 +133,15 @@ pub fn offer_view_from_tree(tree: &serde_json::Value, offer_id: OfferId) -> Opti
                         max_selections: list.max_selections,
                         multiple_selection: list.multiple_selection,
                         option_ids: list.options.iter().map(|o| o.id).collect(),
+                        options: list
+                            .options
+                            .iter()
+                            .map(|o| OfferOptionView {
+                                id: o.id,
+                                name: o.name.clone(),
+                                price: o.price.clone(),
+                            })
+                            .collect(),
                     })
                     .collect()
             })
@@ -266,6 +288,46 @@ pub trait DeliveryReadRepository: Send + Sync {
         restaurant_id: RestaurantId,
         status: Option<DeliveryStatus>,
     ) -> Result<Vec<DeliveryJobRow>, DomainError>;
+}
+
+/// One `View_PendingRefunds` fold-view row (the refund queue, ADR-0039) — hand-written: view-backed
+/// read models get no generated row (`generated/rows.rs` covers `tables/projection_tables.yaml`
+/// only). Field order and types mirror the view's columns: `status` comes back as its INTEGER
+/// ordinal (ADR-0037); the Money value object splits into `amount_cents` + `currency`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefundRow {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    /// REQUESTED (awaiting decision) → APPROVED / DENIED → REFUNDED (Stripe settled).
+    pub status: RefundStatus,
+    /// The captured order total eligible for refund (RefundOpened.amount).
+    pub amount_cents: domain::generated::scalars::MoneyCents,
+    pub currency: CurrencyCode,
+    /// The (possibly partial) approved amount; `None` until approved.
+    pub approved_amount_cents: Option<domain::generated::scalars::MoneyCents>,
+    /// The latest recorded reason (the opening fact's, then the decision's).
+    pub reason: Option<String>,
+    /// The Stripe Refund id once settled; `None` before PaymentRefunded.
+    pub refund_id: Option<RefundId>,
+    pub requested_at: chrono::DateTime<chrono::Utc>,
+    /// The decision's occurrence time; `None` while REQUESTED.
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Optional filters for the refund queue — mirrors the `pendingRefunds` query args in api.yaml
+/// (`restaurantId` / `status`; status REQUESTED = the pending, awaiting-decision queue).
+#[derive(Debug, Clone, Default)]
+pub struct RefundFilter {
+    pub restaurant_id: Option<RestaurantId>,
+    pub status: Option<RefundStatus>,
+}
+
+/// Read port over the `View_PendingRefunds` read model (the RefundProcess refund queue). Backs the
+/// `pendingRefunds` GraphQL query for the restaurant (own orders) and the arbitrating admin.
+#[async_trait]
+pub trait RefundReadRepository: Send + Sync {
+    /// The refund queue, newest-request-first, honouring the filter.
+    async fn list(&self, filter: RefundFilter) -> Result<Vec<RefundRow>, DomainError>;
 }
 
 /// Optional filters for the admin prospection pipeline — mirrors the `prospectionPipeline` query args
