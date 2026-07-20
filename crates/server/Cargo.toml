@@ -42,7 +42,10 @@ async-stream = "0.3"
 # API auth (ADR-0047): verify Supabase-issued JWTs against the project's PUBLIC keys (JWKS) — the signing
 # secret never touches this server. `jsonwebtoken` does the signature/claims verification; `reqwest` fetches
 # the JWKS (default-features off + native-tls, matching the workspace sqlx/infra TLS choice).
-jsonwebtoken = "10"
+# `rust_crypto` selects the RustCrypto signature backend explicitly: with no backend feature the crate
+# compiles but PANICS at runtime on the first verification ("Could not automatically determine the
+# process-level CryptoProvider"), turning every authenticated request into a 502.
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 
 [dev-dependencies]
