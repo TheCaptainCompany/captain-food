@@ -295,9 +295,11 @@ l4() {
   [ "$op_status" = "SUCCEEDED" ] || fail "L4: placeOrder operation not terminal after 60s — last: $last"
   say "      L4: placeOrder SUCCEEDED — locating the Stripe PaymentIntent"
 
-  # The Stripe intent id is server-assigned; the checkout UI reads it via paymentStatus, but the
-  # smoke customer has no Customer aggregate (initiator scope), so the TEST-mode stand-in reads it
-  # back from Stripe by OUR orderId metadata (set at create-intent, required by the webhook ACL).
+  # The Stripe intent id is server-assigned; the checkout UI reads it via paymentStatus (PUBLIC +
+  # ownership-scoped since #13), but the smoke customer has no Customer aggregate and place_order
+  # does not stamp session_id onto the run row yet (#12) — so ownership resolves null and the
+  # TEST-mode stand-in reads the intent back from Stripe by OUR orderId metadata (set at
+  # create-intent, required by the webhook ACL). Switch to paymentStatus once #12 lands.
   pi=""; t=0
   while [ "$t" -le 30 ]; do
     pi=$(curl -sS -m 20 "$STRIPE_API/v1/payment_intents?limit=20" -u "$STRIPE_SECRET_KEY:" \

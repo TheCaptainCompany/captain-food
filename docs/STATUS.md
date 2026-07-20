@@ -3,6 +3,15 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-20 (13:00 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-20 — #13: `paymentStatus`/`paymentStatusChanged` are PUBLIC + ownership-scoped.**
+> api.yaml roles `[CUSTOMER]` → `[PUBLIC]` on both (the issue's recommended option, matching
+> `operationStatus`): the generated resolvers' ADMIN/session ownership branches — previously dead
+> behind the CUSTOMER guard — are now reachable; strangers resolve null / an empty stream (no
+> existence oracle). New `crates/server/tests/graphql_payment_status.rs` covers session-owner /
+> stranger / sessionless / ADMIN. The prod smoke keeps its Stripe-metadata stand-in until **#12**
+> stamps `session_id` onto the run row (comment updated to say exactly that). `make validate`
+> 0 errors, workspace tests green.
+
 > ✅ **2026-07-20 (13:00 UTC) — watchdog: `sirene-sync` 6-hour hang fixed** (ADR-20260720-130045).
 > The weekly SIRENE ingestion job ran the full 6h GitHub ceiling and was force-`cancelled` twice
 > (07-18 dispatch + 07-20 03:00 cron); build was fine (~40s), the hang was entirely the ingest step.

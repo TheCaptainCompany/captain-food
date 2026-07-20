@@ -1365,7 +1365,7 @@ input MetadataInput {
 type Query {
   phoneCountries: [PhoneCountry!]! @public @reads(views: ["PhoneCountry"])
   operationStatus(input: OperationStatusQueryInput!): Operation @public
-  paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent @auth(requires: [CUSTOMER])
+  paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent @public
   me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["Customer"])
   favoriteRestaurants(input: FavoriteRestaurantsQueryInput!): [Restaurant!]! @auth(requires: [CUSTOMER]) @reads(views: ["Restaurant"])
   restaurants(input: RestaurantsQueryInput): [Restaurant!]! @public @reads(views: ["Restaurant"])
@@ -1464,6 +1464,6 @@ type Mutation {
 # ==============================================================================
 type Subscription {
   operationStatusChanged(input: OperationStatusChangedSubscriptionInput!): Operation! @public
-  paymentStatusChanged(input: PaymentStatusChangedSubscriptionInput!): PaymentIntent! @auth(requires: [CUSTOMER])
+  paymentStatusChanged(input: PaymentStatusChangedSubscriptionInput!): PaymentIntent! @public
   orderStatusChanged(input: OrderStatusChangedSubscriptionInput!): Order! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT])
 }

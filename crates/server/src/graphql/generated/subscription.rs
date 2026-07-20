@@ -88,8 +88,8 @@ impl SubscriptionRoot {
             }
         })
     }
-    /// Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling.
-    #[graphql(name = "paymentStatusChanged", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    /// Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling. PUBLIC like the query, ownership-scoped at stream setup (customer / session / ADMIN) — strangers get an empty stream.
+    #[graphql(name = "paymentStatusChanged")]
     async fn payment_status_changed(&self, ctx: &async_graphql::Context<'_>, input: PaymentStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<PaymentIntent>>> {
         let bus = ctx.data::<infrastructure::EventBus>()?.clone();
         let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();

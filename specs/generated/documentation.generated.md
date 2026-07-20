@@ -4975,12 +4975,12 @@ Poll a journaled command's status by its messageId acceptance handle (the pull c
 <a id="query-paymentstatus"></a>
 #### 🔎 Query: `paymentStatus`
 
-The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy); ownership-scoped to the checkout's customer (or session) and ADMIN.
+The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). PUBLIC like operationStatus, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
 
 
 - **Input**: 🧩 `PaymentStatusQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
 - **Returns**: [🧩 `PaymentIntent`](#type-paymentintent) · **reads** —
-- **Roles**: CUSTOMER · **slice** V0
+- **Roles**: PUBLIC · **slice** V0
 
 <a id="query-me"></a>
 #### 🔎 Query: `me`
@@ -5167,12 +5167,12 @@ Live status of one journaled command, keyed by its messageId acceptance handle (
 <a id="subscription-paymentstatuschanged"></a>
 #### 🔔 Subscription: [`paymentStatusChanged`](#subscription-paymentstatuschanged)
 
-Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling.
+Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling. PUBLIC like the query, ownership-scoped at stream setup (customer / session / ADMIN) — strangers get an empty stream.
 
 
 - **Input**: 🧩 `PaymentStatusChangedSubscriptionInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
 - **Streams**: [🧩 `PaymentIntent`](#type-paymentintent)
-- **Roles**: CUSTOMER · **slice** V0
+- **Roles**: PUBLIC · **slice** V0
 
 ### 🧩 Output types _(1)_
 
