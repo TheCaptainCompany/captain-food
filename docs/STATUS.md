@@ -212,6 +212,12 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 
 ## 📋 Remaining work — todo & session split
 
+> **⚠️ TRACKING MOVED (2026-07-20, user-directed): remaining work now lives in
+> [GitHub issues](https://github.com/Captain-Food/captain-food/issues) (#12–#28, typed
+> Task/Bug/Feature) managed on the GitHub Project board — not in this file.** New work items get an
+> issue, not a table row; this file stays the narrative deployment/architecture snapshot. The table
+> below is the last pre-migration snapshot, kept for history.
+
 Two sessions run in parallel — 🅐 = this (desktop) session, 🅑 = the iPhone/other session. Pull-rebase before every push.
 
 | # | Item | Owner | Status |
