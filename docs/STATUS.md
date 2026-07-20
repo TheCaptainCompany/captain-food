@@ -1,7 +1,16 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-20 (early). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-20 (13:00 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-20 (13:00 UTC) — watchdog: `sirene-sync` 6-hour hang fixed** (ADR-20260720-130045).
+> The weekly SIRENE ingestion job ran the full 6h GitHub ceiling and was force-`cancelled` twice
+> (07-18 dispatch + 07-20 03:00 cron); build was fine (~40s), the hang was entirely the ingest step.
+> Root cause: `SireneClient` used a bare `reqwest::Client::new()` with **no request timeout**, so a
+> stalled INSEE read froze the sweep forever. Fix (code/CI only, no specs): per-request
+> `timeout(60s)`+`connect_timeout(15s)` on the client (`crates/sirene_ingest/src/client.rs`) plus a
+> belt-and-suspenders `timeout-minutes: 90` on the workflow. `cargo build`+`cargo test -p
+> sirene_ingest` green (4 tests). Next scheduled sweep (Mon 03:00 UTC) to confirm a clean exit.
 
 > ✅ **2026-07-20 (early) — post-merge wave, all landed directly on `main` (user-directed), each
 > workstream gated in an isolated worktree then re-gated integrated (final: 29x tests green,

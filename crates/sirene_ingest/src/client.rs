@@ -70,10 +70,27 @@ pub struct SireneClient {
     token: String,
 }
 
+/// Per-request ceiling for a single `/siret` call. INSEE pages return in seconds; without this a
+/// stalled connection hangs the whole department sweep until GitHub's 6-hour job ceiling force-
+/// cancels the run (observed 2026-07-20). Generous enough to never trip on a healthy slow page, but
+/// bounded so a dead socket fails the page (then the loop's own retries / department isolation apply)
+/// instead of the whole job. Mirrors the explicit timeout on the worker ping in `main.rs`.
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Connection-establishment ceiling — a separate, tighter bound so an unreachable host fails fast.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 impl SireneClient {
     pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Self {
+        // A bare `Client::new()` has NO request timeout, so a stalled read blocks forever; always
+        // give the client bounded timeouts (fall back to the default client only if the builder,
+        // which is infallible in practice, ever errors).
+        let http = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            http: reqwest::Client::new(),
+            http,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             token: token.into(),
         }

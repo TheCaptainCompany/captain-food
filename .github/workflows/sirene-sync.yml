@@ -35,6 +35,10 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    # A full France sweep is ~minutes; this bounds any unforeseen hang to well under the 6-hour
+    # GitHub job ceiling (which silently burned two runs on 2026-07-20) while never tripping a
+    # healthy run. The real fix is the per-request timeout in the client; this is the safety net.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
