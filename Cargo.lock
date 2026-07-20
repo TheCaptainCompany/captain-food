@@ -48,8 +48,10 @@ dependencies = [
  "async-trait",
  "chrono",
  "domain",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "uuid",
 ]

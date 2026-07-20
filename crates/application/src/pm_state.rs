@@ -20,7 +20,9 @@ use domain::shared::errors::DomainError;
 
 /// One `payment_process_manager` row: a PlaceOrderProcess checkout run, keyed by cart. The unique
 /// `payment_intent_id` correlates inbound Stripe facts back to the run;
-/// `last_processed_stripe_event_id` dedups Stripe webhook re-delivery.
+/// `last_processed_stripe_event_id` dedups Stripe webhook re-delivery. The
+/// `customer_id`/`session_id`/`client_secret` columns back the initiator-scoped `paymentStatus`
+/// read (ADR-20260720-015500) — the one declared exception to PM-table privacy.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaymentProcessRow {
     pub cart_id: CartId,
@@ -29,6 +31,13 @@ pub struct PaymentProcessRow {
     pub payment_intent_id: PaymentIntentId,
     pub process_status: PaymentProcessStatus,
     pub payment_status: PaymentStatus,
+    /// Checkout owner (`None` for anonymous) — `paymentStatus` ownership scope.
+    pub customer_id: Option<CustomerId>,
+    /// Initiating session (`X-SESSION-ID`) — anonymous `paymentStatus` ownership scope.
+    pub session_id: Option<SessionId>,
+    /// Stripe PaymentIntent client secret, served to the initiator while AWAITING_PAYMENT_RESULT and
+    /// NULLed when the run resolves. Never event-sourced (credential, not a business fact).
+    pub client_secret: Option<String>,
     /// Dedup key for Stripe webhook re-delivery.
     pub last_processed_stripe_event_id: Option<ExternalReference>,
     /// Maintained by the runtime envelope — ignored on write, stamped `now()` by `upsert`.
@@ -87,6 +96,10 @@ pub trait PaymentProcessStateStore: Send + Sync {
         &self,
         payment_intent_id: &PaymentIntentId,
     ) -> Result<Option<PaymentProcessRow>, DomainError>;
+
+    /// The run that will materialize this order — the `paymentStatus(orderId)` read
+    /// (ADR-20260720-015500; the caller enforces the initiator ownership scope).
+    async fn by_order(&self, order_id: OrderId) -> Result<Option<PaymentProcessRow>, DomainError>;
 
     /// Insert or replace the run's row; `last_update_utc` is stamped server-side (`now()`).
     async fn upsert(&self, row: &PaymentProcessRow) -> Result<(), DomainError>;
@@ -164,6 +177,13 @@ pub mod mem {
                 .values()
                 .find(|r| &r.payment_intent_id == payment_intent_id)
                 .cloned())
+        }
+
+        async fn by_order(
+            &self,
+            order_id: OrderId,
+        ) -> Result<Option<PaymentProcessRow>, DomainError> {
+            Ok(self.rows.lock().unwrap().values().find(|r| r.order_id == order_id).cloned())
         }
 
         async fn upsert(&self, row: &PaymentProcessRow) -> Result<(), DomainError> {
@@ -269,6 +289,9 @@ mod tests {
             payment_intent_id: PaymentIntentId(intent.into()),
             process_status: PaymentProcessStatus::AWAITING_PAYMENT_RESULT,
             payment_status: PaymentStatus::PENDING,
+            customer_id: None,
+            session_id: None,
+            client_secret: Some("pi_secret".into()),
             last_processed_stripe_event_id: None,
             last_update_utc: DateTime::<Utc>::MIN_UTC,
         }

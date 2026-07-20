@@ -386,6 +386,9 @@ async fn a_second_concurrent_checkout_of_the_same_cart_is_rejected() {
         payment_intent_id: PaymentIntentId("pi_first".into()),
         process_status: PaymentProcessStatus::AWAITING_PAYMENT_RESULT,
         payment_status: PaymentStatus::PENDING,
+        customer_id: None,
+        session_id: None,
+        client_secret: Some("pi_first_secret".into()),
         last_processed_stripe_event_id: None,
         last_update_utc: chrono::Utc::now(),
     })

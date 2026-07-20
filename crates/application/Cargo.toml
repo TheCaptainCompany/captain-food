@@ -15,7 +15,11 @@ chrono = { workspace = true }
 # The Actor envelope (ADR-0041) carries raw uuid ids; the typed domain ids wrap the same type.
 # `v5` on top of the workspace features: DeliveryDispatchProcess derives a DETERMINISTIC delivery-job
 # id (UUIDv5 of the order id) so re-reacting to the same OrderMarkedReady is idempotent.
-uuid = { workspace = true, features = ["v5"] }
+# `v7` (ADR-20260720-015300): server-generated messageId/inbound_event_id are time-ordered UUIDv7.
+uuid = { workspace = true, features = ["v5", "v7"] }
+# Canonical command payload hash (journal duplicate-vs-conflict discriminator, ADR-20260720-015300).
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 # Async runtime for the behaviour tests (tests.yaml Given/When/Then over the command handlers).

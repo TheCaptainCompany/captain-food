@@ -7,10 +7,11 @@
 //! `specs/scalars.yaml`, the same source the `ref_*` seed rows come from).
 
 use domain::generated::scalars::{
-    CartStatus, ComparisonBasis, CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider,
-    DeliveryStatus, GbpLinkStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus,
-    PaymentStatus, ProspectPipelineStatus, RefundProcessStatus, RestaurantListingStatus,
-    RestaurantStatus, ServiceType, ThumbRating,
+    CartStatus, CommandChannel, CommandJournalStatus, ComparisonBasis, CuisineCategory,
+    DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus, GbpLinkStatus,
+    InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
+    ProspectPipelineStatus, RefundProcessStatus, RestaurantListingStatus, RestaurantStatus,
+    ServiceType, ThumbRating,
 };
 use domain::shared::errors::DomainError;
 
@@ -95,6 +96,9 @@ enum_ord!(DeliveryDispatchProcessStatus {
     REOFFER_REQUIRED => 2,
     COMPLETED => 3,
 });
+enum_ord!(CommandJournalStatus { RECEIVED => 0, SUCCEEDED => 1, REJECTED => 2, FAILED => 3 });
+enum_ord!(CommandChannel { GRAPHQL => 0, WORKER => 1, INTERNAL => 2 });
+enum_ord!(InboundEventStatus { RECEIVED => 0, DELIVERED => 1, FAILED => 2 });
 
 /// `to_ord` through an `Option` (nullable enum column).
 pub fn opt_to_ord<E: EnumOrd>(v: &Option<E>) -> Option<i32> {
@@ -152,6 +156,12 @@ mod tests {
             DeliveryDispatchProcessStatus::from_ord(2).unwrap(),
             DeliveryDispatchProcessStatus::REOFFER_REQUIRED
         );
+        assert_eq!(CommandJournalStatus::FAILED.to_ord(), 3);
+        assert_eq!(CommandJournalStatus::from_ord(0).unwrap(), CommandJournalStatus::RECEIVED);
+        assert_eq!(CommandChannel::INTERNAL.to_ord(), 2);
+        assert_eq!(CommandChannel::from_ord(1).unwrap(), CommandChannel::WORKER);
+        assert_eq!(InboundEventStatus::DELIVERED.to_ord(), 1);
+        assert_eq!(InboundEventStatus::from_ord(2).unwrap(), InboundEventStatus::FAILED);
         assert!(RestaurantStatus::from_ord(99).is_err());
     }
 }

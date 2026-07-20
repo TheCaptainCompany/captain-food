@@ -29,7 +29,8 @@ use super::enum_sql::EnumOrd;
 
 /// Column list of `payment_process_manager`, in [`PaymentProcessRow`] field order.
 const PAYMENT_COLUMNS: &str = "cart_id, order_id, payment_intent_id, process_status, \
-     payment_status, last_processed_stripe_event_id, last_update_utc";
+     payment_status, customer_id, session_id, client_secret, \
+     last_processed_stripe_event_id, last_update_utc";
 
 fn decode_payment(row: &PgRow) -> Result<PaymentProcessRow, DomainError> {
     Ok(PaymentProcessRow {
@@ -38,6 +39,15 @@ fn decode_payment(row: &PgRow) -> Result<PaymentProcessRow, DomainError> {
         payment_intent_id: PaymentIntentId(row.try_get("payment_intent_id").map_err(db_err)?),
         process_status: EnumOrd::from_ord(row.try_get::<i32, _>("process_status").map_err(db_err)?)?,
         payment_status: EnumOrd::from_ord(row.try_get::<i32, _>("payment_status").map_err(db_err)?)?,
+        customer_id: row
+            .try_get::<Option<uuid::Uuid>, _>("customer_id")
+            .map_err(db_err)?
+            .map(CustomerId),
+        session_id: row
+            .try_get::<Option<uuid::Uuid>, _>("session_id")
+            .map_err(db_err)?
+            .map(SessionId),
+        client_secret: row.try_get::<Option<String>, _>("client_secret").map_err(db_err)?,
         last_processed_stripe_event_id: row
             .try_get::<Option<String>, _>("last_processed_stripe_event_id")
             .map_err(db_err)?
@@ -81,15 +91,25 @@ impl PaymentProcessStateStore for PgPaymentProcessState {
         row.as_ref().map(decode_payment).transpose()
     }
 
+    async fn by_order(&self, order_id: OrderId) -> Result<Option<PaymentProcessRow>, DomainError> {
+        let sql = format!("SELECT {PAYMENT_COLUMNS} FROM payment_process_manager WHERE order_id = $1");
+        let row =
+            sqlx::query(&sql).bind(order_id.0).fetch_optional(&self.pool).await.map_err(db_err)?;
+        row.as_ref().map(decode_payment).transpose()
+    }
+
     async fn upsert(&self, row: &PaymentProcessRow) -> Result<(), DomainError> {
         let sql = format!(
             "INSERT INTO payment_process_manager ({PAYMENT_COLUMNS}) \
-             VALUES ($1,$2,$3,$4,$5,$6,now()) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) \
              ON CONFLICT (cart_id) DO UPDATE SET \
              order_id = EXCLUDED.order_id, \
              payment_intent_id = EXCLUDED.payment_intent_id, \
              process_status = EXCLUDED.process_status, \
              payment_status = EXCLUDED.payment_status, \
+             customer_id = EXCLUDED.customer_id, \
+             session_id = EXCLUDED.session_id, \
+             client_secret = EXCLUDED.client_secret, \
              last_processed_stripe_event_id = EXCLUDED.last_processed_stripe_event_id, \
              last_update_utc = now()"
         );
@@ -99,6 +119,9 @@ impl PaymentProcessStateStore for PgPaymentProcessState {
             .bind(row.payment_intent_id.0.clone())
             .bind(row.process_status.to_ord())
             .bind(row.payment_status.to_ord())
+            .bind(row.customer_id.as_ref().map(|v| v.0))
+            .bind(row.session_id.as_ref().map(|v| v.0))
+            .bind(row.client_secret.clone())
             .bind(row.last_processed_stripe_event_id.as_ref().map(|v| v.0.clone()))
             .execute(&self.pool)
             .await

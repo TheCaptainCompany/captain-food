@@ -108,11 +108,13 @@ pub async fn on_payment_captured(
     }
 
     // state.set — resolve the run; the trigger's event id is the Stripe re-delivery dedup key.
+    // The client secret is a spent credential once the run resolves — NULL it (ADR-20260720-015500).
     state
         .upsert(&PaymentProcessRow {
             payment_status: PaymentStatus::CAPTURED,
             process_status: PaymentProcessStatus::ORDER_PLACED,
             last_processed_stripe_event_id: Some(ExternalReference(env.event_id.to_string())),
+            client_secret: None,
             ..row
         })
         .await?;
@@ -144,6 +146,7 @@ pub async fn on_payment_failed(
             payment_status: PaymentStatus::FAILED,
             process_status: PaymentProcessStatus::FAILED,
             last_processed_stripe_event_id: Some(ExternalReference(env.event_id.to_string())),
+            client_secret: None,
             ..row
         })
         .await?;
@@ -226,6 +229,9 @@ mod tests {
             payment_intent_id: PaymentIntentId("pi_123".into()),
             process_status: PaymentProcessStatus::AWAITING_PAYMENT_RESULT,
             payment_status: PaymentStatus::PENDING,
+            customer_id: None,
+            session_id: None,
+            client_secret: Some("pi_123_secret".into()),
             last_processed_stripe_event_id: None,
             last_update_utc: chrono::DateTime::<chrono::Utc>::MIN_UTC,
         }

@@ -1834,6 +1834,13 @@ pub async fn place_order(
             payment_intent_id: intent.payment_intent_id.clone(),
             process_status: PaymentProcessStatus::AWAITING_PAYMENT_RESULT,
             payment_status: PaymentStatus::PENDING,
+            // Initiator scope + credential for the paymentStatus read (ADR-20260720-015500). The
+            // anonymous session is dispatch-layer knowledge (X-SESSION-ID) — the acceptance-first
+            // dispatch stamps it when it wires through (placeOrder requires CUSTOMER, so the
+            // customer_id scope is the one that matters here).
+            customer_id: cmd.customer_id,
+            session_id: None,
+            client_secret: Some(intent.client_secret.clone()),
             last_processed_stripe_event_id: None,
             last_update_utc: chrono::Utc::now(),
         })
