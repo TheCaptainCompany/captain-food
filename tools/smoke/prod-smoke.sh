@@ -7,9 +7,11 @@
 #   L3  fixture      — a dedicated TEST-mode smoke restaurant (slug `smoke-test`) with one
 #                      product/offer exists; created via the real GraphQL mutations (ADMIN role)
 #                      when missing. Idempotent: fixed fixture UUIDs, existence-checked first.
-#   L4  money path   — cart -> placeOrder (CUSTOMER role) -> Stripe PaymentIntent -> server-side
-#                      confirm with pm_card_visa -> webhook -> order-tracking read model shows the
-#                      order PLACED with paymentStatus CAPTURED (bounded polling).
+#   L4  money path   — cart -> placeOrder (CUSTOMER role, ACCEPTANCE-FIRST: MutationAcceptance ->
+#                      poll operationStatus(messageId) to SUCCEEDED, ADR-20260720-015500) -> find
+#                      the Stripe PaymentIntent by its orderId metadata -> server-side confirm with
+#                      pm_card_visa -> webhook -> inbound_events drain -> order-tracking read model
+#                      shows the order PLACED with paymentStatus CAPTURED (bounded polling).
 #
 # Safe to re-run against production: TEST-mode money only (sk_test key), one dedicated tenant,
 # idempotent fixtures, fresh cart/order ids per run.
@@ -244,12 +246,13 @@ l3() {
 
 # --- L4: full money path (TEST mode) --------------------------------------------------------------
 l4() {
-  local cart_id line_id session_id order_id customer resp pi secret confirm status pay_status deadline t last
+  local cart_id line_id session_id order_id customer resp message_id op_status pi secret confirm status pay_status deadline t last
   cart_id=$(uuid); line_id=$(uuid); session_id=$(uuid); order_id=$(uuid)
 
-  # 1. Build the cart (PUBLIC role — guest carts by design).
+  # 1. Build the cart (PUBLIC role — guest carts by design). Acceptance-first: the mutation only
+  #    acknowledges (MutationAcceptance); the cart-projection wait below observes the completion.
   gql_ok "L4" "$API_BASE/public/graphql" "" \
-    'mutation($i: AddCartLineInput!){ addCartLine(input:$i){ correlationId } }' \
+    'mutation($i: AddCartLineInput!){ addCartLine(input:$i){ messageId operationStatus } }' \
     "$(jq -cn --arg c "$cart_id" --arg r "$FIX_RESTAURANT_ID" --arg l "$line_id" --arg o "$FIX_OFFER_ID" --arg s "$session_id" \
       '{i:{cartId:$c, restaurantId:$r, sessionId:$s, line:{cartLineId:$l, offerId:$o, quantity:1}}}')" >/dev/null
 
@@ -261,15 +264,48 @@ l4() {
   wait_for "L4" "cart projection" 60 check_cart_projected
 
   # 2. Checkout as the smoke CUSTOMER (TEST mode order against the TEST restaurant).
+  #    Acceptance-first (ADR-20260720-015500): placeOrder returns only the acceptance envelope; the
+  #    outcome is read by polling operationStatus(messageId) — owned by this customer's JWT subject
+  #    (the journal row's user_id) — until it leaves PENDING.
   customer=$(mint_token "$SMOKE_CUSTOMER_EMAIL" "CUSTOMER")
   resp=$(gql_ok "L4" "$API_BASE/customer/graphql" "$customer" \
-    'mutation($i: PlaceOrderInput!){ placeOrder(input:$i){ correlationId paymentIntentId clientSecret } }' \
+    'mutation($i: PlaceOrderInput!){ placeOrder(input:$i){ messageId operationStatus duplicate } }' \
     "$(jq -cn --arg o "$order_id" --arg r "$FIX_RESTAURANT_ID" --arg c "$cart_id" '{i:{
         mode:"TEST", orderId:$o, restaurantId:$r, cartId:$c,
         customerContact:{displayName:"Smoke Customer", phone:"+33600000000"},
         serviceType:"COLLECTION", paymentMethodId:"pm_card_visa"}}')")
-  pi=$(printf '%s' "$resp" | jq -r '.data.placeOrder.paymentIntentId // empty')
-  [ -n "$pi" ] || fail "L4: placeOrder returned no paymentIntentId: $resp"
+  message_id=$(printf '%s' "$resp" | jq -r '.data.placeOrder.messageId // empty')
+  [ -n "$message_id" ] || fail "L4: placeOrder returned no messageId (acceptance): $resp"
+  say "      L4: placeOrder accepted (messageId $message_id) — polling operationStatus"
+
+  op_status=""; t=0; last="(never observed)"
+  while [ "$t" -le 60 ]; do
+    resp=$(gql "$API_BASE/customer/graphql" "$customer" \
+      'query($m: MessageId!){ operationStatus(input:{messageId:$m}) { status errorCode message } }' \
+      "$(jq -cn --arg m "$message_id" '{m:$m}')")
+    op_status=$(printf '%s' "$resp" | jq -r '.data.operationStatus.status // empty')
+    case "$op_status" in
+      SUCCEEDED) break ;;
+      REJECTED|FAILED)
+        fail "L4: placeOrder $op_status: $(printf '%s' "$resp" | jq -c '.data.operationStatus' | head -c 400)" ;;
+    esac
+    last="status=${op_status:-<no operation row>}"
+    sleep 3; t=$((t+3))
+  done
+  [ "$op_status" = "SUCCEEDED" ] || fail "L4: placeOrder operation not terminal after 60s — last: $last"
+  say "      L4: placeOrder SUCCEEDED — locating the Stripe PaymentIntent"
+
+  # The Stripe intent id is server-assigned; the checkout UI reads it via paymentStatus, but the
+  # smoke customer has no Customer aggregate (initiator scope), so the TEST-mode stand-in reads it
+  # back from Stripe by OUR orderId metadata (set at create-intent, required by the webhook ACL).
+  pi=""; t=0
+  while [ "$t" -le 30 ]; do
+    pi=$(curl -sS -m 20 "$STRIPE_API/v1/payment_intents?limit=20" -u "$STRIPE_SECRET_KEY:" \
+      | jq -r --arg o "$order_id" '.data[] | select(.metadata.orderId==$o) | .id' | head -1)
+    [ -n "$pi" ] && break
+    sleep 3; t=$((t+3))
+  done
+  [ -n "$pi" ] || fail "L4: no Stripe PaymentIntent carries orderId=$order_id metadata after 30s"
   say "      L4: payment intent $pi created"
 
   # 3. Server-side confirm with the universal test card (frontend stand-in; TEST mode key only).
