@@ -217,11 +217,10 @@ struct Report {
 
 const INLINE_TYPES: [&str; 4] = ["string", "boolean", "integer", "float"];
 
-/// checkRoles: an operation must declare ≥1 role, and each must be a scalars.yaml#/UserType value.
+/// checkRoles: `roles:` is a LITERAL list (ADR-20260720-191500) — omitted means open to every role
+/// path (→ @public), present means exactly those paths (→ @auth, PUBLIC = the anonymous path). Each
+/// listed role must be a scalars.yaml#/UserType value.
 fn check_roles(issues: &mut Vec<Issue>, roles: &[String], where_: &str, uts: &BTreeSet<String>) {
-    if roles.is_empty() {
-        issues.push(err("op-no-authz", where_.into(), "operation declares no roles (→ @auth/@public).".into()));
-    }
     for r in roles {
         if !uts.contains(r) {
             issues.push(err(
@@ -873,7 +872,9 @@ fn validate(model: &Model) -> Report {
                             continue;
                         }
                     };
-                    let allowed = roles.iter().any(|r| r == "PUBLIC") || (!p.role.is_empty() && roles.iter().any(|r| r == &p.role));
+                    // Literal roles (ADR-20260720-191500): omitted = every persona may call it;
+                    // present = the persona's path-role must be listed (PUBLIC = the anonymous path).
+                    let allowed = roles.is_empty() || (!p.role.is_empty() && roles.iter().any(|r| r == &p.role));
                     if !allowed {
                         issues.push(err(
                             "story-role-not-authorized",
@@ -4580,7 +4581,9 @@ fn input_types_block(model: &Model, api: &Api) -> String {
 }
 
 fn auth_directive(roles: &[String]) -> String {
-    if roles.iter().any(|r| r == "PUBLIC") {
+    // Literal roles (ADR-20260720-191500): omitted = open to every role path (@public); present =
+    // exactly the listed paths (@auth) — PUBLIC inside `requires` is the anonymous path.
+    if roles.is_empty() {
         "@public".to_string()
     } else {
         format!("@auth(requires: [{}])", roles.join(", "))
@@ -4704,6 +4707,15 @@ fn d_emo(kind: &str) -> &'static str {
         "property" => "🔹", "story" => "🎬", "activity" => "🧭", "test" => "🧪", "obs" => "📡",
         "context" => "🔲", "container" => "🧱", "component" => "⚙️", "subscription" => "🔔",
         "rule" => "📐", "screen" => "📱", "translation" => "🌐", _ => "•",
+    }
+}
+/// Docs label for an operation's `roles:` — an omitted list means open to every role path
+/// (literal roles, ADR-20260720-191500).
+fn roles_label(roles: &[String]) -> String {
+    if roles.is_empty() {
+        "EVERYONE (open — roles omitted)".to_string()
+    } else {
+        roles.join(", ")
     }
 }
 fn user_emo(role: &str) -> &'static str {
@@ -4951,7 +4963,7 @@ fn emit_documentation(model: &Model) -> String {
             q.description.as_deref().map(|d| format!("\n{}\n", d)).unwrap_or_default(),
             input,
             format!("- **Returns**: {} · **reads** {}", ret, reads),
-            format!("- **Roles**: {} · **slice** {}", q.roles.join(", "), q.slice),
+            format!("- **Roles**: {} · **slice** {}", roles_label(&q.roles), q.slice),
         ].join("\n") });
     }
     for m in &api.mutations {
@@ -4959,7 +4971,7 @@ fn emit_documentation(model: &Model) -> String {
         api_docs.push(Doc { ctx: cx.of_command(&m.command), md: vec![
             item_head("mutation", "Mutation", &m.name),
             format!("\n- **Command**: {}{}", dlink("command", &m.command), handler.map(|h| format!(" → handled by {}", dlink("actor", &h.0))).unwrap_or_default()),
-            format!("- **Roles**: {} · **slice** {}", m.roles.join(", "), m.slice),
+            format!("- **Roles**: {} · **slice** {}", roles_label(&m.roles), m.slice),
             format!("- **Returns**: {} (acceptance-first — outcome via {})", dlink("type", "MutationAcceptance"), dlink("query", "operationStatus")),
         ].join("\n") });
     }
@@ -4984,7 +4996,7 @@ fn emit_documentation(model: &Model) -> String {
             s.description.as_deref().map(|d| format!("\n{}\n", d)).unwrap_or_default(),
             input,
             format!("- **Streams**: {}", ret),
-            format!("- **Roles**: {} · **slice** {}", s.roles.join(", "), s.slice),
+            format!("- **Roles**: {} · **slice** {}", roles_label(&s.roles), s.slice),
         ].join("\n") });
     }
 
@@ -5639,13 +5651,13 @@ fn emit_documentation_html(model: &Model) -> String {
         };
         let ret = format!("{}{}", if type_set.contains(&q.returns_type) { h_link("type", &q.returns_type) } else if entity_set.contains(&q.returns_type) { h_link("entity", &q.returns_type) } else { format!("<span class=\"k-id\">{}</span>", h_esc(&q.returns_type)) }, if q.returns_list { " []" } else { "" });
         let reads = { let s = q.reads.iter().map(|v| h_link("view", v)).collect::<Vec<_>>().join(", "); if s.is_empty() { "—".to_string() } else { s } };
-        let body = format!("{}<div class=\"rel\"><span class=\"lbl\">returns:</span> {} · <span class=\"lbl\">reads</span> {}</div><div class=\"rel\"><span class=\"lbl\">roles:</span> {} · <span class=\"badge\">{}</span></div>", input_rel, ret, reads, h_esc(&q.roles.join(", ")), q.slice);
+        let body = format!("{}<div class=\"rel\"><span class=\"lbl\">returns:</span> {} · <span class=\"lbl\">reads</span> {}</div><div class=\"rel\"><span class=\"lbl\">roles:</span> {} · <span class=\"badge\">{}</span></div>", input_rel, ret, reads, h_esc(&roles_label(&q.roles)), q.slice);
         let ctx = cx.of_operation(&q.roles, &(if !q.reads.is_empty() { cx.of_reads(&q.reads) } else { cx.of_type(&q.returns_type) }));
         api_docs.push(HDoc { ctx, html: h_item("query", "Query", &q.name, &body, q.description.as_deref()) });
     }
     for m in &api.mutations {
         let h = cmd_handler.get(&m.command);
-        let body = format!("<div class=\"rel\"><span class=\"lbl\">command:</span> {}{}</div><div class=\"rel\"><span class=\"lbl\">roles:</span> {} · <span class=\"badge\">{}</span></div><div class=\"rel\"><span class=\"lbl\">returns:</span> {} <span class=\"muted\">(acceptance-first — outcome via {})</span></div>", h_link("command", &m.command), h.map(|h| format!(" → {}", h_link("actor", &h.0))).unwrap_or_default(), h_esc(&m.roles.join(", ")), m.slice, h_link("type", "MutationAcceptance"), h_link("query", "operationStatus"));
+        let body = format!("<div class=\"rel\"><span class=\"lbl\">command:</span> {}{}</div><div class=\"rel\"><span class=\"lbl\">roles:</span> {} · <span class=\"badge\">{}</span></div><div class=\"rel\"><span class=\"lbl\">returns:</span> {} <span class=\"muted\">(acceptance-first — outcome via {})</span></div>", h_link("command", &m.command), h.map(|h| format!(" → {}", h_link("actor", &h.0))).unwrap_or_default(), h_esc(&roles_label(&m.roles)), m.slice, h_link("type", "MutationAcceptance"), h_link("query", "operationStatus"));
         api_docs.push(HDoc { ctx: cx.of_command(&m.command), html: h_item("mutation", "Mutation", &m.name, &body, None) });
     }
     for s in &api.subscriptions {
@@ -5656,7 +5668,7 @@ fn emit_documentation_html(model: &Model) -> String {
             format!("<div class=\"rel\"><span class=\"lbl\">input:</span> <span class=\"k-type\">🧩 {}SubscriptionInput{}</span> <span class=\"muted\">{{ {} }}</span></div>", h_esc(&pascal(&s.name)), if s.args.iter().any(|a| a.required) { "!" } else { "" }, field_list)
         };
         let ret = format!("{}{}", if type_set.contains(&s.returns_type) { h_link("type", &s.returns_type) } else if entity_set.contains(&s.returns_type) { h_link("entity", &s.returns_type) } else { format!("<span class=\"k-id\">{}</span>", h_esc(&s.returns_type)) }, if s.returns_list { " []" } else { "" });
-        let body = format!("{}<div class=\"rel\"><span class=\"lbl\">streams:</span> {}</div><div class=\"rel\"><span class=\"lbl\">roles:</span> {} · <span class=\"badge\">{}</span></div>", input_rel, ret, h_esc(&s.roles.join(", ")), s.slice);
+        let body = format!("{}<div class=\"rel\"><span class=\"lbl\">streams:</span> {}</div><div class=\"rel\"><span class=\"lbl\">roles:</span> {} · <span class=\"badge\">{}</span></div>", input_rel, ret, h_esc(&roles_label(&s.roles)), s.slice);
         api_docs.push(HDoc { ctx: cx.of_operation(&s.roles, &cx.of_type(&s.returns_type)), html: h_item("subscription", "Subscription", &s.name, &body, s.description.as_deref()) });
     }
     let type_docs: Vec<HDoc> = api.types.iter().map(|t| {
@@ -7570,9 +7582,10 @@ fn acl_role_variant(role: &str) -> String {
 }
 
 /// An operation's allowed-role set in canonical `scalars.yaml#/UserType` declaration order, or `None`
-/// when the operation is public (`roles` include PUBLIC → open to every role, no guard/visible needed).
+/// when the operation is open to everyone (`roles` OMITTED — ADR-20260720-191500 literal lists; a
+/// present list is guarded verbatim, PUBLIC in it being just the anonymous path).
 fn acl_role_set(model: &Model, roles: &[String]) -> Option<Vec<String>> {
-    if roles.iter().any(|r| r == "PUBLIC") {
+    if roles.is_empty() {
         return None;
     }
     let order = model
@@ -7616,7 +7629,7 @@ fn acl_field_attr(model: &Model, roles: &[String]) -> String {
 fn emit_server_acl(model: &Model) -> String {
     let api = parse_api(model);
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/api.yaml — do not edit by hand.\n// Per-operation ACL role sets (ADR-0006 role-as-path): each distinct non-public `roles:` set on an\n// api.yaml query/mutation/subscription becomes an allowed-role const + a `visible` fn. The generated\n// QueryRoot/MutationRoot/SubscriptionRoot fields wire them as `guard = \"RoleGuard::new(ALLOW_…)\"`\n// (execution — unauthorized roles get a FORBIDDEN error) and `visible = \"visible_…\"` (introspection —\n// the field is hidden from unauthorized roles, and async-graphql's `find_visible_types` then hides\n// every type reachable only through hidden fields, so per-role introspection/Voyager expose only that\n// role's surface). Public operations (roles include PUBLIC) carry no guard/visible: open to every role.\n#![allow(dead_code)]\n\npub(crate) use super::super::acl::RoleGuard;\nuse super::super::acl::{role_allows, RequestRole};\n",
+        "// GENERATED by the Captain.Food codegen from specs/api.yaml — do not edit by hand.\n// Per-operation ACL role sets (ADR-0006 role-as-path): each distinct non-public `roles:` set on an\n// api.yaml query/mutation/subscription becomes an allowed-role const + a `visible` fn. The generated\n// QueryRoot/MutationRoot/SubscriptionRoot fields wire them as `guard = \"RoleGuard::new(ALLOW_…)\"`\n// (execution — unauthorized roles get a FORBIDDEN error) and `visible = \"visible_…\"` (introspection —\n// the field is hidden from unauthorized roles, and async-graphql's `find_visible_types` then hides\n// every type reachable only through hidden fields, so per-role introspection/Voyager expose only that\n// role's surface). Operations with `roles:` OMITTED carry no guard/visible: open to every role path\n// (LITERAL roles, ADR-20260720-191500 — PUBLIC in a list is just the anonymous path).\n#![allow(dead_code)]\n\npub(crate) use super::super::acl::RoleGuard;\nuse super::super::acl::{role_allows, RequestRole};\n",
     );
     // Distinct non-public role sets across queries + mutations + subscriptions (the generated
     // SubscriptionRoot carries the same guard/visible pairs), keyed by identifier for a

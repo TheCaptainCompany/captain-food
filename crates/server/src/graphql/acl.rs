@@ -70,10 +70,11 @@ pub fn request_role(ctx: &Context<'_>) -> RequestRole {
     ctx.data_opt::<RequestRole>().copied().unwrap_or(RequestRole::Public)
 }
 
-/// True when `allowed` (an operation's api.yaml `roles`) admits the request's role. PUBLIC in the list
-/// means the operation is public: allowed for every role, including the unauthenticated PUBLIC path.
+/// True when `allowed` (an operation's api.yaml `roles`) admits the request's role. The list is
+/// LITERAL (ADR-20260720-191500): `RequestRole::Public` in it admits only the anonymous PUBLIC path
+/// — an operation open to every role carries no guard at all (roles omitted in the spec).
 pub fn role_allows(ctx: &Context<'_>, allowed: &[RequestRole]) -> bool {
-    allowed.contains(&RequestRole::Public) || allowed.contains(&request_role(ctx))
+    allowed.contains(&request_role(ctx))
 }
 
 /// Execution guard on the generated QueryRoot/MutationRoot fields: rejects the request with a

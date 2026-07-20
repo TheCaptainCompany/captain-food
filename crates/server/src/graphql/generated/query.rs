@@ -19,7 +19,7 @@ impl QueryRoot {
     async fn phone_countries(&self) -> async_graphql::Result<Vec<PhoneCountry>> {
         Err(async_graphql::Error::new("not implemented"))
     }
-    /// Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). PUBLIC but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the command_journal, no View_*.
+    /// Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the command_journal, no View_*.
     #[graphql(name = "operationStatus")]
     async fn operation_status(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusQueryInput) -> async_graphql::Result<Option<Operation>> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?;
@@ -35,8 +35,8 @@ impl QueryRoot {
         }
         Ok(Some(super::mutation::operation_from_journal(&row)))
     }
-    /// The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). PUBLIC like operationStatus, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
-    #[graphql(name = "paymentStatus")]
+    /// The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). Literal roles [PUBLIC, CUSTOMER, ADMIN] (#13/#31): the checkout paths only, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
+    #[graphql(name = "paymentStatus", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER_ADMIN)", visible = "visible_public_customer_admin")]
     async fn payment_status(&self, ctx: &async_graphql::Context<'_>, input: PaymentStatusQueryInput) -> async_graphql::Result<Option<PaymentIntent>> {
         let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?;
         let Some(row) = pm

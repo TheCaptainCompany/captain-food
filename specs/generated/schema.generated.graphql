@@ -1365,7 +1365,7 @@ input MetadataInput {
 type Query {
   phoneCountries: [PhoneCountry!]! @public @reads(views: ["PhoneCountry"])
   operationStatus(input: OperationStatusQueryInput!): Operation @public
-  paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent @public
+  paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
   me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["Customer"])
   favoriteRestaurants(input: FavoriteRestaurantsQueryInput!): [Restaurant!]! @auth(requires: [CUSTOMER]) @reads(views: ["Restaurant"])
   restaurants(input: RestaurantsQueryInput): [Restaurant!]! @public @reads(views: ["Restaurant"])
@@ -1405,8 +1405,8 @@ type Mutation {
   changeOrderAcceptanceMode(input: ChangeOrderAcceptanceModeInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @command(name: "ChangeOrderAcceptanceMode")
   updateRestaurantGoogleBusinessProfile(input: UpdateRestaurantGoogleBusinessProfileInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "UpdateRestaurantGoogleBusinessProfile")
   markRestaurantClosed(input: MarkRestaurantClosedInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkRestaurantClosed")
-  claimRestaurantListing(input: ClaimRestaurantListingInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "ClaimRestaurantListing")
-  optOutRestaurantListing(input: OptOutRestaurantListingInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "OptOutRestaurantListing")
+  claimRestaurantListing(input: ClaimRestaurantListingInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC, RESTAURANT_ACCOUNT]) @command(name: "ClaimRestaurantListing")
+  optOutRestaurantListing(input: OptOutRestaurantListingInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC, RESTAURANT_ACCOUNT]) @command(name: "OptOutRestaurantListing")
   changeRestaurantListingStatus(input: ChangeRestaurantListingStatusInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ChangeRestaurantListingStatus")
   configureGbpOrderLink(input: ConfigureGoogleBusinessProfileOrderLinkInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]) @command(name: "ConfigureGoogleBusinessProfileOrderLink")
   verifyGbpOrderLink(input: VerifyGoogleBusinessProfileOrderLinkInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT_ACCOUNT, RESTAURANT, ADMIN]) @command(name: "VerifyGoogleBusinessProfileOrderLink")
@@ -1425,8 +1425,8 @@ type Mutation {
   removeOptionList(input: RemoveOptionListInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RemoveOptionList")
   updateOfferStock(input: UpdateOfferStockInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateOfferStock")
   importCatalog(input: ImportCatalogInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]) @command(name: "ImportCatalog")
-  requestPhoneVerification(input: RequestPhoneVerificationInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "RequestPhoneVerification")
-  verifyPhone(input: VerifyPhoneInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "VerifyPhone")
+  requestPhoneVerification(input: RequestPhoneVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC, CUSTOMER]) @command(name: "RequestPhoneVerification")
+  verifyPhone(input: VerifyPhoneInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC, CUSTOMER]) @command(name: "VerifyPhone")
   requestEmailVerification(input: RequestEmailVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestEmailVerification")
   confirmEmailVerification(input: ConfirmEmailVerificationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ConfirmEmailVerification")
   requestPhoneChange(input: RequestPhoneChangeInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestPhoneChange")
@@ -1464,6 +1464,6 @@ type Mutation {
 # ==============================================================================
 type Subscription {
   operationStatusChanged(input: OperationStatusChangedSubscriptionInput!): Operation! @public
-  paymentStatusChanged(input: PaymentStatusChangedSubscriptionInput!): PaymentIntent! @public
+  paymentStatusChanged(input: PaymentStatusChangedSubscriptionInput!): PaymentIntent! @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
   orderStatusChanged(input: OrderStatusChangedSubscriptionInput!): Order! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT])
 }

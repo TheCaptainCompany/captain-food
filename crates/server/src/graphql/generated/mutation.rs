@@ -653,7 +653,7 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
-    #[graphql(name = "claimRestaurantListing")]
+    #[graphql(name = "claimRestaurantListing", guard = "RoleGuard::new(ALLOW_PUBLIC_RESTAURANT_ACCOUNT)", visible = "visible_public_restaurant_account")]
     async fn claim_restaurant_listing(&self, ctx: &async_graphql::Context<'_>, input: ClaimRestaurantListingInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
@@ -699,7 +699,7 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
-    #[graphql(name = "optOutRestaurantListing")]
+    #[graphql(name = "optOutRestaurantListing", guard = "RoleGuard::new(ALLOW_PUBLIC_RESTAURANT_ACCOUNT)", visible = "visible_public_restaurant_account")]
     async fn opt_out_restaurant_listing(&self, ctx: &async_graphql::Context<'_>, input: OptOutRestaurantListingInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
@@ -1560,7 +1560,7 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
-    #[graphql(name = "requestPhoneVerification")]
+    #[graphql(name = "requestPhoneVerification", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
     async fn request_phone_verification(&self, ctx: &async_graphql::Context<'_>, input: RequestPhoneVerificationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
@@ -1606,7 +1606,7 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
-    #[graphql(name = "verifyPhone")]
+    #[graphql(name = "verifyPhone", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
     async fn verify_phone(&self, ctx: &async_graphql::Context<'_>, input: VerifyPhoneInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();

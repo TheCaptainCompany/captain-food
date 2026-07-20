@@ -3,6 +3,18 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-20 (13:00 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-20 — #31: LITERAL `roles:` lists (ADR-20260720-191500, product-owner directive).**
+> api.yaml `roles:` now means exactly what it says: **omitted** → open to every role path
+> (`@public`, no guard); **present** → only the listed paths, PUBLIC being just the anonymous
+> `/public/graphql` path. Validator `op-no-authz` retired; story authz + SDL/ACL emitters +
+> runtime `role_allows` aligned. Migration: 11 standalone `[PUBLIC]` ops drop the line
+> (behaviour-preserving); `paymentStatus`/`paymentStatusChanged` become the literal
+> `[PUBLIC, CUSTOMER, ADMIN]` (#13's original intent, now expressible); the pre-existing literal
+> lists (`verifyPhone`/`requestPhoneVerification` [PUBLIC, CUSTOMER], listing claims
+> [PUBLIC, RESTAURANT_ACCOUNT]) finally gain their intended restriction. ⚠️ Review rule: a missing
+> `roles:` line is a positive "open to everyone" claim. New ACL test
+> `literal_roles_lists_admit_only_listed_paths`. `make validate` 0 errors, workspace green.
+
 > ✅ **2026-07-20 — #13: `paymentStatus`/`paymentStatusChanged` are PUBLIC + ownership-scoped.**
 > api.yaml roles `[CUSTOMER]` → `[PUBLIC]` on both (the issue's recommended option, matching
 > `operationStatus`): the generated resolvers' ADMIN/session ownership branches — previously dead

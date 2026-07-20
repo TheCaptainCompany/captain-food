@@ -193,7 +193,26 @@ The Sirene/Google sync ACL (a scheduled worker) acting as an EXTERNAL caller. It
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(23)_
+### 🧰 API operations _(25)_
+
+<a id="query-restaurants"></a>
+#### 🔎 Query: `restaurants`
+
+Discover: public list of restaurants. All args are optional filters resolved by the read side (Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
+
+
+- **Input**: 🧩 `RestaurantsQueryInput` — `search?`: `string`, `tags?`: [[🔤 `Tag`](#scalar-tag)], `serviceType?`: [🔤 `ServiceType`](#scalar-servicetype), `openNow?`: `boolean`, `city?`: [🔤 `CityName`](#scalar-cityname), `priceRange?`: [🔤 `PriceRange`](#scalar-pricerange), `list?`: [🔤 `RestaurantListKey`](#scalar-restaurantlistkey), `listingStatus?`: [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus), `orderableOnly?`: `boolean`
+- **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `Restaurant`](#view-restaurant)
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
+
+<a id="query-restaurant"></a>
+#### 🔎 Query: `restaurant`
+
+A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
+
+- **Input**: 🧩 `RestaurantQueryInput!` — `slug`: [🔤 `Slug`](#scalar-slug)
+- **Returns**: [🧩 `Restaurant`](#type-restaurant) · **reads** [🗄️ `Restaurant`](#view-restaurant)
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
 <a id="query-restaurantdeliveries"></a>
 #### 🔎 Query: `restaurantDeliveries`
@@ -1818,7 +1837,26 @@ _criticality: **medium**_
 
 _Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import._
 
-### 🧰 API operations _(12)_
+### 🧰 API operations _(14)_
+
+<a id="query-catalog"></a>
+#### 🔎 Query: `catalog`
+
+A restaurant's full catalog (categories → products → offers + option lists).
+
+- **Input**: 🧩 `CatalogQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid)
+- **Returns**: [🧩 `Catalog`](#type-catalog) · **reads** [🗄️ `Catalog`](#view-catalog)
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
+
+<a id="query-categories"></a>
+#### 🔎 Query: `categories`
+
+The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
+
+
+- **Input**: 🧩 `CategoriesQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid)
+- **Returns**: [🧩 `CatalogCategory`](#type-catalogcategory) (list) · **reads** [🗄️ `Catalog`](#view-catalog)
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
 <a id="mutation-createcatalog"></a>
 #### ✏️ Mutation: `createCatalog`
@@ -2799,7 +2837,16 @@ _Rejects importing into a missing catalog, on a translation failure, or with a m
 
 _Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)._
 
-### 🧰 API operations _(20)_
+### 🧰 API operations _(21)_
+
+<a id="query-cart"></a>
+#### 🔎 Query: `cart`
+
+A single cart by id (session-scoped; readable by the guest/customer who owns it).
+
+- **Input**: 🧩 `CartQueryInput!` — `id`: [🔤 `CartId`](#scalar-cartid)
+- **Returns**: [🧩 `Cart`](#type-cart) · **reads** [🗄️ `Cart`](#view-cart)
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
 <a id="query-orders"></a>
 #### 🔎 Query: `orders`
@@ -2824,21 +2871,21 @@ Order tracking by id; owning customer or the restaurant/admin. Ownership enforce
 #### ✏️ Mutation: `addCartLine`
 
 - **Command**: [📩 `AddCartLine`](#command-addcartline) → handled by [🎭 `Cart`](#actor-cart)
-- **Roles**: PUBLIC · **slice** V0
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="mutation-removecartline"></a>
 #### ✏️ Mutation: `removeCartLine`
 
 - **Command**: [📩 `RemoveCartLine`](#command-removecartline) → handled by [🎭 `Cart`](#actor-cart)
-- **Roles**: PUBLIC · **slice** V0
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="mutation-changecartlinequantity"></a>
 #### ✏️ Mutation: `changeCartLineQuantity`
 
 - **Command**: [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity) → handled by [🎭 `Cart`](#actor-cart)
-- **Roles**: PUBLIC · **slice** V0
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="mutation-placeorder"></a>
@@ -4951,36 +4998,17 @@ _criticality: **high**_
 
 _Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding._
 
-### 🧰 API operations _(27)_
-
-<a id="query-phonecountries"></a>
-#### 🔎 Query: `phoneCountries`
-
-Selectable phone countries for the dialing-code picker (static reference data; the picker sends back the dialingCode '+33').
-
-- **Input**: _(none)_
-- **Returns**: [🧩 `PhoneCountry`](#type-phonecountry) (list) · **reads** [🗄️ `PhoneCountry`](#view-phonecountry)
-- **Roles**: PUBLIC · **slice** V0
-
-<a id="query-operationstatus"></a>
-#### 🔎 Query: `operationStatus`
-
-Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). PUBLIC but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the command_journal, no View_*.
-
-
-- **Input**: 🧩 `OperationStatusQueryInput!` — `messageId`: [🔤 `MessageId`](#scalar-messageid)
-- **Returns**: [🧩 `Operation`](#type-operation) · **reads** —
-- **Roles**: PUBLIC · **slice** V0
+### 🧰 API operations _(19)_
 
 <a id="query-paymentstatus"></a>
 #### 🔎 Query: `paymentStatus`
 
-The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). PUBLIC like operationStatus, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
+The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). Literal roles [PUBLIC, CUSTOMER, ADMIN] (#13/#31): the checkout paths only, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
 
 
 - **Input**: 🧩 `PaymentStatusQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
 - **Returns**: [🧩 `PaymentIntent`](#type-paymentintent) · **reads** —
-- **Roles**: PUBLIC · **slice** V0
+- **Roles**: PUBLIC, CUSTOMER, ADMIN · **slice** V0
 
 <a id="query-me"></a>
 #### 🔎 Query: `me`
@@ -5000,44 +5028,6 @@ The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to
 - **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `Restaurant`](#view-restaurant)
 - **Roles**: CUSTOMER · **slice** V1
 
-<a id="query-restaurants"></a>
-#### 🔎 Query: `restaurants`
-
-Discover: public list of restaurants. All args are optional filters resolved by the read side (Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
-
-
-- **Input**: 🧩 `RestaurantsQueryInput` — `search?`: `string`, `tags?`: [[🔤 `Tag`](#scalar-tag)], `serviceType?`: [🔤 `ServiceType`](#scalar-servicetype), `openNow?`: `boolean`, `city?`: [🔤 `CityName`](#scalar-cityname), `priceRange?`: [🔤 `PriceRange`](#scalar-pricerange), `list?`: [🔤 `RestaurantListKey`](#scalar-restaurantlistkey), `listingStatus?`: [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus), `orderableOnly?`: `boolean`
-- **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `Restaurant`](#view-restaurant)
-- **Roles**: PUBLIC · **slice** V0
-
-<a id="query-catalog"></a>
-#### 🔎 Query: `catalog`
-
-A restaurant's full catalog (categories → products → offers + option lists).
-
-- **Input**: 🧩 `CatalogQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid)
-- **Returns**: [🧩 `Catalog`](#type-catalog) · **reads** [🗄️ `Catalog`](#view-catalog)
-- **Roles**: PUBLIC · **slice** V0
-
-<a id="query-categories"></a>
-#### 🔎 Query: `categories`
-
-The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
-
-
-- **Input**: 🧩 `CategoriesQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid)
-- **Returns**: [🧩 `CatalogCategory`](#type-catalogcategory) (list) · **reads** [🗄️ `Catalog`](#view-catalog)
-- **Roles**: PUBLIC · **slice** V0
-
-<a id="query-restaurant"></a>
-#### 🔎 Query: `restaurant`
-
-A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
-
-- **Input**: 🧩 `RestaurantQueryInput!` — `slug`: [🔤 `Slug`](#scalar-slug)
-- **Returns**: [🧩 `Restaurant`](#type-restaurant) · **reads** [🗄️ `Restaurant`](#view-restaurant)
-- **Roles**: PUBLIC · **slice** V0
-
 <a id="query-carts"></a>
 #### 🔎 Query: `carts`
 
@@ -5046,15 +5036,6 @@ A customer's carts (one OPEN cart per restaurant).
 - **Input**: 🧩 `CartsQueryInput!` — `customerId`: [🔤 `CustomerId`](#scalar-customerid)
 - **Returns**: [🧩 `Cart`](#type-cart) (list) · **reads** [🗄️ `Cart`](#view-cart)
 - **Roles**: CUSTOMER, ADMIN · **slice** V0
-
-<a id="query-cart"></a>
-#### 🔎 Query: `cart`
-
-A single cart by id (session-scoped; readable by the guest/customer who owns it).
-
-- **Input**: 🧩 `CartQueryInput!` — `id`: [🔤 `CartId`](#scalar-cartid)
-- **Returns**: [🧩 `Cart`](#type-cart) · **reads** [🗄️ `Cart`](#view-cart)
-- **Roles**: PUBLIC · **slice** V0
 
 <a id="mutation-requestphoneverification"></a>
 #### ✏️ Mutation: `requestPhoneVerification`
@@ -5154,25 +5135,15 @@ A single cart by id (session-scoped; readable by the guest/customer who owns it)
 - **Roles**: CUSTOMER · **slice** V1
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
-<a id="subscription-operationstatuschanged"></a>
-#### 🔔 Subscription: [`operationStatusChanged`](#subscription-operationstatuschanged)
-
-Live status of one journaled command, keyed by its messageId acceptance handle (the push counterpart of queries/operationStatus, ADR-20260720-015500). Yields the current journal state first (no subscribe/complete race), then every transition. PUBLIC but ownership-scoped like the query (JWT subject / X-SESSION-ID via the WS connection_init payload / ADMIN).
-
-
-- **Input**: 🧩 `OperationStatusChangedSubscriptionInput!` — `messageId`: [🔤 `MessageId`](#scalar-messageid)
-- **Streams**: [🧩 `Operation`](#type-operation)
-- **Roles**: PUBLIC · **slice** V0
-
 <a id="subscription-paymentstatuschanged"></a>
 #### 🔔 Subscription: [`paymentStatusChanged`](#subscription-paymentstatuschanged)
 
-Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling. PUBLIC like the query, ownership-scoped at stream setup (customer / session / ADMIN) — strangers get an empty stream.
+Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling. Literal roles like the query (#31), ownership-scoped at stream setup (customer / session / ADMIN) — strangers get an empty stream.
 
 
 - **Input**: 🧩 `PaymentStatusChangedSubscriptionInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
 - **Streams**: [🧩 `PaymentIntent`](#type-paymentintent)
-- **Roles**: PUBLIC · **slice** V0
+- **Roles**: PUBLIC, CUSTOMER, ADMIN · **slice** V0
 
 ### 🧩 Output types _(1)_
 
@@ -7140,7 +7111,26 @@ _Closes the order when an independent rider completes the delivery_
 
 _Shared vocabulary and operations that span several bounded contexts (or belong to none)._
 
-### 🧰 API operations _(3)_
+### 🧰 API operations _(6)_
+
+<a id="query-phonecountries"></a>
+#### 🔎 Query: `phoneCountries`
+
+Selectable phone countries for the dialing-code picker (static reference data; the picker sends back the dialingCode '+33').
+
+- **Input**: _(none)_
+- **Returns**: [🧩 `PhoneCountry`](#type-phonecountry) (list) · **reads** [🗄️ `PhoneCountry`](#view-phonecountry)
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
+
+<a id="query-operationstatus"></a>
+#### 🔎 Query: `operationStatus`
+
+Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the command_journal, no View_*.
+
+
+- **Input**: 🧩 `OperationStatusQueryInput!` — `messageId`: [🔤 `MessageId`](#scalar-messageid)
+- **Returns**: [🧩 `Operation`](#type-operation) · **reads** —
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
 <a id="query-pricingpolicy"></a>
 #### 🔎 Query: `pricingPolicy`
@@ -7168,6 +7158,16 @@ The active Uber Eats split/fee assumptions for the estimated comparison (admin; 
 - **Input**: _(none)_
 - **Returns**: [🧩 `UberSplitPolicy`](#type-ubersplitpolicy) (list) · **reads** [🗄️ `UberSplitPolicy`](#view-ubersplitpolicy)
 - **Roles**: ADMIN · **slice** V1
+
+<a id="subscription-operationstatuschanged"></a>
+#### 🔔 Subscription: [`operationStatusChanged`](#subscription-operationstatuschanged)
+
+Live status of one journaled command, keyed by its messageId acceptance handle (the push counterpart of queries/operationStatus, ADR-20260720-015500). Yields the current journal state first (no subscribe/complete race), then every transition. Open to every role path (roles omitted) but ownership-scoped like the query (JWT subject / X-SESSION-ID via the WS connection_init payload / ADMIN).
+
+
+- **Input**: 🧩 `OperationStatusChangedSubscriptionInput!` — `messageId`: [🔤 `MessageId`](#scalar-messageid)
+- **Streams**: [🧩 `Operation`](#type-operation)
+- **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
 ### 🧩 Output types _(11)_
 

@@ -140,11 +140,12 @@ async fn unauthorized_execution_is_forbidden() {
     assert!(!is_forbidden(&resp.errors[0]), "guard must pass for RESTAURANT_ACCOUNT: {:?}", resp.errors);
 }
 
-/// PUBLIC operations run under the unauthenticated PUBLIC role — and under every other role.
+/// Operations with `roles:` OMITTED (literal roles, ADR-20260720-191500) run under the
+/// unauthenticated PUBLIC role — and under every other role.
 #[tokio::test]
 async fn public_operations_are_open_to_all_roles() {
     let schema = schema();
-    // phoneCountries is [PUBLIC] and unwired: reaching its `not implemented` stub proves the ACL let
+    // phoneCountries has roles omitted (open) and is unwired: reaching its `not implemented` stub proves the ACL let
     // the resolver run (no DB in this test, so wired resolvers can't fully succeed).
     for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Admin] {
         let resp = execute_as(&schema, role, "{ phoneCountries { dialingCode } }").await;
@@ -152,8 +153,41 @@ async fn public_operations_are_open_to_all_roles() {
         assert!(!is_forbidden(&resp.errors[0]), "public op forbidden for {role:?}");
         assert_eq!(resp.errors[0].message, "not implemented", "resolver did not run for {role:?}");
     }
-    // restaurants ([PUBLIC], wired) passes the ACL under PUBLIC: the only failure without deps is the
+    // restaurants (roles omitted, wired) passes the ACL under PUBLIC: the only failure without deps is the
     // missing repository, never FORBIDDEN.
     let resp = execute_as(&schema, RequestRole::Public, "{ restaurants { slug } }").await;
     assert!(!resp.errors.is_empty() && !is_forbidden(&resp.errors[0]), "restaurants blocked: {:?}", resp.errors);
+}
+
+/// LITERAL roles lists (ADR-20260720-191500, #31): PUBLIC in a `roles:` list is just the anonymous
+/// path — the list admits exactly the listed paths. `paymentStatus` is [PUBLIC, CUSTOMER, ADMIN]:
+/// open on those three paths, FORBIDDEN + hidden on any other; `verifyPhone` is [PUBLIC, CUSTOMER].
+#[tokio::test]
+async fn literal_roles_lists_admit_only_listed_paths() {
+    let schema = schema();
+
+    // Execution: the three listed paths pass the guard (the resolver then errors on the missing
+    // PM store — proof it ran); RESTAURANT and RIDER are rejected by the guard itself.
+    let query = r#"{ paymentStatus(input: { orderId: "3f6d3c9a-8f04-4f7e-9f0e-3a1b2c4d5e6f" }) { status } }"#;
+    for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Admin] {
+        let resp = execute_as(&schema, role, query).await;
+        assert!(!resp.errors.is_empty(), "expected the missing-dep error for {role:?}");
+        assert!(!is_forbidden(&resp.errors[0]), "listed path {role:?} must pass the guard: {:?}", resp.errors[0]);
+    }
+    for role in [RequestRole::Restaurant, RequestRole::Rider, RequestRole::External] {
+        let resp = execute_as(&schema, role, query).await;
+        assert_eq!(resp.errors.len(), 1, "expected one error for {role:?}: {:?}", resp.errors);
+        assert!(is_forbidden(&resp.errors[0]), "unlisted path {role:?} must be FORBIDDEN: {:?}", resp.errors[0]);
+    }
+
+    // Introspection follows: listed paths see the field, unlisted paths don't.
+    for role in [RequestRole::Public, RequestRole::Customer, RequestRole::Admin] {
+        let (q, _m) = introspected_fields(&schema, role).await;
+        assert!(q.contains(&"paymentStatus".into()), "paymentStatus missing under {role:?}: {q:?}");
+    }
+    let (rest_q, rest_m) = introspected_fields(&schema, RequestRole::Restaurant).await;
+    assert!(!rest_q.contains(&"paymentStatus".into()), "paymentStatus leaked to RESTAURANT");
+    assert!(!rest_m.contains(&"verifyPhone".into()), "verifyPhone ([PUBLIC, CUSTOMER]) leaked to RESTAURANT");
+    let (_rider_q, rider_m) = introspected_fields(&schema, RequestRole::Rider).await;
+    assert!(!rider_m.contains(&"verifyPhone".into()), "verifyPhone ([PUBLIC, CUSTOMER]) leaked to RIDER");
 }

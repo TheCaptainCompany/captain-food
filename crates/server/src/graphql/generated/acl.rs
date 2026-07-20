@@ -5,7 +5,8 @@
 // (execution — unauthorized roles get a FORBIDDEN error) and `visible = "visible_…"` (introspection —
 // the field is hidden from unauthorized roles, and async-graphql's `find_visible_types` then hides
 // every type reachable only through hidden fields, so per-role introspection/Voyager expose only that
-// role's surface). Public operations (roles include PUBLIC) carry no guard/visible: open to every role.
+// role's surface). Operations with `roles:` OMITTED carry no guard/visible: open to every role path
+// (LITERAL roles, ADR-20260720-191500 — PUBLIC in a list is just the anonymous path).
 #![allow(dead_code)]
 
 pub(crate) use super::super::acl::RoleGuard;
@@ -51,6 +52,24 @@ pub(crate) fn visible_customer_restaurant_account_restaurant_admin(ctx: &async_g
 pub(crate) const ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN: &[RequestRole] = &[RequestRole::Customer, RequestRole::RestaurantAccount, RequestRole::Restaurant, RequestRole::Rider, RequestRole::Admin];
 pub(crate) fn visible_customer_restaurant_account_restaurant_rider_admin(ctx: &async_graphql::Context<'_>) -> bool {
     role_allows(ctx, ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)
+}
+
+/// roles: [PUBLIC, CUSTOMER]
+pub(crate) const ALLOW_PUBLIC_CUSTOMER: &[RequestRole] = &[RequestRole::Public, RequestRole::Customer];
+pub(crate) fn visible_public_customer(ctx: &async_graphql::Context<'_>) -> bool {
+    role_allows(ctx, ALLOW_PUBLIC_CUSTOMER)
+}
+
+/// roles: [PUBLIC, CUSTOMER, ADMIN]
+pub(crate) const ALLOW_PUBLIC_CUSTOMER_ADMIN: &[RequestRole] = &[RequestRole::Public, RequestRole::Customer, RequestRole::Admin];
+pub(crate) fn visible_public_customer_admin(ctx: &async_graphql::Context<'_>) -> bool {
+    role_allows(ctx, ALLOW_PUBLIC_CUSTOMER_ADMIN)
+}
+
+/// roles: [PUBLIC, RESTAURANT_ACCOUNT]
+pub(crate) const ALLOW_PUBLIC_RESTAURANT_ACCOUNT: &[RequestRole] = &[RequestRole::Public, RequestRole::RestaurantAccount];
+pub(crate) fn visible_public_restaurant_account(ctx: &async_graphql::Context<'_>) -> bool {
+    role_allows(ctx, ALLOW_PUBLIC_RESTAURANT_ACCOUNT)
 }
 
 /// roles: [RESTAURANT_ACCOUNT, ADMIN]

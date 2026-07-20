@@ -25,7 +25,7 @@ pub struct SubscriptionRoot;
 
 #[async_graphql::Subscription(name = "Subscription")]
 impl SubscriptionRoot {
-    /// Live status of one journaled command, keyed by its messageId acceptance handle (the push counterpart of queries/operationStatus, ADR-20260720-015500). Yields the current journal state first (no subscribe/complete race), then every transition. PUBLIC but ownership-scoped like the query (JWT subject / X-SESSION-ID via the WS connection_init payload / ADMIN).
+    /// Live status of one journaled command, keyed by its messageId acceptance handle (the push counterpart of queries/operationStatus, ADR-20260720-015500). Yields the current journal state first (no subscribe/complete race), then every transition. Open to every role path (roles omitted) but ownership-scoped like the query (JWT subject / X-SESSION-ID via the WS connection_init payload / ADMIN).
     #[graphql(name = "operationStatusChanged")]
     async fn operation_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Operation>>> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
@@ -88,8 +88,8 @@ impl SubscriptionRoot {
             }
         })
     }
-    /// Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling. PUBLIC like the query, ownership-scoped at stream setup (customer / session / ADMIN) — strangers get an empty stream.
-    #[graphql(name = "paymentStatusChanged")]
+    /// Checkout payment-state changes for one order (the push counterpart of queries/paymentStatus, ADR-20260720-015500): re-resolves the PlaceOrderProcess run row on Payment-stream events, so the checkout page receives the clientSecret and the terminal CAPTURED/FAILED without polling. Literal roles like the query (#31), ownership-scoped at stream setup (customer / session / ADMIN) — strangers get an empty stream.
+    #[graphql(name = "paymentStatusChanged", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER_ADMIN)", visible = "visible_public_customer_admin")]
     async fn payment_status_changed(&self, ctx: &async_graphql::Context<'_>, input: PaymentStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<PaymentIntent>>> {
         let bus = ctx.data::<infrastructure::EventBus>()?.clone();
         let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();
