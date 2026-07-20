@@ -74,9 +74,9 @@ pub fn wire() -> HealthDto {
 /// The schema version this build requires. Migrations are applied by **sqlx-cli in CI** (ADR-0043); the app
 /// only checks the DB has reached at least this version. Bump when adding a migration this build depends on.
 /// The gate is `>=` (never `==`) so an older build still runs against a newer DB (rollback-by-redeploy).
-/// `20260718100000` = the `external_sirene_restaurants` staging table the in-process SIRENE sync worker
-/// (ADR-0045) drains.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260718100000;
+/// `20260720030000` = the command/inbound journals (ADR-20260720-015300/-015400): every mutation now
+/// writes `command_journal` at acceptance, so the app cannot serve writes without it.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260720030000;
 
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {

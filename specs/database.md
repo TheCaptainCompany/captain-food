@@ -60,6 +60,26 @@ SELECT cron.schedule('domain_events_retention', '0 * * * *', $$
 $$);
 ```
 
+### Write-path journals & adapter staging (ADR-20260720-015300 / -015400)
+
+Two table categories sit BESIDE the event store, never inside it:
+
+- **`command_journal`** ([`tables/journals.yaml`](database/tables/journals.yaml)) — one row per
+  command submission (any channel), persisted **before** handling. pk `message_id` is the write-path
+  idempotency key (same payload hash = replayed acceptance; different = Conflict); the row records
+  **rejections too** and backs the `operationStatus` query/subscription. Events appended by the
+  command carry `message_id` as `domain_events.cause_id`, chaining request → journal → facts.
+- **`inbound_events`** (same file) — adapted inbound **business** events (events.yaml vocabulary
+  only) staged by adapter ACLs, drained by the `InboundEventsDrainWorker` through the normal write
+  path (`cause_id = inbound_event_id`; the aggregate's fold stays the authoritative dedupe).
+- **`external_*` staging** ([`tables/integration_staging.yaml`](database/tables/integration_staging.yaml),
+  ADR-0045 generalized) — adapter-OWNED verbatim mirrors (`external_sirene_restaurants`,
+  `external_stripe_events`, `external_hubrise_callbacks`): verify → UPSERT → ACK, with
+  `processed_at` as the translation high-water mark for replay/backfill.
+
+Journals **never write `domain_events`** and are **never replayed as state** — the event log stays
+the single source of truth. None of these are projected or a GraphQL `reads` target.
+
 ## 2. Read models — projection views (`View_*`)
 
 Queries **never** read `domain_events`; they read dedicated read tables fed by projections that

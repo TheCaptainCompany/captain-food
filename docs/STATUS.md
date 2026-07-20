@@ -3,12 +3,33 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-19. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🔀 **Parallel session engaged: command sourcing + inbound-event sourcing** (infrastructure
-> journals, branched from main after this branch merges). Two constraints agreed here carry over:
-> journals NEVER write `domain_events` (aggregates own the log — ADR-20260719-193500; hook points =
-> the ACL ingest seams + the server's mutation-dispatch boundary), and the event log stays the single
-> source of truth (a command journal records requests incl. rejections, never replays as state).
-> Journal TABLES still get declared in `specs/database/tables/*.yaml` so their DDL generates.
+> ✅ **LANDED (2026-07-20): command sourcing + inbound-event sourcing + ACCEPTANCE-FIRST GraphQL**
+> (ADR-20260720-015300/-015400/-015500, branch `claude/clarification-needed-5si77x`). The two
+> pre-agreed constraints held: journals NEVER write `domain_events` (aggregates own the log) and the
+> event log stays the single source of truth. What shipped:
+> ① `specs/database/tables/journals.yaml` (fifth table category): **`command_journal`** (pk
+> `message_id`, envelope columns, business payload + hash, `RECEIVED→SUCCEEDED|REJECTED|FAILED`,
+> records rejections) + **`inbound_events`** (adapted BUSINESS events only, unique
+> `(source, external_id)`); adapter-owned raw mirrors `external_stripe_events` /
+> `external_hubrise_callbacks` join ADR-0045's staging category. ② **ALL ~70 mutations are
+> acceptance-first** (api.yaml v2, MAJOR): optional `metadata: MetadataInput`
+> (messageId/correlationId/causeId; `X-SESSION-ID` header = the anonymous session; `traceparent` →
+> traceId) → journal insert (idempotent replay `duplicate: true`; payload-mismatch = sync Conflict)
+> → spawned handler (events carry `cause_id = messageId`) → uniform `MutationAcceptance`. Outcomes:
+> PUBLIC ownership-scoped **`operationStatus(messageId)`** + **`operationStatusChanged`** (journal +
+> `OperationStatusBus`, snapshot-first; rejections = `Operation.errorCode`, amending
+> ADR-20260719-120000), and checkout's **`paymentStatus(orderId)`** + **`paymentStatusChanged`**
+> served from the payment PM row (now carrying `customer_id`/`session_id`/`client_secret`, NULLed on
+> resolve — the declared PM-privacy exception). ③ Stripe webhooks: verify → mirror verbatim → stage
+> `inbound_events` → ACK + nudge the **`InboundEventsDrainWorker`** (sirene-pattern; also sweeps
+> stale-RECEIVED journal rows); HubRise callbacks mirror + dedupe before enrichment. ④ Migration
+> `20260720030000_command_inbound_journals.sql` + `REQUIRED_SCHEMA_VERSION` bump; observability:
+> `place-order` gains `message_id`/`command.journal`, new `stripe-webhook-ingestion` contract.
+> `make validate` 0 errors, no drift, full workspace green incl. the Pg-gated acceptance-first e2e.
+> **Follow-ups**: `orderStatusChanged` still keys on correlationId (align with messageId later);
+> HubRise enricher command sends not yet journaled (`channel: WORKER`); a generic per-mutation
+> observability contract needs a §8 `surface: graphql` binding kind; clients/frontends must adopt
+> the two-step model (checkout: acceptance → `paymentStatus` poll/subscribe → Stripe element).
 >
 > 🧭 **Agreed direction (2026-07-19, late):** generalize the spec→codegen approach — ①
 > **service catalog with configurable binding** (ADR-20260719-214500, Proposed): `specs/services.yaml`
