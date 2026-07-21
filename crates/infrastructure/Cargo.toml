@@ -27,7 +27,9 @@ sqlx = { workspace = true, features = ["chrono", "uuid", "json"] }
 # behind the in-process EventBus (appended-event fan-out for GraphQL subscriptions); the workspace
 # feature set also carries rt/macros used by the integration test.
 tokio = { workspace = true, features = ["sync"] }
-# reqwest moved out with the SIRENE HTTP client to `sirene_ingest` (ADR-0045) — no direct HTTP here.
+# The generated /services/* HTTP clients (issue #26, ADR-20260719-214500) — constructed only for
+# services whose spec binding is `http`, compiled for all so the wire path stays covered.
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 # Stripe webhook signature verification (integrations/stripe): HMAC-SHA256 over the RAW body with a
 # constant-time comparison (`Mac::verify_slice`). All three are already in-tree transitively (sqlx's
 # SCRAM auth pulls hmac/sha2/hex), so this adds no new build weight.

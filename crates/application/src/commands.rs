@@ -100,8 +100,8 @@ use domain::generated::scalars::{
 use domain::order::OrderState;
 use domain::rider::RiderState;
 
+use crate::generated::services::{PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta};
 use crate::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
-use crate::ports::{CreatedPaymentIntent, PaymentGateway};
 use crate::queries::{CatalogReadRepository, OfferView};
 use crate::repository::Repository;
 
@@ -1682,7 +1682,7 @@ pub async fn change_rider_status(
 /// rules.yaml#/ServerPriceAuthority: the server is the only price authority; an unresolvable line
 /// price rejects fail-closed with `errors.yaml#/PriceUnresolvable`, and a client `expectedTotal`
 /// that diverges from the recomputed total rejects with `errors.yaml#/PriceMismatch`) and create
-/// the Stripe PaymentIntent through the [`PaymentGateway`] seam for exactly that recomputed amount
+/// the Stripe PaymentIntent through the generated [`PaymentService`] port for exactly that recomputed amount
 /// (a synchronous decline is the canonical `errors.yaml#/PaymentDeclined`). Returns the created
 /// intent so the mutation payload can carry `paymentIntentId`/`clientSecret` (api.yaml).
 ///
@@ -1700,14 +1700,14 @@ pub async fn change_rider_status(
 pub async fn place_order(
     store: &dyn EventStore,
     catalogs: &dyn CatalogReadRepository,
-    payments: &dyn PaymentGateway,
+    payments: &dyn PaymentService,
     pm_state: &dyn PaymentProcessStateStore,
     cmd: PlaceOrder,
     // Envelope data, not command payload (ADR-0041): the dispatch-layer X-SESSION-ID, stamped onto
     // the PM run row so an anonymous checkout can read paymentStatus after a restart (#12).
     session_id: Option<domain::generated::scalars::SessionId>,
     actor: &Actor,
-) -> Result<CreatedPaymentIntent, DomainError> {
+) -> Result<PaymentRequestOutput, DomainError> {
     // The restaurant must exist, be ACTIVE and not PAUSED — folded from ITS stream (authoritative,
     // race-free; the saga may read other aggregates' streams through the same EventStore port).
     let (restaurant_events, _) =
@@ -1791,16 +1791,21 @@ pub async fn place_order(
         }
     }
     let amount = priced.total_amount.clone();
-    // Create the Stripe PaymentIntent through the gateway seam FOR THE RECOMPUTED AMOUNT; a
-    // synchronous decline surfaces as the canonical `PaymentDeclined` rejection.
+    // Create the Stripe PaymentIntent through the generated service port FOR THE RECOMPUTED AMOUNT;
+    // a synchronous decline surfaces as the canonical `PaymentDeclined` rejection. The
+    // `orderId`/`restaurantId`/`cartId` refs are the ENVELOPE the Stripe ACL copies onto the intent's
+    // `metadata` so the inbound webhook facts can be mapped back onto our aggregates (issue #26).
     let intent = payments
-        .create_payment_intent(&crate::ports::PaymentIntentRequest {
-            amount: amount.clone(),
-            payment_method_id: cmd.payment_method_id.clone(),
-            order_id: cmd.order_id,
-            restaurant_id: cmd.restaurant_id,
-            cart_id: cmd.cart_id,
-        })
+        .request(
+            PaymentRequestInput {
+                amount: amount.clone(),
+                payment_method_id: domain::generated::scalars::PaymentMethodId(cmd.payment_method_id.clone()),
+            },
+            &ServiceCallMeta::new(actor.correlation_id)
+                .with_ref("orderId", cmd.order_id.0.to_string())
+                .with_ref("restaurantId", cmd.restaurant_id.0.to_string())
+                .with_ref("cartId", cmd.cart_id.0.to_string()),
+        )
         .await?;
     // Freeze the priced checkout onto the event so PlaceOrderProcess can rebuild OrderPlaced +
     // CartCheckedOut from the log on capture (rules.yaml#/CheckoutSnapshotFrozenAtIntent): the

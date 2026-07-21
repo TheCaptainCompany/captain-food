@@ -9,7 +9,7 @@
 //! - The RESTAURANT (its own orders) or an ADMIN decides with the COMMAND legs [`approve_refund`] /
 //!   [`deny_refund`] (authz = api.yaml roles): a non-pending run rejects with
 //!   `errors.yaml#/RefundNotPending`; approval requests the outbound Stripe refund
-//!   (`PaymentGateway::request_refund`) and records the decision on the Payment aggregate.
+//!   (the generated `payment.refund` service port, issue #26) and records the decision on the Payment aggregate.
 //! - Stripe settles with the inbound `PaymentRefunded` fact (recorded by the Payment aggregate);
 //!   [`on_payment_refunded`] closes the run — an unknown or already-settled run skips (unsolicited
 //!   refunds are benign per the DSL note).
@@ -25,7 +25,8 @@ use domain::shared::errors::DomainError;
 use serde_json::json;
 
 use crate::pm_state::{RefundProcessRow, RefundProcessStateStore};
-use crate::ports::{Actor, EventStore, PaymentGateway};
+use crate::generated::services::{PaymentRefundInput, PaymentService, ServiceCallMeta};
+use crate::ports::{Actor, EventStore};
 use crate::process_managers::{saga_actor, TriggerEnvelope};
 use crate::queries::OrderReadRepository;
 use crate::repository::Repository;
@@ -193,7 +194,7 @@ async fn deliver_to_payment(
 pub async fn approve_refund(
     store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
-    gateway: &dyn PaymentGateway,
+    gateway: &dyn PaymentService,
     cmd: ApproveRefund,
     actor: &Actor,
 ) -> Result<(), DomainError> {
@@ -203,9 +204,14 @@ pub async fn approve_refund(
     let Some(intent) = row.payment_intent_id.clone() else {
         return Err(DomainError::rejected("RefundNotPending", json!({ "orderId": cmd.order_id })));
     };
-    // call payment_gateway.request_refund — a gateway refusal rejects the command (fail closed;
+    // call payment.refund (services.yaml) — a gateway refusal rejects the command (fail closed;
     // nothing is recorded and the run stays PENDING_APPROVAL).
-    gateway.request_refund(&intent, &cmd.amount).await?;
+    gateway
+        .refund(
+            PaymentRefundInput { payment_intent_id: intent.clone(), amount: cmd.amount.clone() },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
     // deliver RefundApproved → Payment (the aggregate records the decision).
     deliver_to_payment(
         store,
@@ -389,29 +395,30 @@ mod tests {
         FakeOrders { row: Some(tracking_row("PENDING", Some("pi_123"))) }
     }
 
-    /// Fake Stripe gateway recording refund requests; `create_payment_intent` is out of scope here.
+    /// Fake Stripe gateway recording refund requests; `request` (create-intent) is out of scope here.
     #[derive(Default)]
     struct RecordingGateway {
         refunds: Mutex<Vec<(String, i64)>>,
     }
 
     #[async_trait]
-    impl PaymentGateway for RecordingGateway {
-        async fn create_payment_intent(
+    impl PaymentService for RecordingGateway {
+        async fn request(
             &self,
-            _request: &crate::ports::PaymentIntentRequest,
-        ) -> Result<crate::ports::CreatedPaymentIntent, DomainError> {
+            _input: crate::generated::services::PaymentRequestInput,
+            _meta: &ServiceCallMeta,
+        ) -> Result<crate::generated::services::PaymentRequestOutput, DomainError> {
             unreachable!("RefundProcess never creates intents")
         }
-        async fn request_refund(
+        async fn refund(
             &self,
-            payment_intent_id: &PaymentIntentId,
-            amount: &Money,
+            input: PaymentRefundInput,
+            _meta: &ServiceCallMeta,
         ) -> Result<(), DomainError> {
             self.refunds
                 .lock()
                 .unwrap()
-                .push((payment_intent_id.0.clone(), amount.amount_cents.0));
+                .push((input.payment_intent_id.0.clone(), input.amount.amount_cents.0));
             Ok(())
         }
     }

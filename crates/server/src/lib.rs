@@ -55,6 +55,9 @@ use shared_types::HealthDto;
 use graphql::schema::{ReadDeps, WriteDeps};
 
 mod auth;
+/// The expose-gated `/services/*` surface + module index, GENERATED from specs/services.yaml
+/// (issue #26, ADR-20260719-214500).
+pub mod generated;
 mod graphql;
 mod hosts;
 
@@ -196,20 +199,26 @@ pub fn router() -> Router {
                     ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
                     gbp_probe: Arc::new(UnverifiedGbpOrderLinkProbe),
                     auth_provider: Arc::new(FailClosedAuthProviderGateway),
-                    // Real outbound Stripe gateway when STRIPE_SECRET_KEY is configured; otherwise the
-                    // fail-closed stand-in (placeOrder stays wired end-to-end but declines every checkout).
-                    payments: match std::env::var("STRIPE_SECRET_KEY") {
-                        Ok(key) if !key.is_empty() => {
-                            println!("payment gateway: StripePaymentGateway (STRIPE_SECRET_KEY set)");
-                            Arc::new(stripe_adapter::StripePaymentGateway::new(key))
+                    // The `payment` service resolved through the GENERATED topology binding
+                    // (services.yaml `binding: local`, issue #26): the composition root only supplies
+                    // the in-process constructor — the real outbound Stripe adapter when
+                    // STRIPE_SECRET_KEY is configured, otherwise the fail-closed stand-in (placeOrder
+                    // stays wired end-to-end but declines every checkout).
+                    payments: infrastructure::generated::service_bindings::payment_service(|| {
+                        match std::env::var("STRIPE_SECRET_KEY") {
+                            Ok(key) if !key.is_empty() => {
+                                println!("payment service: StripePaymentGateway (STRIPE_SECRET_KEY set)");
+                                Arc::new(stripe_adapter::StripePaymentGateway::new(key))
+                            }
+                            _ => {
+                                println!(
+                                    "payment service: FailClosedPaymentGateway (STRIPE_SECRET_KEY unset — every checkout declines)"
+                                );
+                                Arc::new(FailClosedPaymentGateway)
+                            }
                         }
-                        _ => {
-                            println!(
-                                "payment gateway: FailClosedPaymentGateway (STRIPE_SECRET_KEY unset — every checkout declines)"
-                            );
-                            Arc::new(FailClosedPaymentGateway)
-                        }
-                    },
+                    })
+                    .expect("payment service binding (services.yaml)"),
                     // The payment_process_manager state rows placeOrder opens/single-flights on
                     // (ADR-20260719-193500).
                     pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(
@@ -238,10 +247,16 @@ pub fn router() -> Router {
                 // In-process saga runner (the state-table process managers of
                 // specs/processmanager.yaml, ADR-20260719-193500) — same pattern as the projection
                 // worker: RUN_PROCESS_MANAGERS=false hands it to a dedicated worker. The runner
-                // builds its state-table stores and read models over the pool; the delivery-partner
-                // port stays the no-op stand-in until the avelo37 ACL lands (`with_partner`).
+                // builds its state-table stores and read models over the pool; the `delivery`
+                // service resolves through the GENERATED topology binding (services.yaml, issue #26)
+                // with the no-op stand-in as the in-process implementation until the avelo37 ACL
+                // lands (`with_partner`).
                 if std::env::var("RUN_PROCESS_MANAGERS").map(|v| v != "false").unwrap_or(true) {
-                    let runner = ProcessManagerRunner::new(pool.clone());
+                    let partner = infrastructure::generated::service_bindings::delivery_service(|| {
+                        Arc::new(application::ports::NoopDeliveryService)
+                    })
+                    .expect("delivery service binding (services.yaml)");
+                    let runner = ProcessManagerRunner::new(pool.clone()).with_partner(partner);
                     saga_status = Some(runner.status());
                     tokio::spawn(runner.run_loop());
                     println!("saga runner: running in-process (set RUN_PROCESS_MANAGERS=false to disable)");
@@ -358,6 +373,9 @@ pub fn router() -> Router {
         // (signature-verified inbound payment facts) and `POST /adapters/hubrise/webhooks` (HMAC-verified ingress).
         .merge(stripe_adapter::routes(stripe_ingestor))
         .merge(hubrise_adapter::routes(hubrise_state))
+        // The DERIVED `/services/<service>/<op>` surface (issue #26): emitted per the spec's
+        // `expose` flags — empty while every service declares `expose: false` (V0).
+        .merge(generated::services_routes::services_router())
         // Host-based landing (ADR-0036): any path not matched above is dispatched by the request `Host`
         // to its per-audience/tenant placeholder. Explicit routes (/health, /ping, /{role}/graphql) win,
         // so Render's health check (internal *.onrender.com host) is unaffected. Covers `/` too.

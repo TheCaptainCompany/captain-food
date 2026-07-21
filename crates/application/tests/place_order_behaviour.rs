@@ -5,7 +5,7 @@
 //! Pure and offline: an in-memory [`EventStore`] (holding the Restaurant, Cart and Payment streams the
 //! saga touches), a fake `CatalogReadRepository` standing in for the LIVE catalog the handler reprices
 //! every cart line from (rules.yaml#/ServerPriceAuthority — the server is the only price authority), a
-//! fake `PaymentGateway` (declines `pm_declined`, accepts anything else as `pi_123`), and the in-memory
+//! fake `PaymentService` (declines `pm_declined`, accepts anything else as `pi_123`), and the in-memory
 //! `payment_process_manager` state store (`application::pm_state::mem`) the handler opens the run on
 //! (ADR-20260719-193500: PaymentIntentCreated is DELIVERED to `Payment-<intentId>` — the aggregate's
 //! birth — and the run row goes AWAITING_PAYMENT_RESULT). The event-driven saga legs
@@ -21,7 +21,10 @@ use async_trait::async_trait;
 use application::commands::{place_order, rejection_code};
 use application::pm_state::mem::MemPaymentProcessState;
 use application::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
-use application::ports::{version_conflict, Actor, CreatedPaymentIntent, EventStore, PaymentGateway};
+use application::generated::services::{
+    PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
+};
+use application::ports::{version_conflict, Actor, EventStore};
 use application::queries::{
     CatalogReadRepository, CatalogRow, OfferOptionListView, OfferOptionView, OfferView,
 };
@@ -115,23 +118,32 @@ impl CatalogReadRepository for FakeCatalogs {
 }
 
 /// Fake Stripe gateway: `pm_declined` is declined synchronously (the canonical
-/// `errors.yaml#/PaymentDeclined` rejection per the PaymentGateway contract); anything else yields the
+/// `errors.yaml#/PaymentDeclined` rejection per the PaymentService contract); anything else yields the
 /// fixture intent `pi_123`.
 struct FakeGateway;
 
 #[async_trait]
-impl PaymentGateway for FakeGateway {
-    async fn create_payment_intent(
+impl PaymentService for FakeGateway {
+    async fn request(
         &self,
-        request: &application::ports::PaymentIntentRequest,
-    ) -> Result<CreatedPaymentIntent, DomainError> {
-        if request.payment_method_id == "pm_declined" {
+        input: PaymentRequestInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<PaymentRequestOutput, DomainError> {
+        if input.payment_method_id.0 == "pm_declined" {
             return Err(DomainError::Invariant("PaymentDeclined: card_declined".into()));
         }
-        Ok(CreatedPaymentIntent {
+        Ok(PaymentRequestOutput {
             payment_intent_id: PaymentIntentId("pi_123".into()),
             client_secret: "pi_123_secret".into(),
         })
+    }
+
+    async fn refund(
+        &self,
+        _input: application::generated::services::PaymentRefundInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        unreachable!("the checkout leg never refunds")
     }
 }
 

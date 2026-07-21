@@ -13,9 +13,8 @@
 
 use std::sync::Arc;
 
-use application::ports::{
-    AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier, PaymentGateway,
-};
+use application::generated::services::PaymentService;
+use application::ports::{AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository, DeliveryReadRepository,
     OrderReadRepository, PricingPolicyReadRepository, ProspectionReadRepository,
@@ -131,7 +130,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
     let ownership: Arc<dyn GoogleOwnershipVerifier> = Arc::new(FailClosedGoogleOwnershipVerifier);
     let gbp_probe: Arc<dyn GbpOrderLinkProbe> = Arc::new(UnverifiedGbpOrderLinkProbe);
     let auth_provider: Arc<dyn AuthProviderGateway> = Arc::new(FailClosedAuthProviderGateway);
-    let payments: Arc<dyn PaymentGateway> = Arc::new(FailClosedPaymentGateway);
+    let payments: Arc<dyn PaymentService> = Arc::new(FailClosedPaymentGateway);
     let pm_state: Arc<dyn application::pm_state::PaymentProcessStateStore> =
         Arc::new(infrastructure::persistence::PgPaymentProcessState::new(pool.clone()));
     let refund_state: Arc<dyn application::pm_state::RefundProcessStateStore> =

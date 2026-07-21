@@ -19,7 +19,8 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use application::ports::{is_version_conflict, DeliveryPartner, NoopDeliveryPartner};
+use application::generated::services::DeliveryService;
+use application::ports::{is_version_conflict, NoopDeliveryService};
 use application::process_managers::{
     cart_binding, delivery_dispatch, place_order, refund, Outcome, TriggerEnvelope,
 };
@@ -109,8 +110,9 @@ pub struct ProcessManagerRunner {
     // The read models the DSL `read` steps declare.
     orders: PgOrderRepository,
     carts: PgCartRepository,
-    /// DeliveryDispatchProcess's outbound port (no-op stand-in until the avelo37 ACL lands).
-    partner: Arc<dyn DeliveryPartner>,
+    /// DeliveryDispatchProcess's outbound port — the generated `delivery` service (services.yaml,
+    /// issue #26); no-op stand-in until the avelo37 ACL lands.
+    partner: Arc<dyn DeliveryService>,
     status: Arc<Mutex<ProcessManagerStatus>>,
 }
 
@@ -124,14 +126,14 @@ impl ProcessManagerRunner {
             dispatch_state: PgDeliveryDispatchState::new(pool.clone()),
             orders: PgOrderRepository::new(pool.clone()),
             carts: PgCartRepository::new(pool.clone()),
-            partner: Arc::new(NoopDeliveryPartner),
+            partner: Arc::new(NoopDeliveryService),
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
         }
     }
 
     /// Replace the delivery-partner port (the composition root injects the real ACL when it lands).
-    pub fn with_partner(mut self, partner: Arc<dyn DeliveryPartner>) -> Self {
+    pub fn with_partner(mut self, partner: Arc<dyn DeliveryService>) -> Self {
         self.partner = partner;
         self
     }

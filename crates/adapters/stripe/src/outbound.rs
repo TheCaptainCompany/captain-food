@@ -1,11 +1,13 @@
-//! OUTBOUND Stripe client: the real [`PaymentGateway`] adapter (replaces the composition root's
+//! OUTBOUND Stripe client: the real adapter behind the generated [`PaymentService`] port
+//! (services.yaml `payment`, issue #26 — replaces the composition root's
 //! `FailClosedPaymentGateway` stand-in when `STRIPE_SECRET_KEY` is configured).
 //!
-//! - `create_payment_intent` → `POST {base}/v1/payment_intents` (form-encoded), tagging the intent's
-//!   `metadata` with OUR `orderId`/`restaurantId`/`cartId` so the INBOUND webhook ACL (acl.rs) can map
-//!   `payment_intent.*` facts back onto our aggregates. `confirm=false`: the FRONTEND confirms with the
-//!   returned `client_secret` (specs/PRODUCT_SPEC_WEB_CLIENT.md checkout).
-//! - `request_refund` → `POST {base}/v1/refunds` (`payment_intent` + `amount`); the refund OUTCOME
+//! - `payment.request` → `POST {base}/v1/payment_intents` (form-encoded), tagging the intent's
+//!   `metadata` with the [`ServiceCallMeta`] business refs (`orderId`/`restaurantId`/`cartId`,
+//!   copied VERBATIM) so the INBOUND webhook ACL (acl.rs) can map `payment_intent.*` facts back
+//!   onto our aggregates. `confirm=false`: the FRONTEND confirms with the returned `client_secret`
+//!   (specs/PRODUCT_SPEC_WEB_CLIENT.md checkout).
+//! - `payment.refund` → `POST {base}/v1/refunds` (`payment_intent` + `amount`); the refund OUTCOME
 //!   (`PaymentRefunded`) stays an inbound webhook fact, never this call's return value.
 //!
 //! Error mapping (the port contract): a Stripe `card_error`/decline → the canonical
@@ -15,15 +17,16 @@
 //! The base URL is injected (default `https://api.stripe.com`) so tests can point at a local mock;
 //! the request encoding and response/error mapping are PURE functions, unit-tested without network.
 
-use application::ports::{CreatedPaymentIntent, PaymentGateway, PaymentIntentRequest};
+use application::generated::services::{
+    PaymentRefundInput, PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
+};
 use async_trait::async_trait;
-use domain::generated::entities::Money;
 use domain::generated::scalars::PaymentIntentId;
 use domain::shared::errors::DomainError;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.stripe.com";
 
-/// The real outbound Stripe [`PaymentGateway`].
+/// The real outbound Stripe [`PaymentService`] adapter.
 pub struct StripePaymentGateway {
     http: reqwest::Client,
     base_url: String,
@@ -68,22 +71,19 @@ impl StripePaymentGateway {
 }
 
 #[async_trait]
-impl PaymentGateway for StripePaymentGateway {
-    async fn create_payment_intent(
+impl PaymentService for StripePaymentGateway {
+    async fn request(
         &self,
-        request: &PaymentIntentRequest,
-    ) -> Result<CreatedPaymentIntent, DomainError> {
-        let form = encode_create_intent_form(request);
+        input: PaymentRequestInput,
+        meta: &ServiceCallMeta,
+    ) -> Result<PaymentRequestOutput, DomainError> {
+        let form = encode_create_intent_form(&input, meta);
         let (status, body) = self.post_form("/v1/payment_intents", &form).await?;
         decode_create_intent_response(status, &body)
     }
 
-    async fn request_refund(
-        &self,
-        payment_intent_id: &PaymentIntentId,
-        amount: &Money,
-    ) -> Result<(), DomainError> {
-        let form = encode_refund_form(payment_intent_id, amount);
+    async fn refund(&self, input: PaymentRefundInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        let form = encode_refund_form(&input);
         let (status, body) = self.post_form("/v1/refunds", &form).await?;
         decode_refund_response(status, &body)
     }
@@ -94,25 +94,31 @@ impl PaymentGateway for StripePaymentGateway {
 // ------------------------------------------------------------------------------------------------
 
 /// Form body for `POST /v1/payment_intents`. `currency` is lowercased (Stripe convention); the
-/// metadata keys are EXACTLY the ones the inbound webhook ACL reads back (`restaurantId`/`orderId`,
-/// plus `cartId` for traceability).
-pub fn encode_create_intent_form(request: &PaymentIntentRequest) -> Vec<(String, String)> {
-    vec![
-        ("amount".into(), request.amount.amount_cents.0.to_string()),
-        ("currency".into(), request.amount.currency.0.to_lowercase()),
-        ("payment_method".into(), request.payment_method_id.clone()),
-        ("metadata[orderId]".into(), request.order_id.0.to_string()),
-        ("metadata[restaurantId]".into(), request.restaurant_id.0.to_string()),
-        ("metadata[cartId]".into(), request.cart_id.0.to_string()),
-        ("confirm".into(), "false".into()),
-    ]
+/// envelope's business refs are copied VERBATIM into the intent's `metadata` — the checkout call
+/// site sets EXACTLY the keys the inbound webhook ACL reads back (`restaurantId`/`orderId`, plus
+/// `cartId` for traceability); a call without them creates an intent the webhook cannot map
+/// (fail-closed downstream, acl.rs).
+pub fn encode_create_intent_form(
+    input: &PaymentRequestInput,
+    meta: &ServiceCallMeta,
+) -> Vec<(String, String)> {
+    let mut form = vec![
+        ("amount".into(), input.amount.amount_cents.0.to_string()),
+        ("currency".into(), input.amount.currency.0.to_lowercase()),
+        ("payment_method".into(), input.payment_method_id.0.clone()),
+    ];
+    for (key, value) in &meta.refs {
+        form.push((format!("metadata[{key}]"), value.clone()));
+    }
+    form.push(("confirm".into(), "false".into()));
+    form
 }
 
 /// Form body for `POST /v1/refunds`.
-pub fn encode_refund_form(payment_intent_id: &PaymentIntentId, amount: &Money) -> Vec<(String, String)> {
+pub fn encode_refund_form(input: &PaymentRefundInput) -> Vec<(String, String)> {
     vec![
-        ("payment_intent".into(), payment_intent_id.0.clone()),
-        ("amount".into(), amount.amount_cents.0.to_string()),
+        ("payment_intent".into(), input.payment_intent_id.0.clone()),
+        ("amount".into(), input.amount.amount_cents.0.to_string()),
     ]
 }
 
@@ -160,11 +166,11 @@ fn map_error(context: &str, status: u16, body: &str) -> DomainError {
     DomainError::Repository(format!("stripe: {context} failed (HTTP {status}): {body}"))
 }
 
-/// Parse a `POST /v1/payment_intents` response into the port's [`CreatedPaymentIntent`].
+/// Parse a `POST /v1/payment_intents` response into the port's [`PaymentRequestOutput`].
 pub fn decode_create_intent_response(
     status: u16,
     body: &str,
-) -> Result<CreatedPaymentIntent, DomainError> {
+) -> Result<PaymentRequestOutput, DomainError> {
     if !(200..300).contains(&status) {
         return Err(map_error("create_payment_intent", status, body));
     }
@@ -177,7 +183,7 @@ pub fn decode_create_intent_response(
             intent.id
         ))
     })?;
-    Ok(CreatedPaymentIntent { payment_intent_id: PaymentIntentId(intent.id), client_secret })
+    Ok(PaymentRequestOutput { payment_intent_id: PaymentIntentId(intent.id), client_secret })
 }
 
 /// Parse a `POST /v1/refunds` response: 2xx = refund ACCEPTED (settlement arrives as the inbound
@@ -192,29 +198,37 @@ pub fn decode_refund_response(status: u16, body: &str) -> Result<(), DomainError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::generated::scalars::{CartId, CurrencyCode, MoneyCents, OrderId, RestaurantId};
+    use domain::generated::entities::Money;
+    use domain::generated::scalars::{CurrencyCode, MoneyCents, PaymentMethodId};
 
-    fn request() -> PaymentIntentRequest {
-        PaymentIntentRequest {
+    fn request() -> PaymentRequestInput {
+        PaymentRequestInput {
             amount: Money { amount_cents: MoneyCents(2450), currency: CurrencyCode("EUR".into()) },
-            payment_method_id: "pm_card_visa".into(),
-            order_id: OrderId(uuid::Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()),
-            restaurant_id: RestaurantId(
-                uuid::Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap(),
-            ),
-            cart_id: CartId(uuid::Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap()),
+            payment_method_id: PaymentMethodId("pm_card_visa".into()),
         }
+    }
+
+    /// The checkout call site's envelope: the business refs the webhook ACL reads back.
+    fn meta() -> ServiceCallMeta {
+        ServiceCallMeta::new(uuid::Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap())
+            .with_ref("orderId", "11111111-1111-4111-8111-111111111111")
+            .with_ref("restaurantId", "22222222-2222-4222-8222-222222222222")
+            .with_ref("cartId", "33333333-3333-4333-8333-333333333333")
     }
 
     #[test]
     fn create_intent_form_encodes_amount_lowercase_currency_metadata_and_no_confirm() {
-        let form = encode_create_intent_form(&request());
+        let form = encode_create_intent_form(&request(), &meta());
         assert_eq!(
             form,
             vec![
                 ("amount".to_string(), "2450".to_string()),
                 ("currency".to_string(), "eur".to_string()),
                 ("payment_method".to_string(), "pm_card_visa".to_string()),
+                (
+                    "metadata[cartId]".to_string(),
+                    "33333333-3333-4333-8333-333333333333".to_string()
+                ),
                 (
                     "metadata[orderId]".to_string(),
                     "11111111-1111-4111-8111-111111111111".to_string()
@@ -223,10 +237,6 @@ mod tests {
                     "metadata[restaurantId]".to_string(),
                     "22222222-2222-4222-8222-222222222222".to_string()
                 ),
-                (
-                    "metadata[cartId]".to_string(),
-                    "33333333-3333-4333-8333-333333333333".to_string()
-                ),
                 ("confirm".to_string(), "false".to_string()),
             ]
         );
@@ -234,10 +244,10 @@ mod tests {
 
     #[test]
     fn refund_form_encodes_intent_and_amount() {
-        let form = encode_refund_form(
-            &PaymentIntentId("pi_123".into()),
-            &Money { amount_cents: MoneyCents(500), currency: CurrencyCode("EUR".into()) },
-        );
+        let form = encode_refund_form(&PaymentRefundInput {
+            payment_intent_id: PaymentIntentId("pi_123".into()),
+            amount: Money { amount_cents: MoneyCents(500), currency: CurrencyCode("EUR".into()) },
+        });
         assert_eq!(
             form,
             vec![

@@ -7448,6 +7448,471 @@ fn emit_pm_state_infrastructure(model: &Model) -> String {
     out
 }
 
+// ================================================================================================
+// Service-catalog emitters (issue #26, ADR-20260719-214500 / codegen-roadmap item 4): trait +
+// http client + binding wiring + expose-gated /services routes from specs/services.yaml.
+// ================================================================================================
+
+/// One operation of a service: the typed `input`/`output` property maps (services.yaml field style)
+/// and the anticipated `errors.yaml` rejection names.
+struct SvcOp {
+    name: String,
+    desc: String,
+    input: Option<Value>,
+    output: Option<Value>,
+    errors: Vec<String>,
+}
+
+/// One service of services.yaml with its derived Rust names and SPEC-OWNED topology.
+struct Svc {
+    name: String,
+    /// PascalCase base of the generated names (`payment` → trait `PaymentService`,
+    /// structs `Payment<Op>Input`/`…Output`, client `HttpPaymentService`).
+    base: String,
+    desc: String,
+    binding: String,
+    expose: bool,
+    ops: Vec<SvcOp>,
+}
+
+/// PascalCase of a snake_case name (`offer_job` → `OfferJob`).
+fn pascal_snake(s: &str) -> String {
+    s.split('_').map(pascal).collect()
+}
+
+/// The DERIVED HTTP path of a service operation: `/services/<service>/<op>`, snake_case →
+/// kebab-case (ADR-20260719-214500 — derived, never hand-picked).
+fn svc_http_path(service: &str, op: &str) -> String {
+    format!("/services/{}/{}", service.replace('_', "-"), op.replace('_', "-"))
+}
+
+/// The address-book variable of an http-bound service: `SERVICE_<NAME>_URL`.
+fn svc_url_var(service: &str) -> String {
+    format!("SERVICE_{}_URL", service.to_uppercase())
+}
+
+/// Parse services.yaml (file order; the §2d `svc-*` rules already validated the shape).
+fn parse_services(model: &Model) -> Vec<Svc> {
+    let mut out = Vec::new();
+    let Some(Value::Mapping(m)) = model.defs.get("services.yaml") else {
+        return out;
+    };
+    for (k, node) in m {
+        let Some(name) = k.as_str() else { continue };
+        let ops = node
+            .get("operations")
+            .and_then(|x| x.as_mapping())
+            .map(|ops| {
+                ops.iter()
+                    .filter_map(|(ok, op)| {
+                        let oname = ok.as_str()?;
+                        Some(SvcOp {
+                            name: oname.to_string(),
+                            desc: op.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string(),
+                            input: op.get("input").cloned(),
+                            output: op.get("output").cloned(),
+                            errors: ref_strings(op.get("errors")).iter().filter_map(|r| ref_name(r)).collect(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(Svc {
+            name: name.to_string(),
+            base: pascal_snake(name),
+            desc: node.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string(),
+            binding: node.get("binding").and_then(|b| b.as_str()).unwrap_or("local").to_string(),
+            expose: node.get("expose").and_then(|b| b.as_bool()).unwrap_or(false),
+            ops,
+        });
+    }
+    out
+}
+
+/// Emit one serde `camelCase` struct for a service operation's `input`/`output` property map.
+/// Unlike events/commands (which carry `required:` lists), service payload fields are REQUIRED
+/// unless marked `nullable: true` — the catalog declares the exact call surface.
+fn push_service_struct(out: &mut String, name: &str, doc: &str, props: &Value) {
+    out.push('\n');
+    if !doc.trim().is_empty() {
+        out.push_str(&format!("/// {}\n", ws1(doc).trim()));
+    }
+    out.push_str("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n");
+    out.push_str("#[serde(rename_all = \"camelCase\")]\n");
+    out.push_str(&format!("pub struct {} {{\n", name));
+    if let Some(map) = props.as_mapping() {
+        for (pk, pnode) in map {
+            let Some(prop) = pk.as_str() else { continue };
+            let field = snake_field(prop);
+            // PROVE serde's camelCase rename restores the exact spec property name on the wire.
+            assert_eq!(
+                serde_camel(&field),
+                prop,
+                "services.yaml#/{}/{}: field '{}' does not round-trip through serde rename_all",
+                name,
+                prop,
+                field
+            );
+            let ident = if RUST_FIELD_KEYWORDS.contains(&field.as_str()) { format!("r#{}", field) } else { field };
+            let ty = struct_field_type("services.yaml", name, prop, pnode);
+            if pnode.get("nullable").and_then(|x| x.as_bool()) == Some(true) {
+                out.push_str(&format!("    pub {}: Option<{}>,\n", ident, ty));
+            } else {
+                out.push_str(&format!("    pub {}: {},\n", ident, ty));
+            }
+        }
+    }
+    out.push_str("}\n");
+}
+
+/// The generated trait-method signature of a service operation: `(&self, input: <In>, meta:
+/// &ServiceCallMeta) -> Result<<Out> | (), DomainError>`; an input-less operation drops the
+/// `input` parameter.
+fn svc_op_signature(svc: &Svc, op: &SvcOp) -> String {
+    let input = if op.input.is_some() {
+        format!("input: {}{}Input, ", svc.base, pascal_snake(&op.name))
+    } else {
+        String::new()
+    };
+    let output = if op.output.is_some() {
+        format!("{}{}Output", svc.base, pascal_snake(&op.name))
+    } else {
+        "()".to_string()
+    };
+    format!("async fn {}(&self, {}meta: &ServiceCallMeta) -> Result<{}, DomainError>", op.name, input, output)
+}
+
+/// Emit `crates/application/src/generated/services.rs` — the SERVICE PORT traits (issue #26,
+/// ADR-20260719-214500): per service one `<Base>Service` trait with one method per operation, plus
+/// the typed `<Base><Op>Input`/`…Output` structs (serde `camelCase`, so the http binding's wire
+/// shape IS the spec shape). Every call also carries the [`ServiceCallMeta`] ENVELOPE — the
+/// correlation metadata (ADR-0041 spirit) that is never part of the spec-declared business input.
+fn emit_services_application(model: &Model) -> String {
+    let services = parse_services(model);
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/services.yaml — do not edit by hand.\n\
+         // SERVICE PORT traits (ADR-20260719-214500, issue #26): the abstract capabilities the domain\n\
+         // calls, one trait per service, consumed by command handlers and process managers. Provider\n\
+         // vocabulary never appears here — the implementation ACL (adapter crates) translates names and\n\
+         // payloads. The spec-declared `input`/`output` are the BUSINESS payload; correlation metadata\n\
+         // travels on the [`ServiceCallMeta`] envelope (like the event envelope, ADR-0041), so business\n\
+         // ids an INBOUND adapter needs to map provider facts back onto our aggregates (e.g. the Stripe\n\
+         // PaymentIntent `metadata` the webhook ACL reads back) are declared at the call site and copied\n\
+         // verbatim by the provider ACL — never smuggled into the operation input.\n\n\
+         use async_trait::async_trait;\n\
+         use domain::generated::entities::*;\n\
+         use domain::generated::events::*;\n\
+         use domain::generated::scalars::*;\n\
+         use domain::shared::errors::DomainError;\n\
+         use serde::{Deserialize, Serialize};\n",
+    );
+    out.push_str(
+        r#"
+/// The service-call ENVELOPE: infrastructure/correlation metadata that travels WITH every
+/// operation call but is never part of the spec-declared business input (ADR-0041 spirit).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceCallMeta {
+    /// The triggering command/event's correlation id (ADR-0041), propagated across every binding.
+    pub correlation_id: uuid::Uuid,
+    /// Business correlation references the INBOUND adapter needs to map provider facts back onto
+    /// our aggregates (e.g. Stripe intent metadata `orderId`/`restaurantId`/`cartId`) — copied
+    /// verbatim onto the provider call, never business input.
+    #[serde(default)]
+    pub refs: std::collections::BTreeMap<String, String>,
+}
+
+impl ServiceCallMeta {
+    /// Envelope for a call correlated to `correlation_id`, with no business refs.
+    pub fn new(correlation_id: uuid::Uuid) -> Self {
+        Self { correlation_id, refs: std::collections::BTreeMap::new() }
+    }
+    /// Attach one business correlation reference (builder style).
+    pub fn with_ref(mut self, key: &str, value: impl Into<String>) -> Self {
+        self.refs.insert(key.to_string(), value.into());
+        self
+    }
+}
+"#,
+    );
+    for svc in &services {
+        out.push_str(&format!(
+            "\n// ---------------------------------------------------------------------------------------------------\n// service `{}` — binding: {}, expose: {}\n// ---------------------------------------------------------------------------------------------------\n",
+            svc.name, svc.binding, svc.expose
+        ));
+        for op in &svc.ops {
+            if let Some(input) = &op.input {
+                push_service_struct(
+                    &mut out,
+                    &format!("{}{}Input", svc.base, pascal_snake(&op.name)),
+                    &format!("Input of `{}.{}`.", svc.name, op.name),
+                    input,
+                );
+            }
+            if let Some(output) = &op.output {
+                push_service_struct(
+                    &mut out,
+                    &format!("{}{}Output", svc.base, pascal_snake(&op.name)),
+                    &format!("Output of `{}.{}`.", svc.name, op.name),
+                    output,
+                );
+            }
+        }
+        out.push('\n');
+        if !svc.desc.trim().is_empty() {
+            out.push_str(&format!("/// {}\n", ws1(&svc.desc).trim()));
+        }
+        out.push_str(&format!("#[async_trait]\npub trait {}Service: Send + Sync {{\n", svc.base));
+        for op in &svc.ops {
+            if !op.desc.trim().is_empty() {
+                out.push_str(&format!("    /// {}\n", ws1(&op.desc).trim()));
+            }
+            if op.errors.is_empty() {
+                out.push_str("    /// Anticipated rejections: none declared.\n");
+            } else {
+                out.push_str(&format!(
+                    "    /// Anticipated rejections: {}.\n",
+                    op.errors.iter().map(|e| format!("`errors.yaml#/{}`", e)).collect::<Vec<_>>().join(", ")
+                ));
+            }
+            out.push_str(&format!("    {};\n", svc_op_signature(svc, op)));
+        }
+        out.push_str("}\n");
+    }
+    out
+}
+
+/// Emit `crates/infrastructure/src/generated/service_clients.rs` — the HTTP clients for the DERIVED
+/// `/services/<service>/<op>` surface plus the shared wire envelopes. One `Http<Base>Service` per
+/// service (compiled for every service so the wire path stays covered; the composition root only
+/// CONSTRUCTS a client for a service whose spec binding is `http`, see `service_bindings.rs`).
+fn emit_services_http_clients(model: &Model) -> String {
+    let services = parse_services(model);
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/services.yaml — do not edit by hand.\n\
+         // HTTP clients for the DERIVED `/services/<service>/<op>` surface (ADR-20260719-214500,\n\
+         // issue #26): every operation is a POST with the JSON call envelope `{ input, meta }`;\n\
+         // a 2xx answers `{ output }` (null for output-less operations) and an error answers the\n\
+         // kind-tagged `{ error }` envelope, so a remote failure rehydrates into the SAME\n\
+         // `DomainError` a local call would return (rejections keep their errors.yaml code +\n\
+         // context). Addresses come from `SERVICE_<NAME>_URL` — an address book, never a decision.\n\n\
+         use application::generated::services::*;\n\
+         use async_trait::async_trait;\n\
+         use domain::shared::errors::DomainError;\n",
+    );
+    out.push_str(
+        r#"
+/// Wire envelope of one service-operation POST: the spec-declared input + the call envelope.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct WireCall<I> {
+    pub input: I,
+    pub meta: ServiceCallMeta,
+}
+
+/// Wire envelope of a 2xx response (`output` is `null` for output-less operations).
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct WireOutput<O> {
+    pub output: O,
+}
+
+/// Wire envelope of a non-2xx response.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct WireErrorEnvelope {
+    pub error: WireError,
+}
+
+/// A `DomainError` on the wire, kind-tagged so the caller-side error is indistinguishable
+/// from a local call's.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WireError {
+    Rejected { code: String, context: serde_json::Value },
+    Invariant { message: String },
+    Repository { message: String },
+}
+
+impl From<&DomainError> for WireError {
+    fn from(e: &DomainError) -> Self {
+        match e {
+            DomainError::Rejected { code, context } => {
+                WireError::Rejected { code: code.clone(), context: context.clone() }
+            }
+            DomainError::Invariant(m) => WireError::Invariant { message: m.clone() },
+            DomainError::Repository(m) => WireError::Repository { message: m.clone() },
+        }
+    }
+}
+
+impl From<WireError> for DomainError {
+    fn from(e: WireError) -> Self {
+        match e {
+            WireError::Rejected { code, context } => DomainError::Rejected { code, context },
+            WireError::Invariant { message } => DomainError::Invariant(message),
+            WireError::Repository { message } => DomainError::Repository(message),
+        }
+    }
+}
+
+/// HTTP status of a service error: anticipated rejections are 422, invariants 409,
+/// dependency failures 502.
+pub fn wire_error_status(e: &WireError) -> u16 {
+    match e {
+        WireError::Rejected { .. } => 422,
+        WireError::Invariant { .. } => 409,
+        WireError::Repository { .. } => 502,
+    }
+}
+
+/// POST one service-operation call and decode the response envelopes back into the port's
+/// `Result`. Transport failures and undecodable bodies are `DomainError::Repository`.
+async fn post_call<I: serde::Serialize, O: serde::de::DeserializeOwned>(
+    http: &reqwest::Client,
+    base_url: &str,
+    path: &str,
+    input: I,
+    meta: &ServiceCallMeta,
+) -> Result<O, DomainError> {
+    let response = http
+        .post(format!("{base_url}{path}"))
+        .json(&WireCall { input, meta: meta.clone() })
+        .send()
+        .await
+        .map_err(|e| DomainError::Repository(format!("service call: transport error on {path}: {e}")))?;
+    let status = response.status().as_u16();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| DomainError::Repository(format!("service call: body read error on {path}: {e}")))?;
+    if (200..300).contains(&status) {
+        let decoded: WireOutput<O> = serde_json::from_str(&body)
+            .map_err(|e| DomainError::Repository(format!("service call: undecodable output on {path}: {e}")))?;
+        return Ok(decoded.output);
+    }
+    match serde_json::from_str::<WireErrorEnvelope>(&body) {
+        Ok(envelope) => Err(envelope.error.into()),
+        Err(_) => Err(DomainError::Repository(format!(
+            "service call: HTTP {status} on {path}: {}",
+            &body[..body.len().min(200)]
+        ))),
+    }
+}
+"#,
+    );
+    for svc in &services {
+        out.push_str(&format!(
+            "\n/// HTTP [`{base}Service`] over `POST {{base}}{example}` (address: `{var}`).\npub struct Http{base}Service {{\n    http: reqwest::Client,\n    base_url: String,\n}}\n\nimpl Http{base}Service {{\n    pub fn new(base_url: impl Into<String>) -> Self {{\n        Self {{ http: reqwest::Client::new(), base_url: base_url.into().trim_end_matches('/').to_string() }}\n    }}\n}}\n\n#[async_trait]\nimpl {base}Service for Http{base}Service {{\n",
+            base = svc.base,
+            example = svc_http_path(&svc.name, "<op>"),
+            var = svc_url_var(&svc.name),
+        ));
+        for op in &svc.ops {
+            let arg = if op.input.is_some() { "input" } else { "()" };
+            out.push_str(&format!(
+                "    {} {{\n        post_call(&self.http, &self.base_url, \"{}\", {}, meta).await\n    }}\n",
+                svc_op_signature(svc, op),
+                svc_http_path(&svc.name, &op.name),
+                arg
+            ));
+        }
+        out.push_str("}\n");
+    }
+    out
+}
+
+/// Emit `crates/infrastructure/src/generated/service_bindings.rs` — the composition-root topology
+/// resolvers (SPEC-OWNED binding, ADR-20260719-214500): one function per service. `binding: local`
+/// invokes the supplied in-process constructor; `binding: http` ignores it and constructs the
+/// generated client from `SERVICE_<NAME>_URL` (a missing address is a startup error). Flipping a
+/// service's binding is a reviewed spec change that regenerates ONLY this wiring.
+fn emit_service_bindings(model: &Model) -> String {
+    let services = parse_services(model);
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/services.yaml — do not edit by hand.\n\
+         // Composition-root topology bindings (ADR-20260719-214500, issue #26): the deployment\n\
+         // topology is DECIDED IN THE SPEC (`binding: local | http` per service) — environment\n\
+         // configuration carries only addresses (`SERVICE_<NAME>_URL`), never decisions. The\n\
+         // composition root supplies the in-process constructor for every service; whether it is\n\
+         // used (local) or replaced by the generated HTTP client (http) is this module's call.\n\n\
+         use application::generated::services::*;\n\
+         use std::sync::Arc;\n",
+    );
+    for svc in &services {
+        if svc.binding == "http" {
+            out.push_str(&format!(
+                "\n/// `{name}` — binding: http (services.yaml): the generated client over `{var}`;\n/// the in-process constructor is NOT wired. A missing address is a startup error.\npub fn {name}_service(\n    local: impl FnOnce() -> Arc<dyn {base}Service>,\n) -> Result<Arc<dyn {base}Service>, String> {{\n    let _ = local; // http binding — the in-process implementation is not used\n    let url = std::env::var(\"{var}\")\n        .map_err(|_| \"{var} is required: service '{name}' is bound http (services.yaml)\".to_string())?;\n    Ok(Arc::new(crate::generated::service_clients::Http{base}Service::new(url)))\n}}\n",
+                name = svc.name,
+                base = svc.base,
+                var = svc_url_var(&svc.name),
+            ));
+        } else {
+            out.push_str(&format!(
+                "\n/// `{name}` — binding: local (services.yaml): the in-process adapter the composition\n/// root supplies; zero HTTP inside the deployable.\npub fn {name}_service(\n    local: impl FnOnce() -> Arc<dyn {base}Service>,\n) -> Result<Arc<dyn {base}Service>, String> {{\n    Ok(local())\n}}\n",
+                name = svc.name,
+                base = svc.base,
+            ));
+        }
+    }
+    out
+}
+
+/// Emit `crates/server/src/generated/services_routes.rs` — the DERIVED `/services/<service>/<op>`
+/// axum routes, emitted ONLY for services declaring `expose: true` (ADR-20260719-214500). With no
+/// exposed service (the V0 default) the router is empty and state-generic; exposing one is a
+/// reviewed spec change that regenerates the typed POST handlers + `ServicesRouterState`.
+fn emit_services_routes(model: &Model) -> String {
+    let services = parse_services(model);
+    let exposed: Vec<&Svc> = services.iter().filter(|s| s.expose).collect();
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/services.yaml — do not edit by hand.\n\
+         // The DERIVED `/services/<service>/<op>` surface (ADR-20260719-214500, issue #26): emitted\n\
+         // ONLY for services declaring `expose: true`. All service operations are POSTs carrying the\n\
+         // JSON call envelope `{ input, meta }`; responses are `{ output }` or the kind-tagged\n\
+         // `{ error }` envelope (see infrastructure::generated::service_clients).\n",
+    );
+    if exposed.is_empty() {
+        out.push_str(
+            "\n/// No service declares `expose: true` (V0: one deployable, zero internal HTTP) — an empty\n/// router, mergeable into any state. Exposing a service is a reviewed spec change.\npub fn services_router<S: Clone + Send + Sync + 'static>() -> axum::Router<S> {\n    axum::Router::new()\n}\n",
+        );
+        return out;
+    }
+    out.push_str(
+        "\nuse application::generated::services::*;\nuse axum::extract::State;\nuse axum::response::IntoResponse;\nuse axum::routing::post;\nuse axum::Json;\nuse infrastructure::generated::service_clients::{wire_error_status, WireCall, WireError, WireErrorEnvelope, WireOutput};\nuse std::sync::Arc;\n\n/// The local ports behind the exposed `/services/*` routes.\n#[derive(Clone)]\npub struct ServicesRouterState {\n",
+    );
+    for svc in &exposed {
+        out.push_str(&format!("    pub {}: Arc<dyn {}Service>,\n", svc.name, svc.base));
+    }
+    out.push_str("}\n\n/// The exposed `/services/*` routes.\npub fn services_router(state: ServicesRouterState) -> axum::Router {\n    axum::Router::new()\n");
+    for svc in &exposed {
+        for op in &svc.ops {
+            out.push_str(&format!(
+                "        .route(\"{}\", post({}_{}))\n",
+                svc_http_path(&svc.name, &op.name),
+                svc.name,
+                op.name
+            ));
+        }
+    }
+    out.push_str("        .with_state(state)\n}\n");
+    for svc in &exposed {
+        for op in &svc.ops {
+            let input_ty = if op.input.is_some() {
+                format!("{}{}Input", svc.base, pascal_snake(&op.name))
+            } else {
+                "serde_json::Value".to_string()
+            };
+            let call_args = if op.input.is_some() { "call.input, &call.meta" } else { "&call.meta" };
+            out.push_str(&format!(
+                "\nasync fn {name}_{op}(\n    State(state): State<ServicesRouterState>,\n    Json(call): Json<WireCall<{input_ty}>>,\n) -> axum::response::Response {{\n    match state.{name}.{op}({call_args}).await {{\n        Ok(output) => Json(WireOutput {{ output }}).into_response(),\n        Err(e) => {{\n            let error = WireError::from(&e);\n            let status = axum::http::StatusCode::from_u16(wire_error_status(&error))\n                .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);\n            (status, Json(WireErrorEnvelope {{ error }})).into_response()\n        }}\n    }}\n}}\n",
+                name = svc.name,
+                op = op.name,
+                input_ty = input_ty,
+                call_args = call_args,
+            ));
+        }
+    }
+    out
+}
+
 /// Emit `crates/domain/src/generated/commands.rs` from commands.yaml — one serde `camelCase` payload
 /// struct per command (and command value object), the CQRS write-side input types (ADR-0034 #3). A
 /// command is a request the system may reject; its payload references scalars + entities.
@@ -8353,14 +8818,15 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
         ));
     }
     // placeOrder needs the CatalogReadRepository (server-side line pricing from the live catalog —
-    // the only price authority, rules.yaml#/ServerPriceAuthority) + PaymentGateway (create-intent
-    // seam) + PaymentProcessStateStore (the payment_process_manager row it opens and single-flights
-    // on, ADR-20260719-193500). Its CreatedPaymentIntent is no longer returned — the checkout reads
+    // the only price authority, rules.yaml#/ServerPriceAuthority) + the generated PaymentService
+    // port (services.yaml `payment.request`, issue #26) + PaymentProcessStateStore (the
+    // payment_process_manager row it opens and single-flights
+    // on, ADR-20260719-193500). Its created intent is no longer returned — the checkout reads
     // queries/paymentStatus (+ paymentStatusChanged) off the run row. The saga's event legs
     // (PaymentCaptured/PaymentFailed) run in the infrastructure ProcessManagerRunner, not here.
     if name == "placeOrder" {
         return Some((
-            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();\n        let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?.clone();\n        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?.clone();\n        let pm_state = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();\n".into(),
+            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();\n        let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?.clone();\n        let payments = ctx.data::<std::sync::Arc<dyn application::generated::services::PaymentService>>()?.clone();\n        let pm_state = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();\n".into(),
             // env.session_id rides into the spawn (disjoint capture of a Copy field): the anonymous
             // session scope for the paymentStatus read survives an app restart (#12).
             "application::commands::place_order(store.as_ref(), catalogs.as_ref(), payments.as_ref(), pm_state.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), &actor).await.map(|_| ())".into(),
@@ -8368,11 +8834,12 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
     }
     // The refund DECISION legs run on the RefundProcess orchestrator (application::process_managers::
     // refund), not an aggregate command handler: they need the RefundProcessStateStore (the pending
-    // refund_process_manager row they decide on) and — for the approval — the PaymentGateway that
-    // requests the Stripe refund (fail closed).
+    // refund_process_manager row they decide on) and — for the approval — the generated
+    // PaymentService port (services.yaml `payment.refund`) that requests the Stripe refund
+    // (fail closed).
     if name == "approveRefund" {
         return Some((
-            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();\n        let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?.clone();\n        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?.clone();\n".into(),
+            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();\n        let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?.clone();\n        let payments = ctx.data::<std::sync::Arc<dyn application::generated::services::PaymentService>>()?.clone();\n".into(),
             "application::process_managers::refund::approve_refund(store.as_ref(), refund_state.as_ref(), payments.as_ref(), cmd, &actor).await.map(|_| ())".into(),
         ));
     }
@@ -9039,7 +9506,8 @@ fn main() {
         ("rows.rs", emit_projection_rows(&model)),
         ("projectors.rs", emit_projectors(&model)),
         ("pm_state.rs", emit_pm_state_application(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\n".to_string()),
+        ("services.rs", emit_services_application(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod services;\n".to_string()),
     ] {
         let path = app_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
@@ -9057,9 +9525,28 @@ fn main() {
     }
     for (name, content) in [
         ("pm_state.rs", emit_pm_state_infrastructure(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod pm_state;\n".to_string()),
+        ("service_clients.rs", emit_services_http_clients(&model)),
+        ("service_bindings.rs", emit_service_bindings(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\n".to_string()),
     ] {
         let path = infra_gen.join(name);
+        if let Err(e) = fs::write(&path, content) {
+            eprintln!("✗ write {}: {}", path.display(), e);
+            std::process::exit(1);
+        }
+        eprintln!("✓ wrote {}", path.display());
+    }
+    // crates/server/src/generated/: the expose-gated /services/* routes from services.yaml (issue #26).
+    let srv_svc_gen = repo_root(&specs).join("crates/server/src/generated");
+    if let Err(e) = fs::create_dir_all(&srv_svc_gen) {
+        eprintln!("✗ create {}: {}", srv_svc_gen.display(), e);
+        std::process::exit(1);
+    }
+    for (name, content) in [
+        ("services_routes.rs", emit_services_routes(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod services_routes;\n".to_string()),
+    ] {
+        let path = srv_svc_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
             eprintln!("✗ write {}: {}", path.display(), e);
             std::process::exit(1);
@@ -9163,6 +9650,109 @@ mod tests {
         assert_eq!(pm_lookup_method("payment_intent_id"), "by_payment_intent");
         assert_eq!(pm_lookup_method("delivery_job_id"), "by_delivery_job");
         assert_eq!(pm_lookup_method("session_id"), "by_session");
+    }
+
+    /// A Model from inline YAML sources (path → content), for emitter tests that need spec shapes
+    /// the committed catalog does not exercise (http binding, expose: true).
+    fn inline_model(files: &[(&str, &str)]) -> Model {
+        let mut defs = BTreeMap::new();
+        for (path, content) in files {
+            let parsed: Value = serde_yaml::from_str(content).expect("test yaml parses");
+            defs.insert(path.to_string(), strip_meta(parsed));
+        }
+        Model { defs }
+    }
+
+    const SVC_HTTP_EXPOSED: &str = r#"
+geocoding:
+  description: "Test service."
+  operations:
+    resolve_address:
+      description: "Resolve one address."
+      input:
+        query: { type: string }
+      output:
+        latitude: { type: number }
+      errors: []
+    warm_cache:
+      description: "No input, no output."
+      errors: []
+  binding: http
+  expose: true
+  implementations:
+    nominatim:
+      routes:
+        resolve_address: 'POST /adapters/nominatim/search'
+        warm_cache: 'POST /adapters/nominatim/warm'
+"#;
+
+    #[test]
+    fn services_trait_signatures_follow_the_catalog() {
+        let model = inline_model(&[("services.yaml", SVC_HTTP_EXPOSED)]);
+        let out = emit_services_application(&model);
+        assert!(out.contains("pub trait GeocodingService: Send + Sync {"), "{out}");
+        assert!(
+            out.contains("async fn resolve_address(&self, input: GeocodingResolveAddressInput, meta: &ServiceCallMeta) -> Result<GeocodingResolveAddressOutput, DomainError>;"),
+            "{out}"
+        );
+        // Input-less + output-less operation: no input parameter, unit result.
+        assert!(
+            out.contains("async fn warm_cache(&self, meta: &ServiceCallMeta) -> Result<(), DomainError>;"),
+            "{out}"
+        );
+        assert!(out.contains("pub struct GeocodingResolveAddressInput {\n    pub query: String,\n}"), "{out}");
+    }
+
+    #[test]
+    fn services_http_client_derives_paths_and_kebab_case() {
+        let model = inline_model(&[("services.yaml", SVC_HTTP_EXPOSED)]);
+        let out = emit_services_http_clients(&model);
+        assert!(out.contains("pub struct HttpGeocodingService"), "{out}");
+        assert!(out.contains("\"/services/geocoding/resolve-address\""), "{out}");
+        assert!(out.contains("post_call(&self.http, &self.base_url, \"/services/geocoding/warm-cache\", (), meta).await"), "{out}");
+    }
+
+    #[test]
+    fn service_bindings_honor_the_spec_topology() {
+        let http = inline_model(&[("services.yaml", SVC_HTTP_EXPOSED)]);
+        let out = emit_service_bindings(&http);
+        assert!(out.contains("SERVICE_GEOCODING_URL"), "{out}");
+        assert!(out.contains("HttpGeocodingService::new(url)"), "{out}");
+        let local = inline_model(&[(
+            "services.yaml",
+            "payment:\n  operations:\n    request:\n      errors: []\n  binding: local\n  expose: false\n",
+        )]);
+        let out = emit_service_bindings(&local);
+        assert!(out.contains("pub fn payment_service("), "{out}");
+        assert!(out.contains("Ok(local())"), "{out}");
+        assert!(!out.contains("SERVICE_PAYMENT_URL"), "{out}");
+    }
+
+    #[test]
+    fn services_routes_are_expose_gated() {
+        let none = inline_model(&[(
+            "services.yaml",
+            "payment:\n  operations:\n    request:\n      errors: []\n  binding: local\n  expose: false\n",
+        )]);
+        let out = emit_services_routes(&none);
+        assert!(out.contains("pub fn services_router<S: Clone + Send + Sync + 'static>() -> axum::Router<S> {"), "{out}");
+        assert!(!out.contains("ServicesRouterState"), "{out}");
+        let exposed = inline_model(&[("services.yaml", SVC_HTTP_EXPOSED)]);
+        let out = emit_services_routes(&exposed);
+        assert!(out.contains("pub struct ServicesRouterState {\n    pub geocoding: Arc<dyn GeocodingService>,\n}"), "{out}");
+        assert!(out.contains(".route(\"/services/geocoding/resolve-address\", post(geocoding_resolve_address))"), "{out}");
+        assert!(out.contains("Json(call): Json<WireCall<GeocodingResolveAddressInput>>"), "{out}");
+    }
+
+    #[test]
+    fn svc_names_derive_mechanically() {
+        assert_eq!(pascal_snake("payment"), "Payment");
+        assert_eq!(pascal_snake("offer_job"), "OfferJob");
+        assert_eq!(pascal_snake("verify_phone_otp"), "VerifyPhoneOtp");
+        assert_eq!(svc_http_path("payment", "request"), "/services/payment/request");
+        assert_eq!(svc_http_path("delivery", "offer_job"), "/services/delivery/offer-job");
+        assert_eq!(svc_url_var("payment"), "SERVICE_PAYMENT_URL");
+        assert_eq!(svc_url_var("catalog_sync"), "SERVICE_CATALOG_SYNC_URL");
     }
 
     #[test]

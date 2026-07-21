@@ -26,7 +26,11 @@ Single crate, one binary (`src/main.rs`), organized in sections that mirror the 
   "schema", ADR-0002) and returns the `Issue` set + `Coverage`.
 - **emitters** — `emit_translations_json`, `emit_views_sql` + `emit_views_markdown` (the `database.md` §2
   injection), `emit_structurizr` + `emit_mermaid` (C4), `emit_schema` (GraphQL SDL), `emit_documentation`
-  (md) + `emit_documentation_html` (html); `build_context_map` is the bounded-context engine.
+  (md) + `emit_documentation_html` (html); `build_context_map` is the bounded-context engine. Rust-code
+  emitters target `crates/**/generated`: domain types (scalars/entities/events/commands/errors/lifecycles),
+  projection rows/projectors + PM state stores (app + Pg, item 5), the service catalog (item 4, issue #26:
+  `emit_services_application` traits, `emit_services_http_clients` + `emit_service_bindings`
+  (infrastructure), expose-gated `emit_services_routes` (server)), and the async-graphql layer.
 - **main** — orchestration + the coverage report printed by validate/generate.
 
 ## Output policy

@@ -1,7 +1,25 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (03:50 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (04:35 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #26: service-catalog emitters — the ports are GENERATED
+> (ADR-20260721-043033, implements ADR-20260719-214500, codegen-roadmap item 4).** Four new
+> emitters over `specs/services.yaml`: `application/src/generated/services.rs` (per-service
+> `<Base>Service` trait + typed `<Op>Input`/`Output` structs + the `ServiceCallMeta` ENVELOPE —
+> correlation_id + business `refs`, the ADR-0041 move applied to service calls),
+> `infrastructure/src/generated/service_clients.rs` (`Http<Base>Service` per service over the
+> derived `POST /services/<svc>/<op>` surface, lossless `DomainError` wire round-trip),
+> `infrastructure/src/generated/service_bindings.rs` (spec-owned `binding: local | http`
+> resolvers; http reads `SERVICE_<NAME>_URL`), and the expose-gated
+> `server/src/generated/services_routes.rs` (empty router in V0; http/expose branches covered by
+> codegen unit tests). Hand-written `PaymentGateway` → generated `PaymentService`
+> (placeOrder + refund PM + Stripe outbound adapter, whose intent `metadata` now copies
+> `meta.refs` verbatim) and `DeliveryPartner` → `DeliveryService` (dispatch PM + runner + noop)
+> are MIGRATED AT PARITY and deleted. ⏳ `identity` migration deferred on a CATALOG GAP needing a
+> product-owner spec change: `identity.verify_email_token.output` lacks the proven `email` the
+> handler records (never client input), and `locale` inputs should be `nullable: true` — see the
+> ADR. `make rust` green: workspace builds, all tests pass, validate 0 errors.
 
 > ✅ **2026-07-21 — #27: PM state-table rows and Postgres stores are GENERATED
 > (ADR-20260721-031734, codegen-roadmap item 5).** Two new emitters in `tools/codegen-rs` over

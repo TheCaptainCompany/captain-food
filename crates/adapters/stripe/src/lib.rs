@@ -4,8 +4,9 @@
 //!   mapping, and the idempotent [`acl::StripeWebhookIngestor`] over the `application` EventStore port.
 //! - `http` — the thin axum shell exposing `POST /adapters/stripe/webhooks`; mount [`routes`] into the monolith
 //!   server, or run the standalone `stripe-webhook` binary (see `main.rs`) as its own web service.
-//! - [`outbound`] — the OUTBOUND Stripe client: [`StripePaymentGateway`], the real `PaymentGateway`
-//!   adapter (create PaymentIntent with our `orderId`/`restaurantId` metadata, request refunds).
+//! - [`outbound`] — the OUTBOUND Stripe client: [`StripePaymentGateway`], the real adapter behind the
+//!   generated `PaymentService` port (services.yaml `payment`, issue #26): create PaymentIntent with
+//!   the envelope's `orderId`/`restaurantId` metadata refs, request refunds.
 
 pub mod acl;
 mod http;

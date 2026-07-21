@@ -11,9 +11,8 @@ use std::sync::Arc;
 use async_graphql::Schema;
 use application::journal::CommandJournal;
 use application::pm_state::{PaymentProcessStateStore, RefundProcessStateStore};
-use application::ports::{
-    AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier, PaymentGateway,
-};
+use application::generated::services::PaymentService;
+use application::ports::{AuthProviderGateway, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository, DeliveryReadRepository,
     OrderReadRepository, PricingPolicyReadRepository, ProspectionReadRepository,
@@ -54,9 +53,10 @@ pub struct WriteDeps {
     pub ownership: Arc<dyn GoogleOwnershipVerifier>,
     pub gbp_probe: Arc<dyn GbpOrderLinkProbe>,
     pub auth_provider: Arc<dyn AuthProviderGateway>,
-    /// The Stripe create-intent seam `placeOrder` needs (fail-closed stand-in until the real Stripe
-    /// adapter lands — a checkout is declined, never silently "paid").
-    pub payments: Arc<dyn PaymentGateway>,
+    /// The generated `payment` service port (services.yaml, issue #26) `placeOrder`/`approveRefund`
+    /// call (fail-closed stand-in until the real Stripe adapter is configured — a checkout is
+    /// declined, never silently "paid").
+    pub payments: Arc<dyn PaymentService>,
     /// The `payment_process_manager` state rows `placeOrder` opens (AWAITING_PAYMENT_RESULT) and
     /// single-flights concurrent checkouts of the same cart on (ADR-20260719-193500).
     pub pm_state: Arc<dyn PaymentProcessStateStore>,

@@ -4,7 +4,8 @@
 //!
 //! - `OrderMarkedReady` → for a DELIVERY order (read from OrderTracking), deliver the
 //!   `DeliveryRequested` birth to `DeliveryJob-<uuidv5(orderId)>` (the DETERMINISTIC id IS the
-//!   idempotency key), offer the job through the [`DeliveryPartner`] port, row → OFFERED.
+//!   idempotency key), offer the job through the generated [`DeliveryService`] port (services.yaml
+//!   `delivery.offer_job`, issue #26), row → OFFERED.
 //! - `DeliveryAcceptedByPartner` / `DeliveryRejectedByPartner` (inbound, recorded by the DeliveryJob
 //!   aggregate) → advance the run: acceptance → ACCEPTED; a decline re-offers the job up to
 //!   [`OFFER_ATTEMPT_CAP`] TOTAL offers (V0 single partner — the re-offer targets the same partner;
@@ -31,7 +32,8 @@ use domain::shared::errors::DomainError;
 use serde_json::json;
 
 use crate::pm_state::{DeliveryDispatchRow, DeliveryDispatchStateStore};
-use crate::ports::{is_version_conflict, DeliveryPartner, EventStore};
+use crate::generated::services::{DeliveryOfferJobInput, DeliveryService, ServiceCallMeta};
+use crate::ports::{is_version_conflict, EventStore};
 use crate::process_managers::{
     delivery_job_stream, saga_actor, Outcome, TriggerEnvelope,
 };
@@ -81,7 +83,7 @@ pub async fn on_order_marked_ready(
     store: &dyn EventStore,
     state: &dyn DeliveryDispatchStateStore,
     orders: &dyn OrderReadRepository,
-    partner: &dyn DeliveryPartner,
+    partner: &dyn DeliveryService,
     event: &OrderMarkedReady,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
@@ -155,8 +157,13 @@ pub async fn on_order_marked_ready(
             )
             .await?;
     }
-    // call delivery_partner.offer_job (the no-op stand-in logs until the avelo37 ACL lands).
-    partner.offer_job(&requested).await?;
+    // call delivery.offer_job (services.yaml; the no-op stand-in logs until the avelo37 ACL lands).
+    partner
+        .offer_job(
+            DeliveryOfferJobInput { job: requested.clone() },
+            &ServiceCallMeta::new(env.correlation_id),
+        )
+        .await?;
     // state.set — the run is OFFERED; the birth offer is attempt 1 of the bounded policy.
     state
         .upsert(&DeliveryDispatchRow {
@@ -199,7 +206,7 @@ pub async fn on_delivery_accepted_by_partner(
 pub async fn on_delivery_rejected_by_partner(
     store: &dyn EventStore,
     state: &dyn DeliveryDispatchStateStore,
-    partner: &dyn DeliveryPartner,
+    partner: &dyn DeliveryService,
     event: &DeliveryRejectedByPartner,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
@@ -222,7 +229,12 @@ pub async fn on_delivery_rejected_by_partner(
             DomainEvent::DeliveryRequested(r) => Some(r.clone()),
             _ => None,
         }) {
-            partner.offer_job(&requested).await?;
+            partner
+                .offer_job(
+                    DeliveryOfferJobInput { job: requested },
+                    &ServiceCallMeta::new(env.correlation_id),
+                )
+                .await?;
         }
         state
             .upsert(&DeliveryDispatchRow {
@@ -345,7 +357,7 @@ pub async fn on_delivery_completed(
 mod tests {
     use super::*;
     use crate::pm_state::mem::MemDeliveryDispatchState;
-    use crate::ports::NoopDeliveryPartner;
+    use crate::ports::NoopDeliveryService;
     use crate::process_managers::test_support::{envelope, MemStore};
     use crate::queries::{OrderFilter, OrderTrackingRow};
     use async_trait::async_trait;
@@ -512,7 +524,7 @@ mod tests {
     async fn given_offered(store: &MemStore, state: &MemDeliveryDispatchState) {
         given_ready(store);
         let orders = FakeOrders { row: Some(tracking_row(ServiceType::DELIVERY)) };
-        on_order_marked_ready(store, state, &orders, &NoopDeliveryPartner, &ready(), &envelope())
+        on_order_marked_ready(store, state, &orders, &NoopDeliveryService, &ready(), &envelope())
             .await
             .unwrap();
     }
@@ -530,7 +542,7 @@ mod tests {
             &store,
             &state,
             &orders,
-            &NoopDeliveryPartner,
+            &NoopDeliveryService,
             &ready(),
             &envelope(),
         )
@@ -560,7 +572,7 @@ mod tests {
             &store,
             &state,
             &orders,
-            &NoopDeliveryPartner,
+            &NoopDeliveryService,
             &ready(),
             &envelope(),
         )
@@ -586,7 +598,7 @@ mod tests {
             &store,
             &state,
             &orders,
-            &NoopDeliveryPartner,
+            &NoopDeliveryService,
             &ready(),
             &envelope(),
         )
@@ -646,7 +658,7 @@ mod tests {
         let outcome = on_delivery_rejected_by_partner(
             &store,
             &state,
-            &NoopDeliveryPartner,
+            &NoopDeliveryService,
             &declined("No courier available"),
             &envelope(),
         )
@@ -673,7 +685,7 @@ mod tests {
         on_delivery_rejected_by_partner(
             &store,
             &state,
-            &NoopDeliveryPartner,
+            &NoopDeliveryService,
             &declined("No courier available"),
             &envelope(),
         )
@@ -713,7 +725,7 @@ mod tests {
             let outcome = on_delivery_rejected_by_partner(
                 &store,
                 &state,
-                &NoopDeliveryPartner,
+                &NoopDeliveryService,
                 &declined("No courier available"),
                 &envelope(),
             )
@@ -729,7 +741,7 @@ mod tests {
         let outcome = on_delivery_rejected_by_partner(
             &store,
             &state,
-            &NoopDeliveryPartner,
+            &NoopDeliveryService,
             &declined("Storm — no couriers tonight"),
             &envelope(),
         )
@@ -761,7 +773,7 @@ mod tests {
         let again = on_delivery_rejected_by_partner(
             &store,
             &state,
-            &NoopDeliveryPartner,
+            &NoopDeliveryService,
             &declined("No courier available"),
             &envelope(),
         )

@@ -2207,7 +2207,7 @@ impl MutationRoot {
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?.clone();
-        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?.clone();
+        let payments = ctx.data::<std::sync::Arc<dyn application::generated::services::PaymentService>>()?.clone();
         let pm_state = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();
         let payload_json = command_payload(&input)?;
         let cmd: domain::generated::commands::PlaceOrder = serde_json::from_value(payload_json.clone())
@@ -2750,7 +2750,7 @@ impl MutationRoot {
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
         let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?.clone();
-        let payments = ctx.data::<std::sync::Arc<dyn application::ports::PaymentGateway>>()?.clone();
+        let payments = ctx.data::<std::sync::Arc<dyn application::generated::services::PaymentService>>()?.clone();
         let payload_json = command_payload(&input)?;
         let cmd: domain::generated::commands::ApproveRefund = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;

@@ -149,97 +149,30 @@ pub trait RestaurantRepository: Send + Sync {
     async fn exists(&self, id: RestaurantId) -> Result<bool, DomainError>;
 }
 
-/// What [`PaymentGateway::create_payment_intent`] hands back: the Stripe PaymentIntent reference plus
-/// the client secret the frontend needs to confirm the payment — the `placeOrder` mutation payload's
-/// server-resolved values (api.yaml).
-#[derive(Debug, Clone, PartialEq)]
-pub struct CreatedPaymentIntent {
-    pub payment_intent_id: domain::generated::scalars::PaymentIntentId,
-    pub client_secret: String,
-}
+// The payment / delivery-partner ports are GENERATED from the service catalog now (issue #26,
+// ADR-20260719-214500): `crate::generated::services::{PaymentService, DeliveryService}` replaced the
+// hand-written `PaymentGateway` / `DeliveryPartner` traits (services.yaml `payment` / `delivery`).
+// The Stripe correlation ids the webhook ACL reads back (`orderId`/`restaurantId`/`cartId`) travel on
+// the `ServiceCallMeta` ENVELOPE — never in the spec-declared operation input.
 
-/// Everything [`PaymentGateway::create_payment_intent`] needs: the server-priced amount, the
-/// customer's payment method, and OUR correlation ids. The ids are REQUIRED because the Stripe
-/// webhook ACL (adapters/stripe acl.rs) can only map an inbound `payment_intent.*` fact back onto
-/// our aggregates through the PaymentIntent's `metadata` (`restaurantId`/`orderId`, plus `cartId`
-/// for traceability) — Stripe cannot know them unless we set them at creation.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PaymentIntentRequest {
-    pub amount: domain::generated::entities::Money,
-    pub payment_method_id: String,
-    pub order_id: domain::generated::scalars::OrderId,
-    pub restaurant_id: domain::generated::scalars::RestaurantId,
-    pub cart_id: domain::generated::scalars::CartId,
-}
+/// No-op [`crate::generated::services::DeliveryService`] stand-in until the avelo37 ACL lands: the
+/// offer is LOGGED (so a pending dispatch is observable, mirroring the runner's skip log) and
+/// reported successful — the job stays PENDING on its stream, open to independent riders, and the run
+/// row's OFFERED/FAILED statuses flag the follow-up (FAILED = the bounded re-offer cap was exhausted,
+/// ADR-20260720-004556).
+pub struct NoopDeliveryService;
 
-/// Stripe checkout seam for the PlaceOrder saga's first leg (`commands.yaml#/PlaceOrder` →
-/// `events.yaml#/PaymentIntentCreated`, actors.yaml PlaceOrderProcess) and RefundProcess's outbound
-/// refund call (`specs/processmanager.yaml#/RefundProcess`, port `payment_gateway`). The adapter owns
-/// the Stripe calls; the handlers only record the outcomes. A SYNCHRONOUS decline must be returned as
-/// the canonical `errors.yaml#/PaymentDeclined` rejection (`DomainError::Invariant("PaymentDeclined: …")`).
-/// The payment OUTCOME (`PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`) is INBOUND from Stripe
-/// webhooks (CLAUDE.md "Commands vs inbound events") and never flows through this port. Until the real
-/// Stripe adapter lands the composition root injects a fail-closed stand-in (never silently accepts).
 #[async_trait]
-pub trait PaymentGateway: Send + Sync {
-    /// Create the PaymentIntent for the request's amount against its payment method, tagging the
-    /// intent with our `orderId`/`restaurantId`/`cartId` metadata so the inbound webhook facts can
-    /// be mapped back onto our aggregates.
-    async fn create_payment_intent(
-        &self,
-        request: &PaymentIntentRequest,
-    ) -> Result<CreatedPaymentIntent, DomainError>;
-
-    /// Request a (possibly partial) refund of the captured PaymentIntent (RefundProcess
-    /// `approve_refund`); Stripe settles asynchronously with the inbound `PaymentRefunded` fact.
-    ///
-    /// PROVIDED, fail-closed: existing implementations (the composition root's stand-in, test fakes
-    /// owned by concurrent workstreams) keep compiling through this trait extension, and none of them
-    /// can silently pretend to refund — the default DECLINES with the same canonical rejection style
-    /// as the fail-closed create-intent stand-in. The real Stripe adapter overrides it.
-    async fn request_refund(
-        &self,
-        payment_intent_id: &domain::generated::scalars::PaymentIntentId,
-        amount: &domain::generated::entities::Money,
-    ) -> Result<(), DomainError> {
-        Err(DomainError::Invariant(format!(
-            "PaymentDeclined: refund gateway not configured (fail-closed default; intent {}, \
-             amount {} {}) — the real refund adapter is the Stripe integration workstream's",
-            payment_intent_id.0, amount.amount_cents.0, amount.currency.0
-        )))
-    }
-}
-
-/// Outbound delivery-partner port (`specs/processmanager.yaml#/DeliveryDispatchProcess`, port
-/// `delivery_partner`): offer a delivery job to the partner (e.g. the avelo37 ACL) and/or publish it
-/// to independent riders. The partner's answers come BACK as the inbound facts
-/// (`DeliveryAcceptedByPartner`/`DeliveryRejectedByPartner`/`DeliveryStatusUpdated`) recorded by the
-/// DeliveryJob aggregate — never through this port's return value.
-#[async_trait]
-pub trait DeliveryPartner: Send + Sync {
-    /// Offer the job (its `DeliveryRequested` birth fact carries pickup/dropoff) for fulfilment.
+impl crate::generated::services::DeliveryService for NoopDeliveryService {
     async fn offer_job(
         &self,
-        job: &domain::generated::events::DeliveryRequested,
-    ) -> Result<(), DomainError>;
-}
-
-/// No-op [`DeliveryPartner`] stand-in until the avelo37 ACL lands: the offer is LOGGED (so a pending
-/// dispatch is observable, mirroring the runner's skip log) and reported successful — the job stays
-/// PENDING on its stream, open to independent riders, and the run row's OFFERED/FAILED statuses flag
-/// the follow-up (FAILED = the bounded re-offer cap was exhausted, ADR-20260720-004556).
-pub struct NoopDeliveryPartner;
-
-#[async_trait]
-impl DeliveryPartner for NoopDeliveryPartner {
-    async fn offer_job(
-        &self,
-        job: &domain::generated::events::DeliveryRequested,
+        input: crate::generated::services::DeliveryOfferJobInput,
+        _meta: &crate::generated::services::ServiceCallMeta,
     ) -> Result<(), DomainError> {
         eprintln!(
             "delivery-partner[noop]: job {} (order {}) offered nowhere — the avelo37 ACL is the \
              integration workstream's; independent riders can still accept from the job stream",
-            job.delivery_job_id.0, job.order_id.0
+            input.job.delivery_job_id.0, input.job.order_id.0
         );
         Ok(())
     }

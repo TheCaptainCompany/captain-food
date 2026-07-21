@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — catalog (`specs/services.yaml`) + validator wiring landed 2026-07-19; trait/client/route EMITTERS still to come (codegen-roadmap item 4).
+Accepted — catalog (`specs/services.yaml`) + validator wiring landed 2026-07-19; the trait/client/binding/route EMITTERS landed 2026-07-21 with issue #26 (ADR-20260721-043033; `identity` migration + C4/observability catalog binding remain).
 
 ## Context
 
