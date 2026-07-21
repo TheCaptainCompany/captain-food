@@ -67,21 +67,41 @@ section), and the org fields **Priority + Value Size + Impact + Effort**, using 
 above. The product owner adjusts its row position in the project if the default bucket placement
 isn't enough.
 
-## Claim protocol (multi-session safety)
+## Claim protocol (multi-session safety) — claim → draft PR → supervised auto-merge
 
-1. **Before any work**: add the **`status/in-progress`** label to the issue AND post a claim
-   comment naming the branch (`NN-slug`) you are opening. The label is the atomic, API-visible
-   claim; the comment covers the window before the PR exists.
+(ADR-20260720-233000, amended by ADR-20260721-042018.)
+
+1. **Claim = label + comment + branch + draft PR, immediately** (before any implementation work):
+   - add the **`status/in-progress`** label AND post a claim comment naming the **`NN-slug`**
+     branch (issue number first). The label is the atomic, API-visible claim.
+   - create branch `NN-slug` from latest `main`, push it, and **open a draft PR
+     `NN-slug → main` right away** — body starting with **`Closes #NN`** plus the intended
+     approach. From minute one the Development sidebar shows the branch + PR, the board flips to
+     In progress (native workflow), and the stale-claim reaper sees linked-PR activity.
+     Draft status is the interlock: GitHub refuses auto-merge on a draft, so the early PR can
+     never merge half-done work.
 2. **Never work an issue that carries `status/in-progress`** — pick the next unclaimed rank.
-3. Branch names are **`NN-slug`** (issue number first); the PR body carries **`Closes #NN`** —
-   from then on GitHub's Development sidebar shows everyone the branch + PR for the issue.
-4. Merge (or close) ends the claim naturally (the issue closes). Abandoning? Remove the label.
-5. **Board mirror (native Project workflows — no label trigger exists)**: enable
+3. **Work happens on the PR**: push commits to `NN-slug`; the `ci` workflow gates every push.
+4. **Completion = ready + auto-merge + supervision** (never end at "pushed, CI pending"):
+   local gates green (`make rust`), STATUS.md/ADR updated in the same change, then mark the PR
+   **ready for review**, **enable auto-merge** (repo default merge method), and **supervise until
+   MERGED** — watch the checks, fix and push on any failure. The merge auto-closes the issue
+   (`Closes #NN`), which ends the claim. Checks can't be made green / scope exploded? Comment the
+   diagnosis on the PR — don't go silent.
+5. Merge (or close) ends the claim naturally. Abandoning? Remove the label and close the draft PR.
+6. **Board mirror (native Project workflows — no label trigger exists)**: enable
    "Pull request linked to issue → Status: In progress", "Pull request merged → Done" and
-   "Item closed → Done". The Status column therefore flips at PR-link time; during the short
-   claim→PR window the claim is visible as the `status/in-progress` label chip + claim comment.
+   "Item closed → Done". With the PR created at claim time, the Status column flips at claim time.
    Sessions never write the Status column directly — the label is the authoritative claim
    (full label→Status sync would need a PAT-scoped Action; deliberately not adopted).
+
+**Auto-merge security posture** (analysis in ADR-20260721-042018): repo-level "Allow auto-merge"
+grants no merge authority — it must be armed per-PR by a **write-access** user and merges under the
+same `main` protection rules as a manual merge; fork/outsider PRs can't arm it and can't merge, so
+a "fake empty PR" from outside just sits open. The load-bearing config is the **`main` ruleset**:
+it MUST require the **`codegen`** status check (build + tests + validator + drift) — without a
+required check, an armed auto-merge fires immediately. Residual (deliberate) trade: any
+write-access session lands unreviewed code once CI is green — the executable gates are the review.
 
 ## Stale-claim reaper
 
