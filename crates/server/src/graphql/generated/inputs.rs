@@ -1079,8 +1079,8 @@ pub struct PaymentStatusChangedSubscriptionInput {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderStatusChangedSubscriptionInput {
-    #[graphql(name = "correlationId")]
-    pub correlation_id: CorrelationId,
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
 }
 
 /// A single cart line as expressed by the customer. References the catalog by id; the handler resolves names/prices/tax from the current catalog and computes totals. Client-supplied prices are NEVER trusted.

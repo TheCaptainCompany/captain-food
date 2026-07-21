@@ -2989,11 +2989,12 @@ Order tracking by id; owning customer or the restaurant/admin. Ownership enforce
 <a id="subscription-orderstatuschanged"></a>
 #### 🔔 Subscription: [`orderStatusChanged`](#subscription-orderstatuschanged)
 
-Order status change events (for the owning customer or restaurant).
+Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership is resolver-side per row: a CUSTOMER caller must BE the order's customer; ADMIN sees any order; RESTAURANT/RESTAURANT_ACCOUNT paths are trusted like the `orders` query until a caller↔restaurant binding exists (recorded gap). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
 
-- **Input**: 🧩 `OrderStatusChangedSubscriptionInput!` — `correlationId`: [🔤 `CorrelationId`](#scalar-correlationid)
+
+- **Input**: 🧩 `OrderStatusChangedSubscriptionInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
 - **Streams**: [🧩 `Order`](#type-order)
-- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT · **slice** V0
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
 ### 🧩 Output types _(3)_
 
@@ -4220,14 +4221,13 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
 | <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
-### 🔤 Scalars _(18)_
+### 🔤 Scalars _(17)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-optionid"></a>🔤 `OptionId` | string _uuid_ |  |
 | <a id="scalar-cartid"></a>🔤 `CartId` | string _uuid_ |  |
 | <a id="scalar-cartlineid"></a>🔤 `CartLineId` | string _uuid_ | Identifies a line within a cart, used to edit its quantity or remove it. |
-| <a id="scalar-correlationid"></a>🔤 `CorrelationId` | string _uuid_ | Correlates a command with the events/state it produces. Returned by every mutation payload so the client can track the outcome via the read side (matches domain_events.correlation_id).  |
 | <a id="scalar-paymentintentid"></a>🔤 `PaymentIntentId` | string | Stripe PaymentIntent id (provider reference). Example: 'pi_3Nabc...'. |
 | <a id="scalar-refundid"></a>🔤 `RefundId` | string | Stripe Refund id (provider reference). Example: 're_3Nabc...'. |
 | <a id="scalar-moneycents"></a>🔤 `MoneyCents` | integer | Monetary amount in minor units (e.g. cents). |
@@ -7383,7 +7383,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(37)_
+### 🔤 Scalars _(38)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -7393,6 +7393,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-offerid"></a>🔤 `OfferId` | string _uuid_ | A purchasable offer with its own price (HubRise: SKU). |
 | <a id="scalar-orderid"></a>🔤 `OrderId` | string _uuid_ |  |
 | <a id="scalar-customerid"></a>🔤 `CustomerId` | string _uuid_ |  |
+| <a id="scalar-correlationid"></a>🔤 `CorrelationId` | string _uuid_ | Correlates a command with the events/state it produces. Returned by every mutation payload so the client can track the outcome via the read side (matches domain_events.correlation_id).  |
 | <a id="scalar-causeid"></a>🔤 `CauseId` | string _uuid_ | Causation id: the id of the message/event that directly caused this one (matches domain_events.cause_id). Threads a cause→effect chain through the log; null for a root command.  |
 | <a id="scalar-messageid"></a>🔤 `MessageId` | string _uuid_ | Unique id of one command submission — the idempotency key of the write path (command_journal pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.  |
 | <a id="scalar-traceid"></a>🔤 `TraceId` | string `^[0-9a-f]{32}$` | W3C trace-id (from the inbound `traceparent` header, or server-started). Response-only technical tracing identifier — never client-suppliable, never a substitute for correlationId (P-02).  |

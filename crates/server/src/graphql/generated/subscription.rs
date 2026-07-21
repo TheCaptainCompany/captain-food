@@ -171,16 +171,49 @@ impl SubscriptionRoot {
             }
         })
     }
-    /// Order status change events (for the owning customer or restaurant).
-    #[graphql(name = "orderStatusChanged", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_customer_restaurant_account_restaurant")]
+    /// Order status change events for ONE order, tracked by orderId — what the confirmation screen has in hand (#14, ADR-20260720-220000; replaces the pre-acceptance-first correlationId key). Ownership is resolver-side per row: a CUSTOMER caller must BE the order's customer; ADMIN sees any order; RESTAURANT/RESTAURANT_ACCOUNT paths are trusted like the `orders` query until a caller↔restaurant binding exists (recorded gap). No guest session scope on Order reads (ADR-20260720-213000 §3 — guests follow paymentStatusChanged until they verify a phone).
+    #[graphql(name = "orderStatusChanged", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn order_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OrderStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Order>>> {
         let bus = ctx.data::<infrastructure::EventBus>()?.clone();
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?.clone();
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?.clone();
-        let wanted = input.correlation_id.0;
+        // Tracked by orderId (#14, ADR-20260720-220000) — the key the confirmation screen has —
+        // replacing the pre-acceptance-first correlationId convention.
+        let order_id: domain::generated::scalars::OrderId = input.order_id.into();
+        let wanted_stream = format!("Order-{}", order_id.0);
+        // Ownership scope, resolved ONCE at setup and applied per resolved row (the row may not be
+        // projected yet when the confirmation screen subscribes): ADMIN sees any order; a CUSTOMER
+        // caller must BE the order's customer (auth_ref → Customer); RESTAURANT/RESTAURANT_ACCOUNT
+        // paths are trusted like the `orders` query until a caller↔restaurant binding exists
+        // (recorded gap, ADR-20260720-220000). Guests: no session scope on Order reads
+        // (ADR-20260720-213000 §3).
+        let role = ctx.data_opt::<crate::graphql::acl::RequestRole>().copied();
+        let caller_customer: Option<domain::generated::scalars::CustomerId> = match ctx
+            .data_opt::<crate::auth::Principal>()
+            .and_then(|p| p.user_id.clone())
+        {
+            Some(auth_ref) => {
+                let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();
+                customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|c| c.customer_id)
+            }
+            None => None,
+        };
         let mut rx = bus.subscribe();
         Ok(async_stream::stream! {
             use domain::generated::scalars as ds;
+            let owned = |row: &application::queries::OrderTrackingRow| match role {
+                Some(crate::graphql::acl::RequestRole::Admin) => true,
+                Some(crate::graphql::acl::RequestRole::Customer) => {
+                    caller_customer.is_some() && caller_customer == row.customer_id
+                }
+                // RESTAURANT / RESTAURANT_ACCOUNT — the only other paths the roles list admits.
+                _ => true,
+            };
             // The last state pushed to this subscriber: (status, row updated_at). The timestamp
             // advances on EVERY projected fold, so "identical to last" distinguishes a not-yet-folded
             // event (re-poll briefly) from a fold that truly left the status unchanged (dedupe).
@@ -193,25 +226,17 @@ impl SubscriptionRoot {
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
-                if evt.correlation_id != wanted {
+                // Only THIS order's stream moves this subscription (`Order-<uuid>`).
+                if evt.stream_name != wanted_stream {
                     continue;
                 }
-                // The Order stream name carries the order id (`Order-<uuid>`); other streams under
-                // the same correlation (Cart, DeliveryJob, ...) don't move the Order read model.
-                let Some(order_id) = evt
-                    .stream_name
-                    .strip_prefix("Order-")
-                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
-                else {
-                    continue;
-                };
                 // The row is folded ASYNCHRONOUSLY by the projection worker (ADR-0040): give it a
                 // bounded window to absorb this event before treating it as a no-op.
                 for attempt in 0..12u32 {
                     if attempt > 0 {
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     }
-                    let row = match orders.by_id(ds::OrderId(order_id)).await {
+                    let row = match orders.by_id(order_id).await {
                         Ok(Some(row)) => row,
                         Ok(None) => continue, // not projected yet — re-poll
                         Err(e) => {
@@ -219,6 +244,9 @@ impl SubscriptionRoot {
                             continue 'events;
                         }
                     };
+                    if !owned(&row) {
+                        continue 'events; // not this caller's order — stay silent, no oracle
+                    }
                     if last == Some((row.status, row.updated_at)) {
                         continue; // fold not visible yet — re-poll
                     }

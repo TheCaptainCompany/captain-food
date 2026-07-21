@@ -1229,7 +1229,7 @@ input PaymentStatusChangedSubscriptionInput {
 }
 
 input OrderStatusChangedSubscriptionInput {
-  correlationId: CorrelationId!
+  orderId: OrderId!
 }
 
 input CartLineInput {
@@ -1465,5 +1465,5 @@ type Mutation {
 type Subscription {
   operationStatusChanged(input: OperationStatusChangedSubscriptionInput!): Operation! @public
   paymentStatusChanged(input: PaymentStatusChangedSubscriptionInput!): PaymentIntent! @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
-  orderStatusChanged(input: OrderStatusChangedSubscriptionInput!): Order! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT])
+  orderStatusChanged(input: OrderStatusChangedSubscriptionInput!): Order! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN])
 }

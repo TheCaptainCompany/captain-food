@@ -310,10 +310,11 @@ async fn order_status_changed_streams_updates_dedupes_and_completes() {
     let bus = EventBus::default();
     let schema = schema_over(orders, InMemoryRestaurants(restaurant_row(restaurant_id)), bus.clone());
 
+    // Tracked by orderId (#14); the RESTAURANT path is trusted like the `orders` query.
     let query = format!(
-        r#"subscription {{ orderStatusChanged(input: {{ correlationId: "{correlation}" }}) {{ id status }} }}"#
+        r#"subscription {{ orderStatusChanged(input: {{ orderId: "{order_id}" }}) {{ id status }} }}"#
     );
-    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Customer));
+    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Restaurant));
 
     // Many identical OrderPlaced envelopes → exactly one PLACED push (dedupe).
     spawn_publisher(bus.clone(), order_envelope(order_id, correlation, "OrderPlaced", 1));
@@ -351,7 +352,7 @@ async fn order_status_changed_streams_updates_dedupes_and_completes() {
 
 /// An envelope with a DIFFERENT correlationId never reaches the subscriber.
 #[tokio::test(flavor = "multi_thread")]
-async fn order_status_changed_ignores_other_correlations() {
+async fn order_status_changed_ignores_other_orders() {
     let restaurant_id = uuid::Uuid::new_v4();
     let order_id = uuid::Uuid::new_v4();
     let store = Arc::new(Mutex::new(HashMap::from([(
@@ -365,17 +366,16 @@ async fn order_status_changed_ignores_other_correlations() {
         bus.clone(),
     );
 
-    // Subscribe on correlation B; publish only correlation A envelopes.
-    let subscribed = uuid::Uuid::new_v4();
-    let published = uuid::Uuid::new_v4();
+    // Subscribe on order B; publish only order A envelopes (#14: the stream key is the orderId).
+    let other_order = uuid::Uuid::new_v4();
     let query = format!(
-        r#"subscription {{ orderStatusChanged(input: {{ correlationId: "{subscribed}" }}) {{ id status }} }}"#
+        r#"subscription {{ orderStatusChanged(input: {{ orderId: "{other_order}" }}) {{ id status }} }}"#
     );
-    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Customer));
-    spawn_publisher(bus.clone(), order_envelope(order_id, published, "OrderPlaced", 1));
+    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Restaurant));
+    spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderPlaced", 1));
 
     let nothing = tokio::time::timeout(Duration::from_millis(1500), stream.next()).await;
-    assert!(nothing.is_err(), "non-matching correlation must yield nothing: {nothing:?}");
+    assert!(nothing.is_err(), "another order's envelope must yield nothing: {nothing:?}");
 }
 
 /// The journal entry an acceptance would have written (RECEIVED, session-owned).
@@ -570,7 +570,7 @@ async fn unauthorized_role_is_forbidden() {
     let bus = EventBus::default();
     let schema = build_schema(None, None, Some(bus));
     let query = format!(
-        r#"subscription {{ orderStatusChanged(input: {{ correlationId: "{}" }}) {{ id }} }}"#,
+        r#"subscription {{ orderStatusChanged(input: {{ orderId: "{}" }}) {{ id }} }}"#,
         uuid::Uuid::new_v4()
     );
 
@@ -586,4 +586,107 @@ async fn unauthorized_role_is_forbidden() {
         let end = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.expect("ends");
         assert!(end.is_none(), "rejected subscription must not keep streaming");
     }
+}
+
+/// One-customer read-model stand-in: resolves ONE auth_ref to ONE CustomerRow (the ownership seam).
+struct OneCustomer {
+    auth_ref: String,
+    customer_id: ds::CustomerId,
+}
+#[async_trait]
+impl CustomerReadRepository for OneCustomer {
+    async fn by_phone(&self, _p: ds::PhoneNumber) -> Result<Option<CustomerRow>, DomainError> {
+        Ok(None)
+    }
+    async fn by_email(&self, _e: ds::EmailAddress) -> Result<Option<CustomerRow>, DomainError> {
+        Ok(None)
+    }
+    async fn by_id(&self, _id: ds::CustomerId) -> Result<Option<CustomerRow>, DomainError> {
+        Ok(None)
+    }
+    async fn by_auth_ref(&self, r: ds::ExternalReference) -> Result<Option<CustomerRow>, DomainError> {
+        if r.0 != self.auth_ref {
+            return Ok(None);
+        }
+        let now = chrono::Utc::now();
+        Ok(Some(CustomerRow {
+            customer_id: self.customer_id,
+            phone: ds::PhoneNumber("+33600000000".into()),
+            auth_ref: Some(r),
+            display_name: None,
+            email: None,
+            email_verified: false,
+            locale: None,
+            timezone: None,
+            ratings: serde_json::json!([]),
+            favorite_restaurant_ids: serde_json::json!([]),
+            preferences: None,
+            addresses: serde_json::json!([]),
+            payment_method_id: None,
+            created_at: now,
+            updated_at: now,
+        }))
+    }
+}
+
+/// Ownership on the CUSTOMER path (#14): the order's own customer receives pushes; a DIFFERENT
+/// customer — and an anonymous CUSTOMER-path caller — receives nothing (silence, no oracle).
+#[tokio::test(flavor = "multi_thread")]
+async fn order_status_changed_is_owned_by_the_orders_customer() {
+    let restaurant_id = uuid::Uuid::new_v4();
+    let order_id = uuid::Uuid::new_v4();
+    let customer_id = ds::CustomerId(uuid::Uuid::new_v4());
+    let auth_ref = uuid::Uuid::new_v4().to_string();
+    let mut row = order_row(order_id, restaurant_id, ds::OrderStatus::PLACED);
+    row.customer_id = Some(customer_id);
+    let store = Arc::new(Mutex::new(HashMap::from([(order_id, row)])));
+    let bus = EventBus::default();
+    let schema = schema_over(
+        InMemoryOrders(store),
+        InMemoryRestaurants(restaurant_row(restaurant_id)),
+        bus.clone(),
+    );
+    let query = format!(
+        r#"subscription {{ orderStatusChanged(input: {{ orderId: "{order_id}" }}) {{ id status }} }}"#
+    );
+
+    // The owning customer receives the push.
+    let customers: Arc<dyn CustomerReadRepository> =
+        Arc::new(OneCustomer { auth_ref: auth_ref.clone(), customer_id });
+    let mut stream = schema.execute_stream(
+        Request::new(query.clone())
+            .data(RequestRole::Customer)
+            .data(server::Principal { user_id: Some(auth_ref), role: RequestRole::Customer })
+            .data(customers),
+    );
+    spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderPlaced", 1));
+    let first = tokio::time::timeout(Duration::from_secs(10), stream.next())
+        .await
+        .expect("owner push in time")
+        .expect("stream item");
+    assert!(first.errors.is_empty(), "owner push errored: {:?}", first.errors);
+    let data = first.data.into_json().expect("json");
+    assert_eq!(data["orderStatusChanged"]["status"], serde_json::json!("PLACED"));
+
+    // A DIFFERENT customer stays silent.
+    let stranger_ref = uuid::Uuid::new_v4().to_string();
+    let strangers: Arc<dyn CustomerReadRepository> = Arc::new(OneCustomer {
+        auth_ref: stranger_ref.clone(),
+        customer_id: ds::CustomerId(uuid::Uuid::new_v4()),
+    });
+    let mut stream = schema.execute_stream(
+        Request::new(query.clone())
+            .data(RequestRole::Customer)
+            .data(server::Principal { user_id: Some(stranger_ref), role: RequestRole::Customer })
+            .data(strangers),
+    );
+    spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderAccepted", 2));
+    let nothing = tokio::time::timeout(Duration::from_millis(1500), stream.next()).await;
+    assert!(nothing.is_err(), "a stranger customer must receive nothing: {nothing:?}");
+
+    // An anonymous CUSTOMER-path caller (no principal) stays silent too.
+    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Customer));
+    spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderReady", 3));
+    let nothing = tokio::time::timeout(Duration::from_millis(1500), stream.next()).await;
+    assert!(nothing.is_err(), "an anonymous customer-path caller must receive nothing: {nothing:?}");
 }

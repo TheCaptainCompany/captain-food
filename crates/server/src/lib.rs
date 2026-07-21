@@ -62,6 +62,9 @@ mod hosts;
 /// execute the schema under a specific role (the HTTP layer injects it from the URL path).
 pub use graphql::acl as graphql_acl;
 pub use graphql::session as graphql_session;
+// The verified request principal — exposed for the subscription-ownership integration tests
+// (the generated resolvers reach it as crate::auth::Principal).
+pub use auth::Principal;
 /// The schema composition surface (build_schema/ReadDeps/WriteDeps), re-exported so integration tests
 /// (and the embedding `desktop` shell) can build the master schema over their own adapters.
 pub use graphql::schema as graphql_schema;

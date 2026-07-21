@@ -34,6 +34,16 @@
 > [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN], Restaurant/Order.deliveryJobs [+RIDER] — closing the
 > PUBLIC-schema PII edges before #21 freezes contracts. New ACL test; validate 0 errors.
 
+> ✅ **2026-07-20 — #14: `orderStatusChanged` keys on orderId + per-row ownership (ADR-20260720-220000).**
+> The last pre-acceptance-first convention is gone: the subscription takes `orderId` (what the
+> confirmation route holds) and matches exactly the `Order-<id>` stream. Ownership per resolved
+> row: ADMIN any; CUSTOMER path must BE the order's customer (auth_ref → Customer), strangers and
+> anonymous callers get silence; RESTAURANT/RESTAURANT_ACCOUNT paths stay trusted like `orders`
+> (RECORDED GAP: no caller↔restaurant binding exists yet — scoping is one coherent follow-up across
+> order/orders/orderStatusChanged); guests follow `paymentStatusChanged` (ADR-20260720-213000 §3).
+> Roles literal `[CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]`. New ownership test; 7
+> subscription tests green; validate 0 errors.
+
 > ✅ **2026-07-20 — #12: anonymous checkout survives restarts (ADR-20260720-213000).**
 > `place_order` now takes the dispatch-layer `X-SESSION-ID` as an ENVELOPE parameter (never command
 > payload, ADR-0041) and stamps it onto the `payment_process_manager` row — a guest resumes
@@ -282,6 +292,10 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 
 - ✅ Keep the web service **warm via uptimerobot `/ping` every 5 min** (prevents free-tier spin-down so the in-process projector + SIRENE worker keep running).
 - 🗑️ `INTERNAL_TRIGGER_TOKEN` / `POST /internal/sirene/drain` — agreed to **remove** (superseded by the `/ping` warmth approach); code removal deferred to avoid colliding with concurrent `routes.rs` edits — harmless meanwhile (fail-closed 503 when the secret is unset).
+
+> **Claim protocol (2026-07-20, ADR-20260720-233000, #39):** before working an issue, add the
+> `status/in-progress` label + a claim comment naming the `NN-slug` branch; NEVER work a claimed
+> issue; the hourly stale-claim reaper releases claims silent for >24h. Method: `BACKLOG.md`.
 
 ## 📋 Remaining work — todo & session split
 
