@@ -104,6 +104,7 @@ pub struct TestBed {
     pub prospection: SpecProspection,
     pub payments: FakeGateway,
     pub delivery: FakeDelivery,
+    pub dispatch_config: SpecDispatchConfig,
     pub identity: FakeIdentity,
     pub ownership: FakeOwnership,
     pub probe: FakeProbe,
@@ -304,21 +305,28 @@ impl TestBed {
                         delivery_job_id: e.delivery_job_id,
                         process_status: DeliveryDispatchProcessStatus::OFFERED,
                         offer_attempts: 1,
+                        current_rank: Some(1),
+                        current_channel: Some(DeliveryChannelKey("independent".into())),
                         last_update_utc: chrono::Utc::now(),
                     })
                     .await
                     .expect("seed dispatch run");
             }
             DomainEvent::DeliveryRejectedByPartner(e) => {
+                // Mirror the saga's ranked-walk advance (#60): a seeded decline advances the run to
+                // the next ranked channel (offer_attempts += 1, current_rank/current_channel step).
                 if let Some(row) = self
                     .dispatch_pm
                     .by_delivery_job(e.delivery_job_id)
                     .await
                     .expect("dispatch run lookup")
                 {
+                    let next_rank = row.current_rank.unwrap_or(0) + 1;
                     self.dispatch_pm
                         .upsert(&DeliveryDispatchRow {
                             offer_attempts: row.offer_attempts + 1,
+                            current_rank: Some(next_rank),
+                            current_channel: harness_channel_at(next_rank),
                             ..row
                         })
                         .await
@@ -852,6 +860,55 @@ pub struct FakeDelivery;
 impl DeliveryService for FakeDelivery {
     async fn offer_job(&self, _input: DeliveryOfferJobInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
         Ok(())
+    }
+}
+
+/// The harness's fixed ranked walk (#60) — 3 channels so the spec's exhaustion fixture (two prior
+/// declines, then a third that fails closed with `attempts: 3`) is reachable. Shared by
+/// [`SpecDispatchConfig`] (the saga's live resolution) and the seed-mirror in `apply_effects` (which
+/// steps a seeded decline's `current_rank`) so both stay consistent.
+fn harness_channel_at(rank: i32) -> Option<DeliveryChannelKey> {
+    match rank {
+        1 => Some(DeliveryChannelKey("independent".into())),
+        2 => Some(DeliveryChannelKey("uber_direct".into())),
+        3 => Some(DeliveryChannelKey("coopcycle".into())),
+        _ => None,
+    }
+}
+
+/// Dispatch-strategy double (#60): every restaurant is CAPTAIN-dispatched with the harness ranking —
+/// the birth leg offers rank-1 and opens OFFERED.
+#[derive(Default)]
+pub struct SpecDispatchConfig;
+
+#[async_trait]
+impl crate::dispatch_strategy::DispatchStrategyRepository for SpecDispatchConfig {
+    async fn restaurant_dispatch(
+        &self,
+        _restaurant_id: RestaurantId,
+    ) -> Result<crate::dispatch_strategy::RestaurantDispatch, DomainError> {
+        Ok(crate::dispatch_strategy::RestaurantDispatch {
+            mode: RestaurantDispatchMode::CAPTAIN,
+            city_id: None,
+        })
+    }
+    async fn ranked_channels(
+        &self,
+        _city_id: Option<CityId>,
+    ) -> Result<Vec<crate::dispatch_strategy::RankedChannel>, DomainError> {
+        Ok((1..=3)
+            .map(|rank| crate::dispatch_strategy::RankedChannel {
+                rank,
+                channel: harness_channel_at(rank).unwrap(),
+                ttl_override_seconds: None,
+            })
+            .collect())
+    }
+    async fn channel_default_ttl_seconds(
+        &self,
+        _channel: &DeliveryChannelKey,
+    ) -> Result<Option<i32>, DomainError> {
+        Ok(Some(120))
     }
 }
 

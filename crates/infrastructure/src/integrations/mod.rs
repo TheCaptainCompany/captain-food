@@ -20,6 +20,8 @@
 //! deploy as its own web service. They are deliberately NOT part of `infrastructure`. Later: delivery
 //! partner.
 
+pub mod delivery_gateway;
+pub mod delivery_offer_timeout_worker;
 pub mod google;
 pub mod inbound_drain_worker;
 pub mod payments;

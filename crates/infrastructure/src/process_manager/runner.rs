@@ -30,8 +30,8 @@ use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 
 use crate::persistence::{
-    db_err, PgCartBindingState, PgCartRepository, PgDeliveryDispatchState, PgEventStore,
-    PgOrderRepository, PgPaymentProcessState, PgRefundProcessState,
+    db_err, PgCartBindingState, PgCartRepository, PgDeliveryDispatchState, PgDispatchStrategy,
+    PgEventStore, PgOrderRepository, PgPaymentProcessState, PgRefundProcessState,
 };
 use crate::process_manager::ProcessManagerStatus;
 
@@ -85,6 +85,8 @@ const REGISTRY: &[PmGroup] = &[
             "OrderMarkedReady",
             "DeliveryAcceptedByPartner",
             "DeliveryRejectedByPartner",
+            "DeliveryEscalationRequested",
+            "DeliveryOfferTimedOut",
             "DeliveryStatusUpdated",
             "DeliveryCompleted",
         ],
@@ -110,6 +112,8 @@ pub struct ProcessManagerRunner {
     // The read models the DSL `read` steps declare.
     orders: PgOrderRepository,
     carts: PgCartRepository,
+    /// DeliveryDispatchProcess's strategy config (restaurant mode + city ranked walk, #60).
+    dispatch_config: PgDispatchStrategy,
     /// DeliveryDispatchProcess's outbound port — the generated `delivery` service (services.yaml,
     /// issue #26); no-op stand-in until the avelo37 ACL lands.
     partner: Arc<dyn DeliveryService>,
@@ -126,6 +130,7 @@ impl ProcessManagerRunner {
             dispatch_state: PgDeliveryDispatchState::new(pool.clone()),
             orders: PgOrderRepository::new(pool.clone()),
             carts: PgCartRepository::new(pool.clone()),
+            dispatch_config: PgDispatchStrategy::new(pool.clone()),
             partner: Arc::new(NoopDeliveryService),
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
@@ -346,6 +351,7 @@ impl ProcessManagerRunner {
                     &self.dispatch_state,
                     &self.orders,
                     self.partner.as_ref(),
+                    &self.dispatch_config,
                     e,
                     env,
                 )
@@ -359,6 +365,29 @@ impl ProcessManagerRunner {
                     &self.store,
                     &self.dispatch_state,
                     self.partner.as_ref(),
+                    &self.dispatch_config,
+                    e,
+                    env,
+                )
+                .await
+            }
+            (ProcessManager::DeliveryDispatch, DomainEvent::DeliveryEscalationRequested(e)) => {
+                delivery_dispatch::on_delivery_escalation_requested(
+                    &self.store,
+                    &self.dispatch_state,
+                    self.partner.as_ref(),
+                    &self.dispatch_config,
+                    e,
+                    env,
+                )
+                .await
+            }
+            (ProcessManager::DeliveryDispatch, DomainEvent::DeliveryOfferTimedOut(e)) => {
+                delivery_dispatch::on_delivery_offer_timed_out(
+                    &self.store,
+                    &self.dispatch_state,
+                    self.partner.as_ref(),
+                    &self.dispatch_config,
                     e,
                     env,
                 )

@@ -1,4 +1,4 @@
-version: 2
+version: 3
 description: >
   Captain.Food SERVICE catalog (ADR-20260719-214500) — the abstract capabilities the DOMAIN calls,
   deliberately SEPARATE from api.yaml: api.yaml is the PRODUCT API (GraphQL, role-filtered, for UIs
@@ -73,9 +73,10 @@ delivery:
     facts recorded by the DeliveryJob aggregate — never through this return value.
   operations:
     offer_job:
-      description: "Offer the delivery job (its DeliveryRequested birth fact carries pickup/dropoff) for fulfilment."
+      description: "Offer the delivery job (its DeliveryRequested birth fact carries pickup/dropoff) on a resolved TARGET channel; the composite gateway routes to that channel's adapter (an unwired channel behaves as an immediate decline → escalate, #60)."
       input:
         job: { $ref: 'events.yaml#/DeliveryRequested' }
+        channel: { $ref: 'scalars.yaml#/DeliveryChannelKey' }   # target channel the strategy hook selected from the city's ranked walk (#60)
       errors: []
   binding: local
   expose: false

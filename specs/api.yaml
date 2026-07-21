@@ -1,4 +1,4 @@
-version: 2
+version: 3
 description: >
   Captain.Food API surface (GraphQL ports) — SOURCE OF TRUTH for operations, payloads and the ACL.
   Reuses scalars.yaml (scalars/enums), entities.yaml (output-type shapes), commands.yaml (mutation
@@ -828,6 +828,10 @@ mutations:
   cancelDelivery:
     command: { $ref: 'commands.yaml#/CancelDelivery' }
     roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V0
+  escalateDelivery:
+    command: { $ref: 'commands.yaml#/EscalateDelivery' }
+    roles: [RESTAURANT, ADMIN]   # restaurant/operator skips the current channel and advances the ranked dispatch walk (#60)
     slice: V0
 
 

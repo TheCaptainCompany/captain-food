@@ -1,4 +1,4 @@
-version: 1
+version: 2
 description: >
   Captain.Food STORY MAP — personas → activities → steps. Each step `$ref`s the api.yaml query/mutation
   that realizes it (codegen validates the ref resolves). `personaRole` maps the persona to its
@@ -174,6 +174,7 @@ restaurant_manager:
       steps:
         ViewDeliveries: { $ref: 'api.yaml#/queries/restaurantDeliveries' }
         CancelDelivery: { $ref: 'api.yaml#/mutations/cancelDelivery' }
+        EscalateDelivery: { $ref: 'api.yaml#/mutations/escalateDelivery' }   # skip the current channel, advance the ranked dispatch walk (#60)
 
 rider:
   description: A courier who delivers orders from restaurants to customers.

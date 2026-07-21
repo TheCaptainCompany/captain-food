@@ -1,5 +1,5 @@
-//! DeliveryDispatchProcess (`specs/processmanager.yaml#/DeliveryDispatchProcess`, ADR-0031) — HOOK
-//! IMPLS + thin wrappers for the GENERATED leg pipelines
+//! DeliveryDispatchProcess (`specs/processmanager.yaml#/DeliveryDispatchProcess`, ADR-0031;
+//! resolve→walk strategy, #60) — HOOK IMPLS + thin wrappers for the GENERATED leg pipelines
 //! (`crate::generated::process_managers::delivery_dispatch_process`, issue #25). The pipelines
 //! (state by/expect/set, the linear-branch marker, deliver/send plumbing) are generated; this module
 //! keeps only the non-structural seams:
@@ -8,18 +8,24 @@
 //!   stream, like the restaurant command handlers);
 //! - `build_delivery_requested` — the DETERMINISTIC UUIDv5 job id ([`delivery_job_id_for`], the
 //!   idempotency key), the order's test-mode lineage (ADR-0038), and the pickup/dropoff unwraps;
-//! - the bounded re-offer `branch` + `compute_offer_attempts` (cap [`OFFER_ATTEMPT_CAP`],
-//!   ADR-20260720-004556, rules.yaml#/DispatchRetriesAreBounded);
+//! - the DISPATCH-STRATEGY resolution (#60): the birth leg resolves the restaurant's mode + the
+//!   city's rank-1 channel (self-dispatch short-circuits — `offer_job` is SKIPPED); each advance leg
+//!   WALKS to the next ranked channel (`branch` = "channels remain?", `advance_current_*` = the walk
+//!   step). All of it reads the config tables through [`DispatchStrategyRepository`], not the log.
 //! - the DeliveryJob fold predicates (birth exists / not already FAILED).
 
 use domain::generated::entities::Address;
 use domain::generated::events::{
-    DeliveryAcceptedByPartner, DeliveryCompleted, DeliveryDispatchFailed, DeliveryRejectedByPartner,
-    DeliveryRequested, DeliveryStatusUpdated, DomainEvent, OrderMarkedReady,
+    DeliveryAcceptedByPartner, DeliveryCompleted, DeliveryDispatchFailed, DeliveryEscalationRequested,
+    DeliveryOfferTimedOut, DeliveryRejectedByPartner, DeliveryRequested, DeliveryStatusUpdated,
+    DomainEvent, OrderMarkedReady,
 };
-use domain::generated::scalars::{DeliveryStatus, OrderId, RestaurantId};
+use domain::generated::scalars::{
+    DeliveryChannelKey, DeliveryDispatchProcessStatus, DeliveryStatus, OrderId, RestaurantId,
+};
 use domain::shared::errors::DomainError;
 
+use crate::dispatch_strategy::{resolve_plan, DispatchPlan, DispatchStrategyRepository};
 use crate::generated::process_managers::delivery_dispatch_process::{self, OrderRead, RestaurantRead};
 use crate::generated::process_managers::HookOutcome;
 use crate::generated::services::{DeliveryOfferJobInput, DeliveryService};
@@ -29,11 +35,6 @@ use crate::process_managers::{
     delivery_job_stream, order_stream, restaurant_stream, Outcome, TriggerEnvelope,
 };
 use crate::queries::OrderReadRepository;
-
-/// The bounded re-offer cap (ADR-20260720-004556, rules.yaml#/DispatchRetriesAreBounded): at most
-/// this many TOTAL offers per dispatch run (the birth offer counts as 1). The decline that finds the
-/// counter already at the cap fails the dispatch closed — never a retry loop beyond it.
-pub const OFFER_ATTEMPT_CAP: i32 = 3;
 
 /// Fixed UUIDv5 namespace for the ids this saga derives. NEVER change it: derived job ids must stay
 /// stable across re-reactions and deployments (they ARE the idempotency key).
@@ -60,10 +61,43 @@ fn restaurant_address(restaurant_events: &[DomainEvent]) -> Option<Address> {
     })
 }
 
-/// Hooks for the `OrderMarkedReady` leg: reads, the derived job birth, the offer input.
+/// Load the job's `DeliveryRequested` birth fact (the `offer_job` payload) from its stream.
+async fn load_delivery_requested(
+    store: &dyn EventStore,
+    job_id: &domain::generated::scalars::DeliveryJobId,
+) -> Result<Option<DeliveryRequested>, DomainError> {
+    let (events, _) = store.load(&delivery_job_stream(job_id)).await?;
+    Ok(events.into_iter().find_map(|e| match e {
+        DomainEvent::DeliveryRequested(r) => Some(r),
+        _ => None,
+    }))
+}
+
+// ================================================================================================
+// Birth leg — OrderMarkedReady: create the job, resolve the strategy, offer the rank-1 channel.
+// ================================================================================================
+
+/// Hooks for the `OrderMarkedReady` leg: reads, the derived job birth, and the strategy resolution.
 pub struct DispatchOpenHooks<'a> {
-    pub store: &'a dyn EventStore,
-    pub orders: &'a dyn OrderReadRepository,
+    store: &'a dyn EventStore,
+    orders: &'a dyn OrderReadRepository,
+    strategy: &'a dyn DispatchStrategyRepository,
+}
+
+impl<'a> DispatchOpenHooks<'a> {
+    pub fn new(
+        store: &'a dyn EventStore,
+        orders: &'a dyn OrderReadRepository,
+        strategy: &'a dyn DispatchStrategyRepository,
+    ) -> Self {
+        Self { store, orders, strategy }
+    }
+
+    /// The restaurant's mode + the city's ranked walk (resolved from the config tables per call —
+    /// the birth leg's hooks each re-resolve; cheap, and the read model can cache).
+    async fn plan(&self, restaurant_id: RestaurantId) -> Result<DispatchPlan, DomainError> {
+        resolve_plan(self.strategy, restaurant_id).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -125,8 +159,8 @@ impl delivery_dispatch_process::OrderMarkedReadyHooks for DispatchOpenHooks<'_> 
             restaurant_id: event.restaurant_id,
             pickup,
             dropoff,
-            // TODO(saga): partner pre-selection (e.g. Avelo37 vs independent riders) is a dispatch
-            // policy the delivery-partner ACL will own; V0 leaves the job open to both channels.
+            // Partner pre-selection is now the resolve→walk strategy; the birth fact stays
+            // provider-agnostic (the channel is chosen at offer time, #60).
             provider: None,
         }))
     }
@@ -136,79 +170,208 @@ impl delivery_dispatch_process::OrderMarkedReadyHooks for DispatchOpenHooks<'_> 
         domain::delivery_job::fold(stream).is_none()
     }
 
+    /// Resolve the strategy and offer the rank-1 channel — OR skip the call entirely for a
+    /// RESTAURANT-dispatch order (the self-dispatch short-circuit: Captain offers no channel).
     async fn input_delivery_offer_job(
         &self,
-        _event: &OrderMarkedReady,
+        event: &OrderMarkedReady,
         _order: &OrderRead,
         _restaurant: &RestaurantRead,
         delivery_requested: &DeliveryRequested,
     ) -> Result<HookOutcome<DeliveryOfferJobInput>, DomainError> {
-        Ok(HookOutcome::Ready(DeliveryOfferJobInput { job: delivery_requested.clone() }))
+        let plan = self.plan(event.restaurant_id).await?;
+        if plan.is_self_dispatched() {
+            return Ok(HookOutcome::Skip(format!(
+                "order {} is RESTAURANT-dispatched — Captain offers no channel (self-dispatch), only tracks",
+                event.order_id.0
+            )));
+        }
+        let Some(channel) = plan.channel_at(1) else {
+            return Ok(HookOutcome::Skip(format!(
+                "order {} is CAPTAIN-dispatched but its city has no ranked channels — nothing to offer",
+                event.order_id.0
+            )));
+        };
+        Ok(HookOutcome::Ready(DeliveryOfferJobInput { job: delivery_requested.clone(), channel }))
     }
-}
 
-/// Hooks for the `DeliveryRejectedByPartner` leg: the bounded re-offer branch (ADR-20260720-004556).
-pub struct DispatchRejectedHooks<'a> {
-    pub store: &'a dyn EventStore,
-}
-
-#[async_trait::async_trait]
-impl delivery_dispatch_process::DeliveryRejectedByPartnerHooks for DispatchRejectedHooks<'_> {
-    /// RE-OFFER while the run has made fewer than [`OFFER_ATTEMPT_CAP`] total offers; otherwise the
-    /// EXHAUSTED branch fails the dispatch closed.
-    fn branch(&self, row: &DeliveryDispatchRow) -> bool {
-        row.offer_attempts < OFFER_ATTEMPT_CAP
-    }
-
-    /// The re-offer carries the job's own birth fact (the offer payload IS DeliveryRequested).
-    async fn input_delivery_offer_job(
+    /// A CAPTAIN-dispatch order opens OFFERED; a RESTAURANT-dispatch order opens SELF_DISPATCHED.
+    async fn open_process_status(
         &self,
-        event: &DeliveryRejectedByPartner,
-        _row: &DeliveryDispatchRow,
+        event: &OrderMarkedReady,
+        _order: &OrderRead,
+        _restaurant: &RestaurantRead,
+        _delivery_requested: &DeliveryRequested,
+    ) -> Result<DeliveryDispatchProcessStatus, DomainError> {
+        let plan = self.plan(event.restaurant_id).await?;
+        Ok(if plan.is_self_dispatched() {
+            DeliveryDispatchProcessStatus::SELF_DISPATCHED
+        } else {
+            DeliveryDispatchProcessStatus::OFFERED
+        })
+    }
+
+    /// CAPTAIN → rank 1; RESTAURANT (self-dispatch) → null.
+    async fn open_current_rank(
+        &self,
+        event: &OrderMarkedReady,
+        _order: &OrderRead,
+        _restaurant: &RestaurantRead,
+        _delivery_requested: &DeliveryRequested,
+    ) -> Result<Option<i32>, DomainError> {
+        let plan = self.plan(event.restaurant_id).await?;
+        Ok((!plan.is_self_dispatched() && plan.channel_at(1).is_some()).then_some(1))
+    }
+
+    /// CAPTAIN → the rank-1 channel offer_job was invoked against; RESTAURANT → null.
+    async fn open_current_channel(
+        &self,
+        event: &OrderMarkedReady,
+        _order: &OrderRead,
+        _restaurant: &RestaurantRead,
+        _delivery_requested: &DeliveryRequested,
+    ) -> Result<Option<DeliveryChannelKey>, DomainError> {
+        let plan = self.plan(event.restaurant_id).await?;
+        Ok(if plan.is_self_dispatched() { None } else { plan.channel_at(1) })
+    }
+}
+
+// ================================================================================================
+// Advance legs — decline / timeout / escalate: walk to the next ranked channel, else fail closed.
+// ================================================================================================
+
+/// Shared hooks for the three IDENTICAL advance legs (`DeliveryRejectedByPartner`,
+/// `DeliveryEscalationRequested`, `DeliveryOfferTimedOut`): the ranked-channel walk. Each trigger
+/// advances the run to the NEXT ranked channel; when the walk is exhausted the leg falls through to
+/// the terminal `DeliveryDispatchFailed` (fail-closed, rules.yaml#/DispatchExhaustionFailsClosed).
+pub struct DispatchAdvanceHooks<'a> {
+    store: &'a dyn EventStore,
+    strategy: &'a dyn DispatchStrategyRepository,
+}
+
+impl<'a> DispatchAdvanceHooks<'a> {
+    pub fn new(store: &'a dyn EventStore, strategy: &'a dyn DispatchStrategyRepository) -> Self {
+        Self { store, strategy }
+    }
+
+    async fn plan(&self, restaurant_id: RestaurantId) -> Result<DispatchPlan, DomainError> {
+        resolve_plan(self.strategy, restaurant_id).await
+    }
+
+    /// The next rank in the walk after the one currently offered (`current_rank` + 1; 1 when unset).
+    fn next_rank(row: &DeliveryDispatchRow) -> i32 {
+        row.current_rank.unwrap_or(0) + 1
+    }
+
+    /// Whether a next ranked channel remains to offer.
+    async fn channels_remain(&self, row: &DeliveryDispatchRow) -> Result<bool, DomainError> {
+        let plan = self.plan(row.restaurant_id).await?;
+        Ok(plan.channel_at(Self::next_rank(row)).is_some())
+    }
+
+    /// The re-offer input for the next ranked channel (skips if the walk is exhausted or the birth
+    /// fact is missing).
+    async fn next_offer(
+        &self,
+        row: &DeliveryDispatchRow,
     ) -> Result<HookOutcome<DeliveryOfferJobInput>, DomainError> {
-        let (job_events, _) = self.store.load(&delivery_job_stream(&event.delivery_job_id)).await?;
-        match job_events.iter().find_map(|e| match e {
-            DomainEvent::DeliveryRequested(r) => Some(r.clone()),
-            _ => None,
-        }) {
-            Some(requested) => Ok(HookOutcome::Ready(DeliveryOfferJobInput { job: requested })),
+        let plan = self.plan(row.restaurant_id).await?;
+        let Some(channel) = plan.channel_at(Self::next_rank(row)) else {
+            return Ok(HookOutcome::Skip(format!(
+                "job {} has walked every ranked channel — nothing left to offer",
+                row.delivery_job_id.0
+            )));
+        };
+        match load_delivery_requested(self.store, &row.delivery_job_id).await? {
+            Some(job) => Ok(HookOutcome::Ready(DeliveryOfferJobInput { job, channel })),
             None => Ok(HookOutcome::Skip(format!(
                 "job {} has no DeliveryRequested birth to re-offer",
-                event.delivery_job_id.0
+                row.delivery_job_id.0
             ))),
         }
     }
 
-    /// offer_attempts := offer_attempts + 1 — the arithmetic the DSL value forms cannot carry.
-    fn compute_offer_attempts(&self, row: &DeliveryDispatchRow) -> i32 {
-        row.offer_attempts + 1
+    async fn next_channel(&self, row: &DeliveryDispatchRow) -> Result<Option<DeliveryChannelKey>, DomainError> {
+        let plan = self.plan(row.restaurant_id).await?;
+        Ok(plan.channel_at(Self::next_rank(row)))
     }
 
     /// Idempotent: skipped when the job already folds FAILED.
-    fn should_deliver_delivery_dispatch_failed(
-        &self,
-        stream: &[DomainEvent],
-        _event: &DeliveryDispatchFailed,
-    ) -> bool {
-        !domain::delivery_job::fold(stream)
+    fn already_failed(stream: &[DomainEvent]) -> bool {
+        domain::delivery_job::fold(stream)
             .map(|s| s.status == DeliveryStatus::FAILED)
             .unwrap_or(false)
     }
 }
 
-/// Default-only hooks for the advance/close legs (accepted, status-updated, completed).
-pub struct DispatchAdvanceHooks;
+/// Implement the three advance-leg hook traits (they differ only in the trigger event type) with the
+/// same ranked-walk logic — the event is unused (the walk is driven by the state row).
+macro_rules! impl_advance_hooks {
+    ($trait:ident, $event:ty) => {
+        #[async_trait::async_trait]
+        impl delivery_dispatch_process::$trait for DispatchAdvanceHooks<'_> {
+            async fn branch(&self, _event: &$event, row: &DeliveryDispatchRow) -> Result<bool, DomainError> {
+                self.channels_remain(row).await
+            }
+            async fn input_delivery_offer_job(
+                &self,
+                _event: &$event,
+                row: &DeliveryDispatchRow,
+            ) -> Result<HookOutcome<DeliveryOfferJobInput>, DomainError> {
+                self.next_offer(row).await
+            }
+            fn compute_offer_attempts(&self, row: &DeliveryDispatchRow) -> i32 {
+                row.offer_attempts + 1
+            }
+            async fn advance_current_rank(
+                &self,
+                _event: &$event,
+                row: &DeliveryDispatchRow,
+            ) -> Result<Option<i32>, DomainError> {
+                Ok(Some(Self::next_rank(row)))
+            }
+            async fn advance_current_channel(
+                &self,
+                _event: &$event,
+                row: &DeliveryDispatchRow,
+            ) -> Result<Option<DeliveryChannelKey>, DomainError> {
+                self.next_channel(row).await
+            }
+            fn should_deliver_delivery_dispatch_failed(
+                &self,
+                stream: &[DomainEvent],
+                _event: &DeliveryDispatchFailed,
+            ) -> bool {
+                !Self::already_failed(stream)
+            }
+        }
+    };
+}
 
-impl delivery_dispatch_process::DeliveryAcceptedByPartnerHooks for DispatchAdvanceHooks {}
-impl delivery_dispatch_process::DeliveryStatusUpdatedHooks for DispatchAdvanceHooks {}
-impl delivery_dispatch_process::DeliveryCompletedHooks for DispatchAdvanceHooks {}
+impl_advance_hooks!(DeliveryRejectedByPartnerHooks, DeliveryRejectedByPartner);
+impl_advance_hooks!(DeliveryEscalationRequestedHooks, DeliveryEscalationRequested);
+impl_advance_hooks!(DeliveryOfferTimedOutHooks, DeliveryOfferTimedOut);
 
-/// EVENT leg `events.yaml#/OrderMarkedReady` (rules.yaml#/ReadyDeliveryOrderTriggersDispatch).
+/// Default-only hooks for the non-walking advance/close legs (accepted, status-updated, completed).
+pub struct DispatchTrackHooks;
+
+impl delivery_dispatch_process::DeliveryAcceptedByPartnerHooks for DispatchTrackHooks {}
+impl delivery_dispatch_process::DeliveryStatusUpdatedHooks for DispatchTrackHooks {}
+impl delivery_dispatch_process::DeliveryCompletedHooks for DispatchTrackHooks {}
+
+// ================================================================================================
+// Wrappers — the runner / behaviour-test harness call these (they inject the hook structs).
+// ================================================================================================
+
+/// EVENT leg `events.yaml#/OrderMarkedReady` (rules.yaml#/ReadyDeliveryOrderTriggersDispatch +
+/// rules.yaml#/RestaurantDispatchBypassesRouting).
+#[allow(clippy::too_many_arguments)]
 pub async fn on_order_marked_ready(
     store: &dyn EventStore,
     state: &dyn DeliveryDispatchStateStore,
     orders: &dyn OrderReadRepository,
     partner: &dyn DeliveryService,
+    strategy: &dyn DispatchStrategyRepository,
     event: &OrderMarkedReady,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
@@ -216,7 +379,7 @@ pub async fn on_order_marked_ready(
         store,
         state,
         partner,
-        &DispatchOpenHooks { store, orders },
+        &DispatchOpenHooks::new(store, orders, strategy),
         event,
         env,
     )
@@ -228,15 +391,16 @@ pub async fn on_delivery_accepted_by_partner(
     state: &dyn DeliveryDispatchStateStore,
     event: &DeliveryAcceptedByPartner,
 ) -> Result<Outcome, DomainError> {
-    delivery_dispatch_process::on_delivery_accepted_by_partner(state, &DispatchAdvanceHooks, event).await
+    delivery_dispatch_process::on_delivery_accepted_by_partner(state, &DispatchTrackHooks, event).await
 }
 
-/// EVENT leg `events.yaml#/DeliveryRejectedByPartner` (rules.yaml#/PartnerRejectionReoffers +
-/// rules.yaml#/DispatchRetriesAreBounded, ADR-20260720-004556).
+/// EVENT leg `events.yaml#/DeliveryRejectedByPartner` (rules.yaml#/CityRankingWalkedInOrder +
+/// rules.yaml#/DispatchExhaustionFailsClosed, #60).
 pub async fn on_delivery_rejected_by_partner(
     store: &dyn EventStore,
     state: &dyn DeliveryDispatchStateStore,
     partner: &dyn DeliveryService,
+    strategy: &dyn DispatchStrategyRepository,
     event: &DeliveryRejectedByPartner,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
@@ -244,7 +408,47 @@ pub async fn on_delivery_rejected_by_partner(
         store,
         state,
         partner,
-        &DispatchRejectedHooks { store },
+        &DispatchAdvanceHooks::new(store, strategy),
+        event,
+        env,
+    )
+    .await
+}
+
+/// EVENT leg `events.yaml#/DeliveryEscalationRequested` (rules.yaml#/ManualEscalateSkipsChannel, #60).
+pub async fn on_delivery_escalation_requested(
+    store: &dyn EventStore,
+    state: &dyn DeliveryDispatchStateStore,
+    partner: &dyn DeliveryService,
+    strategy: &dyn DispatchStrategyRepository,
+    event: &DeliveryEscalationRequested,
+    env: &TriggerEnvelope,
+) -> Result<Outcome, DomainError> {
+    delivery_dispatch_process::on_delivery_escalation_requested(
+        store,
+        state,
+        partner,
+        &DispatchAdvanceHooks::new(store, strategy),
+        event,
+        env,
+    )
+    .await
+}
+
+/// EVENT leg `events.yaml#/DeliveryOfferTimedOut` (rules.yaml#/TimeoutEscalatesToNextChannel, #60).
+pub async fn on_delivery_offer_timed_out(
+    store: &dyn EventStore,
+    state: &dyn DeliveryDispatchStateStore,
+    partner: &dyn DeliveryService,
+    strategy: &dyn DispatchStrategyRepository,
+    event: &DeliveryOfferTimedOut,
+    env: &TriggerEnvelope,
+) -> Result<Outcome, DomainError> {
+    delivery_dispatch_process::on_delivery_offer_timed_out(
+        store,
+        state,
+        partner,
+        &DispatchAdvanceHooks::new(store, strategy),
         event,
         env,
     )
@@ -259,7 +463,7 @@ pub async fn on_delivery_status_updated(
     event: &DeliveryStatusUpdated,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
-    delivery_dispatch_process::on_delivery_status_updated(store, state, &DispatchAdvanceHooks, event, env)
+    delivery_dispatch_process::on_delivery_status_updated(store, state, &DispatchTrackHooks, event, env)
         .await
 }
 
@@ -270,571 +474,9 @@ pub async fn on_delivery_completed(
     event: &DeliveryCompleted,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
-    delivery_dispatch_process::on_delivery_completed(store, state, &DispatchAdvanceHooks, event, env)
+    delivery_dispatch_process::on_delivery_completed(store, state, &DispatchTrackHooks, event, env)
         .await
 }
 
-// ================================================================================================
-// Behaviour tests (specs/tests.yaml, DeliveryDispatchProcess saga) — each linked to its rules.yaml
-// rule.
-// ================================================================================================
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::pm_state::mem::MemDeliveryDispatchState;
-    use crate::ports::NoopDeliveryService;
-    use crate::process_managers::test_support::{envelope, MemStore};
-    use crate::queries::{OrderFilter, OrderTrackingRow};
-    use async_trait::async_trait;
-    use domain::generated::entities::{Courier, CustomerContact, Money, PaymentBreakdown};
-    use domain::generated::events::{
-        DeliveryAcceptedByRider, DeliveryPickedUp, OrderDelivered, OrderPlaced,
-        RestaurantRegistered,
-    };
-    use domain::generated::scalars::*;
-
-    fn uid(n: u128) -> uuid::Uuid {
-        uuid::Uuid::from_u128(n)
-    }
-    fn order_id() -> OrderId {
-        OrderId(uid(1))
-    }
-    fn restaurant_id() -> RestaurantId {
-        RestaurantId(uid(3))
-    }
-    fn job_id() -> DeliveryJobId {
-        delivery_job_id_for(&order_id())
-    }
-    fn eur(cents: i64) -> Money {
-        Money { amount_cents: MoneyCents(cents), currency: CurrencyCode("EUR".into()) }
-    }
-    fn address(line1: &str) -> Address {
-        Address {
-            line1: AddressLine(line1.into()),
-            line2: None,
-            postal_code: PostalCode("37000".into()),
-            city: CityName("Tours".into()),
-            country: CountryCode("FR".into()),
-        }
-    }
-
-    fn tracking_row(service_type: ServiceType) -> OrderTrackingRow {
-        OrderTrackingRow {
-            order_id: order_id(),
-            r#ref: ExternalReference("order-1".into()),
-            restaurant_id: restaurant_id(),
-            customer_id: None,
-            status: OrderStatus::READY,
-            service_type,
-            items: serde_json::json!([]),
-            total_amount_cents: MoneyCents(1960),
-            currency: CurrencyCode("EUR".into()),
-            articles_cents: MoneyCents(1960),
-            delivery_cents: MoneyCents(0),
-            service_fee_cents: MoneyCents(0),
-            restaurant_payout_cents: MoneyCents(1960),
-            rider_payout_cents: MoneyCents(0),
-            captain_net_cents: MoneyCents(0),
-            uber_total_cents: None,
-            uber_restaurant_cents: None,
-            uber_rider_cents: None,
-            uber_platform_cents: None,
-            uber_basis: None,
-            delivery_address: (service_type == ServiceType::DELIVERY)
-                .then(|| serde_json::to_value(address("9 Rue Colbert")).unwrap()),
-            estimated_ready_at: None,
-            placed_at: chrono::Utc::now(),
-            status_changed_at: chrono::Utc::now(),
-            payment_intent_id: Some(PaymentIntentId("pi_123".into())),
-            payment_status: "CAPTURED".into(),
-            restaurant_stars: None,
-            rating_comment: None,
-            rider_thumb: None,
-            rider_tip_cents: None,
-            restaurant_tip_cents: None,
-            captain_tip_cents: None,
-            rated_at: None,
-            delivery_status: None,
-            courier: None,
-            estimated_dropoff_at: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }
-    }
-
-    struct FakeOrders {
-        row: Option<OrderTrackingRow>,
-    }
-
-    #[async_trait]
-    impl OrderReadRepository for FakeOrders {
-        async fn list(&self, _filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError> {
-            Ok(self.row.clone().into_iter().collect())
-        }
-        async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError> {
-            Ok(self.row.clone().filter(|r| r.order_id == id))
-        }
-    }
-
-    fn placed(service_type: ServiceType) -> DomainEvent {
-        DomainEvent::OrderPlaced(OrderPlaced {
-            mode: None,
-            order_id: order_id(),
-            r#ref: None,
-            restaurant_id: restaurant_id(),
-            customer_id: None,
-            customer_contact: CustomerContact {
-                display_name: CustomerDisplayName("Johnny".into()),
-                email: None,
-                phone: PhoneNumber("+33612345678".into()),
-            },
-            service_type,
-            delivery_address: (service_type == ServiceType::DELIVERY)
-                .then(|| address("9 Rue Colbert")),
-            items: Vec::new(),
-            total_amount: eur(1960),
-            breakdown: PaymentBreakdown {
-                articles: eur(1960),
-                delivery: eur(0),
-                service_fee: eur(0),
-                total: eur(1960),
-                restaurant_contribution: eur(0),
-                restaurant_payout: eur(1960),
-                rider_payout: eur(0),
-                captain_net: eur(0),
-            },
-            note: None,
-            payment_intent_id: PaymentIntentId("pi_123".into()),
-        })
-    }
-
-    fn registered_restaurant() -> Vec<DomainEvent> {
-        vec![DomainEvent::RestaurantRegistered(RestaurantRegistered {
-            mode: None,
-            restaurant_id: restaurant_id(),
-            account_id: None,
-            listing_status: RestaurantListingStatus::ACTIVE_PARTNER,
-            r#ref: None,
-            external_identifiers: Vec::new(),
-            slug: Slug("chez-marco".into()),
-            display_name: RestaurantDisplayName("Chez Marco".into()),
-            contact: None,
-            website: None,
-            tags: Vec::new(),
-            margin_rate: None,
-            cuisine_category: None,
-            uber_prices_opt_in: None,
-            address: address("1 Rue Nationale"),
-            location: None,
-            timezone: None,
-            preparation_time_minutes: None,
-            opening_hours: Vec::new(),
-        })]
-    }
-
-    fn ready() -> OrderMarkedReady {
-        OrderMarkedReady { order_id: order_id(), restaurant_id: restaurant_id() }
-    }
-
-    /// GIVEN wiring: READY DELIVERY order (stream + read model) and the registered restaurant.
-    fn given_ready(store: &MemStore) {
-        store.seed(
-            &format!("Order-{}", order_id().0),
-            vec![placed(ServiceType::DELIVERY), DomainEvent::OrderMarkedReady(ready())],
-        );
-        store.seed(&format!("Restaurant-{}", restaurant_id().0), registered_restaurant());
-    }
-
-    /// GIVEN: a dispatched (OFFERED) run — the state after [`on_order_marked_ready`].
-    async fn given_offered(store: &MemStore, state: &MemDeliveryDispatchState) {
-        given_ready(store);
-        let orders = FakeOrders { row: Some(tracking_row(ServiceType::DELIVERY)) };
-        on_order_marked_ready(store, state, &orders, &NoopDeliveryService, &ready(), &envelope())
-            .await
-            .unwrap();
-    }
-
-    /// tests.yaml#/TestDispatchOnOrderReady — rules.yaml#/ReadyDeliveryOrderTriggersDispatch: a
-    /// ready DELIVERY order births the delivery job (deterministic id), offers it, row → OFFERED.
-    #[tokio::test]
-    async fn ready_delivery_order_requests_and_offers_a_job() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        given_ready(&store);
-        let orders = FakeOrders { row: Some(tracking_row(ServiceType::DELIVERY)) };
-
-        let outcome = on_order_marked_ready(
-            &store,
-            &state,
-            &orders,
-            &NoopDeliveryService,
-            &ready(),
-            &envelope(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(outcome, Outcome::Completed);
-
-        let job_events = store.stream(&format!("DeliveryJob-{}", job_id().0));
-        let requested = job_events
-            .iter()
-            .find_map(|e| match e {
-                DomainEvent::DeliveryRequested(r) => Some(r.clone()),
-                _ => None,
-            })
-            .expect("DeliveryRequested birth");
-        assert_eq!(requested.delivery_job_id, job_id()); // deterministic id
-        assert_eq!(requested.pickup, address("1 Rue Nationale")); // restaurant address
-        assert_eq!(requested.dropoff, address("9 Rue Colbert")); // order delivery address
-        assert_eq!(domain::delivery_job::fold(&job_events).unwrap().status, DeliveryStatus::PENDING);
-        let row = state.by_delivery_job(job_id()).await.unwrap().unwrap();
-        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::OFFERED);
-        assert_eq!(row.order_id, order_id());
-        assert_eq!(row.restaurant_id, restaurant_id());
-
-        // Idempotent re-reaction: the deterministic job stream absorbs the replay.
-        let again = on_order_marked_ready(
-            &store,
-            &state,
-            &orders,
-            &NoopDeliveryService,
-            &ready(),
-            &envelope(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(again, Outcome::Completed);
-        assert_eq!(store.stream(&format!("DeliveryJob-{}", job_id().0)).len(), 1);
-    }
-
-    /// rules.yaml#/ReadyDeliveryOrderTriggersDispatch (COLLECTION corollary): no dispatch.
-    #[tokio::test]
-    async fn collection_orders_are_not_dispatched() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        store.seed(
-            &format!("Order-{}", order_id().0),
-            vec![placed(ServiceType::COLLECTION), DomainEvent::OrderMarkedReady(ready())],
-        );
-        store.seed(&format!("Restaurant-{}", restaurant_id().0), registered_restaurant());
-        let orders = FakeOrders { row: Some(tracking_row(ServiceType::COLLECTION)) };
-
-        let outcome = on_order_marked_ready(
-            &store,
-            &state,
-            &orders,
-            &NoopDeliveryService,
-            &ready(),
-            &envelope(),
-        )
-        .await
-        .unwrap();
-        assert!(matches!(outcome, Outcome::Skipped(_)), "{outcome:?}");
-        assert!(store.stream(&format!("DeliveryJob-{}", job_id().0)).is_empty());
-        assert!(state.by_order(order_id()).await.unwrap().is_none());
-    }
-
-    /// tests.yaml#/TestDispatchPartnerAccepted — rules.yaml#/PartnerAcceptanceRecordsCourier: the
-    /// inbound acceptance (fact on the job stream) advances the run to ACCEPTED.
-    #[tokio::test]
-    async fn partner_acceptance_advances_the_run() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        given_offered(&store, &state).await;
-
-        let outcome = on_delivery_accepted_by_partner(
-            &state,
-            &DeliveryAcceptedByPartner {
-                delivery_job_id: job_id(),
-                partner_ref: ExternalReference("avelo-77".into()),
-                courier: Courier {
-                    display_name: "Léa".into(),
-                    phone: Some(PhoneNumber("+33611223344".into())),
-                    rider_id: None,
-                },
-                estimated_pickup_at: None,
-                estimated_dropoff_at: None,
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(outcome, Outcome::Completed);
-        let row = state.by_delivery_job(job_id()).await.unwrap().unwrap();
-        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::ACCEPTED);
-    }
-
-    fn declined(reason: &str) -> DeliveryRejectedByPartner {
-        DeliveryRejectedByPartner {
-            delivery_job_id: job_id(),
-            partner_ref: None,
-            reason: Some(reason.into()),
-        }
-    }
-
-    /// tests.yaml#/TestDispatchPartnerRejected — rules.yaml#/PartnerRejectionReoffers +
-    /// rules.yaml#/DispatchRetriesAreBounded: a decline under the cap re-offers the job — the run
-    /// stays OFFERED, the attempt counter increments, and no failure fact is recorded.
-    #[tokio::test]
-    async fn partner_rejection_reoffers_while_under_the_cap() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        given_offered(&store, &state).await;
-
-        let outcome = on_delivery_rejected_by_partner(
-            &store,
-            &state,
-            &NoopDeliveryService,
-            &declined("No courier available"),
-            &envelope(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(outcome, Outcome::Completed);
-        let row = state.by_delivery_job(job_id()).await.unwrap().unwrap();
-        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::OFFERED);
-        assert_eq!(row.offer_attempts, 2);
-        assert!(!store
-            .stream(&format!("DeliveryJob-{}", job_id().0))
-            .iter()
-            .any(|e| matches!(e, DomainEvent::DeliveryDispatchFailed(_))));
-    }
-
-    /// tests.yaml#/TestDispatchAcceptedAfterReoffer — rules.yaml#/DispatchRetriesAreBounded +
-    /// rules.yaml#/PartnerAcceptanceRecordsCourier: the happy path after a retry — the partner
-    /// accepts the re-offered job and the run advances to ACCEPTED.
-    #[tokio::test]
-    async fn partner_acceptance_after_reoffer_advances_the_run() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        given_offered(&store, &state).await;
-        on_delivery_rejected_by_partner(
-            &store,
-            &state,
-            &NoopDeliveryService,
-            &declined("No courier available"),
-            &envelope(),
-        )
-        .await
-        .unwrap();
-
-        let outcome = on_delivery_accepted_by_partner(
-            &state,
-            &DeliveryAcceptedByPartner {
-                delivery_job_id: job_id(),
-                partner_ref: ExternalReference("avelo-77".into()),
-                courier: Courier { display_name: "Léa".into(), phone: None, rider_id: None },
-                estimated_pickup_at: None,
-                estimated_dropoff_at: None,
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(outcome, Outcome::Completed);
-        let row = state.by_delivery_job(job_id()).await.unwrap().unwrap();
-        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::ACCEPTED);
-        assert_eq!(row.offer_attempts, 2); // the retry stays counted
-    }
-
-    /// tests.yaml#/TestDispatchFailsAfterOfferCap — rules.yaml#/DispatchRetriesAreBounded: the 3rd
-    /// decline exhausts the cap ([`OFFER_ATTEMPT_CAP`] total offers): DeliveryDispatchFailed is
-    /// recorded on the job stream (job folds FAILED) and the run closes FAILED; a re-delivered
-    /// decline after that is a benign skip and appends nothing (fail-closed, no retry loop).
-    #[tokio::test]
-    async fn third_decline_fails_the_dispatch_closed() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        given_offered(&store, &state).await;
-
-        // Declines 1 and 2 re-offer (offers 2 and 3).
-        for n in [2, 3] {
-            let outcome = on_delivery_rejected_by_partner(
-                &store,
-                &state,
-                &NoopDeliveryService,
-                &declined("No courier available"),
-                &envelope(),
-            )
-            .await
-            .unwrap();
-            assert_eq!(outcome, Outcome::Completed);
-            let row = state.by_delivery_job(job_id()).await.unwrap().unwrap();
-            assert_eq!(row.process_status, DeliveryDispatchProcessStatus::OFFERED);
-            assert_eq!(row.offer_attempts, n);
-        }
-
-        // Decline 3 (the cap is exhausted): terminal failure, no 4th offer.
-        let outcome = on_delivery_rejected_by_partner(
-            &store,
-            &state,
-            &NoopDeliveryService,
-            &declined("Storm — no couriers tonight"),
-            &envelope(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(outcome, Outcome::Completed);
-        let row = state.by_delivery_job(job_id()).await.unwrap().unwrap();
-        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::FAILED);
-        assert_eq!(row.offer_attempts, 3);
-        let job_events = store.stream(&format!("DeliveryJob-{}", job_id().0));
-        let failed = job_events
-            .iter()
-            .find_map(|e| match e {
-                DomainEvent::DeliveryDispatchFailed(f) => Some(f.clone()),
-                _ => None,
-            })
-            .expect("DeliveryDispatchFailed recorded");
-        assert_eq!(failed.order_id, order_id());
-        assert_eq!(failed.restaurant_id, restaurant_id());
-        assert_eq!(failed.attempts, 3);
-        assert_eq!(failed.last_reason.as_deref(), Some("Storm — no couriers tonight"));
-        // The job folds FAILED — the restaurant board (View_DeliveryJob) surfaces it.
-        assert_eq!(
-            domain::delivery_job::fold(&job_events).unwrap().status,
-            DeliveryStatus::FAILED
-        );
-
-        // Re-delivered decline on the FAILED run: benign skip, nothing appended.
-        let again = on_delivery_rejected_by_partner(
-            &store,
-            &state,
-            &NoopDeliveryService,
-            &declined("No courier available"),
-            &envelope(),
-        )
-        .await
-        .unwrap();
-        assert!(matches!(again, Outcome::Skipped(_)), "{again:?}");
-        assert_eq!(store.stream(&format!("DeliveryJob-{}", job_id().0)), job_events);
-    }
-
-    /// Error guard shared by the partner/rider legs: an unknown dispatch run throws
-    /// `errors.yaml#/DeliveryJobNotFound` (abort and surface, never a silent skip).
-    #[tokio::test]
-    async fn unknown_job_is_flagged_with_the_typed_error() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        let unknown = DeliveryJobId(uid(0xBAD));
-
-        let err = on_delivery_accepted_by_partner(
-            &state,
-            &DeliveryAcceptedByPartner {
-                delivery_job_id: unknown,
-                partner_ref: ExternalReference("avelo-77".into()),
-                courier: Courier { display_name: "Léa".into(), phone: None, rider_id: None },
-                estimated_pickup_at: None,
-                estimated_dropoff_at: None,
-            },
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code(), Some("DeliveryJobNotFound"), "{err:?}");
-
-        let err = on_delivery_status_updated(
-            &store,
-            &state,
-            &DeliveryStatusUpdated {
-                delivery_job_id: unknown,
-                partner_ref: None,
-                status: DeliveryStatus::DELIVERED,
-                occurred_at: None,
-                note: None,
-            },
-            &envelope(),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code(), Some("DeliveryJobNotFound"), "{err:?}");
-
-        let err = on_delivery_completed(
-            &store,
-            &state,
-            &DeliveryCompleted { delivery_job_id: unknown, at: None },
-            &envelope(),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code(), Some("DeliveryJobNotFound"), "{err:?}");
-    }
-
-    /// tests.yaml#/TestDispatchClosesOrderOnPartnerDelivered —
-    /// rules.yaml#/OrderClosedOnDeliveryCompletion: a partner-reported DELIVERED sends
-    /// MarkOrderDelivered (→ OrderDelivered) and resolves the run COMPLETED; intermediate statuses
-    /// skip.
-    #[tokio::test]
-    async fn partner_delivered_status_closes_the_order() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        given_offered(&store, &state).await;
-
-        let trigger = DeliveryStatusUpdated {
-            delivery_job_id: job_id(),
-            partner_ref: None,
-            status: DeliveryStatus::DELIVERED,
-            occurred_at: None,
-            note: None,
-        };
-        let outcome =
-            on_delivery_status_updated(&store, &state, &trigger, &envelope()).await.unwrap();
-        assert_eq!(outcome, Outcome::Completed);
-        let order_events = store.stream(&format!("Order-{}", order_id().0));
-        assert!(order_events.iter().any(|e| matches!(
-            e,
-            DomainEvent::OrderDelivered(OrderDelivered { order_id: o, .. }) if *o == order_id()
-        )));
-        assert_eq!(domain::order::fold(&order_events).unwrap().status, OrderStatus::DELIVERED);
-        let row = state.by_delivery_job(job_id()).await.unwrap().unwrap();
-        assert_eq!(row.process_status, DeliveryDispatchProcessStatus::COMPLETED);
-
-        // An intermediate status never closes the order.
-        let store2 = MemStore::default();
-        let state2 = MemDeliveryDispatchState::default();
-        given_offered(&store2, &state2).await;
-        let picked_up = DeliveryStatusUpdated { status: DeliveryStatus::PICKED_UP, ..trigger };
-        let outcome =
-            on_delivery_status_updated(&store2, &state2, &picked_up, &envelope()).await.unwrap();
-        assert!(matches!(outcome, Outcome::Skipped(_)), "{outcome:?}");
-        assert_eq!(
-            domain::order::fold(&store2.stream(&format!("Order-{}", order_id().0))).unwrap().status,
-            OrderStatus::READY
-        );
-    }
-
-    /// tests.yaml#/TestDispatchClosesOrderOnRiderCompleted —
-    /// rules.yaml#/OrderClosedOnDeliveryCompletion: an independent rider's completion closes the
-    /// order once; the re-delivered completion is absorbed (the Order rejects, the leg skips).
-    #[tokio::test]
-    async fn rider_completion_closes_the_order_once() {
-        let store = MemStore::default();
-        let state = MemDeliveryDispatchState::default();
-        given_offered(&store, &state).await;
-        // The rider lifecycle facts fold onto the job stream (accepted + picked up).
-        let mut job_events = store.stream(&format!("DeliveryJob-{}", job_id().0));
-        job_events.push(DomainEvent::DeliveryAcceptedByRider(DeliveryAcceptedByRider {
-            delivery_job_id: job_id(),
-            rider_id: RiderId(uid(9)),
-        }));
-        job_events.push(DomainEvent::DeliveryPickedUp(DeliveryPickedUp {
-            delivery_job_id: job_id(),
-            rider_id: RiderId(uid(9)),
-            at: None,
-        }));
-        store.seed(&format!("DeliveryJob-{}", job_id().0), job_events);
-
-        let trigger = DeliveryCompleted { delivery_job_id: job_id(), at: None };
-        let outcome = on_delivery_completed(&store, &state, &trigger, &envelope()).await.unwrap();
-        assert_eq!(outcome, Outcome::Completed);
-        let order_events = store.stream(&format!("Order-{}", order_id().0));
-        assert_eq!(domain::order::fold(&order_events).unwrap().status, OrderStatus::DELIVERED);
-        assert_eq!(
-            state.by_delivery_job(job_id()).await.unwrap().unwrap().process_status,
-            DeliveryDispatchProcessStatus::COMPLETED
-        );
-
-        // Re-delivery: the Order rejects the second MarkOrderDelivered (already DELIVERED) — the
-        // leg logs and skips, and the stream gains nothing.
-        let again = on_delivery_completed(&store, &state, &trigger, &envelope()).await.unwrap();
-        assert!(matches!(again, Outcome::Skipped(ref m) if m.contains("rejected")), "{again:?}");
-        assert_eq!(store.stream(&format!("Order-{}", order_id().0)), order_events);
-    }
-}
+mod tests;

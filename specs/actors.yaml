@@ -1,4 +1,4 @@
-version: 6
+version: 7
 description: >
   Captain.Food ACTOR catalog (actor-model). Its goal is to be a CODE-GENERATION SOURCE: from it a
   generator can scaffold the in-domain message handlers — aggregates with command handlers that emit
@@ -551,13 +551,16 @@ DeliveryJob:
       effect: "Inbound partner acceptance (via the avelo37 ACL use case): the DeliveryJob records the assigned courier (idempotent by partnerRef)."
     - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
       emits: [{ $ref: 'events.yaml#/DeliveryRejectedByPartner' }]
-      effect: "Inbound partner rejection (via the avelo37 ACL use case): the DeliveryJob records it; DeliveryDispatchProcess re-offers (bounded, ADR-20260720-004556)."
+      effect: "Inbound partner rejection (via the avelo37 ACL use case): the DeliveryJob records it; DeliveryDispatchProcess advances the ranked channel walk (#60)."
+    - message: { $ref: 'events.yaml#/DeliveryOfferTimedOut' }
+      emits: [{ $ref: 'events.yaml#/DeliveryOfferTimedOut' }]
+      effect: "The DeliveryOfferTimeoutWorker's fact that an outstanding offer expired (#60): the DeliveryJob records it (mirrors the inbound rejection); DeliveryDispatchProcess advances the ranked channel walk."
     - message: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
       emits: [{ $ref: 'events.yaml#/DeliveryStatusUpdated' }]
       effect: "Inbound partner progress report (via the avelo37 ACL, two-layer inbox — the same event the UpdateDeliveryStatus command emits on the rider/admin path): the DeliveryJob records the reported transition (idempotent; lifecycle-guarded at append), and DeliveryDispatchProcess closes the order on DELIVERED."
     - message: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
       emits: [{ $ref: 'events.yaml#/DeliveryDispatchFailed' }]
-      effect: "DeliveryDispatchProcess delivers the terminal dispatch failure (offer cap of 3 exhausted): the DeliveryJob records it (status → FAILED) so the restaurant board surfaces it for manual handling (idempotent)."
+      effect: "DeliveryDispatchProcess delivers the terminal dispatch failure (the ranked channel walk is exhausted — fail closed, #60): the DeliveryJob records it (status → FAILED) so the restaurant board surfaces it for manual handling (idempotent)."
     - message: { $ref: 'commands.yaml#/AcceptDelivery' }
       emits: [{ $ref: 'events.yaml#/DeliveryAcceptedByRider' }]
       throws:
@@ -579,6 +582,10 @@ DeliveryJob:
       throws:
         - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
         - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # a DELIVERED job cannot be cancelled
+    - message: { $ref: 'commands.yaml#/EscalateDelivery' }
+      emits: [{ $ref: 'events.yaml#/DeliveryEscalationRequested' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }   # only a known job can be escalated; self-dispatch/exhaustion are the saga's concern, not thrown here (#60)
     - message: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
       emits: [{ $ref: 'events.yaml#/DeliveryIssueReported' }]
       throws:

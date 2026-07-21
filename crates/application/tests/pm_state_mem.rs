@@ -66,6 +66,8 @@ async fn mem_dispatch_store_finds_by_order_and_job() {
         delivery_job_id: DeliveryJobId(job),
         process_status: DeliveryDispatchProcessStatus::OFFERED,
         offer_attempts: 1,
+        current_rank: Some(1),
+        current_channel: Some(domain::generated::scalars::DeliveryChannelKey("independent".into())),
         last_update_utc: DateTime::<Utc>::MIN_UTC,
     };
     store.upsert(&row).await.unwrap();

@@ -1,4 +1,4 @@
-version: 2
+version: 3
 description: >
   Observability CONTRACTS for critical workflows — a first-class part of the Captain.Food DSL, not an
   afterthought. Each contract declares, for one workflow, the REQUIRED spans, identifiers, attributes,
@@ -593,3 +593,82 @@ coopcycle-webhook-ingestion:
 
   latency_budget: { max_p95_ms: 1000, max_p99_ms: 3000 }
   error_budget: { max_error_rate_pct: 1.0 }
+
+# =====================================================================
+# delivery-dispatch-strategy — the resolve→walk dispatch saga (#60)
+# OrderMarkedReady (DELIVERY) -> resolve strategy (restaurant mode / city ranking)
+#   -> RESTAURANT: SELF_DISPATCHED (Captain tracks only)
+#   -> CAPTAIN: offer the rank-1 channel, then advance on decline/timeout/escalate to the
+#      next ranked channel, else fail closed (DeliveryDispatchFailed).
+# =====================================================================
+delivery-dispatch-strategy:
+  feature: delivery-dispatch-strategy
+  criticality: high
+  workflow:
+    saga: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
+    emits:
+      - { $ref: 'events.yaml#/DeliveryRequested' }
+      - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+    inbound:
+      - { $ref: 'events.yaml#/OrderMarkedReady' }
+      - { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
+      - { $ref: 'events.yaml#/DeliveryEscalationRequested' }
+      - { $ref: 'events.yaml#/DeliveryOfferTimedOut' }
+
+  run_identity:
+    - { name: correlation_id, source: "event.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: order_id, source: "domain.aggregate_id", businessKey: { $ref: 'scalars.yaml#/OrderId' }, required: true }
+    - { name: delivery_job_id, source: "domain.delivery_job_id", businessKey: { $ref: 'scalars.yaml#/DeliveryJobId' }, required: true }
+
+  spans:
+    - name: "event.consume.trigger"
+      kind: CONSUMER
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }   # OrderMarkedReady | DeliveryRejectedByPartner | DeliveryOfferTimedOut | DeliveryEscalationRequested
+    - name: "dispatch.resolve_strategy"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.dispatch_mode", type: string, required: true }   # CAPTAIN | RESTAURANT (RestaurantDispatchConfig)
+        - { key: "business.city_id", type: string, required: false }         # absent on a SELF_DISPATCHED short-circuit
+    - name: "dispatch.select_channel"
+      kind: INTERNAL
+      required: false   # skipped on a RESTAURANT (SELF_DISPATCHED) run — no channel is selected
+      attributes:
+        - { key: "business.channel", type: string, required: true }         # the DeliveryChannelCatalog key offered
+        - { key: "business.rank", type: int, required: true }                # 1-based position in the city's ranked walk
+        - { key: "business.channels_remaining", type: string, required: true } # true | false (fail-closed when false)
+    - name: "delivery.offer_job"
+      kind: CLIENT
+      required: false   # skipped when the run self-dispatches or the walk is already exhausted
+      attributes:
+        - { key: "business.channel", type: string, required: true }
+        - { key: "business.result", type: string, required: true }          # offered | self_dispatched | exhausted
+    - name: "event.store.append"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+        - { key: "business.stream_id", type: string, required: true }
+
+  metrics:
+    - { name: "delivery_dispatch_duration_ms", type: histogram, attributes: ["result"] }
+    - { name: "delivery_offer_timeout_ms", type: histogram, attributes: ["channel"] }
+  business_metrics:
+    - { name: "delivery_offers_total", type: counter, attributes: ["channel", "rank", "trigger"] }
+    - { name: "delivery_dispatch_failed_total", type: counter, attributes: ["city_id"] }
+    - { name: "delivery_self_dispatched_total", type: counter, attributes: ["restaurant_id"] }
+
+  status_rules:
+    success:
+      required_spans: ["event.consume.trigger", "dispatch.resolve_strategy", "event.store.append"]
+      conditions: ["delivery.offer_job.business.result != 'exhausted'"]
+    technical_error:
+      any_span_errors: true
+    business_rejected:
+      conditions: ["delivery.offer_job.business.result == 'exhausted'"]
+
+  latency_budget: { max_p95_ms: 800, max_p99_ms: 2000 }
+  error_budget: { max_error_rate_pct: 2.0 }

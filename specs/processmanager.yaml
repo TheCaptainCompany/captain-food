@@ -1,4 +1,4 @@
-version: 2
+version: 3
 description: >
   Captain.Food PROCESS MANAGER catalog — a CODE-GENERATION SOURCE (like actors.yaml for aggregates).
   A process manager is a STATE-TABLE ORCHESTRATOR, not an event-sourced actor: it reacts to a message
@@ -393,14 +393,20 @@ CartBindingProcess:
 DeliveryDispatchProcess:
   type: process-manager
   description: >
-    Dispatches and tracks deliveries (bounded context: delivery, ADR-0031). When a DELIVERY order is
-    marked ready, delivers the DeliveryRequested birth to the DeliveryJob (deterministic UUIDv5 job id
-    from the order id = idempotency key) and offers the job to the partner and/or independent riders.
-    Reacts to partner-reported facts (recorded by the DeliveryJob aggregate): a partner decline
-    re-offers the job up to 3 TOTAL offers (offer_attempts on the state row; V0 has a single partner —
-    multi-partner ranking is the extension point), then fails closed with DeliveryDispatchFailed
-    (ADR-20260720-004556). Closes the order on delivery by sending MarkOrderDelivered — the Order
-    validates the transition, so a terminal cancelled/rejected order is never resurrected.
+    Dispatches and tracks deliveries (bounded context: delivery, ADR-0031; resolve→walk strategy, #60).
+    When a DELIVERY order is marked ready, delivers the DeliveryRequested birth to the DeliveryJob
+    (deterministic UUIDv5 job id from the order id = idempotency key), then RESOLVES a dispatch strategy:
+    a RESTAURANT-dispatch order short-circuits to SELF_DISPATCHED (Captain offers no channel and only
+    tracks — the restaurant drives progress and the customer still gets tracking); a CAPTAIN-dispatch
+    order WALKS the city's ranked channel list (CityDeliveryRanking), offering the rank-1 channel. Three
+    triggers advance the walk to the next ranked channel — a partner decline (DeliveryRejectedByPartner),
+    an offer timeout (DeliveryOfferTimedOut) and a manual operator escalate (DeliveryEscalationRequested)
+    — until the list is exhausted, then fails closed with DeliveryDispatchFailed (fail-closed,
+    rules.yaml#/DispatchExhaustionFailsClosed — #60 supersedes the ADR-20260720-004556 numeric cap-3).
+    Channel selection and "channels remain?" are RUNTIME HOOKS (the CityDeliveryRanking read/selection the
+    value forms cannot carry), so each leg carries its branches linearly with notes. Closes the order on
+    delivery by sending MarkOrderDelivered — the Order validates the transition, so a terminal
+    cancelled/rejected order is never resurrected.
   state_table: { $ref: 'database/tables/process_managers.yaml#/delivery_dispatch_process_manager' }
   ports:
     delivery: { $ref: 'services.yaml#/delivery' }
@@ -435,14 +441,17 @@ DeliveryDispatchProcess:
         - call:
             port: delivery
             operation: offer_job
+            note: "Offer the job on the strategy-resolved rank-1 channel (CityDeliveryRanking). The offer_job INPUT is a runtime hook: it resolves the restaurant's dispatch strategy and returns the target channel for a CAPTAIN-dispatch order, or SKIPS the call for a RESTAURANT-dispatch order (self-dispatch short-circuit — Captain offers no channel and only tracks). The ranking read/selection cannot be carried by the value forms (#60)."
         - state:
             set:
               order_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/orderId' } }
               restaurant_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/restaurantId' } }
               delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryRequested/properties/deliveryJobId' } }
-              process_status: { const: OFFERED }
+              process_status: { from_hook: open_process_status }
               offer_attempts: { const: 1 }
-            note: "The birth offer counts as attempt 1 of the bounded re-offer policy (cap 3, ADR-20260720-004556)."
+              current_rank: { from_hook: open_current_rank }
+              current_channel: { from_hook: open_current_channel }
+            note: "Open the run under the resolved strategy (#60). A CAPTAIN-dispatch order opens OFFERED at rank 1 with current_rank/current_channel set to the rank-1 channel offer_job was invoked against; a RESTAURANT-dispatch order opens SELF_DISPATCHED with current_rank/current_channel null (Captain offers no channel and only tracks — the restaurant drives progress and the customer still gets tracking). process_status/current_rank/current_channel are resolved by runtime strategy hooks (from_hook) reading RestaurantDispatchConfig + CityDeliveryRanking; offer_attempts = 1 counts the birth offer."
 
     - message: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
       description: >
@@ -460,11 +469,11 @@ DeliveryDispatchProcess:
 
     - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
       description: >
-        The partner declined (inbound): bounded re-offer (ADR-20260720-004556). While the run has made
-        fewer than 3 total offers, re-offer the job (V0 single partner — the same partner; multi-partner
-        ranking is the extension point) and stay OFFERED; the 3rd decline exhausts the cap and fails the
-        dispatch closed with DeliveryDispatchFailed. The linear step list carries the two branches with
-        notes — the cap comparison (an integer bound) is not expressible in guard `that` consts.
+        The partner declined (inbound): ADVANCE the ranked channel walk (#60). If a next ranked channel
+        remains, offer it and stay OFFERED; when the walk is exhausted, fail the dispatch closed with
+        DeliveryDispatchFailed. "Channels remain?" and next-channel selection are runtime hooks (the
+        CityDeliveryRanking walk the value forms cannot carry), so the linear step list carries the two
+        branches with notes.
       steps:
         - state:
             by: { delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/deliveryJobId' } } }
@@ -474,19 +483,21 @@ DeliveryDispatchProcess:
             note: "ERROR — a rejection for an unknown dispatch run; abort and surface."
         - state:
             expect: { process_status: { const: OFFERED } }
-            note: "Only an outstanding offer can be declined — a decline on a resolved/terminal run skips (benign re-delivery)."
+            note: "Only an outstanding offer can be declined — a decline on a SELF_DISPATCHED / resolved / terminal run skips (benign re-delivery)."
         - call:
             port: delivery
             operation: offer_job
-            note: "RE-OFFER branch (offer_attempts < 3 only — skipped on the exhausted run): offer the job again to the single V0 partner."
+            note: "ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60)."
         - state:
             set:
               offer_attempts: { from_state: offer_attempts }
+              current_rank: { from_hook: advance_current_rank }
+              current_channel: { from_hook: advance_current_channel }
               process_status: { const: OFFERED }
-            note: "RE-OFFER branch: offer_attempts := offer_attempts + 1 (the orchestrator increments — arithmetic the value forms cannot carry); the run stays OFFERED awaiting the partner's answer."
+            note: "ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step — arithmetic/selection the value forms cannot carry); the run stays OFFERED awaiting the answer."
         - guard:
             skip: true
-            note: "offer_attempts stayed under the cap (3) → the job was re-offered; the run ends here. Otherwise (3rd decline) fall through to the terminal failure."
+            note: "A next channel remained → the job was re-offered; the run ends here. Otherwise (walk exhausted) fall through to the terminal failure."
         - deliver:
             event: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
             to: { $ref: 'actors.yaml#/DeliveryJob' }
@@ -499,7 +510,95 @@ DeliveryDispatchProcess:
             note: "EXHAUSTED branch: the terminal dispatch-failure fact — View_DeliveryJob/OrderTracking surface it to the restaurant for manual handling."
         - state:
             set: { process_status: { const: FAILED } }
-            note: "The run closes FAILED — fail-closed, never a retry loop beyond the cap (rules.yaml#/DispatchRetriesAreBounded)."
+            note: "The run closes FAILED — fail-closed after walking every ranked channel (rules.yaml#/DispatchExhaustionFailsClosed)."
+
+    - message: { $ref: 'events.yaml#/DeliveryEscalationRequested' }
+      description: >
+        A manual operator escalate (EscalateDelivery → DeliveryEscalationRequested, #60): SKIP the channel
+        currently offered and ADVANCE the ranked walk now — identical advance behaviour to a partner
+        decline. If a next ranked channel remains, offer it and stay OFFERED; when the walk is exhausted,
+        fail the dispatch closed.
+      steps:
+        - state:
+            by: { delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryEscalationRequested/properties/deliveryJobId' } } }
+            note: "Load the dispatch run for this job."
+        - guard:
+            throws: { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+            note: "ERROR — an escalate for an unknown dispatch run; abort and surface."
+        - state:
+            expect: { process_status: { const: OFFERED } }
+            note: "Only an outstanding offer can be escalated — an escalate on a SELF_DISPATCHED / resolved / terminal run skips (benign)."
+        - call:
+            port: delivery
+            operation: offer_job
+            note: "ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60)."
+        - state:
+            set:
+              offer_attempts: { from_state: offer_attempts }
+              current_rank: { from_hook: advance_current_rank }
+              current_channel: { from_hook: advance_current_channel }
+              process_status: { const: OFFERED }
+            note: "ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED."
+        - guard:
+            skip: true
+            note: "A next channel remained → the job was re-offered; the run ends here. Otherwise (walk exhausted) fall through to the terminal failure."
+        - deliver:
+            event: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+            to: { $ref: 'actors.yaml#/DeliveryJob' }
+            with:
+              deliveryJobId: { from: { $ref: 'events.yaml#/DeliveryEscalationRequested/properties/deliveryJobId' } }
+              orderId: { from_state: order_id }
+              restaurantId: { from_state: restaurant_id }
+              attempts: { from_state: offer_attempts }
+              lastReason: { from: { $ref: 'events.yaml#/DeliveryEscalationRequested/properties/reason' } }
+            note: "EXHAUSTED branch: the operator escalated past the last ranked channel — the terminal dispatch-failure fact."
+        - state:
+            set: { process_status: { const: FAILED } }
+            note: "The run closes FAILED — fail-closed after walking every ranked channel (rules.yaml#/DispatchExhaustionFailsClosed)."
+
+    - message: { $ref: 'events.yaml#/DeliveryOfferTimedOut' }
+      description: >
+        An outstanding offer expired (DeliveryOfferTimeoutWorker → DeliveryOfferTimedOut, #60): ADVANCE the
+        ranked walk to the next channel — identical advance behaviour to a partner decline. If a next
+        ranked channel remains, offer it and stay OFFERED; when the walk is exhausted, fail the dispatch
+        closed.
+      steps:
+        - state:
+            by: { delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryOfferTimedOut/properties/deliveryJobId' } } }
+            note: "Load the dispatch run for this job."
+        - guard:
+            throws: { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+            note: "ERROR — a timeout for an unknown dispatch run; abort and surface."
+        - state:
+            expect: { process_status: { const: OFFERED } }
+            note: "Only an outstanding offer can time out — a timeout on a SELF_DISPATCHED / resolved / terminal run skips (benign; the worker races the answer)."
+        - call:
+            port: delivery
+            operation: offer_job
+            note: "ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60)."
+        - state:
+            set:
+              offer_attempts: { from_state: offer_attempts }
+              current_rank: { from_hook: advance_current_rank }
+              current_channel: { from_hook: advance_current_channel }
+              process_status: { const: OFFERED }
+            note: "ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED."
+        - guard:
+            skip: true
+            note: "A next channel remained → the job was re-offered; the run ends here. Otherwise (walk exhausted) fall through to the terminal failure."
+        - deliver:
+            event: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+            to: { $ref: 'actors.yaml#/DeliveryJob' }
+            with:
+              deliveryJobId: { from: { $ref: 'events.yaml#/DeliveryOfferTimedOut/properties/deliveryJobId' } }
+              orderId: { from_state: order_id }
+              restaurantId: { from_state: restaurant_id }
+              attempts: { from_state: offer_attempts }
+              lastReason: { from: { $ref: 'events.yaml#/DeliveryOfferTimedOut/properties/reason' } }
+            note: "EXHAUSTED branch: the last ranked channel's offer timed out — the terminal dispatch-failure fact."
+        - state:
+            set: { process_status: { const: FAILED } }
+            note: "The run closes FAILED — fail-closed after walking every ranked channel (rules.yaml#/DispatchExhaustionFailsClosed)."
 
     - message: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
       description: "Partner-reported progress: only the terminal DELIVERED report closes the order."

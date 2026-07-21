@@ -1,7 +1,32 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (10:45 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (16:20 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #60: delivery dispatch strategy foundation COMPLETE (ADR-20260721-161939 —
+> supersedes ADR-20260720-004556).** Multi-partner routing built ONCE so #57 (Uber Direct) and #58
+> (CoopCycle) become an adapter crate + a catalog row + a `services.yaml` implementation, with no
+> further saga change. Two-layer model: the **channel CATALOG + spec defaults** live in the spec
+> (`DeliveryChannelCatalog`, `DeliveryChannelKey` slug — data-driven, not an enum), while **usage** is
+> runtime config — `CityDeliveryRanking` (per-city ordered walk list, `city_id IS NULL` = platform
+> default), `RestaurantDispatchConfig` (city + `RestaurantDispatchMode`), `City` a first-class entity.
+> `DeliveryDispatchProcess` is now **resolve → walk**: the birth leg resolves the plan (`RESTAURANT`
+> mode → `SELF_DISPATCHED`, Captain tracks but never offers; `CAPTAIN` → offer rank-1), and one shared
+> advance behaviour reached by three legs (`DeliveryRejectedByPartner` / `DeliveryOfferTimedOut` /
+> `DeliveryEscalationRequested`) offers the next-ranked channel or records the terminal
+> `DeliveryDispatchFailed` when the list is exhausted (list length is the bound, fail-closed —
+> `rules.yaml#/DispatchExhaustionFailsClosed` replaces `DispatchRetriesAreBounded`). New: `offer_job`
+> gains a `channel` target routed by a **composite `DeliveryService`** (channel→adapter registry;
+> unwired channels fall through via the offer timeout, so V0 Tours without Uber Direct is unchanged);
+> `DeliveryOfferTimeoutWorker` (env-gated, TTL = `min(global max, city override ?? channel default)`)
+> implements the ADR-004556 §5 deferred timeout; `EscalateDelivery` command (RESTAURANT/ADMIN) is the
+> manual escalate. Codegen gained a `{ from_hook: <name> }` PM value form (async, rowless,
+> orchestrator-resolved — the strategy/channel hook reads the config tables). Migration
+> `20260721140000` (City + 3 config tables + PM columns `current_rank`/`current_channel` + the
+> `(process_status, last_update_utc)` sweep index + V0 Tours seed); `REQUIRED_SCHEMA_VERSION` bumped.
+> `make rust` green (build + 220+ tests + validate 0 errors + generate, no drift). Follow-ups: #57/#58
+> adapters register their channels here; #61 partner self-registration writes the usage config; #62
+> delivery-delay satisfaction check; a synchronous-decline path for unconfigured channels.
 
 > ✅ **2026-07-21 — #28: Avelo37 delivery-partner adapter COMPLETE (ADR-20260721-104233 —
 > realizes the ADR-20260720-015400 "delivery adopts the inbox" follow-up, the outbound half of the

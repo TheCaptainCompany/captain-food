@@ -1,4 +1,4 @@
-version: 1
+version: 2
 description: >
   Captain.Food GENERATED read-model VIEWS — the `View_*` state-folds the codegen emits as
   `CREATE OR REPLACE VIEW` over domain_events (ADR-0039). Every read model here is a pure fold; the ones
@@ -76,6 +76,8 @@ View_RestaurantAccount:
 nonProjectedEvents:
   - { $ref: 'events.yaml#/PaymentIntentCreated' }   # in-flight checkout; clientSecret returned in PlaceOrderPayload, order materializes on capture
   - { $ref: 'events.yaml#/RefundRequested' }        # saga trigger consumed by RefundProcess; the settled PaymentRefunded fact is what gets projected
+  - { $ref: 'events.yaml#/DeliveryEscalationRequested' }   # internal dispatch mechanics (#60); advances the ranked walk, feeds no View_*
+  - { $ref: 'events.yaml#/DeliveryOfferTimedOut' }         # internal dispatch mechanics (#60); advances the ranked walk, feeds no View_*
 
 # NOTE: OrdersByRestaurant and OrdersByCustomer were folded into the single canonical Order read model
 # (OrderTracking, now tables/projection_tables.yaml) — queried by id / customer / restaurant+status via its

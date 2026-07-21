@@ -136,6 +136,7 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 |  | DenyRefund | [✏️ `denyRefund`](#mutation-denyrefund) |
 | 🧭 **TrackDeliveries** | ViewDeliveries | [🔎 `restaurantDeliveries`](#query-restaurantdeliveries) |
 |  | CancelDelivery | [✏️ `cancelDelivery`](#mutation-canceldelivery) |
+|  | EscalateDelivery | [✏️ `escalateDelivery`](#mutation-escalatedelivery) |
 
 <a id="story-rider"></a>
 ### 🎬 `rider` · 🛵 `RIDER` · 🗣️ `fr-FR`
@@ -6014,7 +6015,7 @@ _criticality: **high**_
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
-### 🧰 API operations _(6)_
+### 🧰 API operations _(7)_
 
 <a id="query-delivery"></a>
 #### 🔎 Query: `delivery`
@@ -6062,6 +6063,13 @@ The independent rider's assigned/available delivery jobs (rider app).
 - **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-escalatedelivery"></a>
+#### ✏️ Mutation: `escalateDelivery`
+
+- **Command**: [📩 `EscalateDelivery`](#command-escalatedelivery) → handled by [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Roles**: RESTAURANT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 ### 🧩 Output types _(1)_
 
 <a id="type-deliveryjob"></a>
@@ -6100,12 +6108,14 @@ _🧩 aggregate_ — One delivery of an order (bounded context: delivery). Born 
 | [⚡ `DeliveryRequested`](#event-deliveryrequested) | [⚡ `DeliveryRequested`](#event-deliveryrequested) | — |
 | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | — |
 | [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | — |
+| [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout) | [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout) | — |
 | [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | — |
 | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — |
 | [📩 `AcceptDelivery`](#command-acceptdelivery) | [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned) |
 | [📩 `ConfirmPickup`](#command-confirmpickup) | [⚡ `DeliveryPickedUp`](#event-deliverypickedup) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `CompleteDelivery`](#command-completedelivery) | [⚡ `DeliveryCompleted`](#event-deliverycompleted) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `CancelDelivery`](#command-canceldelivery) | [⚡ `DeliveryCancelled`](#event-deliverycancelled) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
+| [📩 `EscalateDelivery`](#command-escalatedelivery) | [⚡ `DeliveryEscalationRequested`](#event-deliveryescalationrequested) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 | [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue) | [⚡ `DeliveryIssueReported`](#event-deliveryissuereported) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue) | [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus) | [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
@@ -6192,7 +6202,7 @@ stateDiagram-v2
 <a id="actor-deliverydispatchprocess"></a>
 #### 🎭 Actor: `DeliveryDispatchProcess`
 
-_⚙️ process manager_ — Dispatches and tracks deliveries (bounded context: delivery, ADR-0031). When a DELIVERY order is marked ready, delivers the DeliveryRequested birth to the DeliveryJob (deterministic UUIDv5 job id from the order id = idempotency key) and offers the job to the partner and/or independent riders. Reacts to partner-reported facts (recorded by the DeliveryJob aggregate): a partner decline re-offers the job up to 3 TOTAL offers (offer_attempts on the state row; V0 has a single partner — multi-partner ranking is the extension point), then fails closed with DeliveryDispatchFailed (ADR-20260720-004556). Closes the order on delivery by sending MarkOrderDelivered — the Order validates the transition, so a terminal cancelled/rejected order is never resurrected.
+_⚙️ process manager_ — Dispatches and tracks deliveries (bounded context: delivery, ADR-0031; resolve→walk strategy, #60). When a DELIVERY order is marked ready, delivers the DeliveryRequested birth to the DeliveryJob (deterministic UUIDv5 job id from the order id = idempotency key), then RESOLVES a dispatch strategy: a RESTAURANT-dispatch order short-circuits to SELF_DISPATCHED (Captain offers no channel and only tracks — the restaurant drives progress and the customer still gets tracking); a CAPTAIN-dispatch order WALKS the city's ranked channel list (CityDeliveryRanking), offering the rank-1 channel. Three triggers advance the walk to the next ranked channel — a partner decline (DeliveryRejectedByPartner), an offer timeout (DeliveryOfferTimedOut) and a manual operator escalate (DeliveryEscalationRequested) — until the list is exhausted, then fails closed with DeliveryDispatchFailed (fail-closed, rules.yaml#/DispatchExhaustionFailsClosed — #60 supersedes the ADR-20260720-004556 numeric cap-3). Channel selection and "channels remain?" are RUNTIME HOOKS (the CityDeliveryRanking read/selection the value forms cannot carry), so each leg carries its branches linearly with notes. Closes the order on delivery by sending MarkOrderDelivered — the Order validates the transition, so a terminal cancelled/rejected order is never resurrected.
 
 
 | Receives | Emits → | Throws |
@@ -6201,6 +6211,8 @@ _⚙️ process manager_ — Dispatches and tracks deliveries (bounded context: 
 | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | _The partner accepted (inbound, recorded by the DeliveryJob aggregate — the courier lives on the job): just advance the run.
 _ | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 | [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
+| [⚡ `DeliveryEscalationRequested`](#event-deliveryescalationrequested) | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
+| [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout) | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 | [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⚡ `OrderDelivered`](#event-orderdelivered) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 | [⚡ `DeliveryCompleted`](#event-deliverycompleted) | [⚡ `OrderDelivered`](#event-orderdelivered) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
 
@@ -6224,7 +6236,7 @@ sequenceDiagram
   PM->>RM_Restaurant: read as restaurant [restaurant_id=OrderMarkedReady.restaurantId]
   PM->>AG_DeliveryJob: deliver DeliveryRequested — the aggregate records it
   PM->>PT_delivery: offer_job
-  PM->>ST: set order_id=OrderMarkedReady.orderId, restaurant_id=OrderMarkedReady.restaurantId, delivery_job_id=DeliveryRequested.deliveryJobId, process_status=OFFERED, offer_attempts=?
+  PM->>ST: set order_id=OrderMarkedReady.orderId, restaurant_id=OrderMarkedReady.restaurantId, delivery_job_id=DeliveryRequested.deliveryJobId, process_status=?, offer_attempts=?, current_rank=?, current_channel=?
   end
   rect rgb(245,245,245)
   IN->>PM: DeliveryAcceptedByPartner (event)
@@ -6238,7 +6250,29 @@ sequenceDiagram
   PM--xIN: throws DeliveryJobNotFound
   PM->>ST: expect process_status=OFFERED
   PM->>PT_delivery: offer_job
-  PM->>ST: set offer_attempts=state.offer_attempts, process_status=OFFERED
+  PM->>ST: set offer_attempts=state.offer_attempts, current_rank=?, current_channel=?, process_status=OFFERED
+  Note over PM: skip unless precondition holds
+  PM->>AG_DeliveryJob: deliver DeliveryDispatchFailed — the aggregate records it
+  PM->>ST: set process_status=FAILED
+  end
+  rect rgb(245,245,245)
+  IN->>PM: DeliveryEscalationRequested (event)
+  PM->>ST: by delivery_job_id=DeliveryEscalationRequested.deliveryJobId
+  PM--xIN: throws DeliveryJobNotFound
+  PM->>ST: expect process_status=OFFERED
+  PM->>PT_delivery: offer_job
+  PM->>ST: set offer_attempts=state.offer_attempts, current_rank=?, current_channel=?, process_status=OFFERED
+  Note over PM: skip unless precondition holds
+  PM->>AG_DeliveryJob: deliver DeliveryDispatchFailed — the aggregate records it
+  PM->>ST: set process_status=FAILED
+  end
+  rect rgb(245,245,245)
+  IN->>PM: DeliveryOfferTimedOut (event)
+  PM->>ST: by delivery_job_id=DeliveryOfferTimedOut.deliveryJobId
+  PM--xIN: throws DeliveryJobNotFound
+  PM->>ST: expect process_status=OFFERED
+  PM->>PT_delivery: offer_job
+  PM->>ST: set offer_attempts=state.offer_attempts, current_rank=?, current_channel=?, process_status=OFFERED
   Note over PM: skip unless precondition holds
   PM->>AG_DeliveryJob: deliver DeliveryDispatchFailed — the aggregate records it
   PM->>ST: set process_status=FAILED
@@ -6290,7 +6324,7 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(14)_
+### 📩 Commands _(15)_
 
 <a id="command-acceptdelivery"></a>
 #### 📩 Command: `AcceptDelivery`
@@ -6333,6 +6367,20 @@ Restaurant/admin cancels a delivery job before it completes.
 | --- | --- | --- | --- |
 | <a id="command-canceldelivery--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="command-canceldelivery--reason"></a>`reason` | `string` | ⬜ |  |
+
+<a id="command-escalatedelivery"></a>
+#### 📩 Command: `EscalateDelivery`
+
+Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
+
+- **Dispatched by**: [✏️ `escalateDelivery`](#mutation-escalatedelivery) · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Emits**: [⚡ `DeliveryEscalationRequested`](#event-deliveryescalationrequested)
+- **Throws**: [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-escalatedelivery--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="command-escalatedelivery--reason"></a>`reason` | `string` | ⬜ |  |
 
 <a id="command-completedelivery"></a>
 #### 📩 Command: `CompleteDelivery`
@@ -6494,7 +6542,7 @@ Change a rider's availability/lifecycle status.
 | <a id="command-changeriderstatus--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="command-changeriderstatus--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### ⚡ Events _(18)_
+### ⚡ Events _(20)_
 
 <a id="event-deliveryrequested"></a>
 #### ⚡ Event: `DeliveryRequested`
@@ -6588,6 +6636,36 @@ Dispatch failed terminally: the delivery partner declined the job at every offer
 | <a id="event-deliverydispatchfailed--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-deliverydispatchfailed--attempts"></a>`attempts` | `integer` | ✅ | Total offer attempts made before giving up (the cap; the birth offer counts as 1). |
 | <a id="event-deliverydispatchfailed--lastreason"></a>`lastReason` | `string` | ⬜ | Reason carried by the final partner decline, when the partner gave one. |
+
+<a id="event-deliveryescalationrequested"></a>
+#### ⚡ Event: `DeliveryEscalationRequested`
+
+An operator (restaurant/admin) asked to skip the delivery channel currently offered and advance the ranked walk now (#60). Emitted by the DeliveryJob aggregate handling the EscalateDelivery command; consumed by DeliveryDispatchProcess, which offers the next ranked channel (or fails closed when the walk is exhausted). Internal dispatch mechanics — feeds no View_*.
+
+- **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Consumed by**: [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
+- **Projected into**: _non-projected (saga/transient)_
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-deliveryescalationrequested--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="event-deliveryescalationrequested--reason"></a>`reason` | `string` | ⬜ | Why the operator escalated (optional free text). |
+
+<a id="event-deliveryoffertimedout"></a>
+#### ⚡ Event: `DeliveryOfferTimedOut`
+
+An outstanding delivery offer expired before the channel answered (#60): the DeliveryOfferTimeoutWorker found an OFFERED run older than the resolved TTL and records this fact (authored like DeliveryDispatchFailed). Recorded by the DeliveryJob aggregate and consumed by DeliveryDispatchProcess, which advances the ranked walk to the next channel (or fails closed when exhausted). Internal dispatch mechanics — feeds no View_*.
+
+- **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Consumed by**: [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
+- **Projected into**: _non-projected (saga/transient)_
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-deliveryoffertimedout--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="event-deliveryoffertimedout--channel"></a>`channel` | [🔤 `DeliveryChannelKey`](#scalar-deliverychannelkey) | ✅ | The channel whose offer timed out. |
+| <a id="event-deliveryoffertimedout--rank"></a>`rank` | `integer` | ✅ | 1-based rank of the timed-out channel in the city's ranked walk. |
+| <a id="event-deliveryoffertimedout--reason"></a>`reason` | `string` | ⬜ | Optional detail (e.g. the resolved TTL that elapsed). |
 
 <a id="event-deliveryacceptedbypartner"></a>
 #### ⚡ Event: `DeliveryAcceptedByPartner`
@@ -6774,7 +6852,7 @@ A rider's availability/lifecycle status changed.
 | <a id="event-riderstatuschanged--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="event-riderstatuschanged--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### 🔤 Scalars _(4)_
+### 🔤 Scalars _(5)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -6782,19 +6860,20 @@ A rider's availability/lifecycle status changed.
 | <a id="scalar-riderid"></a>🔤 `RiderId` | string _uuid_ | An independent Captain rider (courier). Null on a partner-fulfilled job (the partner's courier is name/phone only). |
 | <a id="scalar-riderstatus"></a>🔤 `RiderStatus` | enum (OFFLINE \| AVAILABLE \| ON_DELIVERY \| SUSPENDED) | Availability/lifecycle status of an independent Captain rider. |
 | <a id="scalar-deliveryprovider"></a>🔤 `DeliveryProvider` | enum (PARTNER \| INDEPENDENT) | Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider). |
+| <a id="scalar-deliverychannelkey"></a>🔤 `DeliveryChannelKey` | string `^[a-z0-9]+(?:_[a-z0-9]+)*$` | Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60). |
 
 ### ⛔ Errors _(6)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
-| <a id="error-deliveryjobnotfound"></a>⛔ `DeliveryJobNotFound` | No delivery job with this id. | 🇬🇧 Delivery job not found. | 🇫🇷 Livraison introuvable. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus), [📩 `DeclineDelivery`](#command-declinedelivery) |
+| <a id="error-deliveryjobnotfound"></a>⛔ `DeliveryJobNotFound` | No delivery job with this id. | 🇬🇧 Delivery job not found. | 🇫🇷 Livraison introuvable. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `EscalateDelivery`](#command-escalatedelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus), [📩 `DeclineDelivery`](#command-declinedelivery) |
 | <a id="error-invaliddeliverystatus"></a>⛔ `InvalidDeliveryStatus` | The delivery job is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the delivery is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus), [📩 `DeclineDelivery`](#command-declinedelivery) |
 | <a id="error-deliveryalreadyassigned"></a>⛔ `DeliveryAlreadyAssigned` | The delivery job has already been accepted by a courier/rider. | 🇬🇧 This delivery has already been taken. | 🇫🇷 Cette livraison a déjà été prise en charge. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
 | <a id="error-rideralreadyregistered"></a>⛔ `RiderAlreadyRegistered` | A rider is already registered for this identity (authRef/id). | 🇬🇧 You are already registered as a rider. | 🇫🇷 Vous êtes déjà inscrit en tant que livreur. | [📩 `RegisterRider`](#command-registerrider) |
 | <a id="error-ridernotfound"></a>⛔ `RiderNotFound` | No rider with this id. | 🇬🇧 Rider not found. | 🇫🇷 Livreur introuvable. | [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-invalidriderstatustransition"></a>⛔ `InvalidRiderStatusTransition` | The rider is not in a status that allows this transition. | 🇬🇧 A rider cannot move from '{currentStatus}' to '{targetStatus}'. | 🇫🇷 Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 
-### 📐 Business rules _(12)_
+### 📐 Business rules _(16)_
 
 <a id="rule-deliveryacceptedonlywhenpending"></a>
 #### 📐 Rule: `DeliveryAcceptedOnlyWhenPending`
@@ -6838,12 +6917,40 @@ _When the partner declines (inbound), the job is re-offered or flagged for manua
 
 - **Verified by**: [🧪 `TestDispatchPartnerRejected`](#test-testdispatchpartnerrejected), [🧪 `TestDeliveryJobRecordsPartnerRejection`](#test-testdeliveryjobrecordspartnerrejection)
 
-<a id="rule-dispatchretriesarebounded"></a>
-#### 📐 Rule: `DispatchRetriesAreBounded`
+<a id="rule-dispatchexhaustionfailsclosed"></a>
+#### 📐 Rule: `DispatchExhaustionFailsClosed`
 
-_A delivery job is offered at most 3 times in total (the birth offer + 2 re-offers); when the partner declines the last allowed offer the dispatch fails terminally (DeliveryDispatchFailed, run FAILED) and is surfaced to the restaurant for manual handling — never an unbounded retry loop (ADR-20260720-004556)._
+_When Captain dispatches, the delivery job walks the city's ranked channel list, offering each ranked channel at most once in rank order; once every ranked channel has been offered and none accepts, the dispatch fails terminally (DeliveryDispatchFailed, run FAILED) and is surfaced to the restaurant for manual handling — never an unbounded retry loop (#60, supersedes ADR-20260720-004556)._
 
-- **Verified by**: [🧪 `TestDispatchPartnerRejected`](#test-testdispatchpartnerrejected), [🧪 `TestDispatchAcceptedAfterReoffer`](#test-testdispatchacceptedafterreoffer), [🧪 `TestDispatchFailsAfterOfferCap`](#test-testdispatchfailsafteroffercap), [🧪 `TestDeliveryJobRecordsDispatchFailure`](#test-testdeliveryjobrecordsdispatchfailure)
+- **Verified by**: [🧪 `TestDispatchFailsAfterOfferCap`](#test-testdispatchfailsafteroffercap), [🧪 `TestDeliveryJobRecordsDispatchFailure`](#test-testdeliveryjobrecordsdispatchfailure)
+
+<a id="rule-restaurantdispatchbypassesrouting"></a>
+#### 📐 Rule: `RestaurantDispatchBypassesRouting`
+
+_A RESTAURANT-dispatch order (RestaurantDispatchMode RESTAURANT) is never offered to a delivery channel: the dispatch run short-circuits to SELF_DISPATCHED and Captain only tracks the delivery, while the restaurant drives its progress and the customer still gets order tracking (#60)._
+
+- **Verified by**: [🧪 `TestDispatchSelfDispatched`](#test-testdispatchselfdispatched)
+
+<a id="rule-cityrankingwalkedinorder"></a>
+#### 📐 Rule: `CityRankingWalkedInOrder`
+
+_When Captain dispatches, channels are offered in the city's configured rank order (CityDeliveryRanking, rank 1 first): the birth offer goes to the rank-1 channel and each advance moves to the next rank (#60)._
+
+- **Verified by**: [🧪 `TestDispatchPartnerRejected`](#test-testdispatchpartnerrejected), [🧪 `TestDispatchAcceptedAfterReoffer`](#test-testdispatchacceptedafterreoffer)
+
+<a id="rule-timeoutescalatestonextchannel"></a>
+#### 📐 Rule: `TimeoutEscalatesToNextChannel`
+
+_When an outstanding delivery offer times out (DeliveryOfferTimedOut), the dispatch advances to the next ranked channel (or fails closed when the ranked walk is exhausted) — a stale offer never blocks the walk (#60)._
+
+- **Verified by**: [🧪 `TestDispatchAdvancesOnTimeout`](#test-testdispatchadvancesontimeout), [🧪 `TestDeliveryJobRecordsOfferTimeout`](#test-testdeliveryjobrecordsoffertimeout)
+
+<a id="rule-manualescalateskipschannel"></a>
+#### 📐 Rule: `ManualEscalateSkipsChannel`
+
+_An operator (restaurant/admin) may escalate an outstanding delivery offer (EscalateDelivery → DeliveryEscalationRequested), skipping the channel currently offered and advancing to the next ranked channel (or failing closed when the ranked walk is exhausted) (#60)._
+
+- **Verified by**: [🧪 `TestDispatchAdvancesOnEscalate`](#test-testdispatchadvancesonescalate), [🧪 `TestDeliveryJobEscalated`](#test-testdeliveryjobescalated)
 
 <a id="rule-orderclosedondeliverycompletion"></a>
 #### 📐 Rule: `OrderClosedOnDeliveryCompletion`
@@ -6982,7 +7089,27 @@ _The DeliveryJob records the terminal dispatch failure delivered by DeliveryDisp
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **When**: [📩 `DeliveryDispatchFailed`](#command-deliverydispatchfailed)
 - **Then**: [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
-- **Verifies**: [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded)
+- **Verifies**: [📐 `DispatchExhaustionFailsClosed`](#rule-dispatchexhaustionfailsclosed)
+
+<a id="test-testdeliveryjobescalated"></a>
+#### 🧪 Test: `TestDeliveryJobEscalated`
+
+_An operator escalates an outstanding offer: the DeliveryJob emits DeliveryEscalationRequested_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
+- **When**: [📩 `EscalateDelivery`](#command-escalatedelivery)
+- **Then**: [⚡ `DeliveryEscalationRequested`](#event-deliveryescalationrequested)
+- **Verifies**: [📐 `ManualEscalateSkipsChannel`](#rule-manualescalateskipschannel)
+
+<a id="test-testdeliveryjobrecordsoffertimeout"></a>
+#### 🧪 Test: `TestDeliveryJobRecordsOfferTimeout`
+
+_The DeliveryJob records the offer-timeout fact (the dispatcher advances the ranked walk)_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
+- **When**: [📩 `DeliveryOfferTimedOut`](#command-deliveryoffertimedout)
+- **Then**: [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout)
+- **Verifies**: [📐 `TimeoutEscalatesToNextChannel`](#rule-timeoutescalatestonextchannel)
 
 <a id="test-testdeliveryjobrecordspartnerstatusreport"></a>
 #### 🧪 Test: `TestDeliveryJobRecordsPartnerStatusReport`
@@ -7151,32 +7278,62 @@ _Records the assigned courier when the partner accepts (inbound)_
 <a id="test-testdispatchpartnerrejected"></a>
 #### 🧪 Test: `TestDispatchPartnerRejected`
 
-_Re-offers the declined job to the partner while under the 3-offer cap (inbound decline)_
+_Advances the ranked channel walk to the next channel on a partner decline (inbound)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **When**: [📩 `DeliveryRejectedByPartner`](#command-deliveryrejectedbypartner)
 - **Then**: ∅ _no event (idempotent no-op)_
-- **Verifies**: [📐 `PartnerRejectionReoffers`](#rule-partnerrejectionreoffers), [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded)
+- **Verifies**: [📐 `PartnerRejectionReoffers`](#rule-partnerrejectionreoffers), [📐 `CityRankingWalkedInOrder`](#rule-cityrankingwalkedinorder)
 
 <a id="test-testdispatchacceptedafterreoffer"></a>
 #### 🧪 Test: `TestDispatchAcceptedAfterReoffer`
 
-_The partner accepts a re-offered job: the run advances to ACCEPTED (happy path after a decline)_
+_A channel accepts a re-offered job after the walk advanced: the run reaches ACCEPTED_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
 - **When**: [📩 `DeliveryAcceptedByPartner`](#command-deliveryacceptedbypartner)
 - **Then**: ∅ _no event (idempotent no-op)_
-- **Verifies**: [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded), [📐 `PartnerAcceptanceRecordsCourier`](#rule-partneracceptancerecordscourier)
+- **Verifies**: [📐 `CityRankingWalkedInOrder`](#rule-cityrankingwalkedinorder), [📐 `PartnerAcceptanceRecordsCourier`](#rule-partneracceptancerecordscourier)
 
 <a id="test-testdispatchfailsafteroffercap"></a>
 #### 🧪 Test: `TestDispatchFailsAfterOfferCap`
 
-_The 3rd partner decline exhausts the offer cap: DeliveryDispatchFailed is recorded and the run closes FAILED_
+_Exhausting the ranked channel walk fails the dispatch closed (DeliveryDispatchFailed, run FAILED)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
 - **When**: [📩 `DeliveryRejectedByPartner`](#command-deliveryrejectedbypartner)
 - **Then**: [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
-- **Verifies**: [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded)
+- **Verifies**: [📐 `DispatchExhaustionFailsClosed`](#rule-dispatchexhaustionfailsclosed)
+
+<a id="test-testdispatchselfdispatched"></a>
+#### 🧪 Test: `TestDispatchSelfDispatched`
+
+_A RESTAURANT-dispatch order is not offered to a channel: the run self-dispatches (Captain tracks only)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `OrderPlaced`](#event-orderplaced)
+- **When**: [📩 `OrderMarkedReady`](#command-ordermarkedready)
+- **Then**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
+- **Verifies**: [📐 `RestaurantDispatchBypassesRouting`](#rule-restaurantdispatchbypassesrouting)
+
+<a id="test-testdispatchadvancesonescalate"></a>
+#### 🧪 Test: `TestDispatchAdvancesOnEscalate`
+
+_A manual operator escalate skips the current channel and advances the ranked walk_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
+- **When**: [📩 `DeliveryEscalationRequested`](#command-deliveryescalationrequested)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `ManualEscalateSkipsChannel`](#rule-manualescalateskipschannel)
+
+<a id="test-testdispatchadvancesontimeout"></a>
+#### 🧪 Test: `TestDispatchAdvancesOnTimeout`
+
+_An expired offer advances the ranked walk to the next channel_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
+- **When**: [📩 `DeliveryOfferTimedOut`](#command-deliveryoffertimedout)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `TimeoutEscalatesToNextChannel`](#rule-timeoutescalatestonextchannel)
 
 <a id="test-testdispatchclosesorderonpartnerdelivered"></a>
 #### 🧪 Test: `TestDispatchClosesOrderOnPartnerDelivered`
@@ -7197,6 +7354,39 @@ _Closes the order when an independent rider completes the delivery_
 - **When**: [📩 `DeliveryCompleted`](#command-deliverycompleted)
 - **Then**: [⚡ `OrderDelivered`](#event-orderdelivered)
 - **Verifies**: [📐 `OrderClosedOnDeliveryCompletion`](#rule-orderclosedondeliverycompletion)
+
+### 📡 Observability _(1)_
+
+<a id="obs-delivery-dispatch-strategy"></a>
+#### 📡 Contract: `delivery-dispatch-strategy`
+
+_criticality: **high**_
+
+- **Workflow**: saga [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess)
+- **Emits**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) · **Inbound**: [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryEscalationRequested`](#event-deliveryescalationrequested), [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout)
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `event.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `order_id` | `domain.aggregate_id` | ✅ | [🔤 `OrderId`](#scalar-orderid) |
+| `delivery_job_id` | `domain.delivery_job_id` | ✅ | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `event.consume.trigger` | `CONSUMER` | ✅ | — | `business.event_type`* |
+| `dispatch.resolve_strategy` | `INTERNAL` | ✅ | — | `business.dispatch_mode`*, `business.city_id` |
+| `dispatch.select_channel` | `INTERNAL` | ⬜ | — | `business.channel`*, `business.rank`*, `business.channels_remaining`* |
+| `delivery.offer_job` | `CLIENT` | ⬜ | — | `business.channel`*, `business.result`* |
+| `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`*, `business.stream_id`* |
+
+- **Metrics**: `delivery_dispatch_duration_ms` _(histogram)_, `delivery_offer_timeout_ms` _(histogram)_ · **Business metrics**: `delivery_offers_total` _(counter)_, `delivery_dispatch_failed_total` _(counter)_, `delivery_self_dispatched_total` _(counter)_
+- **Status rules**: success ⇐ spans [`event.consume.trigger`, `dispatch.resolve_strategy`, `event.store.append`]
+- **SLOs**: p95 ≤ 800ms · p99 ≤ 2000ms · error rate ≤ 2%
 
 <a id="sec-ctx-cross-cutting"></a>
 ## 🔲 6. cross-cutting
@@ -7475,7 +7665,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(38)_
+### 🔤 Scalars _(41)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -7499,6 +7689,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-emailaddress"></a>🔤 `EmailAddress` | string _email_ |  |
 | <a id="scalar-phonenumber"></a>🔤 `PhoneNumber` | string | Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber and stored on events/views. Validation enforced at application level.  |
 | <a id="scalar-addressline"></a>🔤 `AddressLine` | string |  |
+| <a id="scalar-cityid"></a>🔤 `CityId` | string _uuid_ | A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60). |
 | <a id="scalar-postalcode"></a>🔤 `PostalCode` | string |  |
 | <a id="scalar-countrycode"></a>🔤 `CountryCode` | string `^[A-Z]{2}$` | ISO 3166-1 alpha-2 country code. Example: 'FR'. |
 | <a id="scalar-timezone"></a>🔤 `TimeZone` | string | IANA timezone. Example: 'Europe/Paris'. |
@@ -7514,7 +7705,9 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-inboundeventstatus"></a>🔤 `InboundEventStatus` | enum (RECEIVED \| DELIVERED \| FAILED) | Lifecycle of an adapted inbound business event (inbound_events row): RECEIVED (staged by the adapter ACL), DELIVERED (appended through the normal write path — includes the aggregate's already-recorded no-op), FAILED (delivery error, left for retry/inspection).  |
 | <a id="scalar-paymentprocessstatus"></a>🔤 `PaymentProcessStatus` | enum (AWAITING_PAYMENT_RESULT \| ORDER_PLACED \| FAILED) | State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart). |
 | <a id="scalar-refundprocessstatus"></a>🔤 `RefundProcessStatus` | enum (PENDING_APPROVAL \| APPROVED_AWAITING_SETTLEMENT \| DENIED \| REFUNDED) | State of one RefundProcess run (refund_process_manager row, keyed by order). Refunds are approved by the restaurant (own orders) or an admin. |
-| <a id="scalar-deliverydispatchprocessstatus"></a>🔤 `DeliveryDispatchProcessStatus` | enum (OFFERED \| ACCEPTED \| FAILED \| COMPLETED) | State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED keeps REOFFER_REQUIRED's ordinal slot (both flag manual handling; ADR-20260720-004556). |
+| <a id="scalar-deliverydispatchprocessstatus"></a>🔤 `DeliveryDispatchProcessStatus` | enum (OFFERED \| ACCEPTED \| FAILED \| COMPLETED \| SELF_DISPATCHED) | State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED now marks the ranked channel walk exhausted (fail closed, rules.yaml#/DispatchExhaustionFailsClosed — #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED is appended LAST to preserve the declaration-order ordinals of the pre-#60 values (ADR-0037)."  |
+| <a id="scalar-restaurantdispatchmode"></a>🔤 `RestaurantDispatchMode` | enum (CAPTAIN \| RESTAURANT) | Who is responsible for fulfilling a restaurant's deliveries (restaurant-scoped config, resolved at runtime; #60). Default CAPTAIN keeps today's behaviour. |
+| <a id="scalar-deliverychannelkind"></a>🔤 `DeliveryChannelKind` | enum (POOL \| PARTNER) | Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60). |
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 

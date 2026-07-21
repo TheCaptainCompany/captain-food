@@ -1,4 +1,4 @@
-version: 1
+version: 2
 description: >
   Reference / configuration tables (ADR-0037) — seeded once by a repo script, NOT projected from
   domain_events. Plain tables (no `View_` prefix — they are authoritative seeded data, not projections),
@@ -53,3 +53,60 @@ UberSplitPolicy:
     avg_delivery_fee_cents: { type: integer }
     platform_fee_pct:       { type: numeric }
     effective_from:         { type: timestamptz }
+
+# --- Delivery dispatch strategy (#60) ---
+# The channel CATALOG (partners + spec-level defaults) plus the runtime USAGE config resolved per city /
+# restaurant. Spec declares the catalog + mechanism; these config rows carry the "which/where/for whom"
+# the spec cannot anticipate (they are seeded/managed, and later API-writable via partner self-registration
+# #61). See docs/proposals/delivery-dispatch-strategy-foundation.md.
+
+City:
+  reference: true
+  description: >
+    A city Captain operates in (#60). The routing scope: CityDeliveryRanking is keyed by city_id and a
+    restaurant's dispatch config names its city. Seeded (V0: Tours).
+  columns:
+    city_id: { type: { $ref: 'scalars.yaml#/CityId' }, pk: true }
+    name:    { type: { $ref: 'scalars.yaml#/CityName' } }
+    country: { type: { $ref: 'scalars.yaml#/CountryCode' } }
+
+DeliveryChannelCatalog:
+  reference: true
+  description: >
+    Catalog of known delivery channels/partners with their SPEC-LEVEL defaults (#60). One row per channel.
+    Per-scope USAGE (ranking, TTL overrides) is runtime config (CityDeliveryRanking), not here. Every
+    PARTNER-kind channel must have a wired services.yaml delivery implementation. Seeded: independent (POOL),
+    avelo37 / uber_direct / coopcycle (PARTNER).
+  columns:
+    channel:                   { type: { $ref: 'scalars.yaml#/DeliveryChannelKey' }, pk: true }
+    kind:                      { type: { $ref: 'scalars.yaml#/DeliveryChannelKind' } }
+    default_offer_ttl_seconds: { type: integer, note: "Spec-level default offer timeout for this channel; a city row may override it, and the global env max TTL caps it (#60)." }
+    enabled:                   { type: boolean, note: "A channel can be globally disabled without removing its catalog row." }
+    effective_from:            { type: timestamptz }
+
+CityDeliveryRanking:
+  reference: true
+  description: >
+    Per-city ORDERED channel list Captain walks when it dispatches (#60) — the runtime 'content' the spec
+    cannot anticipate. Resolution: the latest effective_from set for a city, ordered by rank; a row with a
+    null city_id is the platform default. Tours seed (today): (tours, 1, independent), (tours, 2, uber_direct).
+  columns:
+    id:                   { type: text, pk: true, note: "Surrogate key (e.g. 'tours-1'); the natural key is (city_id, effective_from, rank)." }
+    city_id:              { type: { $ref: 'scalars.yaml#/CityId' }, nullable: true, index: true, note: "The city this ranking applies to; NULL = platform default fallback." }
+    rank:                 { type: integer, note: "1-based position in the walk order." }
+    channel:              { type: { $ref: 'scalars.yaml#/DeliveryChannelKey' } }
+    ttl_override_seconds: { type: integer, nullable: true, note: "Per-city offer TTL for this channel (INDEPENDENT's TTL lives here); null = the catalog default. Capped by the global env max (#60)." }
+    effective_from:       { type: timestamptz }
+
+RestaurantDispatchConfig:
+  reference: true
+  description: >
+    Per-restaurant dispatch config (#60): the restaurant's city (routing scope), whether Captain or the
+    restaurant dispatches, and — for self-dispatch — the restaurant's own delay threshold driving the
+    customer 'late' tracking signal (not an escalation). Seeded/managed per restaurant; default mode CAPTAIN.
+  columns:
+    restaurant_id:             { type: { $ref: 'scalars.yaml#/RestaurantId' }, pk: true }
+    city_id:                   { type: { $ref: 'scalars.yaml#/CityId' }, index: true }
+    mode:                      { type: { $ref: 'scalars.yaml#/RestaurantDispatchMode' } }
+    self_dispatch_ttl_seconds: { type: integer, nullable: true, note: "The restaurant's promised delivery-time threshold when mode=RESTAURANT; on breach the customer's tracking shows 'late' and feeds the satisfaction check (#62). Not a routing escalation." }
+    effective_from:            { type: timestamptz }

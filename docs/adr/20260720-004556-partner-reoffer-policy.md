@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded by ADR-20260721-161939 (delivery dispatch strategy foundation, #60) — the single-partner
+cap-3 re-offer is replaced by a per-city ranked-channel walk, and the §5 deferred offer timeout is
+implemented as `DeliveryOfferTimeoutWorker`.
 
 ## Context
 

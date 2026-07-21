@@ -756,8 +756,20 @@ pub mod delivery_dispatch_process {
         /// `DeliveryRequested` be appended? (A re-delivered trigger must find the fact already recorded.)
         fn should_deliver_delivery_requested(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::DeliveryRequested) -> bool;
 
-        /// Build the `delivery.offer_job` input for this leg. `Skip` skips just this call — the leg continues.
+        /// Build the `delivery.offer_job` input for this leg. — Offer the job on the strategy-resolved rank-1 channel (CityDeliveryRanking). The offer_job INPUT is a runtime hook: it resolves the restaurant's dispatch strategy and returns the target channel for a CAPTAIN-dispatch order, or SKIPS the call for a RESTAURANT-dispatch order (self-dispatch short-circuit — Captain offers no channel and only tracks). The ranking read/selection cannot be carried by the value forms (#60). `Skip` skips just this call — the leg continues.
         async fn input_delivery_offer_job(&self, event: &domain::generated::events::OrderMarkedReady, order: &OrderRead, restaurant: &RestaurantRead, delivery_requested: &domain::generated::events::DeliveryRequested) -> Result<super::HookOutcome<crate::generated::services::DeliveryOfferJobInput>, domain::shared::errors::DomainError>;
+
+        /// Orchestrator-resolved `process_status` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). Open the run under the resolved strategy (#60). A CAPTAIN-dispatch order opens OFFERED at rank 1 with current_rank/current_channel set to the rank-1 channel offer_job was invoked against; a RESTAURANT-dispatch order opens SELF_DISPATCHED with current_rank/current_channel null (Captain offers no channel and only tracks — the restaurant drives progress and the customer still gets tracking). process_status/current_rank/current_channel are resolved by runtime strategy hooks (from_hook) reading RestaurantDispatchConfig + CityDeliveryRanking; offer_attempts = 1 counts the birth offer.
+        async fn open_process_status(&self, event: &domain::generated::events::OrderMarkedReady, order: &OrderRead, restaurant: &RestaurantRead, delivery_requested: &domain::generated::events::DeliveryRequested) -> Result<domain::generated::scalars::DeliveryDispatchProcessStatus, domain::shared::errors::DomainError>;
+
+        /// Orchestrator-resolved `current_rank` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). Open the run under the resolved strategy (#60). A CAPTAIN-dispatch order opens OFFERED at rank 1 with current_rank/current_channel set to the rank-1 channel offer_job was invoked against; a RESTAURANT-dispatch order opens SELF_DISPATCHED with current_rank/current_channel null (Captain offers no channel and only tracks — the restaurant drives progress and the customer still gets tracking). process_status/current_rank/current_channel are resolved by runtime strategy hooks (from_hook) reading RestaurantDispatchConfig + CityDeliveryRanking; offer_attempts = 1 counts the birth offer.
+        async fn open_current_rank(&self, event: &domain::generated::events::OrderMarkedReady, order: &OrderRead, restaurant: &RestaurantRead, delivery_requested: &domain::generated::events::DeliveryRequested) -> Result<Option<i32>, domain::shared::errors::DomainError>;
+
+        /// Orchestrator-resolved `current_channel` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). Open the run under the resolved strategy (#60). A CAPTAIN-dispatch order opens OFFERED at rank 1 with current_rank/current_channel set to the rank-1 channel offer_job was invoked against; a RESTAURANT-dispatch order opens SELF_DISPATCHED with current_rank/current_channel null (Captain offers no channel and only tracks — the restaurant drives progress and the customer still gets tracking). process_status/current_rank/current_channel are resolved by runtime strategy hooks (from_hook) reading RestaurantDispatchConfig + CityDeliveryRanking; offer_attempts = 1 counts the birth offer.
+        async fn open_current_channel(&self, event: &domain::generated::events::OrderMarkedReady, order: &OrderRead, restaurant: &RestaurantRead, delivery_requested: &domain::generated::events::DeliveryRequested) -> Result<Option<domain::generated::scalars::DeliveryChannelKey>, domain::shared::errors::DomainError>;
 
         /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
         /// credential, ADR-20260720-015500) — default: none.
@@ -808,7 +820,7 @@ pub mod delivery_dispatch_process {
                 .save(&stream, stream_version, &[domain::generated::events::DomainEvent::DeliveryRequested(delivery_requested.clone())], &actor)
                 .await?;
         }
-        // call delivery.offer_job
+        // call delivery.offer_job — Offer the job on the strategy-resolved rank-1 channel (CityDeliveryRanking). The offer_job INPUT is a runtime hook: it resolves the restaurant's dispatch strategy and returns the target channel for a CAPTAIN-dispatch order, or SKIPS the call for a RESTAURANT-dispatch order (self-dispatch short-circuit — Captain offers no channel and only tracks). The ranking read/selection cannot be carried by the value forms (#60).
         match hooks.input_delivery_offer_job(event, &order, &restaurant, &delivery_requested).await? {
             super::HookOutcome::Ready(input) => {
                 delivery.offer_job(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
@@ -817,13 +829,18 @@ pub mod delivery_dispatch_process {
                 eprintln!("saga[DeliveryDispatchProcess]: call delivery.offer_job skipped — {reason}");
             }
         }
-        // state.set — upsert the run row (envelope stamps last_update_utc). The birth offer counts as attempt 1 of the bounded re-offer policy (cap 3, ADR-20260720-004556).
+        // state.set — upsert the run row (envelope stamps last_update_utc). Open the run under the resolved strategy (#60). A CAPTAIN-dispatch order opens OFFERED at rank 1 with current_rank/current_channel set to the rank-1 channel offer_job was invoked against; a RESTAURANT-dispatch order opens SELF_DISPATCHED with current_rank/current_channel null (Captain offers no channel and only tracks — the restaurant drives progress and the customer still gets tracking). process_status/current_rank/current_channel are resolved by runtime strategy hooks (from_hook) reading RestaurantDispatchConfig + CityDeliveryRanking; offer_attempts = 1 counts the birth offer.
+        let hook_process_status = hooks.open_process_status(event, &order, &restaurant, &delivery_requested).await?;
+        let hook_current_rank = hooks.open_current_rank(event, &order, &restaurant, &delivery_requested).await?;
+        let hook_current_channel = hooks.open_current_channel(event, &order, &restaurant, &delivery_requested).await?;
         let mut updated = crate::pm_state::DeliveryDispatchRow {
             order_id: event.order_id,
             restaurant_id: event.restaurant_id,
             delivery_job_id: delivery_requested.delivery_job_id,
-            process_status: domain::generated::scalars::DeliveryDispatchProcessStatus::OFFERED,
+            process_status: hook_process_status,
             offer_attempts: 1,
+            current_rank: hook_current_rank,
+            current_channel: hook_current_channel,
             // Ignored on write — the store stamps now() (runtime envelope).
             last_update_utc: chrono::Utc::now(),
         };
@@ -865,20 +882,29 @@ pub mod delivery_dispatch_process {
 
     /// Non-structural hooks for the generated `DeliveryRejectedByPartner` leg — the seams the step DSL cannot express
     /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// The partner declined (inbound): bounded re-offer (ADR-20260720-004556). While the run has made fewer than 3 total offers, re-offer the job (V0 single partner — the same partner; multi-partner ranking is the extension point) and stay OFFERED; the 3rd decline exhausts the cap and fails the dispatch closed with DeliveryDispatchFailed. The linear step list carries the two branches with notes — the cap comparison (an integer bound) is not expressible in guard `that` consts. 
+    /// The partner declined (inbound): ADVANCE the ranked channel walk (#60). If a next ranked channel remains, offer it and stay OFFERED; when the walk is exhausted, fail the dispatch closed with DeliveryDispatchFailed. "Channels remain?" and next-channel selection are runtime hooks (the CityDeliveryRanking walk the value forms cannot carry), so the linear step list carries the two branches with notes. 
     #[async_trait::async_trait]
     pub trait DeliveryRejectedByPartnerHooks: Send + Sync {
         /// The DSL's linear-branch decision (a mid-leg bare `skip` guard): `true` runs the steps
-        /// BEFORE the marker and ends the leg; `false` falls through to the steps after it.
-        /// Spec note: offer_attempts stayed under the cap (3) → the job was re-offered; the run ends here. Otherwise (3rd decline) fall through to the terminal failure.
-        fn branch(&self, row: &crate::pm_state::DeliveryDispatchRow) -> bool;
+        /// BEFORE the marker and ends the leg; `false` falls through to the steps after it. Resolved at
+        /// runtime (may read config, #60).
+        /// Spec note: A next channel remained → the job was re-offered; the run ends here. Otherwise (walk exhausted) fall through to the terminal failure.
+        async fn branch(&self, event: &domain::generated::events::DeliveryRejectedByPartner, row: &crate::pm_state::DeliveryDispatchRow) -> Result<bool, domain::shared::errors::DomainError>;
 
-        /// Build the `delivery.offer_job` input for this leg. — RE-OFFER branch (offer_attempts < 3 only — skipped on the exhausted run): offer the job again to the single V0 partner. `Skip` skips just this call — the leg continues.
+        /// Build the `delivery.offer_job` input for this leg. — ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60). `Skip` skips just this call — the leg continues.
         async fn input_delivery_offer_job(&self, event: &domain::generated::events::DeliveryRejectedByPartner, row: &crate::pm_state::DeliveryDispatchRow) -> Result<super::HookOutcome<crate::generated::services::DeliveryOfferJobInput>, domain::shared::errors::DomainError>;
 
         /// Orchestrator-computed `offer_attempts` (the DSL's self-referential `from_state` marker — the
-        /// spec note carries the arithmetic). RE-OFFER branch: offer_attempts := offer_attempts + 1 (the orchestrator increments — arithmetic the value forms cannot carry); the run stays OFFERED awaiting the partner's answer.
+        /// spec note carries the arithmetic). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step — arithmetic/selection the value forms cannot carry); the run stays OFFERED awaiting the answer.
         fn compute_offer_attempts(&self, row: &crate::pm_state::DeliveryDispatchRow) -> i32;
+
+        /// Orchestrator-resolved `current_rank` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step — arithmetic/selection the value forms cannot carry); the run stays OFFERED awaiting the answer.
+        async fn advance_current_rank(&self, event: &domain::generated::events::DeliveryRejectedByPartner, row: &crate::pm_state::DeliveryDispatchRow) -> Result<Option<i32>, domain::shared::errors::DomainError>;
+
+        /// Orchestrator-resolved `current_channel` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step — arithmetic/selection the value forms cannot carry); the run stays OFFERED awaiting the answer.
+        async fn advance_current_channel(&self, event: &domain::generated::events::DeliveryRejectedByPartner, row: &crate::pm_state::DeliveryDispatchRow) -> Result<Option<domain::generated::scalars::DeliveryChannelKey>, domain::shared::errors::DomainError>;
 
         /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
         /// credential, ADR-20260720-015500) — default: none.
@@ -890,7 +916,7 @@ pub mod delivery_dispatch_process {
     }
 
     /// EVENT leg `events.yaml#/DeliveryRejectedByPartner` — generated step pipeline (issue #25).
-    /// The partner declined (inbound): bounded re-offer (ADR-20260720-004556). While the run has made fewer than 3 total offers, re-offer the job (V0 single partner — the same partner; multi-partner ranking is the extension point) and stay OFFERED; the 3rd decline exhausts the cap and fails the dispatch closed with DeliveryDispatchFailed. The linear step list carries the two branches with notes — the cap comparison (an integer bound) is not expressible in guard `that` consts. 
+    /// The partner declined (inbound): ADVANCE the ranked channel walk (#60). If a next ranked channel remains, offer it and stay OFFERED; when the walk is exhausted, fail the dispatch closed with DeliveryDispatchFailed. "Channels remain?" and next-channel selection are runtime hooks (the CityDeliveryRanking walk the value forms cannot carry), so the linear step list carries the two branches with notes. 
     pub async fn on_delivery_rejected_by_partner(
         store: &dyn crate::ports::EventStore,
         state: &dyn crate::pm_state::DeliveryDispatchStateStore,
@@ -905,13 +931,13 @@ pub mod delivery_dispatch_process {
         let Some(row) = state.by_delivery_job(event.delivery_job_id).await? else {
             return Err(domain::shared::errors::DomainError::rejected("DeliveryJobNotFound", serde_json::json!({ "deliveryJobId": &event.delivery_job_id })));
         };
-        // state.expect process_status = OFFERED — a failed expect is a benign skip. Only an outstanding offer can be declined — a decline on a resolved/terminal run skips (benign re-delivery).
+        // state.expect process_status = OFFERED — a failed expect is a benign skip. Only an outstanding offer can be declined — a decline on a SELF_DISPATCHED / resolved / terminal run skips (benign re-delivery).
         if row.process_status != domain::generated::scalars::DeliveryDispatchProcessStatus::OFFERED {
-            return Ok(Outcome::Skipped(format!("delivery_dispatch_process_manager run is {:?}, expected OFFERED — Only an outstanding offer can be declined — a decline on a resolved/terminal run skips (benign re-delivery).", row.process_status)));
+            return Ok(Outcome::Skipped(format!("delivery_dispatch_process_manager run is {:?}, expected OFFERED — Only an outstanding offer can be declined — a decline on a SELF_DISPATCHED / resolved / terminal run skips (benign re-delivery).", row.process_status)));
         }
         // Linear-branch marker (bare `skip` guard): the hook chooses the branch.
-        if hooks.branch(&row) {
-            // call delivery.offer_job — RE-OFFER branch (offer_attempts < 3 only — skipped on the exhausted run): offer the job again to the single V0 partner.
+        if hooks.branch(event, &row).await? {
+            // call delivery.offer_job — ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60).
             match hooks.input_delivery_offer_job(event, &row).await? {
                 super::HookOutcome::Ready(input) => {
                     delivery.offer_job(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
@@ -920,10 +946,14 @@ pub mod delivery_dispatch_process {
                     eprintln!("saga[DeliveryDispatchProcess]: call delivery.offer_job skipped — {reason}");
                 }
             }
-            // state.set — upsert the run row (envelope stamps last_update_utc). RE-OFFER branch: offer_attempts := offer_attempts + 1 (the orchestrator increments — arithmetic the value forms cannot carry); the run stays OFFERED awaiting the partner's answer.
+            // state.set — upsert the run row (envelope stamps last_update_utc). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step — arithmetic/selection the value forms cannot carry); the run stays OFFERED awaiting the answer.
             let computed_offer_attempts = hooks.compute_offer_attempts(&row);
+            let hook_current_rank = hooks.advance_current_rank(event, &row).await?;
+            let hook_current_channel = hooks.advance_current_channel(event, &row).await?;
             let mut updated = crate::pm_state::DeliveryDispatchRow {
                 offer_attempts: computed_offer_attempts,
+                current_rank: hook_current_rank,
+                current_channel: hook_current_channel,
                 process_status: domain::generated::scalars::DeliveryDispatchProcessStatus::OFFERED,
                 ..row
             };
@@ -946,7 +976,219 @@ pub mod delivery_dispatch_process {
                 .save(&stream, stream_version, &[domain::generated::events::DomainEvent::DeliveryDispatchFailed(delivery_dispatch_failed.clone())], &actor)
                 .await?;
         }
-        // state.set — upsert the run row (envelope stamps last_update_utc). The run closes FAILED — fail-closed, never a retry loop beyond the cap (rules.yaml#/DispatchRetriesAreBounded).
+        // state.set — upsert the run row (envelope stamps last_update_utc). The run closes FAILED — fail-closed after walking every ranked channel (rules.yaml#/DispatchExhaustionFailsClosed).
+        let mut updated = crate::pm_state::DeliveryDispatchRow {
+            process_status: domain::generated::scalars::DeliveryDispatchProcessStatus::FAILED,
+            ..row
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `DeliveryEscalationRequested` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// A manual operator escalate (EscalateDelivery → DeliveryEscalationRequested, #60): SKIP the channel currently offered and ADVANCE the ranked walk now — identical advance behaviour to a partner decline. If a next ranked channel remains, offer it and stay OFFERED; when the walk is exhausted, fail the dispatch closed. 
+    #[async_trait::async_trait]
+    pub trait DeliveryEscalationRequestedHooks: Send + Sync {
+        /// The DSL's linear-branch decision (a mid-leg bare `skip` guard): `true` runs the steps
+        /// BEFORE the marker and ends the leg; `false` falls through to the steps after it. Resolved at
+        /// runtime (may read config, #60).
+        /// Spec note: A next channel remained → the job was re-offered; the run ends here. Otherwise (walk exhausted) fall through to the terminal failure.
+        async fn branch(&self, event: &domain::generated::events::DeliveryEscalationRequested, row: &crate::pm_state::DeliveryDispatchRow) -> Result<bool, domain::shared::errors::DomainError>;
+
+        /// Build the `delivery.offer_job` input for this leg. — ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60). `Skip` skips just this call — the leg continues.
+        async fn input_delivery_offer_job(&self, event: &domain::generated::events::DeliveryEscalationRequested, row: &crate::pm_state::DeliveryDispatchRow) -> Result<super::HookOutcome<crate::generated::services::DeliveryOfferJobInput>, domain::shared::errors::DomainError>;
+
+        /// Orchestrator-computed `offer_attempts` (the DSL's self-referential `from_state` marker — the
+        /// spec note carries the arithmetic). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
+        fn compute_offer_attempts(&self, row: &crate::pm_state::DeliveryDispatchRow) -> i32;
+
+        /// Orchestrator-resolved `current_rank` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
+        async fn advance_current_rank(&self, event: &domain::generated::events::DeliveryEscalationRequested, row: &crate::pm_state::DeliveryDispatchRow) -> Result<Option<i32>, domain::shared::errors::DomainError>;
+
+        /// Orchestrator-resolved `current_channel` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
+        async fn advance_current_channel(&self, event: &domain::generated::events::DeliveryEscalationRequested, row: &crate::pm_state::DeliveryDispatchRow) -> Result<Option<domain::generated::scalars::DeliveryChannelKey>, domain::shared::errors::DomainError>;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::DeliveryDispatchRow) {}
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `DeliveryDispatchFailed` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_delivery_dispatch_failed(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::DeliveryDispatchFailed) -> bool;
+    }
+
+    /// EVENT leg `events.yaml#/DeliveryEscalationRequested` — generated step pipeline (issue #25).
+    /// A manual operator escalate (EscalateDelivery → DeliveryEscalationRequested, #60): SKIP the channel currently offered and ADVANCE the ranked walk now — identical advance behaviour to a partner decline. If a next ranked channel remains, offer it and stay OFFERED; when the walk is exhausted, fail the dispatch closed. 
+    pub async fn on_delivery_escalation_requested(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::DeliveryDispatchStateStore,
+        delivery: &dyn crate::generated::services::DeliveryService,
+        hooks: &dyn DeliveryEscalationRequestedHooks,
+        event: &domain::generated::events::DeliveryEscalationRequested,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        // state.by delivery_job_id — load the run this trigger correlates to. Load the dispatch run for this job.
+        let Some(row) = state.by_delivery_job(event.delivery_job_id).await? else {
+            return Err(domain::shared::errors::DomainError::rejected("DeliveryJobNotFound", serde_json::json!({ "deliveryJobId": &event.delivery_job_id })));
+        };
+        // state.expect process_status = OFFERED — a failed expect is a benign skip. Only an outstanding offer can be escalated — an escalate on a SELF_DISPATCHED / resolved / terminal run skips (benign).
+        if row.process_status != domain::generated::scalars::DeliveryDispatchProcessStatus::OFFERED {
+            return Ok(Outcome::Skipped(format!("delivery_dispatch_process_manager run is {:?}, expected OFFERED — Only an outstanding offer can be escalated — an escalate on a SELF_DISPATCHED / resolved / terminal run skips (benign).", row.process_status)));
+        }
+        // Linear-branch marker (bare `skip` guard): the hook chooses the branch.
+        if hooks.branch(event, &row).await? {
+            // call delivery.offer_job — ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60).
+            match hooks.input_delivery_offer_job(event, &row).await? {
+                super::HookOutcome::Ready(input) => {
+                    delivery.offer_job(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
+                }
+                super::HookOutcome::Skip(reason) => {
+                    eprintln!("saga[DeliveryDispatchProcess]: call delivery.offer_job skipped — {reason}");
+                }
+            }
+            // state.set — upsert the run row (envelope stamps last_update_utc). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
+            let computed_offer_attempts = hooks.compute_offer_attempts(&row);
+            let hook_current_rank = hooks.advance_current_rank(event, &row).await?;
+            let hook_current_channel = hooks.advance_current_channel(event, &row).await?;
+            let mut updated = crate::pm_state::DeliveryDispatchRow {
+                offer_attempts: computed_offer_attempts,
+                current_rank: hook_current_rank,
+                current_channel: hook_current_channel,
+                process_status: domain::generated::scalars::DeliveryDispatchProcessStatus::OFFERED,
+                ..row
+            };
+            hooks.finalize(&mut updated);
+            state.upsert(&updated).await?;
+            return Ok(Outcome::Completed);
+        }
+        // deliver DeliveryDispatchFailed → DeliveryJob (the aggregate records the fact) — EXHAUSTED branch: the operator escalated past the last ranked channel — the terminal dispatch-failure fact.
+        let delivery_dispatch_failed = domain::generated::events::DeliveryDispatchFailed {
+            delivery_job_id: event.delivery_job_id,
+            order_id: row.order_id,
+            restaurant_id: row.restaurant_id,
+            attempts: i64::from(row.offer_attempts),
+            last_reason: event.reason.clone(),
+        };
+        let stream = format!("DeliveryJob-{}", delivery_dispatch_failed.delivery_job_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_delivery_dispatch_failed(&stream_events, &delivery_dispatch_failed) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::DeliveryDispatchFailed(delivery_dispatch_failed.clone())], &actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc). The run closes FAILED — fail-closed after walking every ranked channel (rules.yaml#/DispatchExhaustionFailsClosed).
+        let mut updated = crate::pm_state::DeliveryDispatchRow {
+            process_status: domain::generated::scalars::DeliveryDispatchProcessStatus::FAILED,
+            ..row
+        };
+        hooks.finalize(&mut updated);
+        state.upsert(&updated).await?;
+        Ok(Outcome::Completed)
+    }
+
+    /// Non-structural hooks for the generated `DeliveryOfferTimedOut` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// An outstanding offer expired (DeliveryOfferTimeoutWorker → DeliveryOfferTimedOut, #60): ADVANCE the ranked walk to the next channel — identical advance behaviour to a partner decline. If a next ranked channel remains, offer it and stay OFFERED; when the walk is exhausted, fail the dispatch closed. 
+    #[async_trait::async_trait]
+    pub trait DeliveryOfferTimedOutHooks: Send + Sync {
+        /// The DSL's linear-branch decision (a mid-leg bare `skip` guard): `true` runs the steps
+        /// BEFORE the marker and ends the leg; `false` falls through to the steps after it. Resolved at
+        /// runtime (may read config, #60).
+        /// Spec note: A next channel remained → the job was re-offered; the run ends here. Otherwise (walk exhausted) fall through to the terminal failure.
+        async fn branch(&self, event: &domain::generated::events::DeliveryOfferTimedOut, row: &crate::pm_state::DeliveryDispatchRow) -> Result<bool, domain::shared::errors::DomainError>;
+
+        /// Build the `delivery.offer_job` input for this leg. — ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60). `Skip` skips just this call — the leg continues.
+        async fn input_delivery_offer_job(&self, event: &domain::generated::events::DeliveryOfferTimedOut, row: &crate::pm_state::DeliveryDispatchRow) -> Result<super::HookOutcome<crate::generated::services::DeliveryOfferJobInput>, domain::shared::errors::DomainError>;
+
+        /// Orchestrator-computed `offer_attempts` (the DSL's self-referential `from_state` marker — the
+        /// spec note carries the arithmetic). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
+        fn compute_offer_attempts(&self, row: &crate::pm_state::DeliveryDispatchRow) -> i32;
+
+        /// Orchestrator-resolved `current_rank` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
+        async fn advance_current_rank(&self, event: &domain::generated::events::DeliveryOfferTimedOut, row: &crate::pm_state::DeliveryDispatchRow) -> Result<Option<i32>, domain::shared::errors::DomainError>;
+
+        /// Orchestrator-resolved `current_channel` (#60, the DSL's `from_hook` marker — resolved at runtime,
+        /// e.g. from the delivery-strategy config tables). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
+        async fn advance_current_channel(&self, event: &domain::generated::events::DeliveryOfferTimedOut, row: &crate::pm_state::DeliveryDispatchRow) -> Result<Option<domain::generated::scalars::DeliveryChannelKey>, domain::shared::errors::DomainError>;
+
+        /// Envelope-owned fix-ups on the row about to be upserted (e.g. clearing a spent
+        /// credential, ADR-20260720-015500) — default: none.
+        fn finalize(&self, _row: &mut crate::pm_state::DeliveryDispatchRow) {}
+
+        /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
+        /// `DeliveryDispatchFailed` be appended? (A re-delivered trigger must find the fact already recorded.)
+        fn should_deliver_delivery_dispatch_failed(&self, stream: &[domain::generated::events::DomainEvent], event: &domain::generated::events::DeliveryDispatchFailed) -> bool;
+    }
+
+    /// EVENT leg `events.yaml#/DeliveryOfferTimedOut` — generated step pipeline (issue #25).
+    /// An outstanding offer expired (DeliveryOfferTimeoutWorker → DeliveryOfferTimedOut, #60): ADVANCE the ranked walk to the next channel — identical advance behaviour to a partner decline. If a next ranked channel remains, offer it and stay OFFERED; when the walk is exhausted, fail the dispatch closed. 
+    pub async fn on_delivery_offer_timed_out(
+        store: &dyn crate::ports::EventStore,
+        state: &dyn crate::pm_state::DeliveryDispatchStateStore,
+        delivery: &dyn crate::generated::services::DeliveryService,
+        hooks: &dyn DeliveryOfferTimedOutHooks,
+        event: &domain::generated::events::DeliveryOfferTimedOut,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        // state.by delivery_job_id — load the run this trigger correlates to. Load the dispatch run for this job.
+        let Some(row) = state.by_delivery_job(event.delivery_job_id).await? else {
+            return Err(domain::shared::errors::DomainError::rejected("DeliveryJobNotFound", serde_json::json!({ "deliveryJobId": &event.delivery_job_id })));
+        };
+        // state.expect process_status = OFFERED — a failed expect is a benign skip. Only an outstanding offer can time out — a timeout on a SELF_DISPATCHED / resolved / terminal run skips (benign; the worker races the answer).
+        if row.process_status != domain::generated::scalars::DeliveryDispatchProcessStatus::OFFERED {
+            return Ok(Outcome::Skipped(format!("delivery_dispatch_process_manager run is {:?}, expected OFFERED — Only an outstanding offer can time out — a timeout on a SELF_DISPATCHED / resolved / terminal run skips (benign; the worker races the answer).", row.process_status)));
+        }
+        // Linear-branch marker (bare `skip` guard): the hook chooses the branch.
+        if hooks.branch(event, &row).await? {
+            // call delivery.offer_job — ADVANCE branch (channels remain — skipped on the exhausted walk): the strategy hook selects the NEXT ranked channel and offer_job offers the job on it (#60).
+            match hooks.input_delivery_offer_job(event, &row).await? {
+                super::HookOutcome::Ready(input) => {
+                    delivery.offer_job(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
+                }
+                super::HookOutcome::Skip(reason) => {
+                    eprintln!("saga[DeliveryDispatchProcess]: call delivery.offer_job skipped — {reason}");
+                }
+            }
+            // state.set — upsert the run row (envelope stamps last_update_utc). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
+            let computed_offer_attempts = hooks.compute_offer_attempts(&row);
+            let hook_current_rank = hooks.advance_current_rank(event, &row).await?;
+            let hook_current_channel = hooks.advance_current_channel(event, &row).await?;
+            let mut updated = crate::pm_state::DeliveryDispatchRow {
+                offer_attempts: computed_offer_attempts,
+                current_rank: hook_current_rank,
+                current_channel: hook_current_channel,
+                process_status: domain::generated::scalars::DeliveryDispatchProcessStatus::OFFERED,
+                ..row
+            };
+            hooks.finalize(&mut updated);
+            state.upsert(&updated).await?;
+            return Ok(Outcome::Completed);
+        }
+        // deliver DeliveryDispatchFailed → DeliveryJob (the aggregate records the fact) — EXHAUSTED branch: the last ranked channel's offer timed out — the terminal dispatch-failure fact.
+        let delivery_dispatch_failed = domain::generated::events::DeliveryDispatchFailed {
+            delivery_job_id: event.delivery_job_id,
+            order_id: row.order_id,
+            restaurant_id: row.restaurant_id,
+            attempts: i64::from(row.offer_attempts),
+            last_reason: event.reason.clone(),
+        };
+        let stream = format!("DeliveryJob-{}", delivery_dispatch_failed.delivery_job_id.0);
+        let (stream_events, stream_version) = store.load(&stream).await?;
+        if hooks.should_deliver_delivery_dispatch_failed(&stream_events, &delivery_dispatch_failed) {
+            crate::repository::Repository::new(store)
+                .save(&stream, stream_version, &[domain::generated::events::DomainEvent::DeliveryDispatchFailed(delivery_dispatch_failed.clone())], &actor)
+                .await?;
+        }
+        // state.set — upsert the run row (envelope stamps last_update_utc). The run closes FAILED — fail-closed after walking every ranked channel (rules.yaml#/DispatchExhaustionFailsClosed).
         let mut updated = crate::pm_state::DeliveryDispatchRow {
             process_status: domain::generated::scalars::DeliveryDispatchProcessStatus::FAILED,
             ..row

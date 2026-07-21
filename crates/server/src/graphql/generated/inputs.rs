@@ -917,6 +917,16 @@ pub struct CancelDeliveryInput {
     pub reason: Option<String>,
 }
 
+/// Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct EscalateDeliveryInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationStatusQueryInput {

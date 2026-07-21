@@ -39,6 +39,7 @@ pub use crate::generated::pm_state::{
 };
 pub use status_bus::{OperationStatusBus, OperationUpdate};
 pub use prospection::PgProspectionRepository;
+pub use referential::PgDispatchStrategy;
 pub use referential::{
     PgPricingPolicyRepository, PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
 };

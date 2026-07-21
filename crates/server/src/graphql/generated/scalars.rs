@@ -755,6 +755,21 @@ impl From<CityName> for ds::CityName {
     }
 }
 
+/// A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct CityId(pub uuid::Uuid);
+async_graphql::scalar!(CityId, "CityId", "A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60).");
+impl From<ds::CityId> for CityId {
+    fn from(v: ds::CityId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<CityId> for ds::CityId {
+    fn from(v: CityId) -> Self {
+        Self(v.0)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PostalCode(pub String);
 async_graphql::scalar!(PostalCode);
@@ -1742,7 +1757,7 @@ impl From<RefundProcessStatus> for ds::RefundProcessStatus {
     }
 }
 
-/// State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED keeps REOFFER_REQUIRED's ordinal slot (both flag manual handling; ADR-20260720-004556).
+/// State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED now marks the ranked channel walk exhausted (fail closed, rules.yaml#/DispatchExhaustionFailsClosed — #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED is appended LAST to preserve the declaration-order ordinals of the pre-#60 values (ADR-0037)."
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum DeliveryDispatchProcessStatus {
     #[graphql(name = "OFFERED")]
@@ -1753,6 +1768,8 @@ pub enum DeliveryDispatchProcessStatus {
     FAILED,
     #[graphql(name = "COMPLETED")]
     COMPLETED,
+    #[graphql(name = "SELF_DISPATCHED")]
+    SELF_DISPATCHED,
 }
 impl From<ds::DeliveryDispatchProcessStatus> for DeliveryDispatchProcessStatus {
     fn from(v: ds::DeliveryDispatchProcessStatus) -> Self {
@@ -1761,6 +1778,7 @@ impl From<ds::DeliveryDispatchProcessStatus> for DeliveryDispatchProcessStatus {
             ds::DeliveryDispatchProcessStatus::ACCEPTED => Self::ACCEPTED,
             ds::DeliveryDispatchProcessStatus::FAILED => Self::FAILED,
             ds::DeliveryDispatchProcessStatus::COMPLETED => Self::COMPLETED,
+            ds::DeliveryDispatchProcessStatus::SELF_DISPATCHED => Self::SELF_DISPATCHED,
         }
     }
 }
@@ -1771,6 +1789,72 @@ impl From<DeliveryDispatchProcessStatus> for ds::DeliveryDispatchProcessStatus {
             DeliveryDispatchProcessStatus::ACCEPTED => Self::ACCEPTED,
             DeliveryDispatchProcessStatus::FAILED => Self::FAILED,
             DeliveryDispatchProcessStatus::COMPLETED => Self::COMPLETED,
+            DeliveryDispatchProcessStatus::SELF_DISPATCHED => Self::SELF_DISPATCHED,
+        }
+    }
+}
+
+/// Who is responsible for fulfilling a restaurant's deliveries (restaurant-scoped config, resolved at runtime; #60). Default CAPTAIN keeps today's behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RestaurantDispatchMode {
+    #[graphql(name = "CAPTAIN")]
+    CAPTAIN,
+    #[graphql(name = "RESTAURANT")]
+    RESTAURANT,
+}
+impl From<ds::RestaurantDispatchMode> for RestaurantDispatchMode {
+    fn from(v: ds::RestaurantDispatchMode) -> Self {
+        match v {
+            ds::RestaurantDispatchMode::CAPTAIN => Self::CAPTAIN,
+            ds::RestaurantDispatchMode::RESTAURANT => Self::RESTAURANT,
+        }
+    }
+}
+impl From<RestaurantDispatchMode> for ds::RestaurantDispatchMode {
+    fn from(v: RestaurantDispatchMode) -> Self {
+        match v {
+            RestaurantDispatchMode::CAPTAIN => Self::CAPTAIN,
+            RestaurantDispatchMode::RESTAURANT => Self::RESTAURANT,
+        }
+    }
+}
+
+/// Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryChannelKey(pub String);
+async_graphql::scalar!(DeliveryChannelKey, "DeliveryChannelKey", "Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).");
+impl From<ds::DeliveryChannelKey> for DeliveryChannelKey {
+    fn from(v: ds::DeliveryChannelKey) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryChannelKey> for ds::DeliveryChannelKey {
+    fn from(v: DeliveryChannelKey) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum DeliveryChannelKind {
+    #[graphql(name = "POOL")]
+    POOL,
+    #[graphql(name = "PARTNER")]
+    PARTNER,
+}
+impl From<ds::DeliveryChannelKind> for DeliveryChannelKind {
+    fn from(v: ds::DeliveryChannelKind) -> Self {
+        match v {
+            ds::DeliveryChannelKind::POOL => Self::POOL,
+            ds::DeliveryChannelKind::PARTNER => Self::PARTNER,
+        }
+    }
+}
+impl From<DeliveryChannelKind> for ds::DeliveryChannelKind {
+    fn from(v: DeliveryChannelKind) -> Self {
+        match v {
+            DeliveryChannelKind::POOL => Self::POOL,
+            DeliveryChannelKind::PARTNER => Self::PARTNER,
         }
     }
 }

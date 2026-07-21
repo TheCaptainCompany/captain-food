@@ -697,6 +697,24 @@ pub struct DeliveryDispatchFailed {
     pub last_reason: Option<String>,
 }
 
+/// An operator (restaurant/admin) asked to skip the delivery channel currently offered and advance the ranked walk now (#60). Emitted by the DeliveryJob aggregate handling the EscalateDelivery command; consumed by DeliveryDispatchProcess, which offers the next ranked channel (or fails closed when the walk is exhausted). Internal dispatch mechanics — feeds no View_*.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryEscalationRequested {
+    pub delivery_job_id: DeliveryJobId,
+    pub reason: Option<String>,
+}
+
+/// An outstanding delivery offer expired before the channel answered (#60): the DeliveryOfferTimeoutWorker found an OFFERED run older than the resolved TTL and records this fact (authored like DeliveryDispatchFailed). Recorded by the DeliveryJob aggregate and consumed by DeliveryDispatchProcess, which advances the ranked walk to the next channel (or fails closed when exhausted). Internal dispatch mechanics — feeds no View_*.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryOfferTimedOut {
+    pub delivery_job_id: DeliveryJobId,
+    pub channel: DeliveryChannelKey,
+    pub rank: i64,
+    pub reason: Option<String>,
+}
+
 /// The delivery partner (e.g. Avelo37) accepted the job and assigned one of its couriers (inbound).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -912,6 +930,8 @@ pub enum DomainEvent {
     DeliveryCompleted(DeliveryCompleted),
     DeliveryCancelled(DeliveryCancelled),
     DeliveryDispatchFailed(DeliveryDispatchFailed),
+    DeliveryEscalationRequested(DeliveryEscalationRequested),
+    DeliveryOfferTimedOut(DeliveryOfferTimedOut),
     DeliveryAcceptedByPartner(DeliveryAcceptedByPartner),
     DeliveryRejectedByPartner(DeliveryRejectedByPartner),
     DeliveryStatusUpdated(DeliveryStatusUpdated),

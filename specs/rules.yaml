@@ -1,4 +1,4 @@
-version: 1
+version: 2
 description: >
   Business rules / invariants the system must uphold (ADR-0032). Each behaviour test in tests.yaml links
   to at least one rule via `rules: [{ $ref: 'rules.yaml#/RuleName' }]`, and the validator enforces the link
@@ -155,8 +155,16 @@ PartnerAcceptanceRecordsCourier:
   description: "When the partner accepts (inbound), the assigned courier is recorded on the job."
 PartnerRejectionReoffers:
   description: "When the partner declines (inbound), the job is re-offered or flagged for manual handling."
-DispatchRetriesAreBounded:
-  description: "A delivery job is offered at most 3 times in total (the birth offer + 2 re-offers); when the partner declines the last allowed offer the dispatch fails terminally (DeliveryDispatchFailed, run FAILED) and is surfaced to the restaurant for manual handling — never an unbounded retry loop (ADR-20260720-004556)."
+DispatchExhaustionFailsClosed:
+  description: "When Captain dispatches, the delivery job walks the city's ranked channel list, offering each ranked channel at most once in rank order; once every ranked channel has been offered and none accepts, the dispatch fails terminally (DeliveryDispatchFailed, run FAILED) and is surfaced to the restaurant for manual handling — never an unbounded retry loop (#60, supersedes ADR-20260720-004556)."
+RestaurantDispatchBypassesRouting:
+  description: "A RESTAURANT-dispatch order (RestaurantDispatchMode RESTAURANT) is never offered to a delivery channel: the dispatch run short-circuits to SELF_DISPATCHED and Captain only tracks the delivery, while the restaurant drives its progress and the customer still gets order tracking (#60)."
+CityRankingWalkedInOrder:
+  description: "When Captain dispatches, channels are offered in the city's configured rank order (CityDeliveryRanking, rank 1 first): the birth offer goes to the rank-1 channel and each advance moves to the next rank (#60)."
+TimeoutEscalatesToNextChannel:
+  description: "When an outstanding delivery offer times out (DeliveryOfferTimedOut), the dispatch advances to the next ranked channel (or fails closed when the ranked walk is exhausted) — a stale offer never blocks the walk (#60)."
+ManualEscalateSkipsChannel:
+  description: "An operator (restaurant/admin) may escalate an outstanding delivery offer (EscalateDelivery → DeliveryEscalationRequested), skipping the channel currently offered and advancing to the next ranked channel (or failing closed when the ranked walk is exhausted) (#60)."
 OrderClosedOnDeliveryCompletion:
   description: "The order is closed (OrderDelivered) when the partner reports DELIVERED or an independent rider completes the delivery."
 DeliveryPartnerAssignmentLifecycle:

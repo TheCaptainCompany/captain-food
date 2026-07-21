@@ -10,8 +10,8 @@ use domain::generated::scalars::{
     CartStatus, CommandChannel, CommandJournalStatus, ComparisonBasis, CuisineCategory,
     DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus, GbpLinkStatus,
     InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
-    ProspectPipelineStatus, RefundProcessStatus, RefundStatus, RestaurantListingStatus,
-    RestaurantStatus, ServiceType, ThumbRating,
+    ProspectPipelineStatus, RefundProcessStatus, RefundStatus, RestaurantDispatchMode,
+    RestaurantListingStatus, RestaurantStatus, ServiceType, ThumbRating,
 };
 use domain::shared::errors::DomainError;
 
@@ -102,7 +102,10 @@ enum_ord!(DeliveryDispatchProcessStatus {
     // FAILED keeps retired REOFFER_REQUIRED's slot (both flag manual handling; ADR-20260720-004556).
     FAILED => 2,
     COMPLETED => 3,
+    // SELF_DISPATCHED appended last to preserve the pre-#60 ordinals (ADR-0037).
+    SELF_DISPATCHED => 4,
 });
+enum_ord!(RestaurantDispatchMode { CAPTAIN => 0, RESTAURANT => 1 });
 enum_ord!(CommandJournalStatus { RECEIVED => 0, SUCCEEDED => 1, REJECTED => 2, FAILED => 3 });
 enum_ord!(CommandChannel { GRAPHQL => 0, WORKER => 1, INTERNAL => 2 });
 enum_ord!(InboundEventStatus { RECEIVED => 0, DELIVERED => 1, FAILED => 2 });

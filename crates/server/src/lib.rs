@@ -85,7 +85,7 @@ pub fn wire() -> HealthDto {
 /// The gate is `>=` (never `==`) so an older build still runs against a newer DB (rollback-by-redeploy).
 /// `20260720030000` = the command/inbound journals (ADR-20260720-015300/-015400): every mutation now
 /// writes `command_journal` at acceptance, so the app cannot serve writes without it.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721130000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721140000;
 
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
@@ -275,32 +275,51 @@ pub fn router() -> Router {
                 // run row still terminates ACCEPTED/FAILED). The partner's answers always arrive
                 // asynchronously through the webhook inbox below, never this outbound call.
                 if std::env::var("RUN_PROCESS_MANAGERS").map(|v| v != "false").unwrap_or(true) {
-                    // Single configured partner (multi-partner RANKING is the deferred foundation
-                    // issue, ADR-20260720-004556): incumbent-first precedence — Avelo37 if configured,
-                    // else CoopCycle if its federation registry is configured (issue #58), else the
-                    // logged no-op stand-in. The partner's answers always arrive asynchronously through
-                    // the webhook inbox below, never this outbound call.
+                    // Composite delivery gateway (#60): the saga offers a job on a strategy-resolved
+                    // CHANNEL, so the single Avelo-vs-Noop choice becomes a registry of channel →
+                    // adapter. `independent` is the rider POOL (a deliberate no-op — jobs stay open to
+                    // riders); `avelo37` is wired when AVELO37_API_KEY is set, and `coopcycle` when its
+                    // federation registry (COOPCYCLE_INSTANCES) is configured (issue #58). Unwired
+                    // channels (e.g. uber_direct in an unconfigured Tours) fall through: the offer times
+                    // out and the saga escalates to the next ranked channel (today's deployments unchanged).
                     let partner = infrastructure::generated::service_bindings::delivery_service(|| {
-                        if let Some(gateway) = avelo37_adapter::Avelo37DeliveryGateway::from_env() {
-                            println!("delivery service: Avelo37DeliveryGateway (AVELO37_API_KEY set)");
-                            Arc::new(gateway)
-                        } else if !coopcycle_registry.is_empty() {
-                            println!("delivery service: CoopCycleDeliveryGateway (COOPCYCLE_INSTANCES set)");
-                            Arc::new(coopcycle_adapter::CoopCycleDeliveryGateway::new(
-                                coopcycle_registry.clone(),
-                            ))
-                        } else {
-                            println!(
-                                "delivery service: NoopDeliveryService (no partner configured — jobs stay open to independent riders)"
-                            );
-                            Arc::new(application::ports::NoopDeliveryService)
+                        let mut gateway = infrastructure::CompositeDeliveryGateway::new().with_channel(
+                            "independent",
+                            Arc::new(application::ports::NoopDeliveryService),
+                        );
+                        if let Some(avelo) = avelo37_adapter::Avelo37DeliveryGateway::from_env() {
+                            gateway = gateway.with_channel("avelo37", Arc::new(avelo));
                         }
+                        if !coopcycle_registry.is_empty() {
+                            gateway = gateway.with_channel(
+                                "coopcycle",
+                                Arc::new(coopcycle_adapter::CoopCycleDeliveryGateway::new(
+                                    coopcycle_registry.clone(),
+                                )),
+                            );
+                        }
+                        println!(
+                            "delivery gateway: composite — wired channels {:?} (unwired channels fall through via offer timeout)",
+                            gateway.wired_channels()
+                        );
+                        Arc::new(gateway)
                     })
                     .expect("delivery service binding (services.yaml)");
                     let runner = ProcessManagerRunner::new(pool.clone()).with_partner(partner);
                     saga_status = Some(runner.status());
                     tokio::spawn(runner.run_loop());
                     println!("saga runner: running in-process (set RUN_PROCESS_MANAGERS=false to disable)");
+
+                    // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next
+                    // ranked channel. Env-gated like the other in-process workers.
+                    if std::env::var("RUN_DELIVERY_OFFER_TIMEOUT").map(|v| v != "false").unwrap_or(true) {
+                        let timeout_worker =
+                            Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(pool.clone()));
+                        tokio::spawn(timeout_worker.run_loop());
+                        println!("delivery offer-timeout worker: running in-process (set RUN_DELIVERY_OFFER_TIMEOUT=false to disable)");
+                    } else {
+                        println!("RUN_DELIVERY_OFFER_TIMEOUT=false — delivery offer-timeout worker not started");
+                    }
                 } else {
                     println!("RUN_PROCESS_MANAGERS=false — saga runner not started in-process");
                 }

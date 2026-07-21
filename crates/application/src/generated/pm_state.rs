@@ -97,7 +97,7 @@ pub trait CartBindingStateStore: Send + Sync {
     async fn upsert(&self, row: &CartBindingRow) -> Result<(), DomainError>;
 }
 
-/// One `delivery_dispatch_process_manager` row. One DeliveryDispatchProcess run per DELIVERY order. Created on OrderMarkedReady (COLLECTION orders never create a row); tracks the offer lifecycle and closes the order on delivery. offer_attempts bounds the partner re-offer loop (cap 3, ADR-20260720-004556).
+/// One `delivery_dispatch_process_manager` row. One DeliveryDispatchProcess run per DELIVERY order. Created on OrderMarkedReady (COLLECTION orders never create a row); resolves a dispatch strategy, then walks the city's ranked delivery channel list, and closes the order on delivery (#60). A RESTAURANT-dispatch order short-circuits to SELF_DISPATCHED (Captain tracks only); a CAPTAIN-dispatch order offers channels in rank order, advancing on a decline/timeout/escalate until the list is exhausted, then fails closed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeliveryDispatchRow {
     pub order_id: OrderId,
@@ -106,8 +106,12 @@ pub struct DeliveryDispatchRow {
     /// Deterministic UUIDv5 from the order id — the idempotency key of the dispatch.
     pub delivery_job_id: DeliveryJobId,
     pub process_status: DeliveryDispatchProcessStatus,
-    /// TOTAL offers made to the delivery channel (the birth offer = 1). Capped at 3 (rules.yaml#/DispatchRetriesAreBounded); the 3rd decline closes the run FAILED. V0 re-offers the single partner; multi-partner ranking is the extension point (ADR-20260720-004556).
+    /// TOTAL offers made across the ranked channel walk (the birth offer = 1). The bound is the ranked list length — each channel is offered once, in rank order; when the walk is exhausted the run closes FAILED (rules.yaml#/DispatchExhaustionFailsClosed, #60 supersedes the ADR-20260720-004556 numeric cap-3).
     pub offer_attempts: i32,
+    /// 1-based position in the city's ranked channel walk currently offered; null before the first offer and for a SELF_DISPATCHED run (#60).
+    pub current_rank: Option<i32>,
+    /// The delivery channel currently offered (the DeliveryChannelCatalog key at current_rank); null before the first offer and for a SELF_DISPATCHED run (#60).
+    pub current_channel: Option<DeliveryChannelKey>,
     /// Maintained by the runtime envelope — ignored on write, stamped `now()` by `upsert`.
     pub last_update_utc: chrono::DateTime<chrono::Utc>,
 }

@@ -73,15 +73,16 @@ use domain::cart::{CartState, MAX_LINE_QUANTITY};
 use domain::delivery_job::DeliveryJobState;
 use domain::generated::commands::{
     AcceptDelivery, AddCartLine, AssignDeliveryToPartner, BindCartToCustomer, CancelDelivery,
-    ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, PlaceOrder, RateOrder,
-    RateRestaurant, RegisterRider, RemoveCartLine, ReportDeliveryIssue, RequestRefund,
-    ResolveDeliveryIssue, TipOrder, UnassignDeliveryFromPartner, UpdateRiderInfo,
+    ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, EscalateDelivery,
+    PlaceOrder, RateOrder, RateRestaurant, RegisterRider, RemoveCartLine, ReportDeliveryIssue,
+    RequestRefund, ResolveDeliveryIssue, TipOrder, UnassignDeliveryFromPartner, UpdateRiderInfo,
 };
 use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
     CartBoundToCustomer, CartLineAdded, CartLineQuantityChanged, CartLineRemoved, CartStarted,
     DeliveryAcceptedByRider, DeliveryAssignedToPartner, DeliveryCancelled, DeliveryCompleted,
-    DeliveryDeclinedByRider, DeliveryIssueReported, DeliveryIssueResolved, DeliveryPickedUp,
+    DeliveryDeclinedByRider, DeliveryEscalationRequested, DeliveryIssueReported, DeliveryIssueResolved,
+    DeliveryPickedUp,
     DeliveryUnassignedFromPartner, OrderRated, OrderTipped, PaymentIntentCreated, RefundRequested,
     RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered,
 };
@@ -1205,6 +1206,27 @@ pub async fn cancel_delivery(
         ));
     }
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/EscalateDelivery` → emit `events.yaml#/DeliveryEscalationRequested` (#60).
+/// A restaurant/admin asks to skip the channel currently offered and advance the ranked walk NOW. Only
+/// a known job can be escalated (`DeliveryJobNotFound`); self-dispatch and walk exhaustion are the
+/// saga's concern (a benign skip / a terminal fact), not command errors — so this handler records the
+/// request unconditionally once the job exists (rules.yaml#/ManualEscalateSkipsChannel).
+pub async fn escalate_delivery(
+    store: &dyn EventStore,
+    cmd: EscalateDelivery,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
+    let event = DomainEvent::DeliveryEscalationRequested(DeliveryEscalationRequested {
+        delivery_job_id: cmd.delivery_job_id,
+        reason: cmd.reason,
+    });
+    Repository::new(store)
+        .save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor)
+        .await
+        .map(|_| ())
 }
 
 // ================================================================================================

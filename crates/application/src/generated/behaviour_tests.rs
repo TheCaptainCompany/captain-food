@@ -447,6 +447,16 @@ fn fx_delivery_dispatch_failed() -> DomainEvent {
     DomainEvent::DeliveryDispatchFailed(evs::DeliveryDispatchFailed { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), attempts: 3, last_reason: Some("No courier available".to_string()) })
 }
 
+/// tests.yaml#/fixtures/deliveryEscalationRequested — events.yaml#/DeliveryEscalationRequested
+fn fx_delivery_escalation_requested() -> DomainEvent {
+    DomainEvent::DeliveryEscalationRequested(evs::DeliveryEscalationRequested { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), reason: Some("Customer waiting too long".to_string()) })
+}
+
+/// tests.yaml#/fixtures/deliveryOfferTimedOut — events.yaml#/DeliveryOfferTimedOut
+fn fx_delivery_offer_timed_out() -> DomainEvent {
+    DomainEvent::DeliveryOfferTimedOut(evs::DeliveryOfferTimedOut { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), channel: sc::DeliveryChannelKey("independent".into()), rank: 1, reason: None })
+}
+
 /// tests.yaml#/fixtures/deliveryStatusUpdatedDelivered — events.yaml#/DeliveryStatusUpdated
 fn fx_delivery_status_updated_delivered() -> DomainEvent {
     DomainEvent::DeliveryStatusUpdated(evs::DeliveryStatusUpdated { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: None, status: sc::DeliveryStatus::DELIVERED, occurred_at: None, note: None })
@@ -2410,7 +2420,7 @@ async fn test_dispatch_on_order_ready() {
     bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed()]).await;
     let before = bed.snapshot();
     let ev = evs::OrderMarkedReady { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")) };
-    let result = crate::process_managers::delivery_dispatch::on_order_marked_ready(&bed.store, &bed.dispatch_pm, &bed.orders, &bed.delivery, &ev, &support::envelope()).await;
+    let result = crate::process_managers::delivery_dispatch::on_order_marked_ready(&bed.store, &bed.dispatch_pm, &bed.orders, &bed.delivery, &bed.dispatch_config, &ev, &support::envelope()).await;
     let _ = result.expect("TestDispatchOnOrderReady: the spec expects acceptance");
     bed.assert_appended("TestDispatchOnOrderReady", &before, &[
         (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_requested()),
@@ -2431,8 +2441,8 @@ async fn test_dispatch_partner_accepted() {
     bed.assert_appended("TestDispatchPartnerAccepted", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestDispatchPartnerRejected — "Re-offers the declined job to the partner while under the 3-offer cap (inbound decline)"
-/// rules: PartnerRejectionReoffers, DispatchRetriesAreBounded
+/// tests.yaml#/tests/TestDispatchPartnerRejected — "Advances the ranked channel walk to the next channel on a partner decline (inbound)"
+/// rules: PartnerRejectionReoffers, CityRankingWalkedInOrder
 #[tokio::test]
 async fn test_dispatch_partner_rejected() {
     let bed = TestBed::new();
@@ -2440,13 +2450,13 @@ async fn test_dispatch_partner_rejected() {
     bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested()]).await;
     let before = bed.snapshot();
     let ev = evs::DeliveryRejectedByPartner { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: None, reason: Some("No courier available".to_string()) };
-    let result = crate::process_managers::delivery_dispatch::on_delivery_rejected_by_partner(&bed.store, &bed.dispatch_pm, &bed.delivery, &ev, &support::envelope()).await;
+    let result = crate::process_managers::delivery_dispatch::on_delivery_rejected_by_partner(&bed.store, &bed.dispatch_pm, &bed.delivery, &bed.dispatch_config, &ev, &support::envelope()).await;
     let _ = result.expect("TestDispatchPartnerRejected: the spec expects acceptance");
     bed.assert_appended("TestDispatchPartnerRejected", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestDispatchAcceptedAfterReoffer — "The partner accepts a re-offered job: the run advances to ACCEPTED (happy path after a decline)"
-/// rules: DispatchRetriesAreBounded, PartnerAcceptanceRecordsCourier
+/// tests.yaml#/tests/TestDispatchAcceptedAfterReoffer — "A channel accepts a re-offered job after the walk advanced: the run reaches ACCEPTED"
+/// rules: CityRankingWalkedInOrder, PartnerAcceptanceRecordsCourier
 #[tokio::test]
 async fn test_dispatch_accepted_after_reoffer() {
     let bed = TestBed::new();
@@ -2459,8 +2469,8 @@ async fn test_dispatch_accepted_after_reoffer() {
     bed.assert_appended("TestDispatchAcceptedAfterReoffer", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestDispatchFailsAfterOfferCap — "The 3rd partner decline exhausts the offer cap: DeliveryDispatchFailed is recorded and the run closes FAILED"
-/// rules: DispatchRetriesAreBounded
+/// tests.yaml#/tests/TestDispatchFailsAfterOfferCap — "Exhausting the ranked channel walk fails the dispatch closed (DeliveryDispatchFailed, run FAILED)"
+/// rules: DispatchExhaustionFailsClosed
 #[tokio::test]
 async fn test_dispatch_fails_after_offer_cap() {
     let bed = TestBed::new();
@@ -2468,11 +2478,56 @@ async fn test_dispatch_fails_after_offer_cap() {
     bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_rejected_by_partner(), fx_delivery_rejected_by_partner()]).await;
     let before = bed.snapshot();
     let ev = evs::DeliveryRejectedByPartner { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), partner_ref: None, reason: Some("No courier available".to_string()) };
-    let result = crate::process_managers::delivery_dispatch::on_delivery_rejected_by_partner(&bed.store, &bed.dispatch_pm, &bed.delivery, &ev, &support::envelope()).await;
+    let result = crate::process_managers::delivery_dispatch::on_delivery_rejected_by_partner(&bed.store, &bed.dispatch_pm, &bed.delivery, &bed.dispatch_config, &ev, &support::envelope()).await;
     let _ = result.expect("TestDispatchFailsAfterOfferCap: the spec expects acceptance");
     bed.assert_appended("TestDispatchFailsAfterOfferCap", &before, &[
         (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_dispatch_failed()),
     ]);
+}
+
+/// tests.yaml#/tests/TestDispatchSelfDispatched — "A RESTAURANT-dispatch order is not offered to a channel: the run self-dispatches (Captain tracks only)"
+/// rules: RestaurantDispatchBypassesRouting
+#[tokio::test]
+async fn test_dispatch_self_dispatched() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
+    bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed()]).await;
+    let before = bed.snapshot();
+    let ev = evs::OrderMarkedReady { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")) };
+    let result = crate::process_managers::delivery_dispatch::on_order_marked_ready(&bed.store, &bed.dispatch_pm, &bed.orders, &bed.delivery, &bed.dispatch_config, &ev, &support::envelope()).await;
+    let _ = result.expect("TestDispatchSelfDispatched: the spec expects acceptance");
+    bed.assert_appended("TestDispatchSelfDispatched", &before, &[
+        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_requested()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDispatchAdvancesOnEscalate — "A manual operator escalate skips the current channel and advances the ranked walk"
+/// rules: ManualEscalateSkipsChannel
+#[tokio::test]
+async fn test_dispatch_advances_on_escalate() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested()]).await;
+    let before = bed.snapshot();
+    let ev = evs::DeliveryEscalationRequested { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), reason: Some("Customer waiting too long".to_string()) };
+    let result = crate::process_managers::delivery_dispatch::on_delivery_escalation_requested(&bed.store, &bed.dispatch_pm, &bed.delivery, &bed.dispatch_config, &ev, &support::envelope()).await;
+    let _ = result.expect("TestDispatchAdvancesOnEscalate: the spec expects acceptance");
+    bed.assert_appended("TestDispatchAdvancesOnEscalate", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestDispatchAdvancesOnTimeout — "An expired offer advances the ranked walk to the next channel"
+/// rules: TimeoutEscalatesToNextChannel
+#[tokio::test]
+async fn test_dispatch_advances_on_timeout() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested()]).await;
+    let before = bed.snapshot();
+    let ev = evs::DeliveryOfferTimedOut { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), channel: sc::DeliveryChannelKey("independent".into()), rank: 1, reason: None };
+    let result = crate::process_managers::delivery_dispatch::on_delivery_offer_timed_out(&bed.store, &bed.dispatch_pm, &bed.delivery, &bed.dispatch_config, &ev, &support::envelope()).await;
+    let _ = result.expect("TestDispatchAdvancesOnTimeout: the spec expects acceptance");
+    bed.assert_appended("TestDispatchAdvancesOnTimeout", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestDispatchClosesOrderOnPartnerDelivered — "Closes the order when the partner reports DELIVERED (inbound)"
@@ -2761,7 +2816,7 @@ async fn test_delivery_job_records_partner_rejection() {
 }
 
 /// tests.yaml#/tests/TestDeliveryJobRecordsDispatchFailure — "The DeliveryJob records the terminal dispatch failure delivered by DeliveryDispatchProcess (job → FAILED)"
-/// rules: DispatchRetriesAreBounded
+/// rules: DispatchExhaustionFailsClosed
 #[tokio::test]
 async fn test_delivery_job_records_dispatch_failure() {
     let bed = TestBed::new();
@@ -2773,6 +2828,38 @@ async fn test_delivery_job_records_dispatch_failure() {
     let _ = result.expect("TestDeliveryJobRecordsDispatchFailure: the spec expects acceptance");
     bed.assert_appended("TestDeliveryJobRecordsDispatchFailure", &before, &[
         (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_dispatch_failed()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryJobEscalated — "An operator escalates an outstanding offer: the DeliveryJob emits DeliveryEscalationRequested"
+/// rules: ManualEscalateSkipsChannel
+#[tokio::test]
+async fn test_delivery_job_escalated() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::EscalateDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), reason: Some("Customer waiting too long".to_string()) };
+    let result = crate::commands::escalate_delivery(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliveryJobEscalated: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryJobEscalated", &before, &[
+        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_escalation_requested()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryJobRecordsOfferTimeout — "The DeliveryJob records the offer-timeout fact (the dispatcher advances the ranked walk)"
+/// rules: TimeoutEscalatesToNextChannel
+#[tokio::test]
+async fn test_delivery_job_records_offer_timeout() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested()]).await;
+    let before = bed.snapshot();
+    let ev = evs::DeliveryOfferTimedOut { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), channel: sc::DeliveryChannelKey("independent".into()), rank: 1, reason: None };
+    let result = bed.record_fact(&format!("DeliveryJob-{}", support::uid("deliv-1")), DomainEvent::DeliveryOfferTimedOut(ev)).await;
+    let _ = result.expect("TestDeliveryJobRecordsOfferTimeout: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryJobRecordsOfferTimeout", &before, &[
+        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_offer_timed_out()),
     ]);
 }
 

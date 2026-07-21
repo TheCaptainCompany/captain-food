@@ -1,4 +1,4 @@
-version: 2
+version: 3
 description: >
   Captain.Food domain model and business events spec.
   Technical envelope fields (eventId, aggregateType, aggregateId, occurredAt, the ACTING USER
@@ -1312,6 +1312,47 @@ DeliveryDispatchFailed:
       nullable: true
       description: "Reason carried by the final partner decline, when the partner gave one."
   required: [deliveryJobId, orderId, restaurantId, attempts]
+
+DeliveryEscalationRequested:
+  description: >
+    An operator (restaurant/admin) asked to skip the delivery channel currently offered and advance the
+    ranked walk now (#60). Emitted by the DeliveryJob aggregate handling the EscalateDelivery command;
+    consumed by DeliveryDispatchProcess, which offers the next ranked channel (or fails closed when the
+    walk is exhausted). Internal dispatch mechanics — feeds no View_*.
+  type: object
+  properties:
+    deliveryJobId:
+      $ref: 'scalars.yaml#/DeliveryJobId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+      description: "Why the operator escalated (optional free text)."
+  required: [deliveryJobId]
+
+DeliveryOfferTimedOut:
+  description: >
+    An outstanding delivery offer expired before the channel answered (#60): the DeliveryOfferTimeoutWorker
+    found an OFFERED run older than the resolved TTL and records this fact (authored like
+    DeliveryDispatchFailed). Recorded by the DeliveryJob aggregate and consumed by DeliveryDispatchProcess,
+    which advances the ranked walk to the next channel (or fails closed when exhausted). Internal dispatch
+    mechanics — feeds no View_*.
+  type: object
+  properties:
+    deliveryJobId:
+      $ref: 'scalars.yaml#/DeliveryJobId'
+    channel:
+      $ref: 'scalars.yaml#/DeliveryChannelKey'
+      description: "The channel whose offer timed out."
+    rank:
+      type: integer
+      description: "1-based rank of the timed-out channel in the city's ranked walk."
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+      description: "Optional detail (e.g. the resolved TTL that elapsed)."
+  required: [deliveryJobId, channel, rank]
 
 # NOTE: DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated are INBOUND
 # integration events — reported by the delivery partner (e.g. Avelo37) through the avelo37-acl and

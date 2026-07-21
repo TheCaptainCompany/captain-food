@@ -162,6 +162,7 @@ mod tests {
                 dropoff: address("9 Rue Colbert"),
                 provider: None,
             },
+            channel: domain::generated::scalars::DeliveryChannelKey("avelo37".into()),
         }
     }
 

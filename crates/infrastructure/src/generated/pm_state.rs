@@ -223,7 +223,7 @@ impl CartBindingStateStore for PgCartBindingState {
 // ---------------------------------------------------------------------------------------------------
 
 /// Column list of `delivery_dispatch_process_manager`, in [`DeliveryDispatchRow`] field order.
-const DELIVERY_DISPATCH_COLUMNS: &str = "order_id, restaurant_id, delivery_job_id, process_status, offer_attempts, last_update_utc";
+const DELIVERY_DISPATCH_COLUMNS: &str = "order_id, restaurant_id, delivery_job_id, process_status, offer_attempts, current_rank, current_channel, last_update_utc";
 
 fn decode_delivery_dispatch(row: &PgRow) -> Result<DeliveryDispatchRow, DomainError> {
     Ok(DeliveryDispatchRow {
@@ -232,6 +232,8 @@ fn decode_delivery_dispatch(row: &PgRow) -> Result<DeliveryDispatchRow, DomainEr
         delivery_job_id: DeliveryJobId(row.try_get("delivery_job_id").map_err(db_err)?),
         process_status: EnumOrd::from_ord(row.try_get::<i32, _>("process_status").map_err(db_err)?)?,
         offer_attempts: row.try_get("offer_attempts").map_err(db_err)?,
+        current_rank: row.try_get("current_rank").map_err(db_err)?,
+        current_channel: row.try_get::<Option<String>, _>("current_channel").map_err(db_err)?.map(DeliveryChannelKey),
         last_update_utc: row.try_get("last_update_utc").map_err(db_err)?,
     })
 }
@@ -264,12 +266,14 @@ impl DeliveryDispatchStateStore for PgDeliveryDispatchState {
     async fn upsert(&self, row: &DeliveryDispatchRow) -> Result<(), DomainError> {
         let sql = format!(
             "INSERT INTO delivery_dispatch_process_manager ({DELIVERY_DISPATCH_COLUMNS}) \
-             VALUES ($1,$2,$3,$4,$5,now()) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,now()) \
              ON CONFLICT (order_id) DO UPDATE SET \
              restaurant_id = EXCLUDED.restaurant_id, \
              delivery_job_id = EXCLUDED.delivery_job_id, \
              process_status = EXCLUDED.process_status, \
              offer_attempts = EXCLUDED.offer_attempts, \
+             current_rank = EXCLUDED.current_rank, \
+             current_channel = EXCLUDED.current_channel, \
              last_update_utc = now()"
         );
         sqlx::query(&sql)
@@ -278,6 +282,8 @@ impl DeliveryDispatchStateStore for PgDeliveryDispatchState {
             .bind(row.delivery_job_id.0)
             .bind(row.process_status.to_ord())
             .bind(row.offer_attempts)
+            .bind(row.current_rank)
+            .bind(row.current_channel.as_ref().map(|v| v.0.clone()))
             .execute(&self.pool)
             .await
             .map_err(db_err)?;

@@ -1,4 +1,4 @@
-version: 1
+version: 2
 description: >
   Captain.Food command PAYLOAD spec. A command is a request to change state that the system can
   reject. This file defines ONLY each command's input payload — strongly typed, with exactly the
@@ -1143,6 +1143,22 @@ ConfirmPickup:
 
 CancelDelivery:
   description: "Restaurant/admin cancels a delivery job before it completes."
+  type: object
+  properties:
+    deliveryJobId:
+      $ref: 'scalars.yaml#/DeliveryJobId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [deliveryJobId]
+
+EscalateDelivery:
+  description: >
+    Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now
+    (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next
+    ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion
+    are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
   type: object
   properties:
     deliveryJobId:

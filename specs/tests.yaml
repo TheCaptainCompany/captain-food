@@ -1,4 +1,4 @@
-version: 2
+version: 3
 description: >
   Captain.Food BEHAVIOUR tests (Given / When / Then) over the actor model. Reusable EVENT instances
   (with their sample data) are CENTRALIZED in `fixtures` and referenced by `$ref: '#/fixtures/<name>'`
@@ -405,6 +405,12 @@ fixtures:
   deliveryDispatchFailed:
     type: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
     data: { deliveryJobId: "deliv-1", orderId: "order-1", restaurantId: "resto-1", attempts: 3, lastReason: "No courier available" }
+  deliveryEscalationRequested:
+    type: { $ref: 'events.yaml#/DeliveryEscalationRequested' }
+    data: { deliveryJobId: "deliv-1", reason: "Customer waiting too long" }
+  deliveryOfferTimedOut:
+    type: { $ref: 'events.yaml#/DeliveryOfferTimedOut' }
+    data: { deliveryJobId: "deliv-1", channel: "independent", rank: 1 }
   deliveryStatusUpdatedDelivered:
     type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
     data: { deliveryJobId: "deliv-1", status: "DELIVERED" }
@@ -2135,10 +2141,10 @@ tests:
     then: []
 
   TestDispatchPartnerRejected:
-    name: "Re-offers the declined job to the partner while under the 3-offer cap (inbound decline)"
+    name: "Advances the ranked channel walk to the next channel on a partner decline (inbound)"
     rules:
       - { $ref: 'rules.yaml#/PartnerRejectionReoffers' }
-      - { $ref: 'rules.yaml#/DispatchRetriesAreBounded' }
+      - { $ref: 'rules.yaml#/CityRankingWalkedInOrder' }
     actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
     given:
       - { $ref: '#/fixtures/deliveryRequested' }
@@ -2148,9 +2154,9 @@ tests:
     then: []
 
   TestDispatchAcceptedAfterReoffer:
-    name: "The partner accepts a re-offered job: the run advances to ACCEPTED (happy path after a decline)"
+    name: "A channel accepts a re-offered job after the walk advanced: the run reaches ACCEPTED"
     rules:
-      - { $ref: 'rules.yaml#/DispatchRetriesAreBounded' }
+      - { $ref: 'rules.yaml#/CityRankingWalkedInOrder' }
       - { $ref: 'rules.yaml#/PartnerAcceptanceRecordsCourier' }
     actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
     given:
@@ -2162,8 +2168,8 @@ tests:
     then: []
 
   TestDispatchFailsAfterOfferCap:
-    name: "The 3rd partner decline exhausts the offer cap: DeliveryDispatchFailed is recorded and the run closes FAILED"
-    rules: [{ $ref: 'rules.yaml#/DispatchRetriesAreBounded' }]
+    name: "Exhausting the ranked channel walk fails the dispatch closed (DeliveryDispatchFailed, run FAILED)"
+    rules: [{ $ref: 'rules.yaml#/DispatchExhaustionFailsClosed' }]
     actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
     given:
       - { $ref: '#/fixtures/deliveryRequested' }
@@ -2174,6 +2180,41 @@ tests:
       data: { deliveryJobId: "deliv-1", reason: "No courier available" }
     then:
       - { $ref: '#/fixtures/deliveryDispatchFailed' }
+
+  TestDispatchSelfDispatched:
+    name: "A RESTAURANT-dispatch order is not offered to a channel: the run self-dispatches (Captain tracks only)"
+    rules: [{ $ref: 'rules.yaml#/RestaurantDispatchBypassesRouting' }]
+    actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/orderPlaced' }
+    when:
+      type: { $ref: 'events.yaml#/OrderMarkedReady' }
+      data: { orderId: "order-1", restaurantId: "resto-1" }
+    then:
+      - { $ref: '#/fixtures/deliveryRequested' }
+
+  TestDispatchAdvancesOnEscalate:
+    name: "A manual operator escalate skips the current channel and advances the ranked walk"
+    rules: [{ $ref: 'rules.yaml#/ManualEscalateSkipsChannel' }]
+    actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+    when:
+      type: { $ref: 'events.yaml#/DeliveryEscalationRequested' }
+      data: { deliveryJobId: "deliv-1", reason: "Customer waiting too long" }
+    then: []
+
+  TestDispatchAdvancesOnTimeout:
+    name: "An expired offer advances the ranked walk to the next channel"
+    rules: [{ $ref: 'rules.yaml#/TimeoutEscalatesToNextChannel' }]
+    actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+    when:
+      type: { $ref: 'events.yaml#/DeliveryOfferTimedOut' }
+      data: { deliveryJobId: "deliv-1", channel: "independent", rank: 1 }
+    then: []
 
   TestDispatchClosesOrderOnPartnerDelivered:
     name: "Closes the order when the partner reports DELIVERED (inbound)"
@@ -2452,7 +2493,7 @@ tests:
 
   TestDeliveryJobRecordsDispatchFailure:
     name: "The DeliveryJob records the terminal dispatch failure delivered by DeliveryDispatchProcess (job → FAILED)"
-    rules: [{ $ref: 'rules.yaml#/DispatchRetriesAreBounded' }]
+    rules: [{ $ref: 'rules.yaml#/DispatchExhaustionFailsClosed' }]
     actor: { $ref: 'actors.yaml#/DeliveryJob' }
     given:
       - { $ref: '#/fixtures/deliveryRequested' }
@@ -2461,6 +2502,30 @@ tests:
       data: { deliveryJobId: "deliv-1", orderId: "order-1", restaurantId: "resto-1", attempts: 3, lastReason: "No courier available" }
     then:
       - { $ref: '#/fixtures/deliveryDispatchFailed' }
+
+  TestDeliveryJobEscalated:
+    name: "An operator escalates an outstanding offer: the DeliveryJob emits DeliveryEscalationRequested"
+    rules: [{ $ref: 'rules.yaml#/ManualEscalateSkipsChannel' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/EscalateDelivery' }
+      data: { deliveryJobId: "deliv-1", reason: "Customer waiting too long" }
+    then:
+      - { $ref: '#/fixtures/deliveryEscalationRequested' }
+
+  TestDeliveryJobRecordsOfferTimeout:
+    name: "The DeliveryJob records the offer-timeout fact (the dispatcher advances the ranked walk)"
+    rules: [{ $ref: 'rules.yaml#/TimeoutEscalatesToNextChannel' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+    when:
+      type: { $ref: 'events.yaml#/DeliveryOfferTimedOut' }
+      data: { deliveryJobId: "deliv-1", channel: "independent", rank: 1 }
+    then:
+      - { $ref: '#/fixtures/deliveryOfferTimedOut' }
 
   TestDeliveryJobRecordsPartnerStatusReport:
     name: "The DeliveryJob records the inbound partner status report as a valid transition (avelo37 inbox, issue #28)"
