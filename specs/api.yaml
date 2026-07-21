@@ -35,6 +35,11 @@ description: >
                    open to every role path (@public). Present → exactly those role paths
                    (@auth(requires: [...])); PUBLIC in the list is just the anonymous path
                    (/public/graphql), e.g. [PUBLIC, CUSTOMER] = anonymous-or-customer only.
+    - navRoles   : OPTIONAL per-type map `edgeField: [roles]` for FK-DERIVED navigation edges (#22,
+                   ADR-20260720-230000). Same LITERAL semantics as `roles`: an edge absent from the
+                   map is OPEN (inherits the parent type's reachability); a listed edge is traversable
+                   only on those role paths (same @auth + generated guard/visible pair as operations —
+                   the field is hidden from other roles' introspection and FORBIDDEN on execution).
     - slice      : V0 | V1.
 
 # --- Output-type registry (GraphQL types → INLINE shape + backing read model) ---------------------
@@ -50,6 +55,10 @@ types:
   Restaurant:
     description: "A restaurant (public discovery + single-restaurant header). Navigates to its catalogs."
     reads: [{ $ref: 'database/tables/projection_tables.yaml#/Restaurant' }]
+    navRoles:   # #22: reverse-FK edges off the PUBLIC-reachable Restaurant carry customer PII / ops data
+      carts: [ADMIN]                                        # every cart of a restaurant — support only
+      orders: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]       # the restaurant's own order board + support
+      deliveryJobs: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]   # dispatch board, not public
     properties:
       id: { $ref: 'scalars.yaml#/RestaurantId' }
       accountId: { $ref: 'scalars.yaml#/RestaurantAccountId', nullable: true }   # null for a non-partner listing
@@ -103,6 +112,8 @@ types:
   Order:
     description: "An order with its tracking status and payment state."
     reads: [{ $ref: 'database/tables/projection_tables.yaml#/OrderTracking' }]
+    navRoles:   # #22: the order's delivery legs are ops data (customer tracking uses Order.deliveryStatus/courier)
+      deliveryJobs: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
     properties:
       id: { $ref: 'scalars.yaml#/OrderId' }
       ref: { $ref: 'scalars.yaml#/ExternalReference' }

@@ -27,6 +27,13 @@
 > of the board; re-prioritising is a product-owner decision made in the project). Sizing &
 > pre-task-doc rules unchanged. Docs-only change — no specs, no code.
 
+> ✅ **2026-07-20 — #22: per-edge ACL on FK-derived nav fields (`navRoles`, ADR-20260720-230000).**
+> api.yaml types may declare `navRoles: { edge: [roles] }` (literal semantics; absent = open):
+> emitted as SDL `@auth` + the operations' guard/visible pair on the generated field; validator
+> rule `nav-roles-unknown-field`. Seeded: Restaurant.carts [ADMIN], Restaurant.orders
+> [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN], Restaurant/Order.deliveryJobs [+RIDER] — closing the
+> PUBLIC-schema PII edges before #21 freezes contracts. New ACL test; validate 0 errors.
+
 > ✅ **2026-07-20 — #14: `orderStatusChanged` keys on orderId + per-row ownership (ADR-20260720-220000).**
 > The last pre-acceptance-first convention is gone: the subscription takes `orderId` (what the
 > confirmation route holds) and matches exactly the `Order-<id>` stream. Ownership per resolved

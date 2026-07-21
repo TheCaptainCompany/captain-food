@@ -482,11 +482,11 @@ type Restaurant {
   timezone: TimeZone
   preparationTimeMinutes: Int
   updatedAt: DateTime!
-  deliveryJobs: [DeliveryJob!]!
+  deliveryJobs: [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN])
   prospects: [Prospect!]!
   catalogs: [Catalog!]!
-  carts: [Cart!]!
-  orders: [Order!]!
+  carts: [Cart!]! @auth(requires: [ADMIN])
+  orders: [Order!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN])
 }
 
 type Catalog {
@@ -540,7 +540,7 @@ type Order {
   courier: Courier
   estimatedDropoffAt: DateTime
   ratedAt: DateTime
-  deliveryJobs: [DeliveryJob!]!
+  deliveryJobs: [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN])
   restaurant: Restaurant!
 }
 
