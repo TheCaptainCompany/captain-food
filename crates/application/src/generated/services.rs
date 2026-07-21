@@ -109,7 +109,7 @@ pub trait DeliveryService: Send + Sync {
 pub struct IdentitySendPhoneOtpInput {
     pub dialing_code: DialingCode,
     pub national_number: NationalPhoneNumber,
-    pub locale: Locale,
+    pub locale: Option<Locale>,
 }
 
 /// Input of `identity.verify_phone_otp`.
@@ -133,7 +133,7 @@ pub struct IdentityVerifyPhoneOtpOutput {
 #[serde(rename_all = "camelCase")]
 pub struct IdentitySendEmailMagicLinkInput {
     pub email: EmailAddress,
-    pub locale: Locale,
+    pub locale: Option<Locale>,
 }
 
 /// Input of `identity.verify_email_token`.
@@ -148,6 +148,7 @@ pub struct IdentityVerifyEmailTokenInput {
 #[serde(rename_all = "camelCase")]
 pub struct IdentityVerifyEmailTokenOutput {
     pub auth_ref: ExternalReference,
+    pub email: EmailAddress,
 }
 
 /// Identity capability — passwordless auth wrapped behind our GraphQL (ADR-0015, Supabase ACL). Consumed by the Customer command handlers (VerifyPhone / email verification), not by a process manager; catalogued so the calling surface is one spec.
@@ -162,7 +163,7 @@ pub trait IdentityService: Send + Sync {
     /// Email a magic link to verify/link this address, localized by the stored locale.
     /// Anticipated rejections: none declared.
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
-    /// Verify a returned magic-link token server-side with the provider.
-    /// Anticipated rejections: `errors.yaml#/InvalidVerificationToken`.
+    /// Verify a returned magic-link token server-side with the provider; reports WHICH email the token proves.
+    /// Anticipated rejections: `errors.yaml#/InvalidVerificationToken`, `errors.yaml#/VerificationCodeExpired`.
     async fn verify_email_token(&self, input: IdentityVerifyEmailTokenInput, meta: &ServiceCallMeta) -> Result<IdentityVerifyEmailTokenOutput, DomainError>;
 }

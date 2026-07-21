@@ -96,7 +96,7 @@ identity:
       input:
         dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
         nationalNumber: { $ref: 'scalars.yaml#/NationalPhoneNumber' }
-        locale: { $ref: 'scalars.yaml#/Locale' }
+        locale: { $ref: 'scalars.yaml#/Locale', nullable: true, description: "Absent pre-identification (no stored locale yet) — the provider falls back to its default localization." }
       errors: []
     verify_phone_otp:
       description: "Verify an SMS OTP with the provider; resolves the provider-side auth user."
@@ -113,16 +113,18 @@ identity:
       description: "Email a magic link to verify/link this address, localized by the stored locale."
       input:
         email: { $ref: 'scalars.yaml#/EmailAddress' }
-        locale: { $ref: 'scalars.yaml#/Locale' }
+        locale: { $ref: 'scalars.yaml#/Locale', nullable: true, description: "The customer's STORED locale, absent when none is stored yet." }
       errors: []
     verify_email_token:
-      description: "Verify a returned magic-link token server-side with the provider."
+      description: "Verify a returned magic-link token server-side with the provider; reports WHICH email the token proves."
       input:
         token: { $ref: 'scalars.yaml#/EmailVerificationToken' }
       output:
         authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+        email: { $ref: 'scalars.yaml#/EmailAddress', description: "The address the token PROVES — the linked email is recorded from this, never from client input." }
       errors:
         - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
   binding: local
   expose: false
   implementations:
