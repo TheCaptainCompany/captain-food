@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use hubrise_adapter::api::HubRiseApiClient;
 use hubrise_adapter::{routes, HubRiseEnricher};
-use infrastructure::PgEventStore;
+use infrastructure::{PgCommandJournal, PgEventStore};
 
 #[tokio::main]
 async fn main() {
@@ -29,8 +29,11 @@ async fn main() {
             state.raw = Some(Arc::new(hubrise_adapter::PgRawHubRiseCallbacks::new(pool.clone())));
             match api {
                 Ok(api) => {
-                    let store = Arc::new(PgEventStore::new(pool));
-                    state.enricher = Some(Arc::new(HubRiseEnricher::new(store, api)));
+                    let store = Arc::new(PgEventStore::new(pool.clone()));
+                    // WORKER-channel command journal (ADR-20260720-015300): every enricher send is
+                    // journaled before handling, so redeliveries dedupe instead of double-applying.
+                    let journal = Arc::new(PgCommandJournal::new(pool));
+                    state.enricher = Some(Arc::new(HubRiseEnricher::new(store, journal, api)));
                 }
                 Err(_) => eprintln!(
                     "hubrise-webhook: enrichment disabled (HUBRISE_ACCESS_TOKEN unset); \

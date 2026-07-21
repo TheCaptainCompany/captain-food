@@ -1,7 +1,24 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-20 (23:45 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #15: the WORKER channel journals (ADR-20260720-015300 follow-up).** The command
+> journal invariant — ALL command submissions converge on `command_journal`, whatever the channel —
+> is now true: the HubRise enricher (`ImportCatalog` + per-SKU `UpdateOfferStock`) and the SIRENE
+> sync worker (`RegisterRestaurant` / `MarkRestaurantClosed`) no longer call handlers directly but go
+> through the new reusable worker-side journaling dispatch `application::dispatch::dispatch_journaled`
+> (`channel: WORKER`, journal-before-handle, same REJECTED/FAILED discrimination as the generated
+> GraphQL dispatch; a FAILED duplicate is re-executed under the same id — for a worker, redelivery IS
+> the retry). Deterministic idempotency keys: HubRise `message_id` = UUIDv5(callback id, command
+> type[, offer id]), `cause_id` = UUIDv5(callback id) → `external_hubrise_callbacks →
+> command_journal → domain_events` is fully traceable, and a webhook redelivery dedupes instead of
+> double-applying; SIRENE `message_id` = UUIDv5(command type, SIRET, staged `last_seen_at`),
+> `cause_id` = UUIDv5(`row:<SIRET>`) — a re-drained staged version dedupes, an ingestion refresh
+> journals anew. Worker rejections finally leave a durable REJECTED trace. No spec change; unit tests
+> (dispatch + enricher dedup) + Pg-gated worker tests extended with journal/causality assertions;
+> workspace tests green, validate 0 errors. Unblocks #16 (`commands_accepted_total{channel}` now sees
+> all channels).
 
 > ✅ **2026-07-20 — value made explicit per issue (product-owner directive, amends
 > ADR-20260720-143000 §1).** New org field **Value Size** (T-shirt XS–XL) = the value the issue

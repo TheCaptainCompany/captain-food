@@ -7,6 +7,7 @@
 //! (Ports & Adapters), injected at the `server` composition root.
 
 pub mod commands;
+pub mod dispatch;
 pub mod generated;
 pub mod journal;
 pub mod payments;

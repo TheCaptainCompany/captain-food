@@ -69,6 +69,13 @@ pub fn sirene_system_user_id() -> uuid::Uuid {
     uuid::Uuid::new_v5(&sirene_namespace(), b"system:sirene-sync")
 }
 
+/// UUIDv5 of an arbitrary seed under the fixed SIRENE namespace — used by the sync worker to derive
+/// deterministic `command_journal` ids (`message_id` per send, `cause_id` per staged row) so a
+/// re-drained row replays the same journal identity (ADR-20260720-015300, #15).
+pub fn sirene_uuid(seed: &str) -> uuid::Uuid {
+    uuid::Uuid::new_v5(&sirene_namespace(), seed.as_bytes())
+}
+
 // ---------------------------------------------------------------------------------------------
 // Mapping — the actual Anti-Corruption boundary
 // ---------------------------------------------------------------------------------------------
