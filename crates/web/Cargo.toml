@@ -6,9 +6,25 @@ license-file.workspace = true
 publish = false
 description = "Captain.Food Leptos frontend (compiles to WASM): the SDUI renderer + GENERATED component registry, action dispatcher, and non-SDUI screens (checkout, order tracking). Depends on `shared_types` + `app-core` (ADR-0035)."
 
-# leptos/leptos_router/leptos_i18n are added when the SSR/hydration runtime lands (later splits of #21);
-# this slice is a plain lib: the GENERATED component registry + a static-screen renderer over it.
+# The SDUI renderer: the GENERATED component registry + Leptos views driven by it. Compiles two ways —
+# `ssr` (default; server-render to HTML, what CI's `cargo build --workspace` builds) and `hydrate`
+# (wasm32 client, built by trunk in a later CI step). leptos_router/leptos_i18n land in later splits.
 [dependencies]
 shared_types = { path = "../shared_types" }
 app-core = { path = "../core" }
 serde = { workspace = true }   # the generated registry derives Serialize/Deserialize on its enums
+leptos = { version = "0.8", default-features = false }
+wasm-bindgen = { version = "0.2", optional = true }   # hydrate-only: the wasm entry point
+
+# uuid comes in transitively (via `domain`); on wasm32 its RNG needs the `js` backend to compile, so
+# the `hydrate` (wasm) build enables it. Native `ssr` builds are unaffected.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { version = "1", features = ["js"] }
+
+[features]
+default = ["ssr"]
+# Server-side render path (native): produce initial HTML from the same view tree.
+ssr = ["leptos/ssr"]
+# Client hydration path (wasm32): attach to the server-rendered DOM. Built by trunk, not by CI's
+# native workspace build.
+hydrate = ["leptos/hydrate", "dep:wasm-bindgen"]

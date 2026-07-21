@@ -1,7 +1,20 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (17:54 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (20:00 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 🚧 **2026-07-21 — #21 frontend renderer STARTED, split 1/4 (#68, PR #69).** The Leptos/WASM SDUI
+> renderer (remaining-work item 5) is being built in the 4 sub-issues of #21 (ADR-20260720-143000).
+> **Split 1** stands up the runtime client seam: (1) a new codegen emitter (`emit_web_registry`) turns
+> `specs/screens/customer_screens.yaml#/component_registry` into `crates/web/src/generated/registry.rs`
+> — a `ComponentKind` allowlist enum (`as_str`/`from_type`/`group`/`ALL`) the renderer dispatches on, so
+> the screens DSL stays the source of truth (codegen roadmap item 6); (2) `crates/web` now depends on
+> **Leptos 0.8** with an `ssr` (default, native) / `hydrate` (wasm32) feature split — the `renderer`
+> builds one static screen (a `home` chrome subset) from the registry and renders it **server-side to
+> HTML** (`render_home_html`), with a `hydrate()` wasm entry attaching to the `data-hydrate` root.
+> `make rust` green (0 errors, no drift); `cargo build --workspace` green. Architecture + sequence
+> diagrams in `docs/frontend/renderer-architecture.md`. Deferred to later splits: live resolver/action
+> wiring + session layer (#12) + two-step mutations (#17) → split 2; checkout/tracking → split 3.
 
 > 🚧 **2026-07-21 — Deployment build model changed: CI builds the image, Render only pulls it
 > (ADR-20260721-175411, amends ADR-0042).** Render meters build-pipeline minutes at a $0 cap, so
