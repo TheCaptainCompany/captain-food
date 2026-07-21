@@ -1,7 +1,15 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (04:35 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (04:50 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — auto-merge sequencing gap closed (ADR-20260721-044613, amends
+> ADR-20260721-042018).** A claim-time draft PR is a near-empty diff and passes CI trivially;
+> arming auto-merge at claim time (instead of at completion) would leave it armed for the whole
+> task and fire the instant the PR left draft, even before the work was done — closing the issue
+> via `Closes #NN` on unfinished work. Fix: auto-merge is armed **exactly once**, together with
+> marking the PR ready for review, as one indivisible completion step — never at claim time, never
+> separately. CLAUDE.md / BACKLOG.md updated to state this explicitly. Docs-only.
 
 > ✅ **2026-07-21 — #26: service-catalog emitters — the ports are GENERATED
 > (ADR-20260721-043033, implements ADR-20260719-214500, codegen-roadmap item 4).** Four new
