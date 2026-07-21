@@ -89,12 +89,13 @@ pub trait PaymentService: Send + Sync {
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryOfferJobInput {
     pub job: DeliveryRequested,
+    pub channel: DeliveryChannelKey,
 }
 
 /// Delivery-fulfilment capability (bounded context: delivery, ADR-0031). `offer_job` offers a delivery job to the partner and/or publishes it to independent riders; the partner's answers come back as the inbound DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated facts recorded by the DeliveryJob aggregate — never through this return value.
 #[async_trait]
 pub trait DeliveryService: Send + Sync {
-    /// Offer the delivery job (its DeliveryRequested birth fact carries pickup/dropoff) for fulfilment.
+    /// Offer the delivery job (its DeliveryRequested birth fact carries pickup/dropoff) on a resolved TARGET channel; the composite gateway routes to that channel's adapter (an unwired channel behaves as an immediate decline → escalate, #60).
     /// Anticipated rejections: none declared.
     async fn offer_job(&self, input: DeliveryOfferJobInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
 }

@@ -3017,6 +3017,10 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
+    #[graphql(name = "escalateDelivery", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    async fn escalate_delivery(&self, input: EscalateDeliveryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        Err(async_graphql::Error::new("not implemented"))
+    }
 }
 
 /// The stripped serde wire shape of the GraphQL input — both the journal `payload` column and the

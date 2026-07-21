@@ -633,6 +633,14 @@ pub struct CancelDelivery {
     pub reason: Option<String>,
 }
 
+/// Restaurant/admin asks to skip the delivery channel currently offered and advance the ranked walk now (#60). The DeliveryJob emits DeliveryEscalationRequested; DeliveryDispatchProcess offers the next ranked channel, or fails the dispatch closed when the walk is exhausted. Self-dispatch and exhaustion are handled by the saga (a benign skip / a terminal fact), not rejected as command errors.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EscalateDelivery {
+    pub delivery_job_id: DeliveryJobId,
+    pub reason: Option<String>,
+}
+
 /// Bind a cart to a customer (after phone verification). The cart is then owned by the customer and can be retrieved across sessions. This is a one-time operation per cart.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

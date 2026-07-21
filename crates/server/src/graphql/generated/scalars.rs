@@ -1757,7 +1757,7 @@ impl From<RefundProcessStatus> for ds::RefundProcessStatus {
     }
 }
 
-/// State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED keeps REOFFER_REQUIRED's ordinal slot (both flag manual handling; ADR-20260720-004556).
+/// State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED now marks the ranked channel walk exhausted (fail closed, rules.yaml#/DispatchExhaustionFailsClosed — #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED is appended LAST to preserve the declaration-order ordinals of the pre-#60 values (ADR-0037)."
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum DeliveryDispatchProcessStatus {
     #[graphql(name = "OFFERED")]
@@ -1768,6 +1768,8 @@ pub enum DeliveryDispatchProcessStatus {
     FAILED,
     #[graphql(name = "COMPLETED")]
     COMPLETED,
+    #[graphql(name = "SELF_DISPATCHED")]
+    SELF_DISPATCHED,
 }
 impl From<ds::DeliveryDispatchProcessStatus> for DeliveryDispatchProcessStatus {
     fn from(v: ds::DeliveryDispatchProcessStatus) -> Self {
@@ -1776,6 +1778,7 @@ impl From<ds::DeliveryDispatchProcessStatus> for DeliveryDispatchProcessStatus {
             ds::DeliveryDispatchProcessStatus::ACCEPTED => Self::ACCEPTED,
             ds::DeliveryDispatchProcessStatus::FAILED => Self::FAILED,
             ds::DeliveryDispatchProcessStatus::COMPLETED => Self::COMPLETED,
+            ds::DeliveryDispatchProcessStatus::SELF_DISPATCHED => Self::SELF_DISPATCHED,
         }
     }
 }
@@ -1786,6 +1789,7 @@ impl From<DeliveryDispatchProcessStatus> for ds::DeliveryDispatchProcessStatus {
             DeliveryDispatchProcessStatus::ACCEPTED => Self::ACCEPTED,
             DeliveryDispatchProcessStatus::FAILED => Self::FAILED,
             DeliveryDispatchProcessStatus::COMPLETED => Self::COMPLETED,
+            DeliveryDispatchProcessStatus::SELF_DISPATCHED => Self::SELF_DISPATCHED,
         }
     }
 }

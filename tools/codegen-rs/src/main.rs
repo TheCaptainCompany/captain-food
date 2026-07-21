@@ -2994,13 +2994,13 @@ fn check_pm_value(
     where_: &str,
     issues: &mut Vec<Issue>,
 ) {
-    let forms = ["const", "from", "from_state", "from_read", "from_port", "from_envelope"];
+    let forms = ["const", "from", "from_state", "from_read", "from_port", "from_envelope", "from_hook"];
     let present: Vec<&str> = forms.iter().copied().filter(|f| v.get(*f).is_some()).collect();
     if present.len() != 1 {
         issues.push(err(
             "pm-value",
             where_.to_string(),
-            "a step value must be exactly one of { const | from | from_state | from_read | from_port | from_envelope }.".into(),
+            "a step value must be exactly one of { const | from | from_state | from_read | from_port | from_envelope | from_hook }.".into(),
         ));
         return;
     }
@@ -3070,6 +3070,19 @@ fn check_pm_value(
                     "pm-value",
                     where_.to_string(),
                     format!("`from_envelope` '{}' is not one of event_id | correlation_id | occurred_at (ADR-0041).", f),
+                ));
+            }
+        }
+        "from_hook" => {
+            // A runtime orchestrator hook (#60): the value is resolved in code, so the name is the
+            // only spec-level constraint — a non-empty snake_case identifier the emitter turns into
+            // an async hook method. (The hook is only consumed inside `state.set`.)
+            let n = v.get("from_hook").and_then(|x| x.as_str()).unwrap_or("");
+            if n.is_empty() || !n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+                issues.push(err(
+                    "pm-value",
+                    where_.to_string(),
+                    format!("`from_hook` '{}' must be a non-empty snake_case hook name.", n),
                 ));
             }
         }
@@ -9666,6 +9679,12 @@ enum PmVal {
     FromPort,
     /// `{ from_envelope: event_id | correlation_id | occurred_at }` (ADR-0041).
     FromEnvelope(String),
+    /// `{ from_hook: <name> }` — an ORCHESTRATOR-computed value (#60). Emits an async call to a
+    /// generated per-leg hook `async fn <name>(&self, <leg-scope ctx>) -> Result<T, _>` that resolves
+    /// the value at runtime (e.g. from config tables). Unlike `from_state`, it needs NO state row, so
+    /// it is usable on a BIRTH leg; the hook receives whatever the leg has in scope (the trigger, any
+    /// reads/delivered payloads, and the state row when one is loaded). Only valid inside `state.set`.
+    FromHook(String),
 }
 
 fn parse_pm_val(v: &Value, loc: &str) -> PmVal {
@@ -9700,6 +9719,9 @@ fn parse_pm_val(v: &Value, loc: &str) -> PmVal {
     }
     if let Some(s) = v.get("from_envelope").and_then(|x| x.as_str()) {
         return PmVal::FromEnvelope(s.to_string());
+    }
+    if let Some(s) = v.get("from_hook").and_then(|x| x.as_str()) {
+        return PmVal::FromHook(s.to_string());
     }
     panic!("{}: unsupported value form {:?}", loc, v)
 }
@@ -10336,6 +10358,7 @@ fn pm_value_expr(ctx: &PmEmit, scope: &PmScope, val: &PmVal, target_full: &str, 
             }
         }
         PmVal::FromPort => panic!("{}: from_port values are only used by the hand-written PlaceOrder command leg", loc),
+        PmVal::FromHook(_) => panic!("{}: from_hook values are only valid inside state.set (handled by emit_state)", loc),
     }
 }
 
@@ -10866,6 +10889,26 @@ impl<'a> PmLegGen<'a> {
             // Self-referential `from_state` = orchestrator-computed (arithmetic the DSL cannot carry).
             let mut lines: Vec<String> = Vec::new();
             for (col, val) in set {
+                if let PmVal::FromHook(name) = val {
+                    // Orchestrator-resolved value (#60) — a runtime hook (e.g. reading config tables)
+                    // usable on ANY leg incl. a birth leg with no state row. It receives whatever the
+                    // leg has in scope (trigger + reads/payloads + the row when one is loaded).
+                    let base = self.ctx.col_ty(col);
+                    let sig = self.hook_sig();
+                    let args = self.hook_args();
+                    self.push(ind, &format!("let hook_{} = hooks.{}({}).await?;", rust_ident(col), name, args));
+                    pm_push_hook(
+                        &mut self.hooks,
+                        name,
+                        true,
+                        format!(
+                            "        /// Orchestrator-resolved `{}` (#60, the DSL's `from_hook` marker — resolved at runtime,\n        /// e.g. from the delivery-strategy config tables).{}\n        async fn {}(&self, {}) -> Result<{}, domain::shared::errors::DomainError>;\n",
+                            col, note_s, name, sig, base
+                        ),
+                    );
+                    lines.push(format!("{}: hook_{},", rust_ident(col), rust_ident(col)));
+                    continue;
+                }
                 if let PmVal::FromState(src) = val {
                     if src == col {
                         let base = {
@@ -11059,22 +11102,26 @@ fn emit_pm_leg(ctx: &PmEmit, pm: &PmOrchDef, leg: &PmLegDef) -> (String, String)
         for (i, s) in leg.steps.iter().enumerate().take(prefix_end) {
             emit_one(&mut gen, i, s, 8, &consumed);
         }
-        let (note, row_ty_s) = match &leg.steps[k] {
-            PmStepDef::Guard { note, .. } => (note.clone(), gen.row_ty().to_string()),
+        let note = match &leg.steps[k] {
+            PmStepDef::Guard { note, .. } => note.clone(),
             _ => unreachable!(),
         };
         let note_s = note.as_deref().map(ws1).unwrap_or_default();
+        // ASYNC branch (#60): the decision may read config (e.g. "does a next ranked channel remain?"),
+        // so the hook is async + fallible and receives the leg's scope (trigger + the loaded row).
+        let branch_sig = gen.hook_sig();
+        let branch_args = gen.hook_args();
         pm_push_hook(
             &mut gen.hooks,
             "branch",
-            false,
+            true,
             format!(
-                "        /// The DSL's linear-branch decision (a mid-leg bare `skip` guard): `true` runs the steps\n        /// BEFORE the marker and ends the leg; `false` falls through to the steps after it.\n        /// Spec note: {}\n        fn branch(&self, row: &{}) -> bool;\n",
-                pm_str_lit(&note_s), row_ty_s
+                "        /// The DSL's linear-branch decision (a mid-leg bare `skip` guard): `true` runs the steps\n        /// BEFORE the marker and ends the leg; `false` falls through to the steps after it. Resolved at\n        /// runtime (may read config, #60).\n        /// Spec note: {}\n        async fn branch(&self, {}) -> Result<bool, domain::shared::errors::DomainError>;\n",
+                pm_str_lit(&note_s), branch_sig
             ),
         );
         gen.push(8, "// Linear-branch marker (bare `skip` guard): the hook chooses the branch.");
-        gen.push(8, "if hooks.branch(&row) {");
+        gen.push(8, &format!("if hooks.branch({}).await? {{", branch_args));
         for (i, s) in leg.steps.iter().enumerate().take(k).skip(prefix_end) {
             emit_one(&mut gen, i, s, 12, &consumed);
         }
@@ -11522,6 +11569,8 @@ fn bt_pm_event_call(pm: &str, event: &str) -> String {
         ("DeliveryDispatchProcess", "OrderMarkedReady") => "crate::process_managers::delivery_dispatch::on_order_marked_ready(&bed.store, &bed.dispatch_pm, &bed.orders, &bed.delivery, &ev, &support::envelope()).await".into(),
         ("DeliveryDispatchProcess", "DeliveryAcceptedByPartner") => "crate::process_managers::delivery_dispatch::on_delivery_accepted_by_partner(&bed.dispatch_pm, &ev).await".into(),
         ("DeliveryDispatchProcess", "DeliveryRejectedByPartner") => "crate::process_managers::delivery_dispatch::on_delivery_rejected_by_partner(&bed.store, &bed.dispatch_pm, &bed.delivery, &ev, &support::envelope()).await".into(),
+        ("DeliveryDispatchProcess", "DeliveryEscalationRequested") => "crate::process_managers::delivery_dispatch::on_delivery_escalation_requested(&bed.store, &bed.dispatch_pm, &bed.delivery, &ev, &support::envelope()).await".into(),
+        ("DeliveryDispatchProcess", "DeliveryOfferTimedOut") => "crate::process_managers::delivery_dispatch::on_delivery_offer_timed_out(&bed.store, &bed.dispatch_pm, &bed.delivery, &ev, &support::envelope()).await".into(),
         ("DeliveryDispatchProcess", "DeliveryStatusUpdated") => "crate::process_managers::delivery_dispatch::on_delivery_status_updated(&bed.store, &bed.dispatch_pm, &ev, &support::envelope()).await".into(),
         ("DeliveryDispatchProcess", "DeliveryCompleted") => "crate::process_managers::delivery_dispatch::on_delivery_completed(&bed.store, &bed.dispatch_pm, &ev, &support::envelope()).await".into(),
         _ => panic!("behaviour-tests: no dispatch entry for process-manager {} ← event {} — extend bt_pm_event_call", pm, event),

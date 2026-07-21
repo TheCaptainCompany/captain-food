@@ -441,27 +441,17 @@ DeliveryDispatchProcess:
         - call:
             port: delivery
             operation: offer_job
-            note: "CAPTAIN branch (restaurant dispatch mode CAPTAIN; skipped for a RESTAURANT-dispatch order): the strategy hook resolves the city's rank-1 channel (CityDeliveryRanking) and offer_job offers the job on that target — the ranking read/selection is a runtime hook the value forms cannot carry (#60)."
+            note: "Offer the job on the strategy-resolved rank-1 channel (CityDeliveryRanking). The offer_job INPUT is a runtime hook: it resolves the restaurant's dispatch strategy and returns the target channel for a CAPTAIN-dispatch order, or SKIPS the call for a RESTAURANT-dispatch order (self-dispatch short-circuit — Captain offers no channel and only tracks). The ranking read/selection cannot be carried by the value forms (#60)."
         - state:
             set:
               order_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/orderId' } }
               restaurant_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/restaurantId' } }
               delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryRequested/properties/deliveryJobId' } }
-              process_status: { const: OFFERED }
+              process_status: { from_hook: open_process_status }
               offer_attempts: { const: 1 }
-              current_rank: { const: 1 }
-              current_channel: { from_port: delivery.offer_job }
-            note: "CAPTAIN branch: the run opens OFFERED at rank 1 (offer_attempts = 1). current_rank/current_channel capture the strategy-hook-resolved rank-1 channel offer_job was invoked against (#60)."
-        - guard:
-            skip: true
-            note: "CAPTAIN branch ends here — an offer is outstanding. Otherwise (restaurant dispatch mode RESTAURANT) fall through to the self-dispatch branch."
-        - state:
-            set:
-              order_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/orderId' } }
-              restaurant_id: { from: { $ref: 'events.yaml#/OrderMarkedReady/properties/restaurantId' } }
-              delivery_job_id: { from: { $ref: 'events.yaml#/DeliveryRequested/properties/deliveryJobId' } }
-              process_status: { const: SELF_DISPATCHED }
-            note: "SELF_DISPATCHED branch (restaurant dispatch mode RESTAURANT): Captain offers no channel (current_rank/current_channel stay null) and only tracks; the restaurant drives progress via the delivery commands and the customer still gets tracking (#60)."
+              current_rank: { from_hook: open_current_rank }
+              current_channel: { from_hook: open_current_channel }
+            note: "Open the run under the resolved strategy (#60). A CAPTAIN-dispatch order opens OFFERED at rank 1 with current_rank/current_channel set to the rank-1 channel offer_job was invoked against; a RESTAURANT-dispatch order opens SELF_DISPATCHED with current_rank/current_channel null (Captain offers no channel and only tracks — the restaurant drives progress and the customer still gets tracking). process_status/current_rank/current_channel are resolved by runtime strategy hooks (from_hook) reading RestaurantDispatchConfig + CityDeliveryRanking; offer_attempts = 1 counts the birth offer."
 
     - message: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
       description: >
@@ -501,8 +491,8 @@ DeliveryDispatchProcess:
         - state:
             set:
               offer_attempts: { from_state: offer_attempts }
-              current_rank: { from_state: current_rank }
-              current_channel: { from_state: current_channel }
+              current_rank: { from_hook: advance_current_rank }
+              current_channel: { from_hook: advance_current_channel }
               process_status: { const: OFFERED }
             note: "ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step — arithmetic/selection the value forms cannot carry); the run stays OFFERED awaiting the answer."
         - guard:
@@ -545,8 +535,8 @@ DeliveryDispatchProcess:
         - state:
             set:
               offer_attempts: { from_state: offer_attempts }
-              current_rank: { from_state: current_rank }
-              current_channel: { from_state: current_channel }
+              current_rank: { from_hook: advance_current_rank }
+              current_channel: { from_hook: advance_current_channel }
               process_status: { const: OFFERED }
             note: "ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED."
         - guard:
@@ -589,8 +579,8 @@ DeliveryDispatchProcess:
         - state:
             set:
               offer_attempts: { from_state: offer_attempts }
-              current_rank: { from_state: current_rank }
-              current_channel: { from_state: current_channel }
+              current_rank: { from_hook: advance_current_rank }
+              current_channel: { from_hook: advance_current_channel }
               process_status: { const: OFFERED }
             note: "ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED."
         - guard:

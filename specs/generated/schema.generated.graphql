@@ -247,6 +247,7 @@ enum DeliveryDispatchProcessStatus {
   ACCEPTED
   FAILED
   COMPLETED
+  SELF_DISPATCHED
 }
 
 enum RestaurantDispatchMode {
@@ -1151,6 +1152,11 @@ input CancelDeliveryInput {
   reason: String
 }
 
+input EscalateDeliveryInput {
+  deliveryJobId: DeliveryJobId!
+  reason: String
+}
+
 input OperationStatusQueryInput {
   messageId: MessageId!
 }
@@ -1469,6 +1475,7 @@ type Mutation {
   confirmPickup(input: ConfirmPickupInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "ConfirmPickup")
   completeDelivery(input: CompleteDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")
   cancelDelivery(input: CancelDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "CancelDelivery")
+  escalateDelivery(input: EscalateDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "EscalateDelivery")
 }
 
 # ==============================================================================
