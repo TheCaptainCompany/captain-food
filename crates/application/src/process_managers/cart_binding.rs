@@ -1,26 +1,45 @@
-//! CartBindingProcess (`specs/processmanager.yaml#/CartBindingProcess`) — binds a returning
-//! visitor's OPEN guest carts to their Customer when `CustomerIdentified` arrives (authRef →
-//! customerId, ADR-20260719-193500 §6): read the session's OPEN carts from the Cart read model,
-//! SEND `commands.yaml#/BindCartToCustomer` per cart — the Cart aggregate validates the one-time
-//! bind and owns the `CartBoundToCustomer` fact (its `customer_id` folds from the same stream,
-//! deleting the impossible cross-stream projector routing) — then record the binding on the
-//! `cart_binding_process_manager` row so a re-delivered `CustomerIdentified` is a no-op.
+//! CartBindingProcess (`specs/processmanager.yaml#/CartBindingProcess`) — HOOK IMPL + thin wrapper
+//! for the GENERATED `CustomerIdentified` leg (`crate::generated::process_managers::cart_binding_process`,
+//! issue #25). The pipeline (for-each send with rejection-skip semantics, state.set) is generated;
+//! this module keeps only the `read open_carts` seam over the Cart read model.
 //!
-//! Send semantics on an EVENT leg: a rejection by the Cart (e.g. already bound) is LOGGED and
-//! SKIPPED for that cart, never re-thrown — the remaining carts still bind.
+//! Send semantics on an EVENT leg (generated): a rejection by the Cart (e.g. already bound) is
+//! LOGGED and SKIPPED for that cart, never re-thrown — the remaining carts still bind.
 
-use domain::generated::commands::BindCartToCustomer;
 use domain::generated::events::CustomerIdentified;
+use domain::generated::scalars::SessionId;
 use domain::shared::errors::DomainError;
 
-use crate::pm_state::{CartBindingRow, CartBindingStateStore};
+use crate::generated::process_managers::cart_binding_process::{self, OpenCartsRead};
+use crate::pm_state::CartBindingStateStore;
 use crate::ports::EventStore;
-use crate::process_managers::{saga_actor, Outcome, TriggerEnvelope};
+use crate::process_managers::{Outcome, TriggerEnvelope};
 use crate::queries::CartReadRepository;
 
-/// EVENT leg `events.yaml#/CustomerIdentified` (rules.yaml#/GuestCartsBoundOnIdentification): bind
-/// every OPEN cart of the identified session to the customer, then record the session→customer
-/// binding on the state row (idempotency for re-delivered triggers).
+/// Hooks for the `CustomerIdentified` leg: the OPEN-carts read (session_id + status = OPEN).
+pub struct CartBindingHooks<'a> {
+    pub carts: &'a dyn CartReadRepository,
+}
+
+#[async_trait::async_trait]
+impl cart_binding_process::CustomerIdentifiedHooks for CartBindingHooks<'_> {
+    async fn read_open_carts(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Vec<OpenCartsRead>, DomainError> {
+        Ok(self
+            .carts
+            .open_by_session(session_id)
+            .await?
+            .into_iter()
+            .map(|c| OpenCartsRead { cart_id: c.cart_id })
+            .collect())
+    }
+}
+
+/// EVENT leg `events.yaml#/CustomerIdentified` (rules.yaml#/GuestCartsBoundOnIdentification) — the
+/// generated pipeline with this module's hooks: bind every OPEN cart of the identified session, then
+/// record the session→customer binding row (idempotency for re-delivered triggers).
 pub async fn on_customer_identified(
     store: &dyn EventStore,
     state: &dyn CartBindingStateStore,
@@ -28,35 +47,8 @@ pub async fn on_customer_identified(
     event: &CustomerIdentified,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
-    // read Cart where session_id = <trigger> AND status = OPEN.
-    let open_carts = carts.open_by_session(event.session_id).await?;
-    let actor = saga_actor(env);
-    // send BindCartToCustomer for_each open cart — the Cart aggregate validates (one-time bind) and
-    // emits CartBoundToCustomer; a per-cart rejection is logged and skipped (DSL note), a plumbing
-    // failure (repository/version conflict) propagates so the runner retries the whole leg.
-    for cart in &open_carts {
-        let cmd = BindCartToCustomer { cart_id: cart.cart_id, customer_id: event.customer_id };
-        match crate::commands::bind_cart_to_customer(store, cmd, &actor).await {
-            Ok(()) => {}
-            Err(DomainError::Rejected { code, context }) => {
-                eprintln!(
-                    "saga[CartBindingProcess]: BindCartToCustomer rejected for cart {} ({code}: {context}) — skipped",
-                    cart.cart_id.0
-                );
-            }
-            Err(other) => return Err(other),
-        }
-    }
-    // state.set — the session's carts are bound; a re-delivered CustomerIdentified is a no-op
-    // (the Cart aggregate's one-time bind is the second idempotency line).
-    state
-        .upsert(&CartBindingRow {
-            session_id: event.session_id,
-            customer_id: event.customer_id,
-            last_update_utc: chrono::Utc::now(), // ignored on write; stamped by the store
-        })
-        .await?;
-    Ok(Outcome::Completed)
+    cart_binding_process::on_customer_identified(store, state, &CartBindingHooks { carts }, event, env)
+        .await
 }
 
 // ================================================================================================

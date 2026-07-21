@@ -1,7 +1,27 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (04:50 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (05:40 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #25: the PM orchestrator step pipelines are GENERATED
+> (ADR-20260721-053456, codegen-roadmap item 3, implements the deferral of ADR-20260719-193500).**
+> New `codegen-rs` emitter over `specs/processmanager.yaml` →
+> `application/src/generated/process_managers.rs`: one module per process manager, one generated
+> `async fn` per leg executing the DSL's ordered typed steps — `state.by/expect/set` over the #27
+> generated stores (missing-row policy typed from the spec: bare `guard throws` after `state.by` =
+> the orphan error; command legs reuse the first `that`-guard's error; otherwise benign skip),
+> structural guards, `call` through the #26 generated service ports, `deliver` with generated
+> stream addressing + `Repository::save` under the saga actor, `send` with the event-leg
+> rejection-logged-and-skipped semantics, and a pk-admission seam on opening legs. The
+> NON-STRUCTURAL seams are per-leg generated HOOK traits (`read_*` with sink-typed structs,
+> `build_*`, `input_*`, `should_deliver_*`, `admit`, `finalize`, `compute_*`, `branch`) —
+> the four hand orchestrators shrank to hook impls + thin wrappers with UNCHANGED call surfaces
+> (runner/server untouched). Two DSL-reading conventions carry the last nuances: self-referential
+> `from_state` = orchestrator-computed (the re-offer counter), a mid-leg bare `skip` guard = the
+> linear-branch marker (ADR-20260720-004556). The `PlaceOrder` command leg stays hand-written
+> (pricing non-goal). Behaviour suite = parity gate, all green (two skip-message substring
+> assertions re-worded; never spec'd). `make rust` green: workspace builds, tests pass, validate
+> 0 errors, no drift.
 
 > ✅ **2026-07-21 — auto-merge sequencing gap closed (ADR-20260721-044613, amends
 > ADR-20260721-042018).** A claim-time draft PR is a near-empty diff and passes CI trivially;

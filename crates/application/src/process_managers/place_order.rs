@@ -1,34 +1,24 @@
-//! PlaceOrderProcess (`specs/processmanager.yaml#/PlaceOrderProcess`) — the EVENT legs of the
-//! checkout saga, executed over its `payment_process_manager` state row (ADR-20260719-193500). The
-//! COMMAND leg (`commands.yaml#/PlaceOrder` → PaymentIntentCreated + the AWAITING_PAYMENT_RESULT row)
-//! is `commands::place_order`; this module reacts to the INBOUND Stripe outcomes recorded by the
-//! Payment aggregate:
+//! PlaceOrderProcess (`specs/processmanager.yaml#/PlaceOrderProcess`) — HOOK IMPLS + thin wrappers
+//! for the GENERATED event-leg pipelines (`crate::generated::process_managers::place_order_process`,
+//! issue #25). The step pipeline (state by/expect/set, deliver plumbing, skip/throw semantics) is
+//! generated from the DSL; this module keeps only the non-structural seams:
 //!
-//! - `events.yaml#/PaymentCaptured` → materialize the Order (`OrderPlaced` on `Order-<orderId>`) and
-//!   close the cart (`CartCheckedOut` on `Cart-<cartId>`) from the checkout snapshot FROZEN on
-//!   `PaymentIntentCreated` in the `Payment-<intentId>` stream — the log alone, no out-of-log store
-//!   (retires the fail-closed `CheckoutSnapshotSource` seam).
-//! - `events.yaml#/PaymentFailed` → resolve the run; no order, the cart stays OPEN
-//!   (rules.yaml#/CheckoutAbortsOnPaymentFailure).
+//! - `build_order_placed` — the frozen checkout snapshot read back from the `Payment-<intentId>`
+//!   stream (ADR-20260719-193500; a missing birth is the same `PaymentEventOrphaned` anomaly class);
+//! - the per-aggregate idempotency predicates (order fold, cart still OPEN);
+//! - `finalize` — NULLing the spent `client_secret` when the run resolves (ADR-20260720-015500).
 //!
-//! Guard semantics: a payment outcome matching NO run (or a run whose Payment stream lost its birth)
-//! is the `errors.yaml#/PaymentEventOrphaned` ERROR — the recorded fact stands but the run aborts and
-//! surfaces (rules.yaml#/OrphanPaymentEventFlagged); an already-resolved run is the benign
-//! `state.expect` skip (Stripe re-delivery).
+//! The COMMAND leg (`commands.yaml#/PlaceOrder`) stays `commands::place_order` (pricing non-goal).
 
-use domain::generated::events::{
-    CartCheckedOut, DomainEvent, OrderPlaced, PaymentCaptured, PaymentFailed,
-};
-use domain::generated::scalars::{
-    CartStatus, ExternalReference, PaymentProcessStatus, PaymentStatus,
-};
+use domain::generated::events::{CartCheckedOut, DomainEvent, OrderPlaced, PaymentCaptured, PaymentFailed};
+use domain::generated::scalars::CartStatus;
 use domain::shared::errors::DomainError;
 use serde_json::json;
 
+use crate::generated::process_managers::{place_order_process, HookOutcome};
 use crate::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
 use crate::ports::EventStore;
-use crate::process_managers::{cart_stream, order_stream, saga_actor, Outcome, TriggerEnvelope};
-use crate::repository::Repository;
+use crate::process_managers::{Outcome, TriggerEnvelope};
 
 /// The typed error both payment-outcome legs throw when the intent matches no checkout run
 /// (`errors.yaml#/PaymentEventOrphaned` — money may have moved with no order to materialize).
@@ -36,49 +26,30 @@ fn orphaned(payment_intent_id: &domain::generated::scalars::PaymentIntentId) -> 
     DomainError::rejected("PaymentEventOrphaned", json!({ "paymentIntentId": payment_intent_id }))
 }
 
-/// EVENT leg `events.yaml#/PaymentCaptured` (rules.yaml#/OrderMaterializedOnPaymentCapture):
-/// `state.by` the intent (missing run → throws PaymentEventOrphaned), `state.expect`
-/// AWAITING_PAYMENT_RESULT (else benign skip), read the frozen checkout back from the
-/// `Payment-<intentId>` stream, deliver `OrderPlaced` to the Order and `CartCheckedOut` to the Cart
-/// (each idempotent against the target's own fold), then resolve the row
-/// CAPTURED/ORDER_PLACED with the trigger id as the Stripe dedup key.
-pub async fn on_payment_captured(
-    store: &dyn EventStore,
-    state: &dyn PaymentProcessStateStore,
-    event: &PaymentCaptured,
-    env: &TriggerEnvelope,
-) -> Result<Outcome, DomainError> {
-    // state.by payment_intent_id — load the checkout run this capture belongs to.
-    let Some(row) = state.by_payment_intent(&event.payment_intent_id).await? else {
-        return Err(orphaned(&event.payment_intent_id));
-    };
-    // state.expect process_status = AWAITING_PAYMENT_RESULT — already-resolved run → benign skip.
-    if row.process_status != PaymentProcessStatus::AWAITING_PAYMENT_RESULT {
-        return Ok(Outcome::Skipped(format!(
-            "checkout run for intent {} is already resolved ({:?}) — benign Stripe re-delivery",
-            event.payment_intent_id.0, row.process_status
-        )));
-    }
-    // The frozen checkout, read back from the Payment aggregate's own stream (ADR-20260719-193500):
-    // the run exists, so its Payment (born by PaymentIntentCreated) must too — a missing birth is the
-    // same orphan anomaly class, never a silent skip.
-    let (payment_events, _) = store.load(&domain::payment::stream(&event.payment_intent_id)).await?;
-    let Some(snap) = payment_events.iter().find_map(|e| match e {
-        DomainEvent::PaymentIntentCreated(created) => Some(created.checkout.clone()),
-        _ => None,
-    }) else {
-        return Err(orphaned(&event.payment_intent_id));
-    };
+/// Hooks for the `PaymentCaptured` leg: the frozen snapshot, the fold predicates, the secret clearing.
+pub struct PlaceOrderCapturedHooks<'a> {
+    pub store: &'a dyn EventStore,
+}
 
-    let actor = saga_actor(env);
-    let repo = Repository::new(store);
-
-    // deliver OrderPlaced → Order-<orderId> (from_state: order_id; payload from the frozen snapshot).
-    // Idempotent: the order fold is Some(_) iff OrderPlaced is already on the stream (a bare
-    // PaymentIntentCreated folds to None — domain::order).
-    let (order_events, order_version) = store.load(&order_stream(&row.order_id)).await?;
-    if domain::order::fold(&order_events).is_none() {
-        let placed = DomainEvent::OrderPlaced(OrderPlaced {
+#[async_trait::async_trait]
+impl place_order_process::PaymentCapturedHooks for PlaceOrderCapturedHooks<'_> {
+    /// The frozen checkout, read back from the Payment aggregate's own stream: the run exists, so its
+    /// Payment (born by PaymentIntentCreated) must too — a missing birth is the same orphan anomaly
+    /// class, never a silent skip.
+    async fn build_order_placed(
+        &self,
+        event: &PaymentCaptured,
+        row: &PaymentProcessRow,
+    ) -> Result<HookOutcome<OrderPlaced>, DomainError> {
+        let (payment_events, _) =
+            self.store.load(&domain::payment::stream(&event.payment_intent_id)).await?;
+        let Some(snap) = payment_events.iter().find_map(|e| match e {
+            DomainEvent::PaymentIntentCreated(created) => Some(created.checkout.clone()),
+            _ => None,
+        }) else {
+            return Err(orphaned(&event.payment_intent_id));
+        };
+        Ok(HookOutcome::Ready(OrderPlaced {
             mode: snap.mode,
             order_id: row.order_id,
             r#ref: snap.r#ref.clone(),
@@ -92,65 +63,56 @@ pub async fn on_payment_captured(
             breakdown: snap.breakdown.clone(),
             note: snap.note.clone(),
             payment_intent_id: event.payment_intent_id.clone(),
-        });
-        repo.save(&order_stream(&row.order_id), order_version, &[placed], &actor).await?;
+        }))
     }
 
-    // deliver CartCheckedOut → Cart-<cartId>, only while the cart is still OPEN (a replay after a
-    // partial reaction finds it CHECKED_OUT and appends nothing).
-    let (cart_events, cart_version) = store.load(&cart_stream(&row.cart_id)).await?;
-    if matches!(domain::cart::fold(&cart_events), Some(c) if c.status == CartStatus::OPEN) {
-        let checked_out = DomainEvent::CartCheckedOut(CartCheckedOut {
-            cart_id: row.cart_id,
-            order_id: row.order_id,
-        });
-        repo.save(&cart_stream(&row.cart_id), cart_version, &[checked_out], &actor).await?;
+    /// Idempotent: the order fold is `Some(_)` iff OrderPlaced is already on the stream (a bare
+    /// PaymentIntentCreated folds to None — `domain::order`).
+    fn should_deliver_order_placed(&self, stream: &[DomainEvent], _event: &OrderPlaced) -> bool {
+        domain::order::fold(stream).is_none()
     }
 
-    // state.set — resolve the run; the trigger's event id is the Stripe re-delivery dedup key.
-    // The client secret is a spent credential once the run resolves — NULL it (ADR-20260720-015500).
-    state
-        .upsert(&PaymentProcessRow {
-            payment_status: PaymentStatus::CAPTURED,
-            process_status: PaymentProcessStatus::ORDER_PLACED,
-            last_processed_stripe_event_id: Some(ExternalReference(env.event_id.to_string())),
-            client_secret: None,
-            ..row
-        })
-        .await?;
-    Ok(Outcome::Completed)
+    /// Only while the cart is still OPEN (a replay after a partial reaction finds it CHECKED_OUT).
+    fn should_deliver_cart_checked_out(&self, stream: &[DomainEvent], _event: &CartCheckedOut) -> bool {
+        matches!(domain::cart::fold(stream), Some(c) if c.status == CartStatus::OPEN)
+    }
+
+    /// The client secret is a spent credential once the run resolves — NULL it (ADR-20260720-015500).
+    fn finalize(&self, row: &mut PaymentProcessRow) {
+        row.client_secret = None;
+    }
 }
 
-/// EVENT leg `events.yaml#/PaymentFailed` (rules.yaml#/CheckoutAbortsOnPaymentFailure): same
-/// `state.by`/`state.expect` gate as the capture leg, then resolve the row FAILED/FAILED. NO domain
-/// event — the cart stays OPEN for the customer to retry checkout.
+/// Hooks for the `PaymentFailed` leg: only the secret clearing (no deliver, no reads).
+pub struct PlaceOrderFailedHooks;
+
+impl place_order_process::PaymentFailedHooks for PlaceOrderFailedHooks {
+    /// Same credential rule as the capture leg (ADR-20260720-015500).
+    fn finalize(&self, row: &mut PaymentProcessRow) {
+        row.client_secret = None;
+    }
+}
+
+/// EVENT leg `events.yaml#/PaymentCaptured` (rules.yaml#/OrderMaterializedOnPaymentCapture) — the
+/// generated pipeline with this module's hooks.
+pub async fn on_payment_captured(
+    store: &dyn EventStore,
+    state: &dyn PaymentProcessStateStore,
+    event: &PaymentCaptured,
+    env: &TriggerEnvelope,
+) -> Result<Outcome, DomainError> {
+    place_order_process::on_payment_captured(store, state, &PlaceOrderCapturedHooks { store }, event, env)
+        .await
+}
+
+/// EVENT leg `events.yaml#/PaymentFailed` (rules.yaml#/CheckoutAbortsOnPaymentFailure) — the
+/// generated pipeline with this module's hooks. NO domain event — the cart stays OPEN.
 pub async fn on_payment_failed(
     state: &dyn PaymentProcessStateStore,
     event: &PaymentFailed,
     env: &TriggerEnvelope,
 ) -> Result<Outcome, DomainError> {
-    // state.by payment_intent_id — a failure matching no run is the same anomaly class as an orphan
-    // capture: abort and surface.
-    let Some(row) = state.by_payment_intent(&event.payment_intent_id).await? else {
-        return Err(orphaned(&event.payment_intent_id));
-    };
-    // state.expect process_status = AWAITING_PAYMENT_RESULT — already-resolved run → benign skip.
-    if row.process_status != PaymentProcessStatus::AWAITING_PAYMENT_RESULT {
-        return Ok(Outcome::Skipped(format!(
-            "checkout run for intent {} is already resolved ({:?}) — benign Stripe re-delivery",
-            event.payment_intent_id.0, row.process_status
-        )));
-    }
-    state
-        .upsert(&PaymentProcessRow {
-            payment_status: PaymentStatus::FAILED,
-            process_status: PaymentProcessStatus::FAILED,
-            last_processed_stripe_event_id: Some(ExternalReference(env.event_id.to_string())),
-            client_secret: None,
-            ..row
-        })
-        .await?;
-    Ok(Outcome::Completed)
+    place_order_process::on_payment_failed(state, &PlaceOrderFailedHooks, event, env).await
 }
 
 // ================================================================================================
@@ -322,7 +284,7 @@ mod tests {
         on_payment_captured(&store, &state, &captured(), &envelope()).await.unwrap();
         let first_order = store.stream(&format!("Order-{}", uid(1)));
         let second = on_payment_captured(&store, &state, &captured(), &envelope()).await.unwrap();
-        assert!(matches!(second, Outcome::Skipped(ref m) if m.contains("already resolved")), "{second:?}");
+        assert!(matches!(second, Outcome::Skipped(ref m) if m.contains("benign Stripe re-delivery")), "{second:?}");
         assert_eq!(store.stream(&format!("Order-{}", uid(1))), first_order);
     }
 

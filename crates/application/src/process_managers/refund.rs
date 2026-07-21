@@ -1,125 +1,151 @@
-//! RefundProcess (`specs/processmanager.yaml#/RefundProcess`) — approved refunds over the
-//! `refund_process_manager` state row (ADR-20260719-193500):
+//! RefundProcess (`specs/processmanager.yaml#/RefundProcess`) — HOOK IMPLS + thin wrappers for the
+//! GENERATED leg pipelines (`crate::generated::process_managers::refund_process`, issue #25). The
+//! pipelines (guards, admission, deliver plumbing over `Payment-<intentId>`, state.set) are
+//! generated; this module keeps only the non-structural seams:
 //!
-//! - The refundable facts (`OrderRejectedByRestaurant`, `OrderCancelledByCustomer`,
-//!   `OrderCancelledByRestaurant`, `RefundRequested`) OPEN a pending run when the order's payment is
-//!   CAPTURED (read from the OrderTracking read model, per the DSL `read` step) — nothing captured is
-//!   the benign skip. Opening also delivers the `RefundOpened` refund-queue fact to the Payment
-//!   aggregate (idempotent), so `View_PendingRefunds` folds the queue from the log, not PM state.
-//! - The RESTAURANT (its own orders) or an ADMIN decides with the COMMAND legs [`approve_refund`] /
-//!   [`deny_refund`] (authz = api.yaml roles): a non-pending run rejects with
-//!   `errors.yaml#/RefundNotPending`; approval requests the outbound Stripe refund
-//!   (the generated `payment.refund` service port, issue #26) and records the decision on the Payment aggregate.
-//! - Stripe settles with the inbound `PaymentRefunded` fact (recorded by the Payment aggregate);
-//!   [`on_payment_refunded`] closes the run — an unknown or already-settled run skips (unsolicited
-//!   refunds are benign per the DSL note).
+//! - `read_order` — the OrderTracking read (NOTE the known feed gap: payment facts land on
+//!   `Payment-%` streams the projection worker does not yet route to OrderTracking, so
+//!   `payment_status` may lag; ADR-20260719-193500 flags the cross-stream projector route);
+//! - `admit` — a re-delivered opening fact never regresses a DECIDED run back to pending;
+//! - the Payment record-idempotency predicates (`domain::payment::already_records`);
+//! - `input_payment_refund` — the Stripe refund input; a pending run without an intent cannot be
+//!   refunded (same typed `RefundNotPending` rejection, fail closed before any gateway call).
 
-use domain::generated::commands::{ApproveRefund, DenyRefund};
+use domain::generated::commands::ApproveRefund;
 use domain::generated::entities::Money;
 use domain::generated::events::{
     DomainEvent, OrderCancelledByCustomer, OrderCancelledByRestaurant, OrderRejectedByRestaurant,
     PaymentRefunded, RefundApproved, RefundDenied, RefundOpened, RefundRequested,
 };
-use domain::generated::scalars::{OrderId, PaymentIntentId, RefundProcessStatus};
+use domain::generated::scalars::{OrderId, RefundProcessStatus};
 use domain::shared::errors::DomainError;
 use serde_json::json;
 
+use crate::generated::process_managers::refund_process::{self, OrderRead};
+use crate::generated::process_managers::HookOutcome;
+use crate::generated::services::{PaymentRefundInput, PaymentService};
 use crate::pm_state::{RefundProcessRow, RefundProcessStateStore};
-use crate::generated::services::{PaymentRefundInput, PaymentService, ServiceCallMeta};
 use crate::ports::{Actor, EventStore};
-use crate::process_managers::{saga_actor, TriggerEnvelope};
+use crate::process_managers::{Outcome, TriggerEnvelope};
 use crate::queries::OrderReadRepository;
-use crate::repository::Repository;
 
-/// The `payment_status` value the OrderTracking projector writes for a captured payment (the row
-/// column is a free String in the read model; the projector's vocabulary is PENDING/CAPTURED/REFUNDED).
-const CAPTURED: &str = "CAPTURED";
-
-/// Opening EVENT legs, shared: read the order's payment from the OrderTracking read model (the DSL
-/// `read` step — NOTE the known feed gap: payment facts land on `Payment-%` streams the projection
-/// worker does not yet route to OrderTracking, so `payment_status` may lag; ADR-20260719-193500
-/// flags the cross-stream projector route as the follow-up), guard `payment_status = CAPTURED`
-/// (benign skip otherwise), then deliver the `RefundOpened` refund-queue fact to the Payment (the
-/// DSL `deliver` step — idempotent via the Payment's fold, so `View_PendingRefunds` shows the
-/// request; rules.yaml#/PendingRefundVisibleUntilDecided) and upsert the PENDING_APPROVAL run. A run
-/// that was already DECIDED (approved/denied/refunded) is NEVER regressed to pending — re-opening
-/// skips.
-async fn open_refund(
-    store: &dyn EventStore,
-    state: &dyn RefundProcessStateStore,
-    orders: &dyn OrderReadRepository,
-    order_id: OrderId,
-    reason: Option<String>,
-    env: &TriggerEnvelope,
-) -> Result<crate::process_managers::Outcome, DomainError> {
-    use crate::process_managers::Outcome;
-    // read OrderTracking by order_id.
-    let Some(order) = orders.by_id(order_id).await? else {
-        return Ok(Outcome::Skipped(format!(
-            "order {} is not in the OrderTracking read model — nothing captured to refund",
-            order_id.0
-        )));
-    };
-    // guard order.payment_status = CAPTURED (skip: true — nothing captured → nothing to refund).
-    if order.payment_status != CAPTURED {
-        return Ok(Outcome::Skipped(format!(
-            "order {} has payment_status {} — nothing captured to refund",
-            order_id.0, order.payment_status
-        )));
+/// Record-idempotency over the Payment aggregate's own fold ([`domain::payment::already_records`]);
+/// a stream with no birth still records the fact (facts are never dropped).
+fn payment_not_recorded(stream: &[DomainEvent], event: &DomainEvent) -> bool {
+    match domain::payment::fold(stream) {
+        Some(payment) => !domain::payment::already_records(&payment, event),
+        None => true,
     }
-    // Idempotent upsert: keep a DECIDED run as-is (a re-delivered opening fact must not regress an
-    // approved/denied/settled run back to pending).
-    if let Some(existing) = state.by_order(order_id).await? {
-        if existing.process_status != RefundProcessStatus::PENDING_APPROVAL {
-            return Ok(Outcome::Skipped(format!(
-                "refund run for order {} is already decided ({:?}) — not regressing to PENDING_APPROVAL",
-                order_id.0, existing.process_status
-            )));
-        }
-    }
-    // deliver RefundOpened → Payment: the refund-queue fact View_PendingRefunds folds (the Payment
-    // records it idempotently, so a re-delivered opening appends nothing).
-    if let Some(intent) = order.payment_intent_id.clone() {
-        deliver_to_payment(
-            store,
-            &intent,
-            DomainEvent::RefundOpened(RefundOpened {
-                order_id,
-                restaurant_id: order.restaurant_id,
-                amount: Money {
-                    amount_cents: order.total_amount_cents,
-                    currency: order.currency.clone(),
-                },
-                reason: reason.clone(),
-            }),
-            &saga_actor(env),
-        )
-        .await?;
-    }
-    state
-        .upsert(&RefundProcessRow {
-            order_id,
-            payment_intent_id: order.payment_intent_id.clone(),
-            refund_id: None,
-            process_status: RefundProcessStatus::PENDING_APPROVAL,
-            approved_amount_cents: None,
-            reason,
-            last_update_utc: chrono::Utc::now(), // ignored on write; stamped by the store
-        })
-        .await?;
-    Ok(Outcome::Completed)
 }
 
-/// EVENT leg `events.yaml#/OrderRejectedByRestaurant` (rules.yaml#/RefundOnRejectionOrCancellation):
-/// the restaurant rejected a paid order — open a pending refund for a restaurant/admin decision.
+/// Hooks shared by the four OPENING event legs (rejection / cancellations / customer request).
+pub struct RefundOpenHooks<'a> {
+    pub orders: &'a dyn OrderReadRepository,
+}
+
+impl RefundOpenHooks<'_> {
+    /// The shared `read order` body: OrderTracking by id, coerced to the generated sink types
+    /// (`total_amount_cents` carries the full [`Money`] the RefundOpened amount needs).
+    async fn load_order(&self, order_id: OrderId) -> Result<HookOutcome<OrderRead>, DomainError> {
+        let Some(o) = self.orders.by_id(order_id).await? else {
+            return Ok(HookOutcome::Skip(format!(
+                "order {} is not in the OrderTracking read model — nothing captured to refund",
+                order_id.0
+            )));
+        };
+        Ok(HookOutcome::Ready(OrderRead {
+            payment_status: o.payment_status,
+            total_amount_cents: Money { amount_cents: o.total_amount_cents, currency: o.currency },
+            payment_intent_id: o.payment_intent_id,
+        }))
+    }
+}
+
+/// A re-delivered opening fact must not regress an approved/denied/settled run back to pending.
+fn admit_only_pending(existing: &RefundProcessRow) -> Option<String> {
+    (existing.process_status != RefundProcessStatus::PENDING_APPROVAL).then(|| {
+        format!(
+            "refund run for order {} is already decided ({:?}) — not regressing to PENDING_APPROVAL",
+            existing.order_id.0, existing.process_status
+        )
+    })
+}
+
+macro_rules! impl_refund_open_hooks {
+    ($trait_:ident) => {
+        #[async_trait::async_trait]
+        impl refund_process::$trait_ for RefundOpenHooks<'_> {
+            async fn read_order(
+                &self,
+                order_id: OrderId,
+            ) -> Result<HookOutcome<OrderRead>, DomainError> {
+                self.load_order(order_id).await
+            }
+
+            fn admit(&self, existing: &RefundProcessRow) -> Option<String> {
+                admit_only_pending(existing)
+            }
+
+            fn should_deliver_refund_opened(
+                &self,
+                stream: &[DomainEvent],
+                event: &RefundOpened,
+            ) -> bool {
+                payment_not_recorded(stream, &DomainEvent::RefundOpened(event.clone()))
+            }
+        }
+    };
+}
+
+impl_refund_open_hooks!(OrderRejectedByRestaurantHooks);
+impl_refund_open_hooks!(OrderCancelledByCustomerHooks);
+impl_refund_open_hooks!(OrderCancelledByRestaurantHooks);
+impl_refund_open_hooks!(RefundRequestedHooks);
+
+/// Hooks for the decision COMMAND legs and the inbound settlement leg.
+pub struct RefundDecisionHooks;
+
+#[async_trait::async_trait]
+impl refund_process::ApproveRefundHooks for RefundDecisionHooks {
+    /// The captured payment to refund. A pending run without an intent cannot be refunded — the
+    /// same typed rejection, BEFORE any gateway call (fail closed).
+    async fn input_payment_refund(
+        &self,
+        cmd: &ApproveRefund,
+        row: &RefundProcessRow,
+    ) -> Result<HookOutcome<PaymentRefundInput>, DomainError> {
+        let Some(intent) = row.payment_intent_id.clone() else {
+            return Err(DomainError::rejected("RefundNotPending", json!({ "orderId": cmd.order_id })));
+        };
+        Ok(HookOutcome::Ready(PaymentRefundInput {
+            payment_intent_id: intent,
+            amount: cmd.amount.clone(),
+        }))
+    }
+
+    fn should_deliver_refund_approved(&self, stream: &[DomainEvent], event: &RefundApproved) -> bool {
+        payment_not_recorded(stream, &DomainEvent::RefundApproved(event.clone()))
+    }
+}
+
+impl refund_process::DenyRefundHooks for RefundDecisionHooks {
+    fn should_deliver_refund_denied(&self, stream: &[DomainEvent], event: &RefundDenied) -> bool {
+        payment_not_recorded(stream, &DomainEvent::RefundDenied(event.clone()))
+    }
+}
+
+impl refund_process::PaymentRefundedHooks for RefundDecisionHooks {}
+
+/// EVENT leg `events.yaml#/OrderRejectedByRestaurant` (rules.yaml#/RefundOnRejectionOrCancellation).
 pub async fn on_order_rejected(
     store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
     orders: &dyn OrderReadRepository,
     event: &OrderRejectedByRestaurant,
     env: &TriggerEnvelope,
-) -> Result<crate::process_managers::Outcome, DomainError> {
-    open_refund(store, state, orders, event.order_id, Some(event.reason.clone()), env).await
+) -> Result<Outcome, DomainError> {
+    refund_process::on_order_rejected_by_restaurant(store, state, &RefundOpenHooks { orders }, event, env)
+        .await
 }
 
 /// EVENT leg `events.yaml#/OrderCancelledByCustomer` (rules.yaml#/RefundOnRejectionOrCancellation).
@@ -129,8 +155,9 @@ pub async fn on_order_cancelled_by_customer(
     orders: &dyn OrderReadRepository,
     event: &OrderCancelledByCustomer,
     env: &TriggerEnvelope,
-) -> Result<crate::process_managers::Outcome, DomainError> {
-    open_refund(store, state, orders, event.order_id, event.reason.clone(), env).await
+) -> Result<Outcome, DomainError> {
+    refund_process::on_order_cancelled_by_customer(store, state, &RefundOpenHooks { orders }, event, env)
+        .await
 }
 
 /// EVENT leg `events.yaml#/OrderCancelledByRestaurant` (rules.yaml#/RefundOnRejectionOrCancellation).
@@ -140,57 +167,25 @@ pub async fn on_order_cancelled_by_restaurant(
     orders: &dyn OrderReadRepository,
     event: &OrderCancelledByRestaurant,
     env: &TriggerEnvelope,
-) -> Result<crate::process_managers::Outcome, DomainError> {
-    open_refund(store, state, orders, event.order_id, Some(event.reason.clone()), env).await
+) -> Result<Outcome, DomainError> {
+    refund_process::on_order_cancelled_by_restaurant(store, state, &RefundOpenHooks { orders }, event, env)
+        .await
 }
 
-/// EVENT leg `events.yaml#/RefundRequested` (rules.yaml#/RefundOnRejectionOrCancellation): the
-/// customer asked (the Order aggregate already validated RequestRefund) — open a pending refund.
+/// EVENT leg `events.yaml#/RefundRequested` (rules.yaml#/RefundOnRejectionOrCancellation).
 pub async fn on_refund_requested(
     store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
     orders: &dyn OrderReadRepository,
     event: &RefundRequested,
     env: &TriggerEnvelope,
-) -> Result<crate::process_managers::Outcome, DomainError> {
-    open_refund(store, state, orders, event.order_id, event.reason.clone(), env).await
+) -> Result<Outcome, DomainError> {
+    refund_process::on_refund_requested(store, state, &RefundOpenHooks { orders }, event, env).await
 }
 
-/// `state.by` the order and require a PENDING_APPROVAL run, or reject with
-/// `errors.yaml#/RefundNotPending` ("also thrown when no run exists for the order").
-async fn require_pending(
-    state: &dyn RefundProcessStateStore,
-    order_id: OrderId,
-) -> Result<RefundProcessRow, DomainError> {
-    match state.by_order(order_id).await? {
-        Some(row) if row.process_status == RefundProcessStatus::PENDING_APPROVAL => Ok(row),
-        _ => Err(DomainError::rejected("RefundNotPending", json!({ "orderId": order_id }))),
-    }
-}
-
-/// Record a refund decision on the Payment aggregate's stream — idempotent via the Payment's own
-/// fold ([`domain::payment::already_records`]); a stream with no birth still records the fact
-/// (facts are never dropped).
-async fn deliver_to_payment(
-    store: &dyn EventStore,
-    payment_intent_id: &PaymentIntentId,
-    event: DomainEvent,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let stream = domain::payment::stream(payment_intent_id);
-    let (events, version) = store.load(&stream).await?;
-    if let Some(payment) = domain::payment::fold(&events) {
-        if domain::payment::already_records(&payment, &event) {
-            return Ok(()); // re-delivered decision — already reflected
-        }
-    }
-    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
-}
-
-/// COMMAND leg `commands.yaml#/ApproveRefund` (rules.yaml#/RefundRequiresApproval): the restaurant
-/// or an admin approves the pending refund (possibly partial) — request the Stripe refund through
-/// the gateway, record `RefundApproved` on the Payment, and move the run to
-/// APPROVED_AWAITING_SETTLEMENT (Stripe's `PaymentRefunded` settles it).
+/// COMMAND leg `commands.yaml#/ApproveRefund` (rules.yaml#/RefundRequiresApproval): approval requests
+/// the Stripe refund through the generated `payment.refund` port, records `RefundApproved` on the
+/// Payment, and moves the run to APPROVED_AWAITING_SETTLEMENT.
 pub async fn approve_refund(
     store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
@@ -198,106 +193,27 @@ pub async fn approve_refund(
     cmd: ApproveRefund,
     actor: &Actor,
 ) -> Result<(), DomainError> {
-    let row = require_pending(state, cmd.order_id).await?;
-    // The captured payment to refund. A pending run without an intent cannot be refunded — the same
-    // typed rejection (no refundable payment is pending for this order).
-    let Some(intent) = row.payment_intent_id.clone() else {
-        return Err(DomainError::rejected("RefundNotPending", json!({ "orderId": cmd.order_id })));
-    };
-    // call payment.refund (services.yaml) — a gateway refusal rejects the command (fail closed;
-    // nothing is recorded and the run stays PENDING_APPROVAL).
-    gateway
-        .refund(
-            PaymentRefundInput { payment_intent_id: intent.clone(), amount: cmd.amount.clone() },
-            &ServiceCallMeta::new(actor.correlation_id),
-        )
-        .await?;
-    // deliver RefundApproved → Payment (the aggregate records the decision).
-    deliver_to_payment(
-        store,
-        &intent,
-        DomainEvent::RefundApproved(RefundApproved {
-            order_id: cmd.order_id,
-            amount: cmd.amount.clone(),
-            reason: cmd.reason.clone(),
-        }),
-        actor,
-    )
-    .await?;
-    // state.set — approved, awaiting the inbound settlement.
-    state
-        .upsert(&RefundProcessRow {
-            process_status: RefundProcessStatus::APPROVED_AWAITING_SETTLEMENT,
-            approved_amount_cents: Some(cmd.amount.amount_cents),
-            reason: cmd.reason,
-            ..row
-        })
-        .await
+    refund_process::approve_refund(store, state, gateway, &RefundDecisionHooks, cmd, actor).await
 }
 
-/// COMMAND leg `commands.yaml#/DenyRefund` (rules.yaml#/RefundRequiresApproval): the restaurant or
-/// an admin denies the pending refund — record `RefundDenied` on the Payment and close the run.
-/// No gateway call.
+/// COMMAND leg `commands.yaml#/DenyRefund` (rules.yaml#/RefundRequiresApproval): denial records
+/// `RefundDenied` on the Payment and closes the run. No gateway call.
 pub async fn deny_refund(
     store: &dyn EventStore,
     state: &dyn RefundProcessStateStore,
-    cmd: DenyRefund,
+    cmd: domain::generated::commands::DenyRefund,
     actor: &Actor,
 ) -> Result<(), DomainError> {
-    let row = require_pending(state, cmd.order_id).await?;
-    if let Some(intent) = row.payment_intent_id.clone() {
-        deliver_to_payment(
-            store,
-            &intent,
-            DomainEvent::RefundDenied(RefundDenied {
-                order_id: cmd.order_id,
-                reason: cmd.reason.clone(),
-            }),
-            actor,
-        )
-        .await?;
-    }
-    state
-        .upsert(&RefundProcessRow {
-            process_status: RefundProcessStatus::DENIED,
-            reason: Some(cmd.reason),
-            ..row
-        })
-        .await
+    refund_process::deny_refund(store, state, &RefundDecisionHooks, cmd, actor).await
 }
 
-/// EVENT leg `events.yaml#/PaymentRefunded` (rules.yaml#/RefundSettledFactRecorded): Stripe reported
-/// the settled refund (the fact is already recorded by the Payment aggregate) — close the run.
-/// `state.by` order + `state.expect` APPROVED_AWAITING_SETTLEMENT: an unknown or already-settled run
-/// skips (idempotent under Stripe re-delivery; an unsolicited refund is benign per the DSL note).
+/// EVENT leg `events.yaml#/PaymentRefunded` (rules.yaml#/RefundSettledFactRecorded): the inbound
+/// settlement closes an APPROVED_AWAITING_SETTLEMENT run; anything else skips benignly.
 pub async fn on_payment_refunded(
     state: &dyn RefundProcessStateStore,
     event: &PaymentRefunded,
-) -> Result<crate::process_managers::Outcome, DomainError> {
-    use crate::process_managers::Outcome;
-    let row = match state.by_order(event.order_id).await? {
-        Some(row) if row.process_status == RefundProcessStatus::APPROVED_AWAITING_SETTLEMENT => row,
-        Some(row) => {
-            return Ok(Outcome::Skipped(format!(
-                "refund run for order {} is {:?}, not awaiting settlement — skip (idempotent re-delivery / unsolicited refund)",
-                event.order_id.0, row.process_status
-            )))
-        }
-        None => {
-            return Ok(Outcome::Skipped(format!(
-                "no refund run for order {} — unsolicited refund settles on the Payment alone",
-                event.order_id.0
-            )))
-        }
-    };
-    state
-        .upsert(&RefundProcessRow {
-            refund_id: Some(event.refund_id.clone()),
-            process_status: RefundProcessStatus::REFUNDED,
-            ..row
-        })
-        .await?;
-    Ok(crate::process_managers::Outcome::Completed)
+) -> Result<Outcome, DomainError> {
+    refund_process::on_payment_refunded(state, &RefundDecisionHooks, event).await
 }
 
 // ================================================================================================
@@ -306,6 +222,8 @@ pub async fn on_payment_refunded(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::generated::services::ServiceCallMeta;
+    use domain::generated::commands::DenyRefund;
     use crate::pm_state::mem::MemRefundProcessState;
     use crate::process_managers::test_support::{envelope, MemStore};
     use crate::process_managers::Outcome;
@@ -552,7 +470,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(outcome, Outcome::Skipped(ref m) if m.contains("nothing captured")), "{outcome:?}");
+        assert!(matches!(outcome, Outcome::Skipped(ref m) if m.contains("nothing to refund")), "{outcome:?}");
         assert!(state.by_order(order_id()).await.unwrap().is_none());
         // No refund-queue fact either — nothing captured, nothing opened.
         assert!(store
