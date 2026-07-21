@@ -1,4 +1,4 @@
-version: 1
+version: 2
 description: >
   WRITE-PATH JOURNALS (ADR-20260720-015300 / -015400) — a fifth table category alongside the event
   store, the projections, the seeded referential tables and the raw integration staging: durable
@@ -19,6 +19,11 @@ command_journal:
     is rejected (Conflict). Records rejections too — `status` + `error` are the source of the
     operationStatus surface. The envelope lives in the COLUMNS; `payload` is the business command
     only (ADR-0041). Events appended by the handler carry message_id as domain_events.cause_id.
+  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
+    max_age: '90 days'
+    applies_to: >
+      Terminal rows (SUCCEEDED/REJECTED/FAILED), aged from completed_at. RECEIVED rows are never
+      age-swept — the stale-RECEIVED sweep (ADR-20260720-015300) marks crashed runs FAILED first.
   columns:
     message_id:     { type: { $ref: 'scalars.yaml#/MessageId' }, pk: true, note: "Client-suppliable (MetadataInput) or server-generated UUIDv7 — the acceptance handle." }
     correlation_id: { type: { $ref: 'scalars.yaml#/CorrelationId' }, index: true, note: "Effective correlation (client-supplied or defaulted to message_id); matches domain_events.correlation_id." }
@@ -44,6 +49,11 @@ inbound_events:
     aggregate's fold-based dedupe stays authoritative — an already-recorded no-op still DELIVERs).
     (source, external_id) is the delivery-level dedupe; inbound_event_id becomes
     domain_events.cause_id for the appended fact.
+  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
+    max_age: '30 days'
+    applies_to: >
+      DELIVERED rows only, aged from delivered_at (the fact already lives forever in domain_events).
+      FAILED rows are kept until resolved and RECEIVED rows are pending work — neither is ever swept.
   columns:
     inbound_event_id: { type: uuid, pk: true, note: "UUIDv7 minted at staging — the causality link into domain_events.cause_id." }
     source:           { type: text, index: true, note: "Owning adapter: 'stripe' (others as they adopt the inbox, ADR-20260720-015400)." }

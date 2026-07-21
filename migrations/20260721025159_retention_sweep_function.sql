@@ -1,0 +1,43 @@
+-- Retention policy for the write-path journals and adapter webhook mirrors
+-- (ADR-20260721-025159; issue #18). Copied from specs/generated/schema.generated.sql (generated
+-- from specs/database/functions/sweep_retention.sql — ADR-0037/0043). Called on a schedule by the
+-- in-process RetentionSweepWorker (RUN_RETENTION_SWEEP, default on) — or a pg_cron job where
+-- DB-side scheduling is preferred. NEVER touches domain_events/domain_stream, RECEIVED journal
+-- rows, FAILED inbound rows, unprocessed mirror rows, or external_sirene_restaurants.
+CREATE FUNCTION sweep_retention()
+RETURNS TABLE (swept_table TEXT, deleted BIGINT)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  n BIGINT;
+BEGIN
+  -- Status predicates resolve through the ref_* enum lookups (ADR-0037 ordinals) — never
+  -- hard-coded integers.
+  DELETE FROM command_journal
+   WHERE status IN (SELECT sort_order FROM ref_command_journal_status
+                     WHERE value IN ('SUCCEEDED', 'REJECTED', 'FAILED'))
+     AND completed_at IS NOT NULL
+     AND completed_at < now() - INTERVAL '90 days';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  swept_table := 'command_journal'; deleted := n; RETURN NEXT;
+
+  DELETE FROM inbound_events
+   WHERE status = (SELECT sort_order FROM ref_inbound_event_status WHERE value = 'DELIVERED')
+     AND delivered_at IS NOT NULL
+     AND delivered_at < now() - INTERVAL '30 days';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  swept_table := 'inbound_events'; deleted := n; RETURN NEXT;
+
+  DELETE FROM external_stripe_events
+   WHERE processed_at IS NOT NULL
+     AND processed_at < now() - INTERVAL '90 days';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  swept_table := 'external_stripe_events'; deleted := n; RETURN NEXT;
+
+  DELETE FROM external_hubrise_callbacks
+   WHERE processed_at IS NOT NULL
+     AND processed_at < now() - INTERVAL '90 days';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  swept_table := 'external_hubrise_callbacks'; deleted := n; RETURN NEXT;
+END;
+$$;

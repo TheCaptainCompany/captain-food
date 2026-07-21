@@ -80,7 +80,7 @@ pub fn wire() -> HealthDto {
 /// The gate is `>=` (never `==`) so an older build still runs against a newer DB (rollback-by-redeploy).
 /// `20260720030000` = the command/inbound journals (ADR-20260720-015300/-015400): every mutation now
 /// writes `command_journal` at acceptance, so the app cannot serve writes without it.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260720030000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721025159;
 
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
@@ -306,6 +306,19 @@ pub fn router() -> Router {
                     Err(_) => eprintln!(
                         "HUBRISE_ACCESS_TOKEN unset — /adapters/hubrise/webhooks verifies callbacks but does not enrich"
                     ),
+                }
+
+                // Retention sweep worker (ADR-20260721-025159): periodically calls the
+                // sweep_retention() SQL function — journal/mirror retention windows live in the
+                // function, never here. Env-gated like the other workers; a pg_cron job calling
+                // the same function is the alternative where DB-side scheduling is preferred.
+                if std::env::var("RUN_RETENTION_SWEEP").map(|v| v != "false").unwrap_or(true) {
+                    let sweeper =
+                        Arc::new(infrastructure::RetentionSweepWorker::new(pool.clone()));
+                    tokio::spawn(sweeper.run_loop());
+                    println!("retention sweep worker: running in-process (set RUN_RETENTION_SWEEP=false to disable)");
+                } else {
+                    println!("RUN_RETENTION_SWEEP=false — retention sweep worker not started");
                 }
 
                 let worker = Arc::new(SireneSyncWorker::new(pool.clone()));

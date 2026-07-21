@@ -1,7 +1,7 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (03:15 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
 > ✅ **2026-07-21 — #15: the WORKER channel journals (ADR-20260720-015300 follow-up).** The command
 > journal invariant — ALL command submissions converge on `command_journal`, whatever the channel —
@@ -19,6 +19,23 @@
 > (dispatch + enricher dedup) + Pg-gated worker tests extended with journal/causality assertions;
 > workspace tests green, validate 0 errors. Unblocks #16 (`commands_accepted_total{channel}` now sees
 > all channels).
+
+> ✅ **2026-07-21 — #18: retention policy for write-path journals & adapter mirrors
+> (ADR-20260721-025159).** The unbounded-growth follow-ups of ADR-20260720-015300/-015400 are
+> closed: one SQL function **`sweep_retention()`** (source
+> `specs/database/functions/sweep_retention.sql`, in the generated schema + migration
+> `20260721025159`, `REQUIRED_SCHEMA_VERSION` bumped) owns the windows — `command_journal`
+> terminal rows 90 d from `completed_at`, `inbound_events` DELIVERED rows 30 d from
+> `delivered_at`, `external_stripe_events`/`external_hubrise_callbacks` processed rows 90 d from
+> `processed_at` (also the GDPR storage-limitation cap on verbatim webhook payloads). NEVER
+> swept: `domain_events`/`domain_stream` (the function does not reference the log), RECEIVED
+> journal rows (stale-RECEIVED sweep marks them FAILED first), FAILED inbound rows (kept until
+> resolved), unprocessed mirror rows, and the SIRENE mirror (detect-by-absence needs every row).
+> Scheduling: new in-process `RetentionSweepWorker` (first pass at boot, then 6 h;
+> `RUN_RETENTION_SWEEP` default on) — a `pg_cron` call of the same function is the documented
+> alternative. The table YAMLs carry documentary `retention:` blocks. New DB-gated test
+> `retention_sweep.rs` proves the delete-set AND the untouchables. `make validate` 0 errors,
+> workspace green.
 
 > ✅ **2026-07-20 — value made explicit per issue (product-owner directive, amends
 > ADR-20260720-143000 §1).** New org field **Value Size** (T-shirt XS–XL) = the value the issue
@@ -43,6 +60,13 @@
 > definition) + a CLAUDE.md non-negotiable ("respect the prioritised backlog" — pick from the top
 > of the board; re-prioritising is a product-owner decision made in the project). Sizing &
 > pre-task-doc rules unchanged. Docs-only change — no specs, no code.
+
+> ✅ **2026-07-20 — #22: per-edge ACL on FK-derived nav fields (`navRoles`, ADR-20260720-230000).**
+> api.yaml types may declare `navRoles: { edge: [roles] }` (literal semantics; absent = open):
+> emitted as SDL `@auth` + the operations' guard/visible pair on the generated field; validator
+> rule `nav-roles-unknown-field`. Seeded: Restaurant.carts [ADMIN], Restaurant.orders
+> [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN], Restaurant/Order.deliveryJobs [+RIDER] — closing the
+> PUBLIC-schema PII edges before #21 freezes contracts. New ACL test; validate 0 errors.
 
 > ✅ **2026-07-20 — #14: `orderStatusChanged` keys on orderId + per-row ownership (ADR-20260720-220000).**
 > The last pre-acceptance-first convention is gone: the subscription takes `orderId` (what the

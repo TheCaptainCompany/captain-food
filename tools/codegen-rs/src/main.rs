@@ -824,6 +824,32 @@ fn validate(model: &Model) -> Report {
                 }
             }
         }
+        // navRoles (#22, ADR-20260720-230000): each key must be a DERIVED navigation edge on that
+        // type, each list a LITERAL roles list (ADR-20260720-191500 semantics).
+        {
+            let registered: HashSet<String> = api.types.iter().map(|t| t.name.clone()).collect();
+            let nav = nav_fields(&views, &registered);
+            for t in &api.types {
+                for (field, roles) in &t.nav_roles {
+                    let known = nav
+                        .get(&t.name)
+                        .map_or(false, |nfs| nfs.iter().any(|n| &n.field == field));
+                    if !known {
+                        issues.push(err(
+                            "nav-roles-unknown-field",
+                            format!("api.yaml/types.{}", t.name),
+                            format!("navRoles key '{}' is not a derived navigation field on '{}'.", field, t.name),
+                        ));
+                    }
+                    check_roles(
+                        &mut issues,
+                        roles,
+                        &format!("api.yaml/types.{}.navRoles.{}", t.name, field),
+                        &user_type_set,
+                    );
+                }
+            }
+        }
         for v in &views {
             if !bound_views.contains(&v.name) && !internal_views.contains(v.name.as_str()) {
                 issues.push(warn(
@@ -4091,6 +4117,9 @@ struct ApiType {
     description: Option<String>,
     reads: Vec<String>,
     properties: Vec<ApiField>,
+    /// OPTIONAL per-type `navRoles:` — FK-derived navigation edge → LITERAL roles list (#22,
+    /// ADR-20260720-230000). Omitted edge = open (inherits the parent type's reachability).
+    nav_roles: Vec<(String, Vec<String>)>,
 }
 struct ApiQuery {
     name: String,
@@ -4185,13 +4214,29 @@ fn field_map(v: Option<&Value>) -> Vec<ApiField> {
     }
 }
 
+/// api.yaml `types.<T>.navRoles` — field name → literal roles list for FK-derived nav edges (#22).
+fn nav_roles_map(v: Option<&Value>) -> Vec<(String, Vec<String>)> {
+    let mut out = Vec::new();
+    if let Some(Value::Mapping(m)) = v {
+        for (k, r) in m {
+            if let (Some(field), Some(seq)) = (k.as_str(), r.as_sequence()) {
+                out.push((
+                    field.to_string(),
+                    seq.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
+                ));
+            }
+        }
+    }
+    out
+}
+
 fn parse_api(model: &Model) -> Api {
     let sect = |k: &str| model.defs.get("api.yaml").and_then(|v| v.get(k)).and_then(|v| v.as_mapping());
     let mut types = Vec::new();
     if let Some(m) = sect("types") {
         for (k, t) in m {
             if let Some(name) = k.as_str() {
-                types.push(ApiType { name: name.into(), description: t.get("description").and_then(|x| x.as_str()).map(|s| s.to_string()), reads: name_list(t.get("reads")), properties: field_map(t.get("properties")) });
+                types.push(ApiType { name: name.into(), description: t.get("description").and_then(|x| x.as_str()).map(|s| s.to_string()), reads: name_list(t.get("reads")), properties: field_map(t.get("properties")), nav_roles: nav_roles_map(t.get("navRoles")) });
             }
         }
     }
@@ -4434,17 +4479,27 @@ fn nav_fields(views: &[SqlView], entity_names: &HashSet<String>) -> HashMap<Stri
     out
 }
 
-fn nav_by_entity(views: &[SqlView], entity_names: &HashSet<String>) -> HashMap<String, Vec<String>> {
+fn nav_by_entity(
+    views: &[SqlView],
+    entity_names: &HashSet<String>,
+    nav_roles: &HashMap<String, HashMap<String, Vec<String>>>,
+) -> HashMap<String, Vec<String>> {
     nav_fields(views, entity_names)
         .into_iter()
         .map(|(entity, nfs)| {
             let lines = nfs
                 .into_iter()
                 .map(|n| {
+                    // Guarded edge (#22): same @auth directive as operations; omitted = bare/open.
+                    let auth = nav_roles
+                        .get(&entity)
+                        .and_then(|m| m.get(&n.field))
+                        .map(|roles| format!(" {}", auth_directive(roles)))
+                        .unwrap_or_default();
                     if n.list {
-                        format!("  {}: [{}!]!", n.field, n.target)
+                        format!("  {}: [{}!]!{}", n.field, n.target, auth)
                     } else {
-                        format!("  {}: {}{}", n.field, n.target, if n.nullable { "" } else { "!" })
+                        format!("  {}: {}{}{}", n.field, n.target, if n.nullable { "" } else { "!" }, auth)
                     }
                 })
                 .collect();
@@ -4455,7 +4510,12 @@ fn nav_by_entity(views: &[SqlView], entity_names: &HashSet<String>) -> HashMap<S
 
 fn output_types_block(model: &Model, views: &[SqlView], api: &Api) -> String {
     let registered: HashSet<String> = api.types.iter().map(|t| t.name.clone()).collect();
-    let nav = nav_by_entity(views, &registered);
+    let nav_roles: HashMap<String, HashMap<String, Vec<String>>> = api
+        .types
+        .iter()
+        .map(|t| (t.name.clone(), t.nav_roles.iter().cloned().collect()))
+        .collect();
+    let nav = nav_by_entity(views, &registered, &nav_roles);
     let mut blocks = Vec::new();
     if let Some(m) = model.defs.get("entities.yaml").and_then(|v| v.as_mapping()) {
         for (k, def) in m {
@@ -7398,11 +7458,35 @@ fn emit_server_types(model: &Model) -> String {
     let mut out = String::from(
         "// GENERATED by the Captain.Food codegen from specs/api.yaml + specs/entities.yaml — do not edit by hand.\n// GraphQL output types (async-graphql SimpleObject), mirroring the generated SDL: entities.yaml types\n// not registered as api.yaml projections, then the api.yaml types, each with its FK-derived navigation\n// fields (plain data fields for now — resolved empty until the read resolvers land).\n#![allow(dead_code)]\n#![allow(non_camel_case_types)]\n\nuse application::projections::{CartRow, CatalogRow, CustomerRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};\nuse application::queries::{DeliveryJobRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};\nuse domain::generated::scalars as ds;\n\nuse super::scalars::*;\n",
     );
+    let nav_roles: HashMap<String, HashMap<String, Vec<String>>> = api
+        .types
+        .iter()
+        .map(|t| (t.name.clone(), t.nav_roles.iter().cloned().collect()))
+        .collect();
     let push_nav = |out: &mut String, name: &str| {
         if let Some(nfs) = nav.get(name) {
             for n in nfs {
                 let base = if n.list { format!("Vec<{}>", gql_rust_name(&n.target)) } else { gql_rust_name(&n.target) };
-                push_gql_field(out, &n.field, &base, n.list || !n.nullable, None);
+                let roles = nav_roles.get(name).and_then(|m| m.get(&n.field));
+                match roles.and_then(|r| acl_role_set(model, r)) {
+                    // Guarded nav edge (#22): the operations' guard/visible pair, fully qualified so
+                    // types.rs needs no acl import.
+                    Some(set) => {
+                        let ident = acl_set_ident(&set);
+                        let ty = if n.list || !n.nullable { base.clone() } else { format!("Option<{}>", base) };
+                        out.push_str(&format!(
+                            "    #[graphql(name = \"{}\", guard = \"super::acl::RoleGuard::new(super::acl::ALLOW_{})\", visible = \"super::acl::visible_{}\")]\n",
+                            n.field,
+                            ident.to_uppercase(),
+                            ident
+                        ));
+                        if ty.starts_with("Vec<") {
+                            out.push_str("    #[serde(default)]\n");
+                        }
+                        out.push_str(&format!("    pub {}: {},\n", rust_ident(&snake_field(&n.field)), ty));
+                    }
+                    None => push_gql_field(out, &n.field, &base, n.list || !n.nullable, None),
+                }
             }
         }
     };
@@ -7644,6 +7728,14 @@ fn emit_server_acl(model: &Model) -> String {
     {
         if let Some(set) = acl_role_set(model, roles) {
             sets.insert(acl_set_ident(&set), set);
+        }
+    }
+    // Guarded FK-derived nav edges (#22) share the same const/visible pairs.
+    for t in &api.types {
+        for (_field, roles) in &t.nav_roles {
+            if let Some(set) = acl_role_set(model, roles) {
+                sets.insert(acl_set_ident(&set), set);
+            }
         }
     }
     for (ident, set) in &sets {

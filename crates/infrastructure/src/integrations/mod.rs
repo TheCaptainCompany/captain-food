@@ -12,6 +12,8 @@
 //!   fail-closed stand-in until the real `supabase-acl` adapter lands.
 //! - [`payments`] — the Stripe OUTBOUND seams (create-intent gateway + checkout-snapshot source);
 //!   fail-closed stand-ins until the real Stripe adapter lands (integration workstream).
+//! - [`retention_sweep_worker`] — the periodic caller of the `sweep_retention()` SQL function
+//!   (journal/mirror retention, ADR-20260721-025159); never touches `domain_events`.
 //!
 //! Partner **webhook** adapters (Stripe, HubRise) now live in their own self-contained crates under
 //! `crates/adapters/*` (ADR-20260718-213352) — each an ACL + HTTP shell + standalone binary, so it can
@@ -21,6 +23,7 @@
 pub mod google;
 pub mod inbound_drain_worker;
 pub mod payments;
+pub mod retention_sweep_worker;
 pub mod sirene;
 pub mod supabase_auth;
 pub mod sync_sirene_worker;

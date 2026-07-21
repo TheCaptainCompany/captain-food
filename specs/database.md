@@ -80,6 +80,22 @@ Two table categories sit BESIDE the event store, never inside it:
 Journals **never write `domain_events`** and are **never replayed as state** — the event log stays
 the single source of truth. None of these are projected or a GraphQL `reads` target.
 
+### Journal & mirror retention — `sweep_retention()` (ADR-20260721-025159)
+
+Unlike the forever event log, journals and webhook mirrors have a **usefulness window**. The
+windows live in **one place** — the [`sweep_retention()`](database/functions/sweep_retention.sql)
+function (part of the generated schema): `command_journal` terminal rows 90 days from
+`completed_at`; `inbound_events` `DELIVERED` rows 30 days from `delivered_at`;
+`external_stripe_events`/`external_hubrise_callbacks` processed rows 90 days from `processed_at`
+(also the PII cap on verbatim third-party payloads). **Never swept**: `domain_events` /
+`domain_stream` (this function does not reference them — the log's only trimming stays the
+opt-in `$maxAge`/`$maxCount` above), `RECEIVED` journal rows (the stale-`RECEIVED` sweep marks
+crashed runs `FAILED` first), `FAILED` inbound rows (kept until resolved), unprocessed mirror
+rows, and `external_sirene_restaurants` (full mirror — detect-by-absence needs every row).
+Scheduling is environment-side, like the `$maxAge` sweep: the in-process `RetentionSweepWorker`
+calls it every 6 h (`RUN_RETENTION_SWEEP`, default on), or a `pg_cron` job
+(`SELECT * FROM sweep_retention();`) where DB-side scheduling is preferred.
+
 ## 2. Read models — projection views (`View_*`)
 
 Queries **never** read `domain_events`; they read dedicated read tables fed by projections that

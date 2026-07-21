@@ -18,6 +18,7 @@ pub use integrations::google::{FailClosedGoogleOwnershipVerifier, UnverifiedGbpO
 pub use integrations::payments::FailClosedPaymentGateway;
 pub use integrations::supabase_auth::FailClosedAuthProviderGateway;
 pub use integrations::inbound_drain_worker::{InboundDrainSummary, InboundEventsDrainWorker};
+pub use integrations::retention_sweep_worker::{RetentionSweepSummary, RetentionSweepWorker};
 pub use integrations::sync_sirene_worker::{SireneSyncSummary, SireneSyncWorker};
 pub use persistence::{
     AppendedEvent, EventBus, OperationStatusBus, OperationUpdate, PgCartRepository,

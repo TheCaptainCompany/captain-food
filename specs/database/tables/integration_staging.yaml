@@ -1,4 +1,4 @@
-version: 2
+version: 3
 description: >
   Raw-integration STAGING tables (ADR-0045, generalized by ADR-20260720-015400) — a third table
   category alongside the event store (eventstore.yaml), the event-fed projections
@@ -21,6 +21,8 @@ external_sirene_restaurants:
     Detect-by-absence deletion uses `last_seen_at` + the explicit `etat` (etatAdministratifEtablissement).
     Scope: all active food-service NAF (56.10A/B/C + 56.30Z) across France; the ingestion partitions its
     INSEE queries by `department` when the deep-pagination cap bites.
+    NO RETENTION (ADR-20260721-025159): this is a full mirror — detect-by-absence needs the complete
+    row set, and it holds company (not consumer) data; sweep_retention() never touches it.
   columns:
     siret:         { type: text, pk: true }                 # 14-digit SIRET — the idempotent external key
     payload:       { type: jsonb }                          # raw INSEE établissement record, verbatim
@@ -40,6 +42,11 @@ external_stripe_events:
     translates it into an adapted business event staged in journals.yaml#/inbound_events.
     Redelivery dedupes on the pk and ACKs immediately; processed_at is the translation high-water
     mark, enabling replay/backfill without asking Stripe to resend.
+  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
+    max_age: '90 days'
+    applies_to: >
+      Processed rows only (processed_at set), aged from processed_at — the replay/backfill horizon,
+      and the PII cap on verbatim Stripe payloads. Unprocessed rows are never swept.
   columns:
     stripe_event_id: { type: text, pk: true }                 # Stripe 'evt_…' — the idempotent external key
     event_type:      { type: text, index: true }              # Stripe type, e.g. 'payment_intent.succeeded'
@@ -54,6 +61,11 @@ external_hubrise_callbacks:
     present, else a UUIDv5 of the raw body. HubRise callbacks carry no state, so the enrichment leg
     (OAuth pull → ACL → ImportCatalog / stock COMMANDS, journaled with channel WORKER) marks
     processed_at — HubRise yields commands, not inbound_events rows (request/report split).
+  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
+    max_age: '90 days'
+    applies_to: >
+      Processed rows only (processed_at set), aged from processed_at — the replay/backfill horizon.
+      Unprocessed rows (enrichment not yet run) are never swept.
   columns:
     callback_id:   { type: text, pk: true }                   # provider event id, else UUIDv5(raw body)
     resource_type: { type: text, index: true }                # HubRise resource: 'catalog' / 'inventory' / …

@@ -102,6 +102,12 @@ pub(crate) fn visible_restaurant_account_restaurant_rider(ctx: &async_graphql::C
     role_allows(ctx, ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER)
 }
 
+/// roles: [RESTAURANT_ACCOUNT, RESTAURANT, RIDER, ADMIN]
+pub(crate) const ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN: &[RequestRole] = &[RequestRole::RestaurantAccount, RequestRole::Restaurant, RequestRole::Rider, RequestRole::Admin];
+pub(crate) fn visible_restaurant_account_restaurant_rider_admin(ctx: &async_graphql::Context<'_>) -> bool {
+    role_allows(ctx, ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)
+}
+
 /// roles: [RESTAURANT, ADMIN]
 pub(crate) const ALLOW_RESTAURANT_ADMIN: &[RequestRole] = &[RequestRole::Restaurant, RequestRole::Admin];
 pub(crate) fn visible_restaurant_admin(ctx: &async_graphql::Context<'_>) -> bool {

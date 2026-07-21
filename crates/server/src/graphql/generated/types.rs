@@ -379,7 +379,7 @@ pub struct Restaurant {
     pub preparation_time_minutes: Option<i64>,
     #[graphql(name = "updatedAt")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
-    #[graphql(name = "deliveryJobs")]
+    #[graphql(name = "deliveryJobs", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_rider_admin")]
     #[serde(default)]
     pub delivery_jobs: Vec<DeliveryJob>,
     #[graphql(name = "prospects")]
@@ -388,10 +388,10 @@ pub struct Restaurant {
     #[graphql(name = "catalogs")]
     #[serde(default)]
     pub catalogs: Vec<Catalog>,
-    #[graphql(name = "carts")]
+    #[graphql(name = "carts", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_ADMIN)", visible = "super::acl::visible_admin")]
     #[serde(default)]
     pub carts: Vec<Cart>,
-    #[graphql(name = "orders")]
+    #[graphql(name = "orders", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_admin")]
     #[serde(default)]
     pub orders: Vec<Order>,
 }
@@ -505,7 +505,7 @@ pub struct Order {
     pub estimated_dropoff_at: Option<chrono::DateTime<chrono::Utc>>,
     #[graphql(name = "ratedAt")]
     pub rated_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[graphql(name = "deliveryJobs")]
+    #[graphql(name = "deliveryJobs", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_rider_admin")]
     #[serde(default)]
     pub delivery_jobs: Vec<DeliveryJob>,
     #[graphql(name = "restaurant")]

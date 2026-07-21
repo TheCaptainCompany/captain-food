@@ -191,3 +191,46 @@ async fn literal_roles_lists_admit_only_listed_paths() {
     let (_rider_q, rider_m) = introspected_fields(&schema, RequestRole::Rider).await;
     assert!(!rider_m.contains(&"verifyPhone".into()), "verifyPhone ([PUBLIC, CUSTOMER]) leaked to RIDER");
 }
+
+/// FK-derived navigation edges with `navRoles` (#22, ADR-20260720-230000): the guarded edges off
+/// the PUBLIC-reachable Restaurant are hidden from unlisted roles' introspection and visible to
+/// listed ones; unguarded edges (catalogs) stay open to everyone.
+#[tokio::test]
+async fn guarded_nav_edges_are_hidden_from_unlisted_roles() {
+    let schema = schema();
+    let type_fields = |role: RequestRole| {
+        let schema = schema.clone();
+        async move {
+        let resp = execute_as(
+            &schema,
+            role,
+            r#"{ __type(name: "Restaurant") { fields { name } } }"#,
+        )
+        .await;
+        assert!(resp.errors.is_empty(), "introspection errored: {:?}", resp.errors);
+        let data = resp.data.into_json().expect("json");
+        data["__type"]["fields"]
+            .as_array()
+            .expect("fields")
+            .iter()
+            .map(|f| f["name"].as_str().expect("name").to_string())
+            .collect::<Vec<_>>()
+        }
+    };
+
+    let public = type_fields(RequestRole::Public).await;
+    assert!(public.contains(&"catalogs".into()), "open edge missing for PUBLIC: {public:?}");
+    assert!(!public.contains(&"carts".into()), "carts ([ADMIN]) leaked to PUBLIC");
+    assert!(!public.contains(&"orders".into()), "orders leaked to PUBLIC");
+    assert!(!public.contains(&"deliveryJobs".into()), "deliveryJobs leaked to PUBLIC");
+
+    let restaurant = type_fields(RequestRole::Restaurant).await;
+    assert!(restaurant.contains(&"orders".into()), "orders missing for RESTAURANT: {restaurant:?}");
+    assert!(restaurant.contains(&"deliveryJobs".into()), "deliveryJobs missing for RESTAURANT");
+    assert!(!restaurant.contains(&"carts".into()), "carts ([ADMIN]) leaked to RESTAURANT");
+
+    let admin = type_fields(RequestRole::Admin).await;
+    for f in ["catalogs", "carts", "orders", "deliveryJobs"] {
+        assert!(admin.contains(&f.to_string()), "{f} missing for ADMIN: {admin:?}");
+    }
+}
