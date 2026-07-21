@@ -16,6 +16,9 @@
 //! - `POST /adapters/stripe/webhooks` — Stripe webhook ingestion (inbound payment facts through the ACL);
 //!   secured by `Stripe-Signature` HMAC verification against `STRIPE_WEBHOOK_SECRET` (fail-closed).
 //!
+//! Every response (all routes) carries `X-VERSION` = the running build's short git SHA (ADR-20260721-175411),
+//! so any client can read which deploy served it without calling `/health` (see `response_timing`).
+//!
 //! The projection worker (ADR-0040) runs **in-process** here for now (Render Background Workers are paid),
 //! gated by `RUN_PROJECTOR` (default on) so it can graduate to a dedicated worker with no logic change.
 //! The SIRENE sync worker (ADR-0045) follows the same pattern: in-process, primarily woken by the CI
@@ -558,7 +561,9 @@ pub fn router() -> Router {
 }
 
 /// Stamp every response with how long the server took to build it: `x-response-time-ms` (milliseconds) and
-/// the standard `Server-Timing` header (shown in browser devtools). Applied as an outer layer over all routes.
+/// the standard `Server-Timing` header (shown in browser devtools), plus `X-VERSION` — the running build's
+/// identity (`build_version()`, the short git SHA) on **every** response, so any HTTP client can read which
+/// deploy served it without hitting `/health` (ADR-20260721-175411). Applied as an outer layer over all routes.
 async fn response_timing(req: Request, next: Next) -> Response {
     let start = std::time::Instant::now();
     let mut resp = next.run(req).await;
@@ -569,6 +574,9 @@ async fn response_timing(req: Request, next: Next) -> Response {
     }
     if let Ok(v) = HeaderValue::from_str(&format!("app;dur={ms}")) {
         headers.insert("server-timing", v);
+    }
+    if let Ok(v) = HeaderValue::from_str(build_version()) {
+        headers.insert("x-version", v);
     }
     resp
 }

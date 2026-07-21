@@ -67,8 +67,10 @@ this tag — the short SHA is a label, so its 7-char abbreviation costs no preci
 
 Because a health endpoint is useless when the instance never starts, the version is discoverable at **three
 layers**, each covering the failure mode the one above it cannot:
-1. **`/health` `version` field** — reported in every state (incl. `degraded`/`down`) for a process that is
-   up but unhealthy. (Previously `/health` reported only the DB schema version, not the app build.)
+1. **`X-VERSION` response header + `/health` `version` field** — the running build's short SHA is stamped on
+   **every** HTTP response (the `response_timing` middleware) and echoed in the `/health` body in every state
+   (incl. `degraded`/`down`), so any client reading any endpoint knows which deploy served it, without a
+   dedicated call. (Previously `/health` reported only the DB schema version, not the app build.)
 2. **Startup log line** — `main()` prints `captain-food server starting — version <sha>` as its *first*
    statement, before any fallible startup (router build, port bind, DB probe), so a process that panics or
    never binds still names its version in the Render logs.
