@@ -1,7 +1,24 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (05:40 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (10:20 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #24: the behaviour-test suite is GENERATED from tests.yaml
+> (ADR-20260721-101552, codegen-roadmap item 2).** New `codegen-rs` emitter
+> (`emit_behaviour_tests`) → `application/src/generated/behaviour_tests.rs`: one `#[tokio::test]`
+> per Given/When/Then case (all 161) — GIVEN seeds fixtures onto their aggregate streams, WHEN
+> dispatches through the real write path (emitter-owned command/PM-leg/record dispatch tables),
+> THEN asserts payload-level equality of the appended facts across ALL streams (strict per-stream
+> diff; `then: []` = strict no-op; `thrown` = typed code + no side effects). Runs on the
+> hand-written `application::behaviour_support` runtime (mem store, read-model/service doubles,
+> PM-run seeding, UUIDv5 spec-id mapping). Executing the spec surfaced and fixed: a new
+> `test-invalid-enum-value` validator rule (caught `serviceType: "PICKUP"`), tests.yaml sample
+> corrections (missing birth facts / cross-aggregate givens, per-leg RefundOpened variants, the
+> V0 zero-fee money chain per pricing.rs, refund legs asserting the refund they open), and two
+> runtime fixes (RegisterRestaurant enforces `RestaurantAccountNotFound` by folding the account
+> stream; delivery-issue payloads no longer stamp wall-clock time — ADR-0041). The ten
+> hand-mirrored `crates/application/tests/*_behaviour.rs` files (118 cases) are DELETED; in-src PM
+> tests and `pm_state_mem.rs` stay. New tests.yaml cases now cost zero Rust. `make rust` green.
 
 > ✅ **2026-07-21 — #25: the PM orchestrator step pipelines are GENERATED
 > (ADR-20260721-053456, codegen-roadmap item 3, implements the deferral of ADR-20260719-193500).**

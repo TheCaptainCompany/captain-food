@@ -28,7 +28,7 @@ fixtures:
   # --- Customer ---
   customerRegistered:
     type: { $ref: 'events.yaml#/CustomerRegistered' }
-    data: { customerId: "cust-1", phone: "+33612345678", displayName: "Johnny", locale: "fr-FR", timezone: "Europe/Paris" }
+    data: { customerId: "cust-1", authRef: "auth-supabase-1", phone: "+33612345678", displayName: "Johnny", locale: "fr-FR", timezone: "Europe/Paris" }
   customerIdentified:
     type: { $ref: 'events.yaml#/CustomerIdentified' }
     data: { customerId: "cust-1", authRef: "auth-supabase-1", sessionId: "sess-1" }
@@ -76,6 +76,9 @@ fixtures:
   restaurantRegistered:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
     data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+  restaurantRegisteredTest:
+    type: { $ref: 'events.yaml#/RestaurantRegistered' }
+    data: { restaurantId: "resto-1", accountId: "acct-1", mode: "TEST", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
   restaurantSeeded:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
     data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], cuisineCategory: "BISTRONOMIC", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
@@ -205,6 +208,9 @@ fixtures:
   offerStockUpdated:
     type: { $ref: 'events.yaml#/OfferStockUpdated' }
     data: { catalogId: "cat-1", restaurantId: "resto-1", offerId: "off-1", stock: { quantity: 5, status: "IN_STOCK" } }
+  offerStockSyncedLow:
+    type: { $ref: 'events.yaml#/OfferStockUpdated' }
+    data: { catalogId: "cat-1", restaurantId: "resto-1", offerId: "off-1", stock: { quantity: 3, status: "LOW_STOCK" } }
   catalogImported:
     type: { $ref: 'events.yaml#/CatalogImported' }
     data: { catalogId: "cat-1", restaurantId: "resto-1", source: "HUBRISE", categories: [], products: [], optionLists: [] }
@@ -216,6 +222,9 @@ fixtures:
   cartLineAdded:
     type: { $ref: 'events.yaml#/CartLineAdded' }
     data: { cartId: "cart-1", line: { cartLineId: "line-1", offerId: "off-1", quantity: 2 } }
+  cartLineAddedUnknownOffer:
+    type: { $ref: 'events.yaml#/CartLineAdded' }
+    data: { cartId: "cart-1", line: { cartLineId: "line-9", offerId: "off-ghost", quantity: 1 } }
   cartLineQuantityChanged:
     type: { $ref: 'events.yaml#/CartLineQuantityChanged' }
     data: { cartId: "cart-1", cartLineId: "line-1", quantity: 3 }
@@ -237,18 +246,19 @@ fixtures:
       restaurantId: "resto-1"
       customerContact: { displayName: "Johnny", phone: "+33612345678" }
       serviceType: "DELIVERY"
+      deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
       items:
-        - { offerId: "off-1", name: "Margherita", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
-      totalAmount: { amountCents: 2019, currency: "EUR" }
+        - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+      totalAmount: { amountCents: 1960, currency: "EUR" }
       breakdown:
         articles: { amountCents: 1960, currency: "EUR" }
         delivery: { amountCents: 0, currency: "EUR" }
-        serviceFee: { amountCents: 59, currency: "EUR" }
-        total: { amountCents: 2019, currency: "EUR" }
+        serviceFee: { amountCents: 0, currency: "EUR" }
+        total: { amountCents: 1960, currency: "EUR" }
         restaurantContribution: { amountCents: 0, currency: "EUR" }
         restaurantPayout: { amountCents: 1960, currency: "EUR" }
         riderPayout: { amountCents: 0, currency: "EUR" }
-        captainNet: { amountCents: 59, currency: "EUR" }
+        captainNet: { amountCents: 0, currency: "EUR" }
       paymentIntentId: "pi_123"
   orderAcceptedByRestaurant:
     type: { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }
@@ -279,7 +289,7 @@ fixtures:
     data: { orderId: "order-1", restaurantId: "resto-1", stars: 5, comment: "Excellent!" }
   orderTipped:
     type: { $ref: 'events.yaml#/OrderTipped' }
-    data: { orderId: "order-1", restaurantId: "resto-1", tippedBy: "CUSTOMER", customerId: "cust-1", tips: [{ recipient: "RIDER", amount: { amountCents: 200, currency: "EUR" } }, { recipient: "RESTAURANT", amount: { amountCents: 100, currency: "EUR" } }, { recipient: "CAPTAIN", amount: { amountCents: 50, currency: "EUR" } }] }
+    data: { orderId: "order-1", restaurantId: "resto-1", tippedBy: "CUSTOMER", tips: [{ recipient: "RIDER", amount: { amountCents: 200, currency: "EUR" } }, { recipient: "RESTAURANT", amount: { amountCents: 100, currency: "EUR" } }, { recipient: "CAPTAIN", amount: { amountCents: 50, currency: "EUR" } }] }
   orderTippedByRestaurant:
     type: { $ref: 'events.yaml#/OrderTipped' }
     data: { orderId: "order-1", restaurantId: "resto-1", tippedBy: "RESTAURANT", tips: [{ recipient: "RIDER", amount: { amountCents: 300, currency: "EUR" } }] }
@@ -293,28 +303,53 @@ fixtures:
     data:
       paymentIntentId: "pi_123"
       restaurantId: "resto-1"
-      amount: { amountCents: 2019, currency: "EUR" }
+      amount: { amountCents: 1960, currency: "EUR" }
       checkout:
         orderId: "order-1"
         cartId: "cart-1"
         restaurantId: "resto-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
+        deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
         items:
-          - { offerId: "off-1", name: "Margherita", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
-        totalAmount: { amountCents: 2019, currency: "EUR" }
+          - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+        totalAmount: { amountCents: 1960, currency: "EUR" }
         breakdown:
           articles: { amountCents: 1960, currency: "EUR" }
           delivery: { amountCents: 0, currency: "EUR" }
-          serviceFee: { amountCents: 59, currency: "EUR" }
-          total: { amountCents: 2019, currency: "EUR" }
+          serviceFee: { amountCents: 0, currency: "EUR" }
+          total: { amountCents: 1960, currency: "EUR" }
           restaurantContribution: { amountCents: 0, currency: "EUR" }
           restaurantPayout: { amountCents: 1960, currency: "EUR" }
           riderPayout: { amountCents: 0, currency: "EUR" }
-          captainNet: { amountCents: 59, currency: "EUR" }
+          captainNet: { amountCents: 0, currency: "EUR" }
+  paymentIntentCreatedCollection:
+    type: { $ref: 'events.yaml#/PaymentIntentCreated' }
+    data:
+      paymentIntentId: "pi_123"
+      restaurantId: "resto-1"
+      amount: { amountCents: 1960, currency: "EUR" }
+      checkout:
+        orderId: "order-1"
+        cartId: "cart-1"
+        restaurantId: "resto-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        items:
+          - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+        totalAmount: { amountCents: 1960, currency: "EUR" }
+        breakdown:
+          articles: { amountCents: 1960, currency: "EUR" }
+          delivery: { amountCents: 0, currency: "EUR" }
+          serviceFee: { amountCents: 0, currency: "EUR" }
+          total: { amountCents: 1960, currency: "EUR" }
+          restaurantContribution: { amountCents: 0, currency: "EUR" }
+          restaurantPayout: { amountCents: 1960, currency: "EUR" }
+          riderPayout: { amountCents: 0, currency: "EUR" }
+          captainNet: { amountCents: 0, currency: "EUR" }
   paymentCaptured:
     type: { $ref: 'events.yaml#/PaymentCaptured' }
-    data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 2019, currency: "EUR" } }
+    data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }
   paymentFailed:
     type: { $ref: 'events.yaml#/PaymentFailed' }
     data: { paymentIntentId: "pi_123", restaurantId: "resto-1", reason: "card_declined" }
@@ -324,6 +359,15 @@ fixtures:
   refundOpened:
     type: { $ref: 'events.yaml#/RefundOpened' }
     data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Out of ingredients" }
+  refundOpenedOnCustomerCancel:
+    type: { $ref: 'events.yaml#/RefundOpened' }
+    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Changed my mind" }
+  refundOpenedOnRestaurantCancel:
+    type: { $ref: 'events.yaml#/RefundOpened' }
+    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Kitchen closed" }
+  refundOpenedOnRequest:
+    type: { $ref: 'events.yaml#/RefundOpened' }
+    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Late delivery" }
   refundApproved:
     type: { $ref: 'events.yaml#/RefundApproved' }
     data: { orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order rejected by the restaurant" }
@@ -467,7 +511,7 @@ tests:
       - { $ref: '#/fixtures/restaurantAccountRegistered' }
     when:
       type: { $ref: 'commands.yaml#/RegisterRestaurant' }
-      data: { restaurantId: "resto-1", accountId: "acct-1", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+      data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
     then:
       - { $ref: '#/fixtures/restaurantRegistered' }
 
@@ -603,7 +647,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/RegisterRestaurant' }
-      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
+      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", cuisineCategory: "BISTRONOMIC", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
     then:
       - { $ref: '#/fixtures/restaurantSeeded' }
   TestRestaurantGoogleBusinessProfileUpdated:
@@ -636,7 +680,7 @@ tests:
       - { $ref: '#/fixtures/restaurantSeeded' }
     when:
       type: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
-      data: { restaurantId: "resto-2", accountId: "acct-9", googleOwnershipProof: "valid-gbp-token" }
+      data: { restaurantId: "resto-2", accountId: "acct-9", googleOwnershipProof: "gbp-proof-ref-1" }
     then:
       - { $ref: '#/fixtures/restaurantListingClaimed' }
   TestRestaurantListingClaimUnverifiedIsRejected:
@@ -659,7 +703,7 @@ tests:
       - { $ref: '#/fixtures/restaurantListingClaimed' }
     when:
       type: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
-      data: { restaurantId: "resto-2", accountId: "acct-9", googleOwnershipProof: "valid-gbp-token" }
+      data: { restaurantId: "resto-2", accountId: "acct-9", googleOwnershipProof: "gbp-proof-ref-1" }
     thrown:
       - { $ref: 'errors.yaml#/ListingAlreadyClaimed' }
   TestRestaurantListingOptedOut:
@@ -670,7 +714,7 @@ tests:
       - { $ref: '#/fixtures/restaurantSeeded' }
     when:
       type: { $ref: 'commands.yaml#/OptOutRestaurantListing' }
-      data: { restaurantId: "resto-2", googleOwnershipProof: "valid-gbp-token", reason: "Please remove my listing" }
+      data: { restaurantId: "resto-2", googleOwnershipProof: "gbp-proof-ref-1", reason: "Please remove my listing" }
     then:
       - { $ref: '#/fixtures/restaurantListingOptedOut' }
   TestRestaurantListingStatusChanged:
@@ -857,6 +901,7 @@ tests:
     rules: [{ $ref: 'rules.yaml#/CatalogProductManagement' }]
     actor: { $ref: 'actors.yaml#/Catalog' }
     given:
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/productAdded' }
     when:
       type: { $ref: 'commands.yaml#/UpdateProduct' }
@@ -902,6 +947,7 @@ tests:
     rules: [{ $ref: 'rules.yaml#/CatalogProductManagement' }]
     actor: { $ref: 'actors.yaml#/Catalog' }
     given:
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/productAdded' }
     when:
       type: { $ref: 'commands.yaml#/RemoveProduct' }
@@ -939,6 +985,7 @@ tests:
     rules: [{ $ref: 'rules.yaml#/CatalogCategoryTreeManagement' }]
     actor: { $ref: 'actors.yaml#/Catalog' }
     given:
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/catalogCategoryAdded' }
     when:
       type: { $ref: 'commands.yaml#/UpdateCatalogCategory' }
@@ -963,6 +1010,7 @@ tests:
     rules: [{ $ref: 'rules.yaml#/CatalogCategoryTreeManagement' }]
     actor: { $ref: 'actors.yaml#/Catalog' }
     given:
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/catalogCategoryAdded' }
     when:
       type: { $ref: 'commands.yaml#/RemoveCatalogCategory' }
@@ -1030,6 +1078,7 @@ tests:
     rules: [{ $ref: 'rules.yaml#/CatalogOptionListManagement' }]
     actor: { $ref: 'actors.yaml#/Catalog' }
     given:
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/optionListAdded' }
     when:
       type: { $ref: 'commands.yaml#/UpdateOptionList' }
@@ -1072,6 +1121,7 @@ tests:
     rules: [{ $ref: 'rules.yaml#/CatalogOptionListManagement' }]
     actor: { $ref: 'actors.yaml#/Catalog' }
     given:
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/optionListAdded' }
     when:
       type: { $ref: 'commands.yaml#/RemoveOptionList' }
@@ -1096,6 +1146,7 @@ tests:
     rules: [{ $ref: 'rules.yaml#/OfferStockManualOrSynced' }]
     actor: { $ref: 'actors.yaml#/Catalog' }
     given:
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/productAdded' }
     when:
       type: { $ref: 'commands.yaml#/UpdateOfferStock' }
@@ -1120,12 +1171,13 @@ tests:
     rules: [{ $ref: 'rules.yaml#/OfferStockManualOrSynced' }]
     actor: { $ref: 'actors.yaml#/Catalog' }
     given:
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/productAdded' }
     when:
       type: { $ref: 'events.yaml#/OfferStockUpdated' }
       data: { catalogId: "cat-1", restaurantId: "resto-1", offerId: "off-1", stock: { quantity: 3, status: "LOW_STOCK" } }
     then:
-      - { $ref: '#/fixtures/offerStockUpdated' }
+      - { $ref: '#/fixtures/offerStockSyncedLow' }
 
   TestCatalogImported:
     name: "Imports a full catalog from an external source"
@@ -1335,6 +1387,7 @@ tests:
     actor: { $ref: 'actors.yaml#/Customer' }
     given:
       - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/restaurantRegistered' }
     when:
       type: { $ref: 'commands.yaml#/MarkRestaurantAsFavorite' }
       data: { customerId: "cust-1", restaurantId: "resto-1" }
@@ -1434,7 +1487,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/AddCartLine' }
-      data: { cartId: "cart-1", restaurantId: "resto-1", sessionId: "sess-1", line: { cartLineId: "line-1", offerId: "off-missing", quantity: 99 } }
+      data: { cartId: "cart-1", restaurantId: "resto-1", sessionId: "sess-1", line: { cartLineId: "line-1", offerId: "off-missing", quantity: 1 } }
     thrown:
       - { $ref: 'errors.yaml#/OfferNotFound' }
       - { $ref: 'errors.yaml#/OfferUnavailable' }
@@ -1444,7 +1497,8 @@ tests:
     name: "Rejects adding a line on a missing/closed/mismatched cart, with a bad option selection, or over the quantity limit"
     rules: [{ $ref: 'rules.yaml#/CartRejectsUnorderableOrInvalidLine' }]
     actor: { $ref: 'actors.yaml#/Cart' }
-    given: []
+    given:
+      - { $ref: '#/fixtures/cartStarted' }
     when:
       type: { $ref: 'commands.yaml#/AddCartLine' }
       data: { cartId: "cart-1", restaurantId: "resto-2", sessionId: "sess-1", line: { cartLineId: "line-1", offerId: "off-1", quantity: 1 } }
@@ -1740,6 +1794,10 @@ tests:
       - { $ref: 'rules.yaml#/CheckoutSnapshotFrozenAtIntent' }
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/productAdded' }
       - { $ref: '#/fixtures/cartStarted' }
       - { $ref: '#/fixtures/cartLineAdded' }
     when:
@@ -1750,7 +1808,7 @@ tests:
         cartId: "cart-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
-        deliveryAddress: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }
+        deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
         paymentMethodId: "pm_123"
     then:
       - { $ref: '#/fixtures/paymentIntentCreated' }
@@ -1760,6 +1818,8 @@ tests:
     rules: [{ $ref: 'rules.yaml#/ServerPriceAuthority' }]
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
       - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/productAdded' }
       - { $ref: '#/fixtures/cartStarted' }
@@ -1771,17 +1831,19 @@ tests:
         restaurantId: "resto-1"
         cartId: "cart-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
-        serviceType: "PICKUP"
+        serviceType: "COLLECTION"
         expectedTotal: { amountCents: 1960, currency: "EUR" }
         paymentMethodId: "pm_123"
     then:
-      - { $ref: '#/fixtures/paymentIntentCreated' }
+      - { $ref: '#/fixtures/paymentIntentCreatedCollection' }
 
   TestPlaceOrderRejectsPriceMismatch:
     name: "A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)"
     rules: [{ $ref: 'rules.yaml#/ServerPriceAuthority' }]
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
       - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/productAdded' }
       - { $ref: '#/fixtures/cartStarted' }
@@ -1793,7 +1855,7 @@ tests:
         restaurantId: "resto-1"
         cartId: "cart-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
-        serviceType: "PICKUP"
+        serviceType: "COLLECTION"
         expectedTotal: { amountCents: 100, currency: "EUR" }
         paymentMethodId: "pm_123"
     thrown:
@@ -1805,8 +1867,11 @@ tests:
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:
       # No catalog facts: the cart's offer resolves to no live price.
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/catalogCreated' }
       - { $ref: '#/fixtures/cartStarted' }
-      - { $ref: '#/fixtures/cartLineAdded' }
+      - { $ref: '#/fixtures/cartLineAddedUnknownOffer' }
     when:
       type: { $ref: 'commands.yaml#/PlaceOrder' }
       data:
@@ -1814,7 +1879,7 @@ tests:
         restaurantId: "resto-1"
         cartId: "cart-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
-        serviceType: "PICKUP"
+        serviceType: "COLLECTION"
         paymentMethodId: "pm_123"
     thrown:
       - { $ref: 'errors.yaml#/PriceUnresolvable' }
@@ -1824,6 +1889,8 @@ tests:
     rules: [{ $ref: 'rules.yaml#/CheckoutPricesCartCreatesPaymentIntent' }]
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
       - { $ref: '#/fixtures/cartStarted' }
     when:
       type: { $ref: 'commands.yaml#/PlaceOrder' }
@@ -1846,6 +1913,8 @@ tests:
     rules: [{ $ref: 'rules.yaml#/OrderTestModeIsolation' }]
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:
+      - { $ref: '#/fixtures/restaurantRegisteredTest' }
+      - { $ref: '#/fixtures/restaurantActivated' }
       - { $ref: '#/fixtures/cartStarted' }
       - { $ref: '#/fixtures/cartLineAdded' }
     when:
@@ -1867,10 +1936,12 @@ tests:
     rules: [{ $ref: 'rules.yaml#/OrderMaterializedOnPaymentCapture' }]
     actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
     given:
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
       - { $ref: '#/fixtures/paymentIntentCreated' }
     when:
       type: { $ref: 'events.yaml#/PaymentCaptured' }
-      data: { paymentIntentId: "pi_123", restaurantId: "resto-1", amount: { amountCents: 2019, currency: "EUR" } }
+      data: { paymentIntentId: "pi_123", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }
     then:
       - { $ref: '#/fixtures/orderPlaced' }
       - { $ref: '#/fixtures/cartCheckedOut' }
@@ -1906,7 +1977,8 @@ tests:
     when:
       type: { $ref: 'events.yaml#/OrderCancelledByCustomer' }
       data: { orderId: "order-1", restaurantId: "resto-1", reason: "Changed my mind" }
-    then: []
+    then:
+      - { $ref: '#/fixtures/refundOpenedOnCustomerCancel' }
 
   TestRefundOnOrderCancelledByRestaurant:
     name: "Requests a Stripe refund when the restaurant cancels the order"
@@ -1916,7 +1988,8 @@ tests:
     when:
       type: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
       data: { orderId: "order-1", restaurantId: "resto-1", reason: "Kitchen closed" }
-    then: []
+    then:
+      - { $ref: '#/fixtures/refundOpenedOnRestaurantCancel' }
 
   TestRefundOnRefundRequested:
     name: "Validates eligibility and requests a Stripe refund on a customer refund request"
@@ -1926,7 +1999,8 @@ tests:
     when:
       type: { $ref: 'events.yaml#/RefundRequested' }
       data: { orderId: "order-1", restaurantId: "resto-1", reason: "Late delivery" }
-    then: []
+    then:
+      - { $ref: '#/fixtures/refundOpenedOnRequest' }
 
   TestRefundSettledFactRecorded:
     name: "Records the settled refund fact reported back by Stripe"
@@ -2038,6 +2112,7 @@ tests:
     rules: [{ $ref: 'rules.yaml#/ReadyDeliveryOrderTriggersDispatch' }]
     actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
     given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
       - { $ref: '#/fixtures/orderPlaced' }
     when:
       type: { $ref: 'events.yaml#/OrderMarkedReady' }
@@ -2102,6 +2177,9 @@ tests:
     rules: [{ $ref: 'rules.yaml#/OrderClosedOnDeliveryCompletion' }]
     actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
     given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderAcceptedByRestaurant' }
+      - { $ref: '#/fixtures/orderMarkedReady' }
       - { $ref: '#/fixtures/deliveryRequested' }
     when:
       type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
@@ -2114,6 +2192,9 @@ tests:
     rules: [{ $ref: 'rules.yaml#/OrderClosedOnDeliveryCompletion' }]
     actor: { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
     given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderAcceptedByRestaurant' }
+      - { $ref: '#/fixtures/orderMarkedReady' }
       - { $ref: '#/fixtures/deliveryRequested' }
       - { $ref: '#/fixtures/deliveryAcceptedByRider' }
       - { $ref: '#/fixtures/deliveryPickedUp' }
@@ -2162,18 +2243,19 @@ tests:
         restaurantId: "resto-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
+        deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
         items:
-          - { offerId: "off-1", name: "Margherita", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
-        totalAmount: { amountCents: 2019, currency: "EUR" }
+          - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+        totalAmount: { amountCents: 1960, currency: "EUR" }
         breakdown:
           articles: { amountCents: 1960, currency: "EUR" }
           delivery: { amountCents: 0, currency: "EUR" }
-          serviceFee: { amountCents: 59, currency: "EUR" }
-          total: { amountCents: 2019, currency: "EUR" }
+          serviceFee: { amountCents: 0, currency: "EUR" }
+          total: { amountCents: 1960, currency: "EUR" }
           restaurantContribution: { amountCents: 0, currency: "EUR" }
           restaurantPayout: { amountCents: 1960, currency: "EUR" }
           riderPayout: { amountCents: 0, currency: "EUR" }
-          captainNet: { amountCents: 59, currency: "EUR" }
+          captainNet: { amountCents: 0, currency: "EUR" }
         paymentIntentId: "pi_123"
     then:
       - { $ref: '#/fixtures/orderPlaced' }
@@ -2189,25 +2271,26 @@ tests:
       data:
         paymentIntentId: "pi_123"
         restaurantId: "resto-1"
-        amount: { amountCents: 2019, currency: "EUR" }
+        amount: { amountCents: 1960, currency: "EUR" }
         checkout:
           orderId: "order-1"
           cartId: "cart-1"
           restaurantId: "resto-1"
           customerContact: { displayName: "Johnny", phone: "+33612345678" }
           serviceType: "DELIVERY"
+          deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
           items:
-            - { offerId: "off-1", name: "Margherita", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
-          totalAmount: { amountCents: 2019, currency: "EUR" }
+            - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+          totalAmount: { amountCents: 1960, currency: "EUR" }
           breakdown:
             articles: { amountCents: 1960, currency: "EUR" }
             delivery: { amountCents: 0, currency: "EUR" }
-            serviceFee: { amountCents: 59, currency: "EUR" }
-            total: { amountCents: 2019, currency: "EUR" }
+            serviceFee: { amountCents: 0, currency: "EUR" }
+            total: { amountCents: 1960, currency: "EUR" }
             restaurantContribution: { amountCents: 0, currency: "EUR" }
             restaurantPayout: { amountCents: 1960, currency: "EUR" }
             riderPayout: { amountCents: 0, currency: "EUR" }
-            captainNet: { amountCents: 59, currency: "EUR" }
+            captainNet: { amountCents: 0, currency: "EUR" }
     then:
       - { $ref: '#/fixtures/paymentIntentCreated' }
 
@@ -2219,7 +2302,7 @@ tests:
       - { $ref: '#/fixtures/paymentIntentCreated' }
     when:
       type: { $ref: 'events.yaml#/PaymentCaptured' }
-      data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 2019, currency: "EUR" } }
+      data: { paymentIntentId: "pi_123", orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }
     then:
       - { $ref: '#/fixtures/paymentCaptured' }
 
@@ -2546,6 +2629,6 @@ tests:
     given: []
     when:
       type: { $ref: 'events.yaml#/PaymentCaptured' }
-      data: { paymentIntentId: "pi_unknown", restaurantId: "resto-1", amount: { amountCents: 2019, currency: "EUR" } }
+      data: { paymentIntentId: "pi_unknown", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }
     thrown:
       - { $ref: 'errors.yaml#/PaymentEventOrphaned' }

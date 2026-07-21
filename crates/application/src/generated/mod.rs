@@ -4,3 +4,5 @@ pub mod projectors;
 pub mod pm_state;
 pub mod process_managers;
 pub mod services;
+#[cfg(test)]
+pub mod behaviour_tests;

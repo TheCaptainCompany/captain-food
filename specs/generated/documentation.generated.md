@@ -2637,7 +2637,7 @@ _Rejects adding a product when the catalog/category is missing, a price currency
 
 _Updates an existing product (full replace)_
 
-- **Given**: [⚡ `ProductAdded`](#event-productadded)
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded)
 - **When**: [📩 `UpdateProduct`](#command-updateproduct)
 - **Then**: [⚡ `ProductUpdated`](#event-productupdated)
 - **Verifies**: [📐 `CatalogProductManagement`](#rule-catalogproductmanagement)
@@ -2657,7 +2657,7 @@ _Rejects updating a missing product, removing its last offer, or mismatching the
 
 _Removes a product from a catalog_
 
-- **Given**: [⚡ `ProductAdded`](#event-productadded)
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded)
 - **When**: [📩 `RemoveProduct`](#command-removeproduct)
 - **Then**: [⚡ `ProductRemoved`](#event-productremoved)
 - **Verifies**: [📐 `CatalogProductManagement`](#rule-catalogproductmanagement)
@@ -2687,7 +2687,7 @@ _Rejects adding a category when the catalog/parent is missing or the ref is dupl
 
 _Updates a catalog category (full replace)_
 
-- **Given**: [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded)
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded)
 - **When**: [📩 `UpdateCatalogCategory`](#command-updatecatalogcategory)
 - **Then**: [⚡ `CatalogCategoryUpdated`](#event-catalogcategoryupdated)
 - **Verifies**: [📐 `CatalogCategoryTreeManagement`](#rule-catalogcategorytreemanagement)
@@ -2707,7 +2707,7 @@ _Rejects updating a missing category or one that would create a cycle_
 
 _Removes a category from a catalog_
 
-- **Given**: [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded)
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CatalogCategoryAdded`](#event-catalogcategoryadded)
 - **When**: [📩 `RemoveCatalogCategory`](#command-removecatalogcategory)
 - **Then**: [⚡ `CatalogCategoryRemoved`](#event-catalogcategoryremoved)
 - **Verifies**: [📐 `CatalogCategoryTreeManagement`](#rule-catalogcategorytreemanagement)
@@ -2747,7 +2747,7 @@ _Rejects adding an option list with no option or invalid selection bounds_
 
 _Updates an option list (full replace)_
 
-- **Given**: [⚡ `OptionListAdded`](#event-optionlistadded)
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `OptionListAdded`](#event-optionlistadded)
 - **When**: [📩 `UpdateOptionList`](#command-updateoptionlist)
 - **Then**: [⚡ `OptionListUpdated`](#event-optionlistupdated)
 - **Verifies**: [📐 `CatalogOptionListManagement`](#rule-catalogoptionlistmanagement)
@@ -2767,7 +2767,7 @@ _Rejects updating a missing option list or leaving it with no option_
 
 _Removes an option list from a catalog_
 
-- **Given**: [⚡ `OptionListAdded`](#event-optionlistadded)
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `OptionListAdded`](#event-optionlistadded)
 - **When**: [📩 `RemoveOptionList`](#command-removeoptionlist)
 - **Then**: [⚡ `OptionListRemoved`](#event-optionlistremoved)
 - **Verifies**: [📐 `CatalogOptionListManagement`](#rule-catalogoptionlistmanagement)
@@ -2787,7 +2787,7 @@ _Rejects removing a missing option list or one still used by an offer_
 
 _Sets the stock level of an offer_
 
-- **Given**: [⚡ `ProductAdded`](#event-productadded)
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded)
 - **When**: [📩 `UpdateOfferStock`](#command-updateofferstock)
 - **Then**: [⚡ `OfferStockUpdated`](#event-offerstockupdated)
 - **Verifies**: [📐 `OfferStockManualOrSynced`](#rule-offerstockmanualorsynced)
@@ -2807,7 +2807,7 @@ _Rejects setting stock for a missing or non-stock-tracked offer_
 
 _Records an inbound HubRise inventory sync (event reaction, no command)_
 
-- **Given**: [⚡ `ProductAdded`](#event-productadded)
+- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded)
 - **When**: [📩 `OfferStockUpdated`](#command-offerstockupdated)
 - **Then**: [⚡ `OfferStockUpdated`](#event-offerstockupdated)
 - **Verifies**: [📐 `OfferStockManualOrSynced`](#rule-offerstockmanualorsynced)
@@ -4434,7 +4434,7 @@ _Rejects adding a line when the offer is unknown, unavailable, or out of stock_
 
 _Rejects adding a line on a missing/closed/mismatched cart, with a bad option selection, or over the quantity limit_
 
-- **Given**: _(none)_
+- **Given**: [⚡ `CartStarted`](#event-cartstarted)
 - **When**: [📩 `AddCartLine`](#command-addcartline)
 - **Thrown**: [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartRestaurantMismatch`](#error-cartrestaurantmismatch), [⛔ `InvalidOptionSelection`](#error-invalidoptionselection), [⛔ `QuantityExceedsLimit`](#error-quantityexceedslimit)
 - **Verifies**: [📐 `CartRejectsUnorderableOrInvalidLine`](#rule-cartrejectsunorderableorinvalidline)
@@ -4760,7 +4760,7 @@ _The Payment records the refund denial (restaurant or admin) delivered by Refund
 
 _Checkout reads the open cart, prices it, and creates a Stripe payment intent_
 
-- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
 - **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent), [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
@@ -4770,7 +4770,7 @@ _Checkout reads the open cart, prices it, and creates a Stripe payment intent_
 
 _Checkout recomputes every line total and the order total from the live catalog; a matching client confirmation total passes_
 
-- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
 - **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
@@ -4780,7 +4780,7 @@ _Checkout recomputes every line total and the order total from the live catalog;
 
 _A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)_
 
-- **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Thrown**: [⛔ `PriceMismatch`](#error-pricemismatch)
 - **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
@@ -4790,7 +4790,7 @@ _A client confirmation total that diverges from the server-recomputed total reje
 
 _A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)_
 
-- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Thrown**: [⛔ `PriceUnresolvable`](#error-priceunresolvable)
 - **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
@@ -4800,7 +4800,7 @@ _A cart line whose price cannot be resolved from the live catalog rejects the ch
 
 _Rejects checkout when the restaurant is paused, the cart is empty, the delivery address is missing or out of area, or the payment is declined_
 
-- **Given**: [⚡ `CartStarted`](#event-cartstarted)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CartStarted`](#event-cartstarted)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Thrown**: [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartEmpty`](#error-cartempty), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PaymentDeclined`](#error-paymentdeclined)
 - **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
@@ -4810,7 +4810,7 @@ _Rejects checkout when the restaurant is paused, the cart is empty, the delivery
 
 _A production (LIVE) order against a TEST restaurant is rejected (test-mode isolation)_
 
-- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Thrown**: [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant)
 - **Verifies**: [📐 `OrderTestModeIsolation`](#rule-ordertestmodeisolation)
@@ -4820,7 +4820,7 @@ _A production (LIVE) order against a TEST restaurant is rejected (test-mode isol
 
 _On payment capture the saga materializes the order and closes the cart_
 
-- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
 - **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
@@ -4864,7 +4864,7 @@ _Requests a Stripe refund when the customer cancels the order_
 
 - **Given**: _(none)_
 - **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
-- **Then**: ∅ _no event (idempotent no-op)_
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
 <a id="test-testrefundonordercancelledbyrestaurant"></a>
@@ -4874,7 +4874,7 @@ _Requests a Stripe refund when the restaurant cancels the order_
 
 - **Given**: _(none)_
 - **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
-- **Then**: ∅ _no event (idempotent no-op)_
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
 <a id="test-testrefundonrefundrequested"></a>
@@ -4884,7 +4884,7 @@ _Validates eligibility and requests a Stripe refund on a customer refund request
 
 - **Given**: _(none)_
 - **When**: [📩 `RefundRequested`](#command-refundrequested)
-- **Then**: ∅ _no event (idempotent no-op)_
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
 <a id="test-testrefundsettledfactrecorded"></a>
@@ -5884,7 +5884,7 @@ _Sets the customer's discovery preferences (timezone + dietary tags)_
 
 _Marks a restaurant as favorite_
 
-- **Given**: [⚡ `CustomerRegistered`](#event-customerregistered)
+- **Given**: [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `RestaurantRegistered`](#event-restaurantregistered)
 - **When**: [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite)
 - **Then**: [⚡ `RestaurantFavorited`](#event-restaurantfavorited)
 - **Verifies**: [📐 `FavoritesManagement`](#rule-favoritesmanagement)
@@ -7041,7 +7041,7 @@ _An OFFLINE rider cannot jump straight to ON_DELIVERY (invalid transition)_
 
 _A ready DELIVERY order triggers creation of a delivery job_
 
-- **Given**: [⚡ `OrderPlaced`](#event-orderplaced)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `OrderPlaced`](#event-orderplaced)
 - **When**: [📩 `OrderMarkedReady`](#command-ordermarkedready)
 - **Then**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **Verifies**: [📐 `ReadyDeliveryOrderTriggersDispatch`](#rule-readydeliveryordertriggersdispatch)
@@ -7091,7 +7091,7 @@ _The 3rd partner decline exhausts the offer cap: DeliveryDispatchFailed is recor
 
 _Closes the order when the partner reports DELIVERED (inbound)_
 
-- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **When**: [📩 `DeliveryStatusUpdated`](#command-deliverystatusupdated)
 - **Then**: [⚡ `OrderDelivered`](#event-orderdelivered)
 - **Verifies**: [📐 `OrderClosedOnDeliveryCompletion`](#rule-orderclosedondeliverycompletion)
@@ -7101,7 +7101,7 @@ _Closes the order when the partner reports DELIVERED (inbound)_
 
 _Closes the order when an independent rider completes the delivery_
 
-- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup)
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup)
 - **When**: [📩 `DeliveryCompleted`](#command-deliverycompleted)
 - **Then**: [⚡ `OrderDelivered`](#event-orderdelivered)
 - **Verifies**: [📐 `OrderClosedOnDeliveryCompletion`](#rule-orderclosedondeliverycompletion)

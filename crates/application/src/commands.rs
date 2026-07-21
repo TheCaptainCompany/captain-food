@@ -278,8 +278,14 @@ pub async fn register_restaurant(
     cmd: RegisterRestaurant,
     actor: &Actor,
 ) -> Result<(), DomainError> {
-    // TODO(invariant): RestaurantAccountNotFound — when cmd.account_id is set, reject if the owning
-    //                  RestaurantAccount does not exist (needs an account read-model lookup port).
+    // The owning RestaurantAccount must exist when the location claims one — folded from ITS stream
+    // (authoritative, race-free; same cross-aggregate read pattern as place_order).
+    if let Some(account_id) = cmd.account_id {
+        let (account_events, _) = store.load(&format!("RestaurantAccount-{}", account_id.0)).await?;
+        if domain::restaurant_account::fold(&account_events).is_none() {
+            return Err(reject("RestaurantAccountNotFound", json!({ "restaurantAccountId": account_id })));
+        }
+    }
     // TODO(invariant): RefAlreadyUsed — reject when cmd.ref is already owned by another aggregate
     //                  (needs an external-reference read-model lookup port).
     if let Some(existing) = restaurants.by_slug(cmd.slug.clone()).await? {
@@ -1413,7 +1419,9 @@ pub async fn report_delivery_issue(
         delivery_job_id: cmd.delivery_job_id,
         rider_id: cmd.rider_id,
         issue: cmd.issue,
-        reported_at: Some(chrono::Utc::now().to_rfc3339()),
+        // The report TIME is envelope metadata (`domain_events.occurred_at`, ADR-0041) — never a
+        // wall-clock stamp in the business payload (which would break command→event determinism).
+        reported_at: None,
     });
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }
@@ -1450,7 +1458,8 @@ pub async fn resolve_delivery_issue(
     let event = DomainEvent::DeliveryIssueResolved(DeliveryIssueResolved {
         delivery_job_id: cmd.delivery_job_id,
         resolution: cmd.resolution,
-        resolved_at: Some(chrono::Utc::now().to_rfc3339()),
+        // Envelope-owned time (ADR-0041) — see reported_at above.
+        resolved_at: None,
     });
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }

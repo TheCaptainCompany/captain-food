@@ -127,6 +127,11 @@ pub(crate) mod test_support {
         pub fn stream(&self, stream: &str) -> Vec<DomainEvent> {
             self.streams.lock().unwrap().get(stream).cloned().unwrap_or_default()
         }
+
+        /// Every stream's current length — the generated behaviour suite's diff baseline.
+        pub fn lengths(&self) -> std::collections::HashMap<String, usize> {
+            self.streams.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.len())).collect()
+        }
     }
 
     #[async_trait::async_trait]
