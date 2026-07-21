@@ -9,6 +9,7 @@
 #[cfg(test)]
 pub mod behaviour_support;
 pub mod commands;
+pub mod deliveries;
 pub mod dispatch;
 pub mod generated;
 pub mod journal;

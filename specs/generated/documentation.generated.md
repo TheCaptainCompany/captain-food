@@ -6100,6 +6100,7 @@ _🧩 aggregate_ — One delivery of an order (bounded context: delivery). Born 
 | [⚡ `DeliveryRequested`](#event-deliveryrequested) | [⚡ `DeliveryRequested`](#event-deliveryrequested) | — |
 | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | — |
 | [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner) | — |
+| [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | — |
 | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — |
 | [📩 `AcceptDelivery`](#command-acceptdelivery) | [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned) |
 | [📩 `ConfirmPickup`](#command-confirmpickup) | [⚡ `DeliveryPickedUp`](#event-deliverypickedup) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
@@ -6626,7 +6627,7 @@ The delivery partner declined the job (inbound); the dispatcher must re-offer or
 The delivery partner reported a status change for the job (inbound): PICKED_UP, OUT_FOR_DELIVERY, DELIVERED, FAILED…
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
-- **Consumed by**: [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
+- **Consumed by**: [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
 - **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
 
 | Field | Type | Required | Description |
@@ -6856,7 +6857,7 @@ _The order is closed (OrderDelivered) when the partner reports DELIVERED or an i
 
 _A PENDING delivery job can be assigned to a delivery partner (once), unassigned to be re-offered, and partner-reported status changes apply only as valid transitions._
 
-- **Verified by**: [🧪 `TestDeliveryAssignedToPartner`](#test-testdeliveryassignedtopartner), [🧪 `TestDeliveryUnassignedFromPartner`](#test-testdeliveryunassignedfrompartner), [🧪 `TestDeliveryPartnerStatusUpdated`](#test-testdeliverypartnerstatusupdated)
+- **Verified by**: [🧪 `TestDeliveryJobRecordsPartnerStatusReport`](#test-testdeliveryjobrecordspartnerstatusreport), [🧪 `TestDeliveryAssignedToPartner`](#test-testdeliveryassignedtopartner), [🧪 `TestDeliveryUnassignedFromPartner`](#test-testdeliveryunassignedfrompartner), [🧪 `TestDeliveryPartnerStatusUpdated`](#test-testdeliverypartnerstatusupdated)
 
 <a id="rule-deliverydeclinekeepsjobpending"></a>
 #### 📐 Rule: `DeliveryDeclineKeepsJobPending`
@@ -6982,6 +6983,16 @@ _The DeliveryJob records the terminal dispatch failure delivered by DeliveryDisp
 - **When**: [📩 `DeliveryDispatchFailed`](#command-deliverydispatchfailed)
 - **Then**: [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 - **Verifies**: [📐 `DispatchRetriesAreBounded`](#rule-dispatchretriesarebounded)
+
+<a id="test-testdeliveryjobrecordspartnerstatusreport"></a>
+#### 🧪 Test: `TestDeliveryJobRecordsPartnerStatusReport`
+
+_The DeliveryJob records the inbound partner status report as a valid transition (avelo37 inbox, issue #28)_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
+- **When**: [📩 `DeliveryStatusUpdated`](#command-deliverystatusupdated)
+- **Then**: [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated)
+- **Verifies**: [📐 `DeliveryPartnerAssignmentLifecycle`](#rule-deliverypartnerassignmentlifecycle)
 
 <a id="test-testdeliverystatusupdatedbycommand"></a>
 #### 🧪 Test: `TestDeliveryStatusUpdatedByCommand`
@@ -7522,7 +7533,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 
-### 📡 Observability _(2)_
+### 📡 Observability _(3)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -7583,6 +7594,38 @@ _criticality: **high**_
 | `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`*, `business.stream_id`* |
 
 - **Metrics**: `stripe_webhook_ingest_duration_ms` _(histogram)_, `inbound_drain_lag_ms` _(histogram)_ · **Business metrics**: `inbound_events_staged_total` _(counter)_, `inbound_events_delivered_total` _(counter)_, `webhook_duplicates_total` _(counter)_
+- **Status rules**: success ⇐ spans [`webhook.verify`, `external.persist`, `acl.translate`, `inbound.persist`, `inbound.drain.deliver`, `event.store.append`]
+- **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 1%
+
+<a id="obs-avelo37-webhook-ingestion"></a>
+#### 📡 Contract: `avelo37-webhook-ingestion`
+
+_criticality: **high**_
+
+- **Workflow**: 
+- **Emits**: — · **Inbound**: [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated)
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `inbound.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `inbound_event_id` | `inbound.inbound_event_id` | ✅ | — |
+| `external_event_id` | `avelo37.event_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `webhook.verify` | `SERVER` | ✅ | — | `business.source`*, `business.signature_status`* |
+| `external.persist` | `INTERNAL` | ✅ | — | `business.external_event_id`*, `business.dedupe`* |
+| `acl.translate` | `INTERNAL` | ✅ | — | `business.event_type`* |
+| `inbound.persist` | `INTERNAL` | ✅ | — | `business.inbound_event_id`* |
+| `inbound.drain.deliver` | `CONSUMER` | ✅ | — | `business.inbound_event_id`*, `business.delivery_outcome`* |
+| `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`*, `business.stream_id`* |
+
+- **Metrics**: `avelo37_webhook_ingest_duration_ms` _(histogram)_, `inbound_drain_lag_ms` _(histogram)_ · **Business metrics**: `inbound_events_staged_total` _(counter)_, `inbound_events_delivered_total` _(counter)_, `webhook_duplicates_total` _(counter)_
 - **Status rules**: success ⇐ spans [`webhook.verify`, `external.persist`, `acl.translate`, `inbound.persist`, `inbound.drain.deliver`, `event.store.append`]
 - **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 1%
 

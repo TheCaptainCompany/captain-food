@@ -1,4 +1,4 @@
-version: 5
+version: 6
 description: >
   Captain.Food ACTOR catalog (actor-model). Its goal is to be a CODE-GENERATION SOURCE: from it a
   generator can scaffold the in-domain message handlers — aggregates with command handlers that emit
@@ -552,6 +552,9 @@ DeliveryJob:
     - message: { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
       emits: [{ $ref: 'events.yaml#/DeliveryRejectedByPartner' }]
       effect: "Inbound partner rejection (via the avelo37 ACL use case): the DeliveryJob records it; DeliveryDispatchProcess re-offers (bounded, ADR-20260720-004556)."
+    - message: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
+      emits: [{ $ref: 'events.yaml#/DeliveryStatusUpdated' }]
+      effect: "Inbound partner progress report (via the avelo37 ACL, two-layer inbox — the same event the UpdateDeliveryStatus command emits on the rider/admin path): the DeliveryJob records the reported transition (idempotent; lifecycle-guarded at append), and DeliveryDispatchProcess closes the order on DELIVERED."
     - message: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
       emits: [{ $ref: 'events.yaml#/DeliveryDispatchFailed' }]
       effect: "DeliveryDispatchProcess delivers the terminal dispatch failure (offer cap of 3 exhausted): the DeliveryJob records it (status → FAILED) so the restaurant board surfaces it for manual handling (idempotent)."

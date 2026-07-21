@@ -4,7 +4,9 @@
 //! Adapter ACLs stage adapted BUSINESS events (events.yaml vocabulary) into the `inbound_events`
 //! inbox after verifying + mirroring the raw payload in their own `external_*` table. THIS worker
 //! drains the `RECEIVED` rows and delivers each through the NORMAL write path
-//! ([`application::payments::record_inbound_payment_event`] → `Repository` → `domain_events`), with
+//! ([`application::payments::record_inbound_payment_event`] for the Stripe payment facts,
+//! [`application::deliveries::record_inbound_delivery_event`] for the Avelo37 delivery-partner
+//! facts — issue #28 — → `Repository` → `domain_events`), with
 //! an EXTERNAL actor whose `cause_id = inbound_event_id` — so every appended fact chains back to the
 //! exact inbound record that carried it. The aggregate's fold-based dedupe stays AUTHORITATIVE: an
 //! `AlreadyRecorded` outcome still marks the row `DELIVERED`.
@@ -21,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use application::journal::{CommandJournal, InboundEventRow, InboundEvents};
+use application::deliveries::record_inbound_delivery_event;
 use application::payments::{record_inbound_payment_event, RecordOutcome};
 use application::ports::{Actor, EventStore};
 use domain::generated::events::DomainEvent;
@@ -179,6 +182,18 @@ impl InboundEventsDrainWorker {
                     Err(e) => Err(e.to_string()),
                 }
             }
+            // Delivery-partner facts (issue #28): the Avelo37 ACL stages them, this route records
+            // them on the DeliveryJob stream — the saga (DeliveryDispatchProcess) reacts from the log.
+            DomainEvent::DeliveryAcceptedByPartner(_)
+            | DomainEvent::DeliveryRejectedByPartner(_)
+            | DomainEvent::DeliveryStatusUpdated(_) => {
+                match record_inbound_delivery_event(self.store.as_ref(), event, &actor).await {
+                    Ok(RecordOutcome::Recorded) => Ok(false),
+                    Ok(RecordOutcome::AlreadyRecorded) => Ok(true),
+                    Err(e) if application::ports::is_version_conflict(&e) => Ok(true),
+                    Err(e) => Err(e.to_string()),
+                }
+            }
             other => Err(format!(
                 "no delivery route for inbound event type '{}' (staged as {})",
                 event_tag(other),
@@ -314,6 +329,84 @@ mod tests {
         assert_eq!(actors[0].cause_id, Some(row.inbound_event_id));
         assert_eq!(actors[0].correlation_id, row.correlation_id);
         // …and the inbox row is DELIVERED (no longer pending).
+        assert!(inbox.pending(10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn drains_a_staged_delivery_fact_onto_the_delivery_job_stream() {
+        use domain::generated::entities::{Address, Courier};
+        use domain::generated::events::{DeliveryAcceptedByPartner, DeliveryRequested};
+        use domain::generated::scalars::{
+            AddressLine, CityName, CountryCode, DeliveryJobId, ExternalReference, PhoneNumber,
+            PostalCode,
+        };
+
+        let (inbox, journal, store) =
+            (Arc::new(MemInboundEvents::default()), Arc::new(MemCommandJournal::default()), Arc::new(MemStore::default()));
+        let job = DeliveryJobId(uuid::Uuid::from_u128(7));
+        let stream = format!("DeliveryJob-{}", job.0);
+        let address = Address {
+            line1: AddressLine("1 rue Nationale".into()),
+            line2: None,
+            postal_code: PostalCode("37000".into()),
+            city: CityName("Tours".into()),
+            country: CountryCode("FR".into()),
+        };
+        // The job exists (saga-delivered birth)…
+        store
+            .streams
+            .lock()
+            .unwrap()
+            .entry(stream.clone())
+            .or_default()
+            .push((
+                DomainEvent::DeliveryRequested(DeliveryRequested {
+                    mode: None,
+                    delivery_job_id: job,
+                    order_id: OrderId(uuid::Uuid::from_u128(1)),
+                    restaurant_id: RestaurantId(uuid::Uuid::from_u128(2)),
+                    pickup: address.clone(),
+                    dropoff: address,
+                    provider: None,
+                }),
+                Actor { user_id: uuid::Uuid::nil(), user_type: 0, correlation_id: uuid::Uuid::nil(), cause_id: None },
+            ));
+        // …and the Avelo37 ACL staged the partner acceptance.
+        let event = DomainEvent::DeliveryAcceptedByPartner(DeliveryAcceptedByPartner {
+            delivery_job_id: job,
+            partner_ref: ExternalReference("avelo-77".into()),
+            courier: Courier {
+                display_name: "Léa".into(),
+                phone: Some(PhoneNumber("+33611223344".into())),
+                rider_id: None,
+            },
+            estimated_pickup_at: None,
+            estimated_dropoff_at: None,
+        });
+        let row = InboundEventRow {
+            inbound_event_id: uuid::Uuid::new_v4(),
+            source: "avelo37".into(),
+            external_id: "evt_av_1".into(),
+            correlation_id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"evt_av_1"),
+            event_type: "DeliveryAcceptedByPartner".into(),
+            payload: serde_json::to_value(&event).unwrap(),
+            status: InboundEventStatus::RECEIVED,
+            error: None,
+            received_at: Utc::now(),
+            delivered_at: None,
+        };
+        inbox.stage(&row).await.unwrap();
+
+        let w = worker(inbox.clone(), journal, store.clone());
+        let s = w.run_once().await.unwrap();
+        assert_eq!(s.delivered, 1);
+        assert_eq!(s.failed, 0);
+        // The fact landed on the DeliveryJob stream with the inbound causality chain.
+        let events = store.stream(&stream);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[1], DomainEvent::DeliveryAcceptedByPartner(_)));
+        let actors = store.actors(&stream);
+        assert_eq!(actors[1].cause_id, Some(row.inbound_event_id));
         assert!(inbox.pending(10).await.unwrap().is_empty());
     }
 

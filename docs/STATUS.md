@@ -1,7 +1,34 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (10:30 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (10:45 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #28: Avelo37 delivery-partner adapter COMPLETE (ADR-20260721-104233 —
+> realizes the ADR-20260720-015400 "delivery adopts the inbox" follow-up, the outbound half of the
+> #26 `delivery` service, and ADR-20260720-004556's bounded re-offer).** The `DeliveryPartner`
+> capability is no longer a no-op: automated dispatch is end-to-end. (1) **New crate**
+> `crates/adapters/avelo37` (ADR-20260718-213352 pattern): `acl.rs` (Avelo37-Signature timestamped
+> HMAC verify, ±300s replay, fail-closed; partner→domain mapping `delivery.accepted/declined/
+> status_updated` → `DeliveryAcceptedByPartner`/`RejectedByPartner`/`StatusUpdated` + partner status
+> vocabulary → `DeliveryStatus`; the two-layer-inbox `Avelo37WebhookIngestor`), `raw.rs`
+> (`PgRawAvelo37Events`), `outbound.rs` (`Avelo37DeliveryGateway` — real `DeliveryService::offer_job`,
+> `from_env` gate on `AVELO37_API_KEY`, `job_reference` read-back key), `http.rs`
+> (`POST /adapters/avelo37/webhooks`) + standalone `main.rs`. (2) **Inbound two-layer inbox**: new
+> `external_avelo37_events` staging table (integration_staging.yaml v4, 90-day processed retention),
+> `inbound_events` source `'avelo37'`, migration `20260721130000` (+ `sweep_retention()` covers the
+> new mirror; `REQUIRED_SCHEMA_VERSION` bumped). (3) **Drain routing extended beyond Payment**:
+> `application::deliveries::record_inbound_delivery_event` (the payments.rs sibling) records the three
+> facts onto `DeliveryJob-<id>` — fold-based dedupe (acceptance by `partnerRef`, status by current
+> status), **lifecycle-guarded** append for the machine-bearing facts (an illegal report is kept
+> FAILED/inspectable, never appended), rejections always recorded (journal unique = their dedupe →
+> bounded re-offer counter advances), orphans recorded (saga guard flags them). (4) **Outbound
+> wiring**: composition root resolves the `delivery` binding to `Avelo37DeliveryGateway` when
+> `AVELO37_API_KEY` is set, else the logged `NoopDeliveryService` — unconfigured deployments (V0
+> Tours) unchanged. (5) **Completeness (ADR-0032)**: `avelo37-webhook-ingestion` observability
+> contract (mirrors Stripe), `TestDeliveryJobRecordsPartnerStatusReport` closes the new event message
+> gate. `make rust` green: workspace builds, tests pass (13 adapter + recorder + drain), validate
+> 0 errors, no drift. Follow-ups: real Avelo37 wire reconciliation on go-live; multi-partner ranking
+> (#57 Uber Direct, #58 CoopCycle) is the named extension point.
 
 > ✅ **2026-07-21 — #24: the behaviour-test suite is GENERATED from tests.yaml
 > (ADR-20260721-101552, codegen-roadmap item 2).** New `codegen-rs` emitter

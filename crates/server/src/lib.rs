@@ -49,6 +49,7 @@ use infrastructure::{
     ProcessManagerStatus, ProjectionStatus, ProjectionWorker, SireneSyncWorker,
     UnverifiedGbpOrderLinkProbe,
 };
+use avelo37_adapter::Avelo37WebhookIngestor;
 use stripe_adapter::StripeWebhookIngestor;
 use shared_types::HealthDto;
 
@@ -83,7 +84,7 @@ pub fn wire() -> HealthDto {
 /// The gate is `>=` (never `==`) so an older build still runs against a newer DB (rollback-by-redeploy).
 /// `20260720030000` = the command/inbound journals (ADR-20260720-015300/-015400): every mutation now
 /// writes `command_journal` at acceptance, so the app cannot serve writes without it.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721120000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721130000;
 
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
@@ -137,6 +138,7 @@ pub fn router() -> Router {
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
     let mut sirene_worker: Option<Arc<SireneSyncWorker>> = None;
     let mut stripe_ingestor: Option<Arc<StripeWebhookIngestor>> = None;
+    let mut avelo37_ingestor: Option<Arc<Avelo37WebhookIngestor>> = None;
     let mut hubrise_state = hubrise_adapter::HubRiseWebhookState::default();
     let mut inbound_drain: Option<Arc<infrastructure::InboundEventsDrainWorker>> = None;
 
@@ -256,12 +258,26 @@ pub fn router() -> Router {
                 // specs/processmanager.yaml, ADR-20260719-193500) — same pattern as the projection
                 // worker: RUN_PROCESS_MANAGERS=false hands it to a dedicated worker. The runner
                 // builds its state-table stores and read models over the pool; the `delivery`
-                // service resolves through the GENERATED topology binding (services.yaml, issue #26)
-                // with the no-op stand-in as the in-process implementation until the avelo37 ACL
-                // lands (`with_partner`).
+                // service resolves through the GENERATED topology binding (services.yaml, issue #26):
+                // the composition root supplies the in-process constructor — the real outbound
+                // Avelo37 gateway when AVELO37_API_KEY is configured (issue #28), otherwise the
+                // logged no-op stand-in (jobs stay open to independent riders; the bounded re-offer
+                // run row still terminates ACCEPTED/FAILED). The partner's answers always arrive
+                // asynchronously through the webhook inbox below, never this outbound call.
                 if std::env::var("RUN_PROCESS_MANAGERS").map(|v| v != "false").unwrap_or(true) {
                     let partner = infrastructure::generated::service_bindings::delivery_service(|| {
-                        Arc::new(application::ports::NoopDeliveryService)
+                        match avelo37_adapter::Avelo37DeliveryGateway::from_env() {
+                            Some(gateway) => {
+                                println!("delivery service: Avelo37DeliveryGateway (AVELO37_API_KEY set)");
+                                Arc::new(gateway)
+                            }
+                            None => {
+                                println!(
+                                    "delivery service: NoopDeliveryService (AVELO37_API_KEY unset — jobs stay open to independent riders)"
+                                );
+                                Arc::new(application::ports::NoopDeliveryService)
+                            }
+                        }
                     })
                     .expect("delivery service binding (services.yaml)");
                     let runner = ProcessManagerRunner::new(pool.clone()).with_partner(partner);
@@ -302,6 +318,23 @@ pub fn router() -> Router {
                 stripe_ingestor = Some(Arc::new(
                     StripeWebhookIngestor::new(
                         Arc::new(stripe_adapter::PgRawStripeEvents::new(pool.clone())),
+                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
+                    )
+                    .with_nudge(Arc::new(move || {
+                        let w = nudge_worker.clone();
+                        tokio::spawn(async move { w.run_once().await });
+                    })),
+                ));
+
+                // Avelo37 delivery-partner webhook ingestor (issue #28, same two-layer inbox as
+                // Stripe): verify → mirror the verbatim delivery into external_avelo37_events → ACL
+                // → stage the adapted DeliveryAcceptedByPartner/RejectedByPartner/StatusUpdated fact
+                // in inbound_events → ACK, nudging the drain worker (which now routes delivery facts
+                // onto the DeliveryJob stream). Mounted at `POST /adapters/avelo37/webhooks` below.
+                let nudge_worker = drain.clone();
+                avelo37_ingestor = Some(Arc::new(
+                    Avelo37WebhookIngestor::new(
+                        Arc::new(avelo37_adapter::PgRawAvelo37Events::new(pool.clone())),
                         Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
                     )
                     .with_nudge(Arc::new(move || {
@@ -392,8 +425,10 @@ pub fn router() -> Router {
         .merge(graphql::routes::inbound_internal_routes(inbound_drain))
         // Partner webhook adapters (ADR-20260718-213352): self-contained crates under crates/adapters/*,
         // each mountable here (monolith) or deployable as its own web service. `POST /adapters/stripe/webhooks`
-        // (signature-verified inbound payment facts) and `POST /adapters/hubrise/webhooks` (HMAC-verified ingress).
+        // (signature-verified inbound payment facts), `POST /adapters/avelo37/webhooks` (signature-verified
+        // inbound delivery-partner facts, issue #28) and `POST /adapters/hubrise/webhooks` (HMAC-verified ingress).
         .merge(stripe_adapter::routes(stripe_ingestor))
+        .merge(avelo37_adapter::routes(avelo37_ingestor))
         .merge(hubrise_adapter::routes(hubrise_state))
         // The DERIVED `/services/<service>/<op>` surface (issue #26): emitted per the spec's
         // `expose` flags — empty while every service declares `expose: false` (V0).

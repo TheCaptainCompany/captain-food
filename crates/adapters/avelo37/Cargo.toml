@@ -1,0 +1,32 @@
+[package]
+name = "avelo37-adapter"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+publish = false
+description = "Avelo37 delivery-partner adapter (ADR-20260718-213352, issue #28): a self-contained vertical slice — the ACL (Avelo37-Signature verification + partner-event mapping + idempotent two-layer-inbox ingestor, ADR-20260720-015400) and its HTTP shell (POST /adapters/avelo37/webhooks), plus the OUTBOUND DeliveryService client (offer_job). Exposes `routes()` for the monolith to mount, and a standalone `avelo37-webhook` binary so it can deploy as its own web service, isolated from other partners."
+
+[dependencies]
+# Inner layers only (dependency rule): the ACL maps Avelo37 shapes onto domain events via the
+# application inbox port — it does NOT depend on `infrastructure` for its logic.
+application = { path = "../../application" }
+domain = { path = "../../domain" }
+# The standalone binary (main.rs) constructs concrete Postgres adapters.
+infrastructure = { path = "../../infrastructure" }
+
+axum = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v5", "v7"] }
+chrono = { workspace = true }
+# Signature verification (same versions as the workspace's other HMAC users).
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+# The outbound DeliveryService impl is an async trait; same crate the application port uses.
+async-trait = { workspace = true }
+# Outbound Avelo37 API client (offer delivery jobs). Same crate + features as the Stripe/HubRise
+# outbound clients: default-features off + native-tls to match the workspace TLS choice.
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }

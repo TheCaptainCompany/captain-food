@@ -14,6 +14,7 @@ members = [
     "crates/infrastructure",   # adapters implementing ports — depends on application, domain, sirene_ingest (wire types)
     "crates/adapters/stripe",  # Stripe partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
     "crates/adapters/hubrise", # HubRise partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
+    "crates/adapters/avelo37",  # Avelo37 delivery-partner adapter (ADR-20260718-213352, issue #28) — ACL + webhook shell + outbound + standalone bin
     "crates/shared_types",     # serde DTOs (+ UniFFI later)
     "crates/core",             # Crux core over domain — depends on domain, shared_types
     "crates/server",           # Axum BFF — depends on application, infrastructure, shared_types

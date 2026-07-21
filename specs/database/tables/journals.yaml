@@ -1,4 +1,4 @@
-version: 2
+version: 3
 description: >
   WRITE-PATH JOURNALS (ADR-20260720-015300 / -015400) — a fifth table category alongside the event
   store, the projections, the seeded referential tables and the raw integration staging: durable
@@ -56,7 +56,7 @@ inbound_events:
       FAILED rows are kept until resolved and RECEIVED rows are pending work — neither is ever swept.
   columns:
     inbound_event_id: { type: uuid, pk: true, note: "UUIDv7 minted at staging — the causality link into domain_events.cause_id." }
-    source:           { type: text, index: true, note: "Owning adapter: 'stripe' (others as they adopt the inbox, ADR-20260720-015400)." }
+    source:           { type: text, index: true, note: "Owning adapter: 'stripe', 'avelo37' (others as they adopt the inbox, ADR-20260720-015400)." }
     external_id:      { type: text, note: "Provider event id (e.g. Stripe 'evt_…'); UNIQUE with source (constraints below)." }
     correlation_id:   { type: { $ref: 'scalars.yaml#/CorrelationId' }, index: true, note: "UUIDv5 of the provider event id — the established ACL convention; matches domain_events.correlation_id on delivery." }
     event_type:       { type: text, index: true, note: "events.yaml key, e.g. 'PaymentCaptured'." }

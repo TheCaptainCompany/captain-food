@@ -16,6 +16,7 @@ shared_types = { path = "../shared_types" }
 # Partner webhook adapters (ADR-20260718-213352) — self-contained crates the monolith mounts via
 # `<crate>::routes(...)`; each also ships a standalone binary for independent deployment.
 stripe-adapter = { path = "../adapters/stripe" }
+avelo37-adapter = { path = "../adapters/avelo37" }
 hubrise-adapter = { path = "../adapters/hubrise" }
 
 # Generated GraphQL type layer: wrapper scalar inners (uuid/chrono) + serde derives.

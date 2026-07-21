@@ -1,20 +1,24 @@
--- Retention sweep for the write-path journals and adapter webhook mirrors
--- (ADR-20260721-025159; issue #18). The ONE place the retention windows live — schedule it from
--- the in-process RetentionSweepWorker (default) or a pg_cron job; either way the policy is here.
+-- Avelo37 delivery-partner webhook mirror (issue #28, ADR-20260720-015400 follow-up).
+-- Copied from specs/generated/schema.generated.sql (generated from
+-- specs/database/tables/integration_staging.yaml v4): the adapter-owned raw staging table for
+-- verified Avelo37 webhook deliveries — verify → mirror verbatim → translate into
+-- inbound_events → drain through the normal write path onto the DeliveryJob stream.
 --
--- Scope, per table (aged rows only — the guard columns are the tables' own high-water marks):
---   command_journal            terminal rows (SUCCEEDED/REJECTED/FAILED)  90 days from completed_at
---   inbound_events             DELIVERED rows                             30 days from delivered_at
---   external_stripe_events     processed rows (processed_at set)          90 days from processed_at
---   external_hubrise_callbacks processed rows (processed_at set)          90 days from processed_at
---   external_avelo37_events    processed rows (processed_at set)          90 days from processed_at
---
--- NEVER swept, at any age: domain_events / domain_stream (the forever log — deliberately not
--- referenced here; its only trimming is the opt-in per-stream $maxAge/$maxCount machinery),
--- command_journal RECEIVED rows (the stale-RECEIVED sweep marks crashed runs FAILED first),
--- inbound_events FAILED rows (kept until resolved) and RECEIVED rows (pending work),
--- unprocessed mirror rows (processed_at IS NULL), and external_sirene_restaurants (a full
--- mirror — detect-by-absence needs the complete row set, ADR-0045).
+-- Also replaces sweep_retention() (specs/database/functions/sweep_retention.sql,
+-- ADR-20260721-025159) so the new mirror joins the 90-day processed-rows sweep.
+
+CREATE TABLE external_avelo37_events (
+  avelo37_event_id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL,
+  processed_at TIMESTAMPTZ NULL
+);
+CREATE INDEX ON external_avelo37_events (event_type);
+CREATE INDEX ON external_avelo37_events (received_at);
+CREATE INDEX ON external_avelo37_events (processed_at);
+
+DROP FUNCTION IF EXISTS sweep_retention();
 CREATE FUNCTION sweep_retention()
 RETURNS TABLE (swept_table TEXT, deleted BIGINT)
 LANGUAGE plpgsql
