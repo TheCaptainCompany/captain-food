@@ -90,7 +90,20 @@ Where Captain.Food is more precise than HubRise, we **keep our model**:
 
 ---
 
-## 5. Import path (events)
+## 5. Connect flow (OAuth) — provisioning & token
+
+Connecting a HubRise **Account** (`GET /adapters/hubrise/connect` → OAuth → callback; issue #20,
+ADR-20260721-100601) provisions the domain side with the ACL's derived UUIDv5 identities —
+`RegisterRestaurantAccount` (Account), `RegisterRestaurant` per Location (`listingStatus:
+PASSIVE_PARTNER`, `ref` = location id), `CreateCatalog` per catalog — then stores the
+**account-scoped, non-expiring** access token in the adapter-owned
+[`hubrise_connections`](../database/tables/integration_connections.yaml) table keyed by
+`RestaurantAccount` (never in `domain_events`, never exposed through api.yaml), and runs an initial
+`ImportCatalog`. Callbacks resolve their pull token via the connection's location snapshot; a
+re-connect refreshes token, locations and catalog content idempotently. Runtime process:
+[docs/integrations/hubrise-process.md §0](../../docs/integrations/hubrise-process.md).
+
+## 6. Import path (events)
 
 Two modes, both going through the ACL:
 

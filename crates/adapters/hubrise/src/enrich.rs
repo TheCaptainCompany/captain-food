@@ -65,18 +65,20 @@ use domain::generated::scalars::{
     CatalogCategoryName, CatalogId, CatalogItemAvailability, CommandChannel, CommandJournalStatus,
     CurrencyCode, ExternalReference, MoneyCents,
     OfferId, OfferName, OptionId, OptionListId, OptionListName, OptionName, ProductCategoryId,
-    ProductDescription, ProductId, ProductName, Quantity, RestaurantId, Tag, TaxRatePercent,
+    ProductDescription, ProductId, ProductName, Quantity, RestaurantAccountId, RestaurantId, Tag,
+    TaxRatePercent,
 };
 
 use crate::acl::HubRiseCallback;
-use crate::api::HubRiseApiClient;
+use crate::api::HubRiseApi;
+use crate::connections::HubRiseConnections;
 
 /// The `source` recorded on every `CatalogImported` from this ACL.
 pub const HUBRISE_SOURCE: &str = "hubrise";
 
 /// `UserType::EXTERNAL` ordinal for the event envelope (enums stored as declaration-order ints,
 /// ADR-0037/0041) — HubRise facts are recorded as the fixed external-system principal, like Stripe's.
-const EXTERNAL_USER_TYPE: i32 = 6;
+pub(crate) const EXTERNAL_USER_TYPE: i32 = 6;
 
 // ================================================================================================
 // Deterministic identity (ADR-0041) — UUIDv5 of the HubRise identifier, like the SIRENE ACL's
@@ -90,8 +92,14 @@ fn hubrise_namespace() -> uuid::Uuid {
 
 /// `UUIDv5(namespace, "<kind>:<seed>")` — the `kind` prefix keeps two entity types that happen to share a
 /// HubRise id string from colliding on the same domain uuid.
-fn derive(kind: &str, seed: &str) -> uuid::Uuid {
+pub(crate) fn derive(kind: &str, seed: &str) -> uuid::Uuid {
     uuid::Uuid::new_v5(&hubrise_namespace(), format!("{kind}:{seed}").as_bytes())
+}
+
+/// Our `RestaurantAccountId` for a HubRise account id — the identity the connect flow provisions
+/// (`RegisterRestaurantAccount`) and keys the `hubrise_connections` token row with.
+pub fn derive_restaurant_account_id(hubrise_account_id: &str) -> RestaurantAccountId {
+    RestaurantAccountId(derive("account", hubrise_account_id))
 }
 
 /// Our `CatalogId` for a HubRise catalog id. The HubRise **connect flow** must `CreateCatalog` with THIS
@@ -469,21 +477,38 @@ pub fn map_inventory(
 // Puller — the outbound HubRise API, behind a trait so the enricher is testable without HTTP
 // ================================================================================================
 
-/// Pulls the changed resource from HubRise after a (stateless) callback. Implemented by the real
-/// [`HubRiseApiClient`]; faked in tests.
+/// Pulls the changed resource from HubRise after a (stateless) callback, with the CONNECTED ACCOUNT's
+/// token (issue #20: one token per account, resolved per callback — no global token). Implemented by
+/// the real [`HubRiseApi`]; faked in tests.
 #[async_trait::async_trait]
 pub trait HubRisePuller: Send + Sync {
-    async fn pull_catalog(&self, hubrise_catalog_id: &str) -> Result<serde_json::Value, String>;
-    async fn pull_inventory(&self, hubrise_location_id: &str) -> Result<serde_json::Value, String>;
+    async fn pull_catalog(
+        &self,
+        token: &str,
+        hubrise_catalog_id: &str,
+    ) -> Result<serde_json::Value, String>;
+    async fn pull_inventory(
+        &self,
+        token: &str,
+        hubrise_location_id: &str,
+    ) -> Result<serde_json::Value, String>;
 }
 
 #[async_trait::async_trait]
-impl HubRisePuller for HubRiseApiClient {
-    async fn pull_catalog(&self, hubrise_catalog_id: &str) -> Result<serde_json::Value, String> {
-        self.get_catalog(hubrise_catalog_id).await.map_err(|e| e.to_string())
+impl HubRisePuller for HubRiseApi {
+    async fn pull_catalog(
+        &self,
+        token: &str,
+        hubrise_catalog_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        self.get_catalog(token, hubrise_catalog_id).await.map_err(|e| e.to_string())
     }
-    async fn pull_inventory(&self, hubrise_location_id: &str) -> Result<serde_json::Value, String> {
-        self.get_inventory(hubrise_location_id).await.map_err(|e| e.to_string())
+    async fn pull_inventory(
+        &self,
+        token: &str,
+        hubrise_location_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        self.get_inventory(token, hubrise_location_id).await.map_err(|e| e.to_string())
     }
 }
 
@@ -517,16 +542,30 @@ pub fn hubrise_system_user_id() -> uuid::Uuid {
 /// Records HubRise-driven catalog/inventory writes through the WORKER-channel journaling dispatch and
 /// the ordinary command handlers. Generic over the [`HubRisePuller`] so the dispatch (import, per-SKU
 /// stock, `OfferNotFound` skip, journal dedup) is unit-testable in memory; `dyn EventStore` /
-/// `dyn CommandJournal` keep it off the concrete Postgres adapters.
+/// `dyn CommandJournal` keep it off the concrete Postgres adapters. The pull token is resolved PER
+/// CALLBACK from the connected account (`hubrise_connections`, issue #20) — the former global
+/// `HUBRISE_ACCESS_TOKEN` fallback is retired.
 pub struct HubRiseEnricher<P: HubRisePuller> {
     store: Arc<dyn EventStore>,
     journal: Arc<dyn CommandJournal>,
+    connections: Arc<dyn HubRiseConnections>,
     puller: P,
 }
 
 impl<P: HubRisePuller> HubRiseEnricher<P> {
-    pub fn new(store: Arc<dyn EventStore>, journal: Arc<dyn CommandJournal>, puller: P) -> Self {
-        Self { store, journal, puller }
+    pub fn new(
+        store: Arc<dyn EventStore>,
+        journal: Arc<dyn CommandJournal>,
+        connections: Arc<dyn HubRiseConnections>,
+        puller: P,
+    ) -> Self {
+        Self { store, journal, connections, puller }
+    }
+
+    /// Resolve the connected account's token for a callback's location — `None` = the location belongs
+    /// to no connected account (the connect flow hasn't run / hasn't seen it): a definitive skip.
+    async fn token_for(&self, location_id: &str) -> Result<Option<String>, DomainError> {
+        self.connections.token_for_location(location_id).await
     }
 
     /// The WORKER-channel journal entry for one command a callback caused (#15): `message_id` =
@@ -598,7 +637,14 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
                 reason: "catalog callback has no location_id (restaurant unknown)".to_string(),
             });
         };
-        let json = match self.puller.pull_catalog(catalog_id).await {
+        let Some(token) = self.token_for(location_id).await? else {
+            return Ok(EnrichOutcome::Skipped {
+                reason: format!(
+                    "no HubRise connection for location {location_id} (connect flow not run)"
+                ),
+            });
+        };
+        let json = match self.puller.pull_catalog(&token, catalog_id).await {
             Ok(j) => j,
             Err(reason) => return Ok(EnrichOutcome::PullFailed { reason }),
         };
@@ -656,7 +702,14 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
                 reason: "inventory callback has no catalog_id".to_string(),
             });
         };
-        let json = match self.puller.pull_inventory(location_id).await {
+        let Some(token) = self.token_for(location_id).await? else {
+            return Ok(EnrichOutcome::Skipped {
+                reason: format!(
+                    "no HubRise connection for location {location_id} (connect flow not run)"
+                ),
+            });
+        };
+        let json = match self.puller.pull_inventory(&token, location_id).await {
             Ok(j) => j,
             Err(reason) => return Ok(EnrichOutcome::PullFailed { reason }),
         };
@@ -726,12 +779,31 @@ mod tests {
     use domain::generated::events::{CatalogCreated, DomainEvent};
     use domain::generated::scalars::CatalogName;
 
-    fn enricher_with(
+    /// Enricher over in-memory stores, with `loc_1` CONNECTED (token `tok_1`) — the connect flow's
+    /// post-state, which enrichment now presumes (issue #20).
+    async fn enricher_with(
         store: Arc<InMemoryEventStore>,
         puller: FakePuller,
     ) -> (HubRiseEnricher<FakePuller>, Arc<MemCommandJournal>) {
         let journal = Arc::new(MemCommandJournal::default());
-        (HubRiseEnricher::new(store, journal.clone(), puller), journal)
+        let connections = Arc::new(crate::connections::mem::MemHubRiseConnections::default());
+        connections
+            .upsert(
+                &crate::connections::HubRiseConnection {
+                    restaurant_account_id: derive_restaurant_account_id("acc_1").0,
+                    hubrise_account_id: "acc_1".into(),
+                    access_token: "tok_1".into(),
+                    account_name: Some("Bella Pizza".into()),
+                },
+                &[crate::connections::ConnectedLocation {
+                    hubrise_location_id: "loc_1".into(),
+                    restaurant_account_id: derive_restaurant_account_id("acc_1").0,
+                    restaurant_id: derive_restaurant_id("loc_1").0,
+                }],
+            )
+            .await
+            .unwrap();
+        (HubRiseEnricher::new(store, journal.clone(), connections, puller), journal)
     }
 
     // ----- boundary value parsing -----
@@ -891,10 +963,21 @@ mod tests {
 
     #[async_trait::async_trait]
     impl HubRisePuller for FakePuller {
-        async fn pull_catalog(&self, _id: &str) -> Result<serde_json::Value, String> {
+        async fn pull_catalog(
+            &self,
+            token: &str,
+            _id: &str,
+        ) -> Result<serde_json::Value, String> {
+            // Every pull must run under the CONNECTED account's token (issue #20).
+            assert_eq!(token, "tok_1", "pull must use the connection's token");
             Ok(self.catalog.clone())
         }
-        async fn pull_inventory(&self, _id: &str) -> Result<serde_json::Value, String> {
+        async fn pull_inventory(
+            &self,
+            token: &str,
+            _id: &str,
+        ) -> Result<serde_json::Value, String> {
+            assert_eq!(token, "tok_1", "pull must use the connection's token");
             Ok(self.inventory.clone())
         }
     }
@@ -942,7 +1025,7 @@ mod tests {
                 catalog: sample_catalog_json(),
                 inventory: serde_json::json!([{ "sku_ref": "SKU-CHEESE", "stock": 7 }]),
             },
-        );
+        ).await;
 
         // 1) Catalog callback → journaled ImportCatalog → CatalogImported appended.
         let out = enricher.enrich(&callback("catalog")).await.unwrap();
@@ -995,7 +1078,7 @@ mod tests {
                 catalog: serde_json::json!({}),
                 inventory: serde_json::json!([{ "sku_ref": "SKU-UNKNOWN", "stock": 3 }]),
             },
-        );
+        ).await;
         let out = enricher.enrich(&callback("inventory")).await.unwrap();
         assert_eq!(out, EnrichOutcome::InventoryApplied { applied: 0, skipped: 1 });
 
@@ -1016,7 +1099,7 @@ mod tests {
         let (enricher, journal) = enricher_with(
             store.clone(),
             FakePuller { catalog: sample_catalog_json(), inventory: serde_json::json!([]) },
-        );
+        ).await;
         let out = enricher.enrich(&callback("catalog")).await.unwrap();
         assert!(matches!(out, EnrichOutcome::Skipped { reason } if reason.contains("CatalogNotFound")));
         let row = journal
@@ -1028,12 +1111,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn callback_for_an_unconnected_location_is_skipped_without_pulling() {
+        let store = Arc::new(InMemoryEventStore::default());
+        let (enricher, journal) = enricher_with(
+            store.clone(),
+            FakePuller { catalog: serde_json::json!({}), inventory: serde_json::json!([]) },
+        )
+        .await;
+        // loc_2 is not in the connection snapshot (only loc_1 is connected): no token to pull with —
+        // a definitive skip, and NOTHING journaled (the pull never happens; FakePuller would panic
+        // on a wrong token anyway).
+        let cb: HubRiseCallback = serde_json::from_value(serde_json::json!({
+            "id": "cb_9", "resource_type": "inventory", "event_type": "update",
+            "location_id": "loc_2", "catalog_id": "cat_1"
+        }))
+        .unwrap();
+        let out = enricher.enrich(&cb).await.unwrap();
+        assert!(
+            matches!(&out, EnrichOutcome::Skipped { reason } if reason.contains("no HubRise connection")),
+            "got {out:?}"
+        );
+        assert!(journal.by_message(derive("command", "cb_9:ImportCatalog")).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn unenriched_resource_type_is_ignored() {
         let store = Arc::new(InMemoryEventStore::default());
         let (enricher, _journal) = enricher_with(
             store.clone(),
             FakePuller { catalog: serde_json::json!({}), inventory: serde_json::json!([]) },
-        );
+        ).await;
         let out = enricher.enrich(&callback("order")).await.unwrap();
         assert_eq!(out, EnrichOutcome::Ignored { resource_type: "order".into() });
     }
@@ -1048,7 +1155,7 @@ mod tests {
                 catalog: sample_catalog_json(),
                 inventory: serde_json::json!([{ "sku_ref": "SKU-CHEESE", "stock": 7 }]),
             },
-        );
+        ).await;
         enricher.enrich(&callback("catalog")).await.unwrap();
         enricher.enrich(&callback("inventory")).await.unwrap();
         let stream = format!("Catalog-{}", derive_catalog_id("cat_1").0);

@@ -83,7 +83,7 @@ pub fn wire() -> HealthDto {
 /// The gate is `>=` (never `==`) so an older build still runs against a newer DB (rollback-by-redeploy).
 /// `20260720030000` = the command/inbound journals (ADR-20260720-015300/-015400): every mutation now
 /// writes `command_journal` at acceptance, so the app cannot serve writes without it.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721025159;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721120000;
 
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
@@ -157,6 +157,8 @@ pub fn router() -> Router {
                 // Read-model repositories injected into GraphQL resolvers (ADR-0035 composition root).
                 let restaurants: Arc<dyn RestaurantReadRepository> =
                     Arc::new(PgRestaurantRepository::new(pool.clone()));
+                // The HubRise connect flow (wired below) shares the restaurant read model.
+                let hubrise_restaurants = restaurants.clone();
                 let prospection: Arc<dyn ProspectionReadRepository> =
                     Arc::new(PgProspectionRepository::new(pool.clone()));
                 let pricing_policy: Arc<dyn PricingPolicyReadRepository> =
@@ -308,25 +310,39 @@ pub fn router() -> Router {
                     })),
                 ));
 
-                // HubRise webhook wiring: the raw mirror (external_hubrise_callbacks) needs only the
-                // database; the domain enrichment (ADR-20260718-145856: OAuth API pull → ACL map →
-                // `ImportCatalog` / per-SKU stock update) additionally needs `HUBRISE_ACCESS_TOKEN` —
-                // otherwise the endpoint stays mirror+verify only (callbacks ACK as pending).
+                // HubRise wiring (issue #20): the raw mirror (external_hubrise_callbacks), the
+                // enrichment, AND the connect flow all need only the database — the pull token is
+                // resolved per connected account from `hubrise_connections` (the global
+                // `HUBRISE_ACCESS_TOKEN` fallback is retired). The connect routes additionally
+                // require the app credentials (HUBRISE_CLIENT_ID + HUBRISE_WEBHOOK_SECRET +
+                // HUBRISE_CONNECT_REDIRECT_URL), checked per request fail-closed.
                 hubrise_state.raw =
                     Some(Arc::new(hubrise_adapter::PgRawHubRiseCallbacks::new(pool.clone())));
-                match hubrise_adapter::api::HubRiseApiClient::from_env() {
-                    Ok(api) => {
-                        // Enricher sends journal on the WORKER channel (ADR-20260720-015300, #15):
-                        // callback redeliveries dedupe on command_journal instead of double-applying.
-                        hubrise_state.enricher = Some(Arc::new(hubrise_adapter::HubRiseEnricher::new(
-                            Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
-                            Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
-                            api,
-                        )));
-                    }
-                    Err(_) => eprintln!(
-                        "HUBRISE_ACCESS_TOKEN unset — /adapters/hubrise/webhooks verifies callbacks but does not enrich"
-                    ),
+                {
+                    let hubrise_store =
+                        Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone()));
+                    let hubrise_journal = Arc::new(infrastructure::PgCommandJournal::new(pool.clone()));
+                    let hubrise_connections =
+                        Arc::new(hubrise_adapter::PgHubRiseConnections::new(pool.clone()));
+                    // Enricher/connect sends journal on the WORKER channel (ADR-20260720-015300, #15):
+                    // callback redeliveries dedupe on command_journal instead of double-applying.
+                    hubrise_state.enricher = Some(Arc::new(hubrise_adapter::HubRiseEnricher::new(
+                        hubrise_store.clone(),
+                        hubrise_journal.clone(),
+                        hubrise_connections.clone(),
+                        hubrise_adapter::api::HubRiseApi::from_env(),
+                    )));
+                    hubrise_state.connect = Some(Arc::new(hubrise_adapter::HubRiseConnectFlow::new(
+                        hubrise_store,
+                        hubrise_journal,
+                        hubrise_restaurants,
+                        hubrise_connections,
+                        hubrise_adapter::connect::HttpHubRiseConnectGateway {
+                            api: hubrise_adapter::api::HubRiseApi::from_env(),
+                            client_id: std::env::var("HUBRISE_CLIENT_ID").unwrap_or_default(),
+                            client_secret: std::env::var("HUBRISE_WEBHOOK_SECRET").unwrap_or_default(),
+                        },
+                    )));
                 }
 
                 // Retention sweep worker (ADR-20260721-025159): periodically calls the

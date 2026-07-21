@@ -1,0 +1,39 @@
+# Partner CONNECTION tables (issue #20, ADR-20260721-100601) — adapter-owned OAuth connection state.
+#
+# A HubRise OAuth connection is authorized against a HubRise ACCOUNT and returns a NON-EXPIRING,
+# account-scoped access token covering all of the account's locations and catalogs. The connect flow
+# (crates/adapters/hubrise) provisions the RestaurantAccount / Restaurant(s) / Catalog(s) aggregates
+# with the enricher's derived UUIDv5 ids, then persists the token here — keyed by the
+# RestaurantAccount (⇔ HubRise Account, 1:1 by derivation).
+#
+# CREDENTIALS AT REST: these tables are ADAPTER-OWNED (like the integration_staging mirrors) and are
+# deliberately reachable from NOTHING else — never event-sourced (a token is a revocable credential,
+# not a business fact — same stance as payment_process_manager.client_secret), never referenced by
+# api.yaml (no GraphQL type reads them, so no navigation edge can ever surface a token), never
+# projected. Re-connecting the same account UPSERTs (token refresh + location catch-up).
+
+hubrise_connections:
+  description: >
+    One row per connected HubRise Account: the account-scoped, non-expiring OAuth access token,
+    keyed by the RestaurantAccount the connect flow provisioned for it (restaurant_account_id =
+    UUIDv5 of the HubRise account id — the enricher's derivation, so enricher and connect flow
+    agree by construction). Adapter-owned credential store — see the file header.
+  columns:
+    restaurant_account_id: { type: { $ref: 'scalars.yaml#/RestaurantAccountId' }, pk: true }   # UUIDv5(account:<hubrise account id>)
+    hubrise_account_id:    { type: text, unique: true }        # the HubRise-side natural key
+    access_token:          { type: text }                      # account-scoped, NON-expiring (HubRise OAuth has no refresh)
+    account_name:          { type: text, nullable: true }      # diagnostic label from the token response
+    connected_at:          { type: timestamptz }               # first successful connect
+    last_connected_at:     { type: timestamptz }               # bumped on every re-connect (token refresh)
+
+hubrise_connection_locations:
+  description: >
+    Callback→token resolution: HubRise callbacks carry a location_id (not the account id), so each
+    connect snapshots the account's locations here — the enricher resolves callback.location_id →
+    restaurant_account_id → hubrise_connections.access_token before pulling. A callback for a
+    location absent from the snapshot is skipped (definitive) until a re-connect refreshes it.
+  columns:
+    hubrise_location_id:   { type: text, pk: true }
+    restaurant_account_id: { type: { $ref: 'scalars.yaml#/RestaurantAccountId' }, index: true }   # → hubrise_connections (owning connection)
+    restaurant_id:         { type: { $ref: 'scalars.yaml#/RestaurantId' }, note: "UUIDv5(location:<id>) — the Restaurant aggregate the connect flow registered for this location." }
+    last_connected_at:     { type: timestamptz }               # last connect that saw this location

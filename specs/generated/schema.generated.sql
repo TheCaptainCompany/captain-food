@@ -158,6 +158,23 @@ CREATE TABLE domain_stream (
   max_count INTEGER NULL
 );
 
+CREATE TABLE hubrise_connections (
+  restaurant_account_id UUID PRIMARY KEY,
+  hubrise_account_id TEXT NOT NULL UNIQUE,
+  access_token TEXT NOT NULL,
+  account_name TEXT NULL,
+  connected_at TIMESTAMPTZ NOT NULL,
+  last_connected_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE hubrise_connection_locations (
+  hubrise_location_id TEXT PRIMARY KEY,
+  restaurant_account_id UUID NOT NULL,
+  restaurant_id UUID NOT NULL,
+  last_connected_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON hubrise_connection_locations (restaurant_account_id);
+
 CREATE TABLE external_sirene_restaurants (
   siret TEXT PRIMARY KEY,
   payload JSONB NOT NULL,

@@ -36,7 +36,7 @@ unit-tested without axum.
 
 ---
 
-## 0. Precondition — the Connect flow (⚠️ the open gap, STATUS 2a)
+## 0. Precondition — the Connect flow (✅ built, issue #20 / ADR-20260721-100601)
 
 ### Entity alignment — HubRise ↔ Captain.Food (1:1 by design)
 
@@ -57,43 +57,51 @@ that is exactly why the access token is **not** one global secret.
 
 A HubRise OAuth **connection** is authorized against an **Account** and returns a **non-expiring** access
 token covering that account (its locations + catalogs). So **one token per `RestaurantAccount`** (= per
-HubRise Account) serves **all** of its `Restaurant` locations. Today the code holds a **single** token in
-`HUBRISE_ACCESS_TOKEN`, so it can serve **one** account only. Multiple connected accounts need a
-**connection/token table keyed by `RestaurantAccount`** (holding the HubRise `account_id` + token); the
-enricher then resolves a callback's `account_id` → that `RestaurantAccount` → its token before pulling.
+HubRise Account) serves **all** of its `Restaurant` locations. The token response itself names the
+connection scope (`account_id`, and `location_id`/`catalog_id` when location-scoped) — confirmed against
+the HubRise auth docs. Tokens live in the adapter-owned **`hubrise_connections`** table keyed by
+`RestaurantAccount`, with a **`hubrise_connection_locations`** snapshot so the enricher resolves a
+callback's `location_id` → the owning account's token before pulling
+(`specs/database/tables/integration_connections.yaml`). The former single global `HUBRISE_ACCESS_TOKEN`
+is **retired**.
 
-> **The gap (STATUS 2a):** enrichment can only land once the `RestaurantAccount`, its `Restaurant`(s) and
-> `Catalog`(s) **exist with the ACL's derived ids** *and* the **account's token is stored**. Establishing
-> both is the **connect flow**, which is **not built yet** — until then `ImportCatalog` skips
-> `CatalogNotFound`. (When building it, confirm the exact HubRise OAuth scope — account-wide vs
-> per-location — against the HubRise Accounts API; the model here assumes the account-scoped connection.)
+The flow is `crates/adapters/hubrise/src/connect.rs` (+ the two routes in `http.rs`), driven by the
+operator/restaurant hitting `GET /adapters/hubrise/connect`:
 
 ```mermaid
 sequenceDiagram
     actor Op as Operator / restaurant
     participant HR as HubRise (manager.hubrise.com)
     box adapter (crates/adapters/hubrise)
-        participant TOK as api::exchange_code (OAuth2)
-        participant CT as connection/token table (TODO)
+        participant EP as http.rs · GET /connect → /oauth/callback (signed state)
+        participant CF as connect.rs · HubRiseConnectFlow
+        participant CT as hubrise_connections (+ _locations)
     end
     box application / domain
-        participant REG as RegisterRestaurantAccount / RegisterRestaurant / CreateCatalog
+        participant J as command_journal (WORKER channel)
+        participant REG as RegisterRestaurantAccount / RegisterRestaurant / CreateCatalog / ImportCatalog
         participant ES as Repository (actor journal)
     end
     box infrastructure
         participant DB as PgEventStore adapter → domain_events
     end
 
-    Op->>HR: authorize the Captain HubRise app for an Account (auth code)
-    HR-->>TOK: code
-    TOK->>HR: POST /oauth2/v1/token (Basic client_id:client_secret + code)
-    HR-->>TOK: access_token (account-scoped, NON-expiring, no refresh)
-    TOK->>CT: persist connection { restaurantAccountId, hubriseAccountId, token }  (TODO)
-    Op->>REG: create the RestaurantAccount + its Restaurants (locations) + Catalog(s)
-    REG->>ES: save RestaurantAccountRegistered + RestaurantRegistered + CatalogCreated (the aggregates' decided facts)
+    Op->>EP: GET /adapters/hubrise/connect
+    EP-->>Op: 302 authorize (client_id, redirect, scope, HMAC state)
+    Op->>HR: authorize the Captain HubRise app for an Account
+    HR-->>EP: GET /oauth/callback?code&state (state verified, 15 min)
+    EP->>CF: connect(code)
+    CF->>HR: POST /oauth2/v1/token (Basic client_id:client_secret + code)
+    HR-->>CF: access_token + account_id (account-scoped, NON-expiring)
+    CF->>HR: GET /account · GET /locations · GET /catalogs (X-Access-Token)
+    CF->>J: journaled sends (message_id = UUIDv5(attempt, command, entity))
+    J->>REG: RegisterRestaurantAccount + RegisterRestaurant per location (PASSIVE_PARTNER)
+    CF->>CT: UPSERT connection { restaurantAccountId, hubriseAccountId, token } + location snapshot
+    J->>REG: CreateCatalog + initial ImportCatalog per catalog (same ACL mapping as §1)
+    REG->>ES: save the aggregates' decided facts
     ES->>DB: append (behind the port)
-    Note over TOK,DB: every id is the ENRICHER'S derived UUIDv5 (account / location / catalog)
-    Note over CT,DB: GAP - the token table + this derived-id provisioning are the open item —<br/>today one HUBRISE_ACCESS_TOKEN = one account = one location.
+    Note over CF,DB: every id is the ENRICHER'S derived UUIDv5 (account / location / catalog),<br/>so §1/§2 callbacks land on exactly these aggregates.
+    Note over CT: re-connect = token refresh + location catch-up + catalog re-import<br/>(creations are idempotent on the derived ids; rejections are warnings, never retried).
 ```
 
 **Why the derived ids matter:** every domain id is a **UUIDv5 of the HubRise identifier** under a fixed
@@ -103,7 +111,7 @@ reconciliation table:
 
 | Domain id | Seed (`kind:value`) | Why that seed |
 |---|---|---|
-| `RestaurantAccountId` | `account:<hubrise account id>` | the connect flow creates the account that holds the token *(enricher: to add)* |
+| `RestaurantAccountId` | `account:<hubrise account id>` | the connect flow creates the account that holds the token (`derive_restaurant_account_id`) |
 | `CatalogId` | `catalog:<hubrise catalog id>` | the connect flow must `CreateCatalog` with this id |
 | `RestaurantId` | `location:<hubrise location id>` | the location **is** the restaurant |
 | category / product / option-list / option | `<kind>:<hubrise id>` | the tree re-joins by `ref` after translation |
@@ -233,9 +241,11 @@ sequenceDiagram
 - **Idempotency:** the deterministic UUIDv5 ids make a re-sync map to the *same* command shape; combined
   with the Catalog aggregate's fold + `UNIQUE(stream, version)`, a redelivered callback converges (a
   re-import replaces catalog content; a repeated stock line re-derives the same `StockStatus`).
-- **Ingress-only fallback:** when no `Enricher` is wired (`HUBRISE_ACCESS_TOKEN` unset) or the callback
-  needs no pull, a *verified* callback is ACKed **202 `verified_pending_enrichment`** — the signature is
-  proven but nothing is written. This is the state before the connect flow (`§0`) provisions a token.
+- **Ingress-only fallback:** when no `Enricher` is wired (no `DATABASE_URL`) or the callback needs no
+  pull, a *verified* callback is ACKed **202 `verified_pending_enrichment`** — the signature is proven
+  but nothing is written. With an enricher wired, a callback for a **location no connection covers**
+  (the connect flow `§0` hasn't run, or the location joined HubRise after the last connect) is a
+  definitive **skip** — re-connecting refreshes the location snapshot.
 
 ---
 
@@ -243,20 +253,26 @@ sequenceDiagram
 
 | Env | Used by | Effect when unset |
 |---|---|---|
-| `HUBRISE_WEBHOOK_SECRET` | `http.rs` (inbound HMAC) | `POST /adapters/hubrise/webhooks` → **503** (fail closed) |
-| `HUBRISE_ACCESS_TOKEN` | `api.rs` (outbound pull) | no `Enricher`; verified callbacks → **202** ingress-only (no enrichment) |
+| `HUBRISE_WEBHOOK_SECRET` | `http.rs` (inbound HMAC; also the OAuth **client secret** — it IS the HubRise app client secret) | `POST /adapters/hubrise/webhooks` → **503**; connect routes → **503** (fail closed) |
+| `HUBRISE_CLIENT_ID` | `http.rs`/`connect.rs` (OAuth authorize + token exchange) | connect routes → **503** (webhook enrichment unaffected) |
+| `HUBRISE_CONNECT_REDIRECT_URL` | `http.rs` (the public `/adapters/hubrise/oauth/callback` URL) | connect routes → **503** |
+| `HUBRISE_OAUTH_SCOPE` | `http.rs` | defaults to `account[catalog.read,inventory.read]` |
 | `HUBRISE_API_BASE_URL` | `api.rs` | defaults to `https://api.hubrise.com/v1` |
+
+Pull tokens are **not** env config: they live per connected account in `hubrise_connections`
+(the retired `HUBRISE_ACCESS_TOKEN` has no fallback — reconnect the account through `§0` instead).
 
 - **Endpoint:** `POST /adapters/hubrise/webhooks` — mounted by `crates/server/src/lib.rs`
   (`.merge(hubrise_adapter::routes(hubrise_enricher))`), **not** the GraphQL surface. The adapter ships a
   standalone `main.rs`, so HubRise can be **deployed as its own web service** (ADR-20260718-213352).
 - **Import path (events):** full sync → `CatalogImported` (replace semantics); inventory sync →
-  `OfferStockUpdated` — see [specs/integrations/hubrise.md §5](../../specs/integrations/hubrise.md#5-import-path-events).
+  `OfferStockUpdated` — see [specs/integrations/hubrise.md §6](../../specs/integrations/hubrise.md#6-import-path-events).
 
 ## Open items (HubRise)
 | Item | Where | Blocked on |
 |---|---|---|
-| **Connect flow**: derived-id `CreateCatalog` + register `Restaurant` | §0 | plan mode (STATUS 2a) |
-| Persist **per-location tokens** (multi-location) | §0 | a connection/token table → plan mode |
+| Restaurant-facing connect UI + "connected" read surface | §0 | restaurant screens (SDUI) |
+| Disconnect/revoke (`POST /oauth2/v1/revoke`) + token encryption at rest | §0 | follow-up (ADR-20260721-100601) |
+| Confirm `GET /catalogs` + the location `opening_hours` wire shape (left empty on provisioning) | §0, `connect.rs` | check against the live API reference |
 | Confirm HubRise API resource **paths** (`/catalog/{id}`, `/location/{id}/inventory`) | §1–§2, `api.rs` | check against the live API reference |
 | Deals / advanced price_overrides / restrictions | mapping | out of V0 scope (spec §4) |
