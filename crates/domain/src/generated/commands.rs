@@ -716,6 +716,32 @@ pub struct UpdateDeliveryPartnerStatus {
     pub status: DeliveryStatus,
 }
 
+/// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDeliveryPartnerAvailability {
+    pub registration_id: DeliveryPartnerRegistrationId,
+    pub channel: DeliveryChannelKey,
+    pub city_id: CityId,
+    pub partner_name: DeliveryPartnerName,
+    pub contact_email: EmailAddress,
+}
+
+/// An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproveDeliveryPartnerAvailability {
+    pub registration_id: DeliveryPartnerRegistrationId,
+}
+
+/// Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeDeliveryPartnerAvailability {
+    pub registration_id: DeliveryPartnerRegistrationId,
+    pub reason: Option<String>,
+}
+
 /// Register as an independent Captain rider (linked to the auth provider user).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -497,6 +497,21 @@ fn fx_delivery_issue_resolved() -> DomainEvent {
     DomainEvent::DeliveryIssueResolved(evs::DeliveryIssueResolved { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), resolution: "Customer called back; order handed over".to_string(), resolved_at: None })
 }
 
+/// tests.yaml#/fixtures/deliveryPartnerAvailabilityRequested — events.yaml#/DeliveryPartnerAvailabilityRequested
+fn fx_delivery_partner_availability_requested() -> DomainEvent {
+    DomainEvent::DeliveryPartnerAvailabilityRequested(evs::DeliveryPartnerAvailabilityRequested { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")), channel: sc::DeliveryChannelKey("uber_direct".into()), city_id: sc::CityId(support::uid("city-1")), partner_name: sc::DeliveryPartnerName("Uber Direct".into()), contact_email: sc::EmailAddress("ops@uberdirect.example".into()) })
+}
+
+/// tests.yaml#/fixtures/deliveryPartnerAvailabilityApproved — events.yaml#/DeliveryPartnerAvailabilityApproved
+fn fx_delivery_partner_availability_approved() -> DomainEvent {
+    DomainEvent::DeliveryPartnerAvailabilityApproved(evs::DeliveryPartnerAvailabilityApproved { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")) })
+}
+
+/// tests.yaml#/fixtures/deliveryPartnerAvailabilityRevoked — events.yaml#/DeliveryPartnerAvailabilityRevoked
+fn fx_delivery_partner_availability_revoked() -> DomainEvent {
+    DomainEvent::DeliveryPartnerAvailabilityRevoked(evs::DeliveryPartnerAvailabilityRevoked { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")), reason: Some("Partner paused service in this city".to_string()) })
+}
+
 /// tests.yaml#/fixtures/riderRegistered — events.yaml#/RiderRegistered
 fn fx_rider_registered() -> DomainEvent {
     DomainEvent::RiderRegistered(evs::RiderRegistered { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::ExternalReference("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()), status: sc::RiderStatus::OFFLINE })
@@ -2989,6 +3004,111 @@ async fn test_delivery_issue_resolved() {
     bed.assert_appended("TestDeliveryIssueResolved", &before, &[
         (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_issue_resolved()),
     ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryPartnerAvailabilityRequested — "A delivery partner self-registers availability to serve a city on a catalog channel"
+/// rules: DeliveryPartnerSelfRegistersCityAvailability
+#[tokio::test]
+async fn test_delivery_partner_availability_requested() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RegisterDeliveryPartnerAvailability { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")), channel: sc::DeliveryChannelKey("uber_direct".into()), city_id: sc::CityId(support::uid("city-1")), partner_name: sc::DeliveryPartnerName("Uber Direct".into()), contact_email: sc::EmailAddress("ops@uberdirect.example".into()) };
+    let result = crate::commands::register_delivery_partner_availability(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliveryPartnerAvailabilityRequested: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryPartnerAvailabilityRequested", &before, &[
+        (format!("DeliveryPartnerRegistration-{}", support::uid("reg-1")), fx_delivery_partner_availability_requested()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryPartnerRegisterAgainIsRejected — "Re-registering the same availability id is rejected (idempotent birth)"
+/// rules: DeliveryPartnerSelfRegistersCityAvailability
+#[tokio::test]
+async fn test_delivery_partner_register_again_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryPartnerRegistration-{}", support::uid("reg-1")), vec![fx_delivery_partner_availability_requested()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RegisterDeliveryPartnerAvailability { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")), channel: sc::DeliveryChannelKey("uber_direct".into()), city_id: sc::CityId(support::uid("city-1")), partner_name: sc::DeliveryPartnerName("Uber Direct".into()), contact_email: sc::EmailAddress("ops@uberdirect.example".into()) };
+    let result = crate::commands::register_delivery_partner_availability(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDeliveryPartnerRegisterAgainIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDeliveryPartnerRegisterAgainIsRejected", &err, &["DeliveryPartnerAvailabilityAlreadyRequested"]);
+    bed.assert_appended("TestDeliveryPartnerRegisterAgainIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestDeliveryPartnerAvailabilityApproved — "An admin approves a pending city-availability registration"
+/// rules: DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval
+#[tokio::test]
+async fn test_delivery_partner_availability_approved() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryPartnerRegistration-{}", support::uid("reg-1")), vec![fx_delivery_partner_availability_requested()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ApproveDeliveryPartnerAvailability { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")) };
+    let result = crate::commands::approve_delivery_partner_availability(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliveryPartnerAvailabilityApproved: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryPartnerAvailabilityApproved", &before, &[
+        (format!("DeliveryPartnerRegistration-{}", support::uid("reg-1")), fx_delivery_partner_availability_approved()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryPartnerApproveMissingIsRejected — "Approving an unknown availability registration is rejected"
+/// rules: DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval
+#[tokio::test]
+async fn test_delivery_partner_approve_missing_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ApproveDeliveryPartnerAvailability { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")) };
+    let result = crate::commands::approve_delivery_partner_availability(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDeliveryPartnerApproveMissingIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDeliveryPartnerApproveMissingIsRejected", &err, &["DeliveryPartnerAvailabilityNotFound"]);
+    bed.assert_appended("TestDeliveryPartnerApproveMissingIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestDeliveryPartnerApproveNonPendingIsRejected — "Approving an already-approved registration is rejected (not pending)"
+/// rules: DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval
+#[tokio::test]
+async fn test_delivery_partner_approve_non_pending_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryPartnerRegistration-{}", support::uid("reg-1")), vec![fx_delivery_partner_availability_requested(), fx_delivery_partner_availability_approved()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ApproveDeliveryPartnerAvailability { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")) };
+    let result = crate::commands::approve_delivery_partner_availability(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDeliveryPartnerApproveNonPendingIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDeliveryPartnerApproveNonPendingIsRejected", &err, &["DeliveryPartnerAvailabilityNotPending"]);
+    bed.assert_appended("TestDeliveryPartnerApproveNonPendingIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestDeliveryPartnerAvailabilityRevoked — "A partner (or admin) revokes a city-availability registration"
+/// rules: DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval
+#[tokio::test]
+async fn test_delivery_partner_availability_revoked() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryPartnerRegistration-{}", support::uid("reg-1")), vec![fx_delivery_partner_availability_requested()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RevokeDeliveryPartnerAvailability { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")), reason: Some("Partner paused service in this city".to_string()) };
+    let result = crate::commands::revoke_delivery_partner_availability(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliveryPartnerAvailabilityRevoked: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryPartnerAvailabilityRevoked", &before, &[
+        (format!("DeliveryPartnerRegistration-{}", support::uid("reg-1")), fx_delivery_partner_availability_revoked()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryPartnerRevokeMissingIsRejected — "Revoking an unknown availability registration is rejected"
+/// rules: DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval
+#[tokio::test]
+async fn test_delivery_partner_revoke_missing_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RevokeDeliveryPartnerAvailability { registration_id: sc::DeliveryPartnerRegistrationId(support::uid("reg-1")), reason: Some("Partner paused service in this city".to_string()) };
+    let result = crate::commands::revoke_delivery_partner_availability(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDeliveryPartnerRevokeMissingIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDeliveryPartnerRevokeMissingIsRejected", &err, &["DeliveryPartnerAvailabilityNotFound"]);
+    bed.assert_appended("TestDeliveryPartnerRevokeMissingIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestRiderRegistered — "A rider registers (linked to the auth provider user)"

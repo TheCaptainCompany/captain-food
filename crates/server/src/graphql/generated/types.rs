@@ -6,7 +6,7 @@
 #![allow(non_camel_case_types)]
 
 use application::projections::{CartRow, CatalogRow, CustomerRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
-use application::queries::{DeliveryJobRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
+use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
 use super::scalars::*;
@@ -738,6 +738,28 @@ pub struct DeliveryJob {
     pub restaurant: Restaurant,
 }
 
+/// A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryPartnerAvailability {
+    #[graphql(name = "registrationId")]
+    pub registration_id: DeliveryPartnerRegistrationId,
+    #[graphql(name = "channel")]
+    pub channel: DeliveryChannelKey,
+    #[graphql(name = "cityId")]
+    pub city_id: CityId,
+    #[graphql(name = "partnerName")]
+    pub partner_name: DeliveryPartnerName,
+    #[graphql(name = "contactEmail")]
+    pub contact_email: EmailAddress,
+    #[graphql(name = "status")]
+    pub status: CityAvailabilityStatus,
+    #[graphql(name = "requestedAt")]
+    pub requested_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "decidedAt")]
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin decides, then APPROVED (Stripe refund requested) or DENIED, and REFUNDED once Stripe settles. Serves the restaurant's and admin's refund queue (filter status = REQUESTED for pending ones).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -1067,6 +1089,23 @@ impl From<RefundRow> for Refund {
             approved_amount: row.approved_amount_cents.map(|c| order_money(c, &currency)),
             reason: row.reason,
             refund_id: row.refund_id.map(Into::into),
+            requested_at: row.requested_at,
+            decided_at: row.decided_at,
+        }
+    }
+}
+
+/// Read-model row → API type: the `View_DeliveryPartnerAvailability` fold-view row (delivery partner
+/// self-registration, #61 — Requested/Approved/Revoked folded on the DeliveryPartnerRegistration stream).
+impl From<DeliveryPartnerAvailabilityRow> for DeliveryPartnerAvailability {
+    fn from(row: DeliveryPartnerAvailabilityRow) -> Self {
+        Self {
+            registration_id: row.registration_id.into(),
+            channel: row.channel.into(),
+            city_id: row.city_id.into(),
+            partner_name: row.partner_name.into(),
+            contact_email: row.contact_email.into(),
+            status: row.status.into(),
             requested_at: row.requested_at,
             decided_at: row.decided_at,
         }

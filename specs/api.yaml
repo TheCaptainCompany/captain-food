@@ -275,6 +275,18 @@ types:
       requestedAt: { type: string, format: date-time }
       pickedUpAt: { type: string, format: date-time, nullable: true }
       deliveredAt: { type: string, format: date-time, nullable: true }
+  DeliveryPartnerAvailability:
+    description: "A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue."
+    reads: [{ $ref: 'database/projection_views.yaml#/View_DeliveryPartnerAvailability' }]
+    properties:
+      registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+      channel: { $ref: 'scalars.yaml#/DeliveryChannelKey' }
+      cityId: { $ref: 'scalars.yaml#/CityId' }
+      partnerName: { $ref: 'scalars.yaml#/DeliveryPartnerName' }
+      contactEmail: { $ref: 'scalars.yaml#/EmailAddress' }
+      status: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
+      requestedAt: { type: string, format: date-time }
+      decidedAt: { type: string, format: date-time, nullable: true }
   Refund:
     description: >
       A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin
@@ -506,6 +518,20 @@ queries:
     returns: { $ref: '#/types/Refund', array: true }
     roles: [RESTAURANT, ADMIN]
     slice: V0
+
+  deliveryPartnerAvailabilities:
+    description: >
+      Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) reviews the state of
+      its own submissions and an admin works the review queue. Optional filters by city, channel and
+      status (status = PENDING is the admin review queue). EXTERNAL is a trusted partner-ACL role — no
+      per-owner narrowing in this slice (a recorded gap; contact-scoped narrowing is a follow-up).
+    args:
+      cityId: { $ref: 'scalars.yaml#/CityId' }
+      channel: { $ref: 'scalars.yaml#/DeliveryChannelKey' }
+      status: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
+    returns: { $ref: '#/types/DeliveryPartnerAvailability', array: true }
+    roles: [EXTERNAL, ADMIN]
+    slice: V1
 
   restaurantLocationsByAccount:
     description: "All restaurant locations under an account (back-office; ownership enforced server-side)."
@@ -833,6 +859,20 @@ mutations:
     command: { $ref: 'commands.yaml#/EscalateDelivery' }
     roles: [RESTAURANT, ADMIN]   # restaurant/operator skips the current channel and advances the ranked dispatch walk (#60)
     slice: V0
+
+  # Delivery partner self-registration (#61)
+  registerDeliveryPartnerAvailability:
+    command: { $ref: 'commands.yaml#/RegisterDeliveryPartnerAvailability' }
+    roles: [EXTERNAL, ADMIN]   # the partner self-registers (EXTERNAL partner-ACL); admin may register on their behalf
+    slice: V1
+  approveDeliveryPartnerAvailability:
+    command: { $ref: 'commands.yaml#/ApproveDeliveryPartnerAvailability' }
+    roles: [ADMIN]             # admin-only review gate
+    slice: V1
+  revokeDeliveryPartnerAvailability:
+    command: { $ref: 'commands.yaml#/RevokeDeliveryPartnerAvailability' }
+    roles: [EXTERNAL, ADMIN]   # partner withdraws (EXTERNAL) or admin disables
+    slice: V1
 
 
 subscriptions:

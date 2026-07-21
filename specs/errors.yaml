@@ -585,6 +585,32 @@ DeliveryAlreadyAssigned:
     en: "This delivery has already been taken."
     fr: "Cette livraison a déjà été prise en charge."
 
+# --- Delivery partner self-registration (#61) ---
+DeliveryPartnerAvailabilityAlreadyRequested:
+  description: "A registration with this id already exists (idempotent self-registration guard)."
+  context:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+  messages:
+    en: "This availability registration already exists."
+    fr: "Cette demande de disponibilité existe déjà."
+
+DeliveryPartnerAvailabilityNotFound:
+  description: "No delivery-partner availability registration with this id."
+  context:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+  messages:
+    en: "Availability registration not found."
+    fr: "Demande de disponibilité introuvable."
+
+DeliveryPartnerAvailabilityNotPending:
+  description: "The availability registration is not PENDING, so it cannot be approved."
+  context:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+    currentStatus: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
+  messages:
+    en: "This availability registration is not awaiting review."
+    fr: "Cette demande de disponibilité n'est pas en attente de validation."
+
 # =====================================================================
 # Rider
 # =====================================================================

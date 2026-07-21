@@ -237,6 +237,12 @@ admin:
         SetRestaurantMargin: { $ref: 'api.yaml#/mutations/updateRestaurant' }
         ReviewUberEstimationPolicy: { $ref: 'api.yaml#/queries/uberEstimationPolicy' }   # Uber comparison calibration (ADR-0024/0030)
         ReviewUberSplitPolicy: { $ref: 'api.yaml#/queries/uberSplitPolicy' }
+    ReviewDeliveryPartners:
+      description: As an admin, I work the delivery-partner self-registration review queue (#61).
+      steps:
+        ReviewQueue: { $ref: 'api.yaml#/queries/deliveryPartnerAvailabilities' }   # status = PENDING is the review queue
+        ApproveAvailability: { $ref: 'api.yaml#/mutations/approveDeliveryPartnerAvailability' }
+        RevokeAvailability: { $ref: 'api.yaml#/mutations/revokeDeliveryPartnerAvailability' }
 
 restaurant_sync:
   description: >
@@ -261,3 +267,23 @@ restaurant_sync:
       steps:
         ContactProspect: { $ref: 'api.yaml#/mutations/recordProspectContact' }
         MarkCold: { $ref: 'api.yaml#/mutations/markProspectCold' }
+
+delivery_partner:
+  description: >
+    A delivery partner (already integrated: a known catalog channel) acting as an EXTERNAL caller through
+    the partner portal / API (#61). It self-registers its availability to serve a city, tracks the review
+    status, and withdraws when it pauses service — no engineer in the loop for the common case.
+  personaRole: EXTERNAL
+  locale: fr-FR
+  goals:
+    - Serve new cities by registering availability without a code change per partner/city.
+    - Keep its city coverage current (withdraw where it pauses service).
+  frustrations:
+    - Manual, engineer-gated onboarding for every partnership.
+  activities:
+    RegisterCityAvailability:
+      description: As a delivery partner, I register my availability to serve a city and track its review status.
+      steps:
+        SubmitAvailability: { $ref: 'api.yaml#/mutations/registerDeliveryPartnerAvailability' }
+        TrackStatus: { $ref: 'api.yaml#/queries/deliveryPartnerAvailabilities' }
+        WithdrawAvailability: { $ref: 'api.yaml#/mutations/revokeDeliveryPartnerAvailability' }

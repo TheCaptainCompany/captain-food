@@ -174,6 +174,12 @@ DeliveryDeclineKeepsJobPending:
 DeliveryIssueLifecycle:
   description: "A delivery issue can be reported on a non-delivered job and later resolved."
 
+# --- Delivery partner self-registration (#61) ---
+DeliveryPartnerSelfRegistersCityAvailability:
+  description: "A delivery partner can self-register (via the EXTERNAL API) its availability to serve a city on a catalog channel; the registration is idempotent by its client-generated id and lands PENDING (#61)."
+DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval:
+  description: "A self-registered city availability becomes APPROVED (eligible for the city's dispatch ranking) only after an admin approves a PENDING registration; approving anything not PENDING is rejected, and a registration may later be revoked by the partner or an admin (#61)."
+
 # --- Rider ---
 RiderLifecycle:
   description: "A rider registers once (per auth user), may update editable profile fields, and changes availability status only through valid transitions."

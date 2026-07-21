@@ -512,6 +512,23 @@ pub enum DeliveryChannelKind {
     PARTNER,
 }
 
+/// A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DeliveryPartnerRegistrationId(pub uuid::Uuid);
+
+/// The delivery partner's display/legal name as stated on self-registration (#61).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DeliveryPartnerName(pub String);
+
+/// Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum CityAvailabilityStatus {
+    PENDING,
+    APPROVED,
+    REVOKED,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum CatalogItemAvailability {

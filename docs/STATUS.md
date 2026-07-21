@@ -1,7 +1,27 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (17:54 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (20:25 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #61 (slice 1): delivery partner self-registration — EXTERNAL write-path + admin
+> approval (ADR-20260721-202504).** First slice of the L "likely split" #61, built on the #60 dispatch
+> foundation. New event-sourced aggregate **`DeliveryPartnerRegistration`** (id = client-generated
+> `registrationId`): a delivery partner self-registers availability to serve a city on a catalog channel
+> through the **EXTERNAL** GraphQL role (`registerDeliveryPartnerAvailability`, lands PENDING), an admin
+> reviews it (`approveDeliveryPartnerAvailability`, ADMIN-only → APPROVED), and the partner/admin may
+> revoke (`revokeDeliveryPartnerAvailability`). Invariants are self-contained (already-requested /
+> not-found / not-pending — 3 new errors); no referential FK check on channel/city in the domain yet
+> (deferred). New fold view **`View_DeliveryPartnerAvailability`** (status derived) backs the **first
+> EXTERNAL query** `deliveryPartnerAvailabilities` (partner tracks submissions; admin review queue).
+> New scalars `DeliveryPartnerRegistrationId` / `DeliveryPartnerName` / `CityAvailabilityStatus`
+> (PENDING/APPROVED/REVOKED); new `delivery_partner` (EXTERNAL) story persona + admin review activity;
+> 3 rules-linked behaviour tests. Codegen: `BT_AGGREGATES`, `wired_mutation_dispatch` (3 arms),
+> `wired_query_body` + `emit_server_types` `From<DeliveryPartnerAvailabilityRow>`. Migration
+> `20260721160000` (the view + `ref_city_availability_status`); `REQUIRED_SCHEMA_VERSION` bumped.
+> `make rust` green (build + 227+ tests + validate 0 errors + generate, no drift). **The APPROVED set
+> is the substrate the #60 `CityDeliveryRanking` walk will consume — that dispatch wiring (+ the
+> channel/city FK checks, per-owner query scoping, the onboarding-request & self-integrate shapes, and
+> a partner SDUI app) is the deferred follow-up.**
 
 > ✅ **2026-07-21 — Deployment build model changed & LIVE: CI builds the image, Render only pulls it
 > (ADR-20260721-175411, amends ADR-0042).** Render meters build-pipeline minutes at a $0 cap, so

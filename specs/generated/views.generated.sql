@@ -64,6 +64,25 @@ SELECT
 FROM domain_events c
 WHERE c.event_type = 'DeliveryRequested';
 
+CREATE OR REPLACE VIEW View_DeliveryPartnerAvailability AS
+SELECT
+  (c.payload->>'registrationId')::uuid AS registration_id,
+  c.payload->>'channel' AS channel,
+  (c.payload->>'cityId')::uuid AS city_id,
+  c.payload->>'partnerName' AS partner_name,
+  c.payload->>'contactEmail' AS contact_email,
+  (SELECT CASE e.event_type WHEN 'DeliveryPartnerAvailabilityRequested' THEN 0 WHEN 'DeliveryPartnerAvailabilityApproved' THEN 1 WHEN 'DeliveryPartnerAvailabilityRevoked' THEN 2 END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPartnerAvailabilityRequested', 'DeliveryPartnerAvailabilityApproved', 'DeliveryPartnerAvailabilityRevoked')
+     ORDER BY e.position DESC LIMIT 1) AS status,
+  c.occurred_at AS requested_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPartnerAvailabilityApproved', 'DeliveryPartnerAvailabilityRevoked')) AS decided_at,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPartnerAvailabilityRequested', 'DeliveryPartnerAvailabilityApproved', 'DeliveryPartnerAvailabilityRevoked')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'DeliveryPartnerAvailabilityRequested';
+
 CREATE OR REPLACE VIEW View_PendingRefunds AS
 SELECT
   (c.payload->>'orderId')::uuid AS order_id,

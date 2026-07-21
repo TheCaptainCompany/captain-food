@@ -327,6 +327,20 @@ impl QueryRoot {
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(Refund::from).collect())
     }
+    /// Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) reviews the state of its own submissions and an admin works the review queue. Optional filters by city, channel and status (status = PENDING is the admin review queue). EXTERNAL is a trusted partner-ACL role — no per-owner narrowing in this slice (a recorded gap; contact-scoped narrowing is a follow-up).
+    #[graphql(name = "deliveryPartnerAvailabilities", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    async fn delivery_partner_availabilities(&self, ctx: &async_graphql::Context<'_>, input: Option<DeliveryPartnerAvailabilitiesQueryInput>) -> async_graphql::Result<Vec<DeliveryPartnerAvailability>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryPartnerAvailabilityReadRepository>>()?;
+        let filter = input
+            .map(|i| application::queries::DeliveryPartnerAvailabilityFilter {
+                city_id: i.city_id.map(Into::into),
+                channel: i.channel.map(Into::into),
+                status: i.status.map(Into::into),
+            })
+            .unwrap_or_default();
+        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(DeliveryPartnerAvailability::from).collect())
+    }
     /// All restaurant locations under an account (back-office; ownership enforced server-side).
     #[graphql(name = "restaurantLocationsByAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
     async fn restaurant_locations_by_account(&self, ctx: &async_graphql::Context<'_>, input: RestaurantLocationsByAccountQueryInput) -> async_graphql::Result<Vec<Restaurant>> {

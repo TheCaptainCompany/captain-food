@@ -174,6 +174,9 @@ A platform operator who onboards accounts and oversees the platform.
 |  | SetRestaurantMargin | [✏️ `updateRestaurant`](#mutation-updaterestaurant) |
 |  | ReviewUberEstimationPolicy | [🔎 `uberEstimationPolicy`](#query-uberestimationpolicy) |
 |  | ReviewUberSplitPolicy | [🔎 `uberSplitPolicy`](#query-ubersplitpolicy) |
+| 🧭 **ReviewDeliveryPartners** | ReviewQueue | [🔎 `deliveryPartnerAvailabilities`](#query-deliverypartneravailabilities) |
+|  | ApproveAvailability | [✏️ `approveDeliveryPartnerAvailability`](#mutation-approvedeliverypartneravailability) |
+|  | RevokeAvailability | [✏️ `revokeDeliveryPartnerAvailability`](#mutation-revokedeliverypartneravailability) |
 
 <a id="story-restaurant_sync"></a>
 ### 🎬 `restaurant_sync` · 🔌 `EXTERNAL` · 🗣️ `fr-FR`
@@ -188,6 +191,18 @@ The Sirene/Google sync ACL (a scheduled worker) acting as an EXTERNAL caller. It
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
 | 🧭 **Prospection** | ContactProspect | [✏️ `recordProspectContact`](#mutation-recordprospectcontact) |
 |  | MarkCold | [✏️ `markProspectCold`](#mutation-markprospectcold) |
+
+<a id="story-delivery_partner"></a>
+### 🎬 `delivery_partner` · 🔌 `EXTERNAL` · 🗣️ `fr-FR`
+
+A delivery partner (already integrated: a known catalog channel) acting as an EXTERNAL caller through the partner portal / API (#61). It self-registers its availability to serve a city, tracks the review status, and withdraws when it pauses service — no engineer in the loop for the common case.
+
+
+| Activity | Step | Operation |
+| --- | --- | --- |
+| 🧭 **RegisterCityAvailability** | SubmitAvailability | [✏️ `registerDeliveryPartnerAvailability`](#mutation-registerdeliverypartneravailability) |
+|  | TrackStatus | [🔎 `deliveryPartnerAvailabilities`](#query-deliverypartneravailabilities) |
+|  | WithdrawAvailability | [✏️ `revokeDeliveryPartnerAvailability`](#mutation-revokedeliverypartneravailability) |
 
 <a id="sec-ctx-restaurant"></a>
 ## 🔲 1. restaurant
@@ -6015,7 +6030,7 @@ _criticality: **high**_
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
-### 🧰 API operations _(7)_
+### 🧰 API operations _(11)_
 
 <a id="query-delivery"></a>
 #### 🔎 Query: `delivery`
@@ -6034,6 +6049,16 @@ The independent rider's assigned/available delivery jobs (rider app).
 - **Input**: 🧩 `MyDeliveriesQueryInput` — `status?`: [🔤 `DeliveryStatus`](#scalar-deliverystatus)
 - **Returns**: [🧩 `DeliveryJob`](#type-deliveryjob) (list) · **reads** [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
 - **Roles**: RIDER · **slice** V0
+
+<a id="query-deliverypartneravailabilities"></a>
+#### 🔎 Query: `deliveryPartnerAvailabilities`
+
+Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) reviews the state of its own submissions and an admin works the review queue. Optional filters by city, channel and status (status = PENDING is the admin review queue). EXTERNAL is a trusted partner-ACL role — no per-owner narrowing in this slice (a recorded gap; contact-scoped narrowing is a follow-up).
+
+
+- **Input**: 🧩 `DeliveryPartnerAvailabilitiesQueryInput` — `cityId?`: [🔤 `CityId`](#scalar-cityid), `channel?`: [🔤 `DeliveryChannelKey`](#scalar-deliverychannelkey), `status?`: [🔤 `CityAvailabilityStatus`](#scalar-cityavailabilitystatus)
+- **Returns**: [🧩 `DeliveryPartnerAvailability`](#type-deliverypartneravailability) (list) · **reads** [🗄️ `View_DeliveryPartnerAvailability`](#view-view_deliverypartneravailability)
+- **Roles**: EXTERNAL, ADMIN · **slice** V1
 
 <a id="mutation-acceptdelivery"></a>
 #### ✏️ Mutation: `acceptDelivery`
@@ -6070,7 +6095,28 @@ The independent rider's assigned/available delivery jobs (rider app).
 - **Roles**: RESTAURANT, ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
-### 🧩 Output types _(1)_
+<a id="mutation-registerdeliverypartneravailability"></a>
+#### ✏️ Mutation: `registerDeliveryPartnerAvailability`
+
+- **Command**: [📩 `RegisterDeliveryPartnerAvailability`](#command-registerdeliverypartneravailability) → handled by [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Roles**: EXTERNAL, ADMIN · **slice** V1
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-approvedeliverypartneravailability"></a>
+#### ✏️ Mutation: `approveDeliveryPartnerAvailability`
+
+- **Command**: [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability) → handled by [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Roles**: ADMIN · **slice** V1
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-revokedeliverypartneravailability"></a>
+#### ✏️ Mutation: `revokeDeliveryPartnerAvailability`
+
+- **Command**: [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability) → handled by [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Roles**: EXTERNAL, ADMIN · **slice** V1
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+### 🧩 Output types _(2)_
 
 <a id="type-deliveryjob"></a>
 #### 🧩 Type: `DeliveryJob`
@@ -6095,7 +6141,37 @@ One delivery of an order (ADR-0031): status, courier, addresses and ETAs. Serves
 | <a id="type-deliveryjob--pickedupat"></a>`pickedUpAt` | `string` _date-time_ | ⬜ |
 | <a id="type-deliveryjob--deliveredat"></a>`deliveredAt` | `string` _date-time_ | ⬜ |
 
-### 🎭 Actors _(3)_
+<a id="type-deliverypartneravailability"></a>
+#### 🧩 Type: `DeliveryPartnerAvailability`
+
+A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue.
+
+- **Read model**: [🗄️ `View_DeliveryPartnerAvailability`](#view-view_deliverypartneravailability)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-deliverypartneravailability--registrationid"></a>`registrationId` | [🔤 `DeliveryPartnerRegistrationId`](#scalar-deliverypartnerregistrationid) | ✅ |
+| <a id="type-deliverypartneravailability--channel"></a>`channel` | [🔤 `DeliveryChannelKey`](#scalar-deliverychannelkey) | ✅ |
+| <a id="type-deliverypartneravailability--cityid"></a>`cityId` | [🔤 `CityId`](#scalar-cityid) | ✅ |
+| <a id="type-deliverypartneravailability--partnername"></a>`partnerName` | [🔤 `DeliveryPartnerName`](#scalar-deliverypartnername) | ✅ |
+| <a id="type-deliverypartneravailability--contactemail"></a>`contactEmail` | [🔤 `EmailAddress`](#scalar-emailaddress) | ✅ |
+| <a id="type-deliverypartneravailability--status"></a>`status` | [🔤 `CityAvailabilityStatus`](#scalar-cityavailabilitystatus) | ✅ |
+| <a id="type-deliverypartneravailability--requestedat"></a>`requestedAt` | `string` _date-time_ | ✅ |
+| <a id="type-deliverypartneravailability--decidedat"></a>`decidedAt` | `string` _date-time_ | ⬜ |
+
+### 🎭 Actors _(4)_
+
+<a id="actor-deliverypartnerregistration"></a>
+#### 🎭 Actor: `DeliveryPartnerRegistration`
+
+_🧩 aggregate_ — A delivery partner's self-registration of availability to serve one city on one catalog channel (#61); id = registrationId. RegisterDeliveryPartnerAvailability is its birth (lands PENDING); an admin approves it, and the partner or an admin may revoke it. Status invariants read only this stream's fold — the review state, not referential FK integrity (channel/city existence is enforced at the boundary, a follow-up). The approved set is the substrate the #60 city dispatch ranking consumes (wiring deferred).
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `RegisterDeliveryPartnerAvailability`](#command-registerdeliverypartneravailability) | [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested) | [⛔ `DeliveryPartnerAvailabilityAlreadyRequested`](#error-deliverypartneravailabilityalreadyrequested) |
+| [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability) | [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved) | [⛔ `DeliveryPartnerAvailabilityNotFound`](#error-deliverypartneravailabilitynotfound), [⛔ `DeliveryPartnerAvailabilityNotPending`](#error-deliverypartneravailabilitynotpending) |
+| [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability) | [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked) | [⛔ `DeliveryPartnerAvailabilityNotFound`](#error-deliverypartneravailabilitynotfound) |
 
 <a id="actor-deliveryjob"></a>
 #### 🎭 Actor: `DeliveryJob`
@@ -6294,7 +6370,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(1)_
+### 🗄️ Views (read models) _(2)_
 
 <a id="view-view_deliveryjob"></a>
 #### 🗄️ View: `View_DeliveryJob`
@@ -6324,7 +6400,27 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(15)_
+<a id="view-view_deliverypartneravailability"></a>
+#### 🗄️ View: `View_DeliveryPartnerAvailability`
+
+- **Source**: [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · 🔭 V1
+- **Rules**: `status` is derived from the latest lifecycle event type: PENDING on Requested → APPROVED on Approved → REVOKED on Revoked. Set-once identity fields (channel, city_id, partner_name, contact_email) are carried only by the Requested birth fact.
+- **Fed by**: [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested), [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved), [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `registration_id` | [🔤 `DeliveryPartnerRegistrationId`](#scalar-deliverypartnerregistrationid) _(derived)_ | [⚡ `DeliveryPartnerAvailabilityRequested`.`registrationId`](#event-deliverypartneravailabilityrequested--registrationid) | PK |  |
+| `channel` | [🔤 `DeliveryChannelKey`](#scalar-deliverychannelkey) _(derived)_ | [⚡ `DeliveryPartnerAvailabilityRequested`.`channel`](#event-deliverypartneravailabilityrequested--channel) | — |  |
+| `city_id` | [🔤 `CityId`](#scalar-cityid) _(derived)_ | [⚡ `DeliveryPartnerAvailabilityRequested`.`cityId`](#event-deliverypartneravailabilityrequested--cityid) | index |  |
+| `partner_name` | [🔤 `DeliveryPartnerName`](#scalar-deliverypartnername) _(derived)_ | [⚡ `DeliveryPartnerAvailabilityRequested`.`partnerName`](#event-deliverypartneravailabilityrequested--partnername) | — |  |
+| `contact_email` | [🔤 `EmailAddress`](#scalar-emailaddress) _(derived)_ | [⚡ `DeliveryPartnerAvailabilityRequested`.`contactEmail`](#event-deliverypartneravailabilityrequested--contactemail) | — |  |
+| `status` | [🔤 `CityAvailabilityStatus`](#scalar-cityavailabilitystatus) | [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested), [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved), [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked) | — | Derived from the latest lifecycle event type. |
+| `requested_at` | `timestamptz` | [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested) | — | occurrence: max(occurred_at) of the birth fact. |
+| `decided_at` | `timestamptz` | [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved), [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked) | nullable | occurrence: max(occurred_at) of the latest decision (approve/revoke); null while PENDING. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+### 📩 Commands _(18)_
 
 <a id="command-acceptdelivery"></a>
 #### 📩 Command: `AcceptDelivery`
@@ -6497,6 +6593,50 @@ Apply a partner-reported status change to the delivery job (from the avelo37-acl
 | <a id="command-updatedeliverypartnerstatus--partnerref"></a>`partnerRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="command-updatedeliverypartnerstatus--status"></a>`status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | ✅ |  |
 
+<a id="command-registerdeliverypartneravailability"></a>
+#### 📩 Command: `RegisterDeliveryPartnerAvailability`
+
+A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
+
+- **Dispatched by**: [✏️ `registerDeliveryPartnerAvailability`](#mutation-registerdeliverypartneravailability) · **handled by** [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Emits**: [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested)
+- **Throws**: [⛔ `DeliveryPartnerAvailabilityAlreadyRequested`](#error-deliverypartneravailabilityalreadyrequested)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-registerdeliverypartneravailability--registrationid"></a>`registrationId` | [🔤 `DeliveryPartnerRegistrationId`](#scalar-deliverypartnerregistrationid) | ✅ | Client-generated id for the new availability registration. |
+| <a id="command-registerdeliverypartneravailability--channel"></a>`channel` | [🔤 `DeliveryChannelKey`](#scalar-deliverychannelkey) | ✅ | The catalog channel this partner operates (e.g. 'uber_direct'). |
+| <a id="command-registerdeliverypartneravailability--cityid"></a>`cityId` | [🔤 `CityId`](#scalar-cityid) | ✅ |  |
+| <a id="command-registerdeliverypartneravailability--partnername"></a>`partnerName` | [🔤 `DeliveryPartnerName`](#scalar-deliverypartnername) | ✅ |  |
+| <a id="command-registerdeliverypartneravailability--contactemail"></a>`contactEmail` | [🔤 `EmailAddress`](#scalar-emailaddress) | ✅ |  |
+
+<a id="command-approvedeliverypartneravailability"></a>
+#### 📩 Command: `ApproveDeliveryPartnerAvailability`
+
+An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking.
+
+- **Dispatched by**: [✏️ `approveDeliveryPartnerAvailability`](#mutation-approvedeliverypartneravailability) · **handled by** [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Emits**: [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved)
+- **Throws**: [⛔ `DeliveryPartnerAvailabilityNotFound`](#error-deliverypartneravailabilitynotfound), [⛔ `DeliveryPartnerAvailabilityNotPending`](#error-deliverypartneravailabilitynotpending)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-approvedeliverypartneravailability--registrationid"></a>`registrationId` | [🔤 `DeliveryPartnerRegistrationId`](#scalar-deliverypartnerregistrationid) | ✅ |  |
+
+<a id="command-revokedeliverypartneravailability"></a>
+#### 📩 Command: `RevokeDeliveryPartnerAvailability`
+
+Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it.
+
+- **Dispatched by**: [✏️ `revokeDeliveryPartnerAvailability`](#mutation-revokedeliverypartneravailability) · **handled by** [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Emits**: [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked)
+- **Throws**: [⛔ `DeliveryPartnerAvailabilityNotFound`](#error-deliverypartneravailabilitynotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-revokedeliverypartneravailability--registrationid"></a>`registrationId` | [🔤 `DeliveryPartnerRegistrationId`](#scalar-deliverypartnerregistrationid) | ✅ |  |
+| <a id="command-revokedeliverypartneravailability--reason"></a>`reason` | `string` | ⬜ |  |
+
 <a id="command-registerrider"></a>
 #### 📩 Command: `RegisterRider`
 
@@ -6542,7 +6682,7 @@ Change a rider's availability/lifecycle status.
 | <a id="command-changeriderstatus--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="command-changeriderstatus--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### ⚡ Events _(20)_
+### ⚡ Events _(23)_
 
 <a id="event-deliveryrequested"></a>
 #### ⚡ Event: `DeliveryRequested`
@@ -6806,6 +6946,50 @@ A previously reported delivery issue was resolved.
 | <a id="event-deliveryissueresolved--resolution"></a>`resolution` | `string` | ✅ |  |
 | <a id="event-deliveryissueresolved--resolvedat"></a>`resolvedAt` | `string` _date-time_ | ⬜ |  |
 
+<a id="event-deliverypartneravailabilityrequested"></a>
+#### ⚡ Event: `DeliveryPartnerAvailabilityRequested`
+
+A delivery partner self-registered its availability to serve a city on a catalog channel (#61). The registration's birth fact; lands PENDING until an admin approves it.
+
+- **Emitted by**: [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_DeliveryPartnerAvailability`](#view-view_deliverypartneravailability)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-deliverypartneravailabilityrequested--registrationid"></a>`registrationId` | [🔤 `DeliveryPartnerRegistrationId`](#scalar-deliverypartnerregistrationid) | ✅ |  |
+| <a id="event-deliverypartneravailabilityrequested--channel"></a>`channel` | [🔤 `DeliveryChannelKey`](#scalar-deliverychannelkey) | ✅ |  |
+| <a id="event-deliverypartneravailabilityrequested--cityid"></a>`cityId` | [🔤 `CityId`](#scalar-cityid) | ✅ |  |
+| <a id="event-deliverypartneravailabilityrequested--partnername"></a>`partnerName` | [🔤 `DeliveryPartnerName`](#scalar-deliverypartnername) | ✅ |  |
+| <a id="event-deliverypartneravailabilityrequested--contactemail"></a>`contactEmail` | [🔤 `EmailAddress`](#scalar-emailaddress) | ✅ |  |
+
+<a id="event-deliverypartneravailabilityapproved"></a>
+#### ⚡ Event: `DeliveryPartnerAvailabilityApproved`
+
+An admin approved a delivery partner's city availability (#61); it becomes eligible for the city's dispatch ranking.
+
+- **Emitted by**: [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_DeliveryPartnerAvailability`](#view-view_deliverypartneravailability)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-deliverypartneravailabilityapproved--registrationid"></a>`registrationId` | [🔤 `DeliveryPartnerRegistrationId`](#scalar-deliverypartnerregistrationid) | ✅ |  |
+
+<a id="event-deliverypartneravailabilityrevoked"></a>
+#### ⚡ Event: `DeliveryPartnerAvailabilityRevoked`
+
+A delivery partner's city availability was revoked — withdrawn by the partner or disabled by an admin (#61); no longer eligible.
+
+- **Emitted by**: [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_DeliveryPartnerAvailability`](#view-view_deliverypartneravailability)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-deliverypartneravailabilityrevoked--registrationid"></a>`registrationId` | [🔤 `DeliveryPartnerRegistrationId`](#scalar-deliverypartnerregistrationid) | ✅ |  |
+| <a id="event-deliverypartneravailabilityrevoked--reason"></a>`reason` | `string` | ⬜ |  |
+
 <a id="event-riderregistered"></a>
 #### ⚡ Event: `RiderRegistered`
 
@@ -6852,28 +7036,35 @@ A rider's availability/lifecycle status changed.
 | <a id="event-riderstatuschanged--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="event-riderstatuschanged--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### 🔤 Scalars _(5)_
+### 🔤 Scalars _(9)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-deliveryjobid"></a>🔤 `DeliveryJobId` | string _uuid_ | Identifies one DeliveryJob (a single delivery of an order from restaurant to customer). |
 | <a id="scalar-riderid"></a>🔤 `RiderId` | string _uuid_ | An independent Captain rider (courier). Null on a partner-fulfilled job (the partner's courier is name/phone only). |
+| <a id="scalar-cityid"></a>🔤 `CityId` | string _uuid_ | A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60). |
 | <a id="scalar-riderstatus"></a>🔤 `RiderStatus` | enum (OFFLINE \| AVAILABLE \| ON_DELIVERY \| SUSPENDED) | Availability/lifecycle status of an independent Captain rider. |
 | <a id="scalar-deliveryprovider"></a>🔤 `DeliveryProvider` | enum (PARTNER \| INDEPENDENT) | Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider). |
 | <a id="scalar-deliverychannelkey"></a>🔤 `DeliveryChannelKey` | string `^[a-z0-9]+(?:_[a-z0-9]+)*$` | Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60). |
+| <a id="scalar-deliverypartnerregistrationid"></a>🔤 `DeliveryPartnerRegistrationId` | string _uuid_ | A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration. |
+| <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
+| <a id="scalar-cityavailabilitystatus"></a>🔤 `CityAvailabilityStatus` | enum (PENDING \| APPROVED \| REVOKED) | Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled. |
 
-### ⛔ Errors _(6)_
+### ⛔ Errors _(9)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
 | <a id="error-deliveryjobnotfound"></a>⛔ `DeliveryJobNotFound` | No delivery job with this id. | 🇬🇧 Delivery job not found. | 🇫🇷 Livraison introuvable. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `EscalateDelivery`](#command-escalatedelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus), [📩 `DeclineDelivery`](#command-declinedelivery) |
 | <a id="error-invaliddeliverystatus"></a>⛔ `InvalidDeliveryStatus` | The delivery job is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the delivery is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus), [📩 `DeclineDelivery`](#command-declinedelivery) |
 | <a id="error-deliveryalreadyassigned"></a>⛔ `DeliveryAlreadyAssigned` | The delivery job has already been accepted by a courier/rider. | 🇬🇧 This delivery has already been taken. | 🇫🇷 Cette livraison a déjà été prise en charge. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `AssignDeliveryToPartner`](#command-assigndeliverytopartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
+| <a id="error-deliverypartneravailabilityalreadyrequested"></a>⛔ `DeliveryPartnerAvailabilityAlreadyRequested` | A registration with this id already exists (idempotent self-registration guard). | 🇬🇧 This availability registration already exists. | 🇫🇷 Cette demande de disponibilité existe déjà. | [📩 `RegisterDeliveryPartnerAvailability`](#command-registerdeliverypartneravailability) |
+| <a id="error-deliverypartneravailabilitynotfound"></a>⛔ `DeliveryPartnerAvailabilityNotFound` | No delivery-partner availability registration with this id. | 🇬🇧 Availability registration not found. | 🇫🇷 Demande de disponibilité introuvable. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability), [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability) |
+| <a id="error-deliverypartneravailabilitynotpending"></a>⛔ `DeliveryPartnerAvailabilityNotPending` | The availability registration is not PENDING, so it cannot be approved. | 🇬🇧 This availability registration is not awaiting review. | 🇫🇷 Cette demande de disponibilité n'est pas en attente de validation. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability) |
 | <a id="error-rideralreadyregistered"></a>⛔ `RiderAlreadyRegistered` | A rider is already registered for this identity (authRef/id). | 🇬🇧 You are already registered as a rider. | 🇫🇷 Vous êtes déjà inscrit en tant que livreur. | [📩 `RegisterRider`](#command-registerrider) |
 | <a id="error-ridernotfound"></a>⛔ `RiderNotFound` | No rider with this id. | 🇬🇧 Rider not found. | 🇫🇷 Livreur introuvable. | [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-invalidriderstatustransition"></a>⛔ `InvalidRiderStatusTransition` | The rider is not in a status that allows this transition. | 🇬🇧 A rider cannot move from '{currentStatus}' to '{targetStatus}'. | 🇫🇷 Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 
-### 📐 Business rules _(16)_
+### 📐 Business rules _(18)_
 
 <a id="rule-deliveryacceptedonlywhenpending"></a>
 #### 📐 Rule: `DeliveryAcceptedOnlyWhenPending`
@@ -6980,6 +7171,20 @@ _A delivery issue can be reported on a non-delivered job and later resolved._
 
 - **Verified by**: [🧪 `TestDeliveryIssueReported`](#test-testdeliveryissuereported), [🧪 `TestDeliveryIssueResolved`](#test-testdeliveryissueresolved)
 
+<a id="rule-deliverypartnerselfregisterscityavailability"></a>
+#### 📐 Rule: `DeliveryPartnerSelfRegistersCityAvailability`
+
+_A delivery partner can self-register (via the EXTERNAL API) its availability to serve a city on a catalog channel; the registration is idempotent by its client-generated id and lands PENDING (#61)._
+
+- **Verified by**: [🧪 `TestDeliveryPartnerAvailabilityRequested`](#test-testdeliverypartneravailabilityrequested), [🧪 `TestDeliveryPartnerRegisterAgainIsRejected`](#test-testdeliverypartnerregisteragainisrejected)
+
+<a id="rule-deliverypartneravailabilitygoesliveonlyafterapproval"></a>
+#### 📐 Rule: `DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval`
+
+_A self-registered city availability becomes APPROVED (eligible for the city's dispatch ranking) only after an admin approves a PENDING registration; approving anything not PENDING is rejected, and a registration may later be revoked by the partner or an admin (#61)._
+
+- **Verified by**: [🧪 `TestDeliveryPartnerAvailabilityApproved`](#test-testdeliverypartneravailabilityapproved), [🧪 `TestDeliveryPartnerApproveMissingIsRejected`](#test-testdeliverypartnerapprovemissingisrejected), [🧪 `TestDeliveryPartnerApproveNonPendingIsRejected`](#test-testdeliverypartnerapprovenonpendingisrejected), [🧪 `TestDeliveryPartnerAvailabilityRevoked`](#test-testdeliverypartneravailabilityrevoked), [🧪 `TestDeliveryPartnerRevokeMissingIsRejected`](#test-testdeliverypartnerrevokemissingisrejected)
+
 <a id="rule-riderlifecycle"></a>
 #### 📐 Rule: `RiderLifecycle`
 
@@ -6987,7 +7192,79 @@ _A rider registers once (per auth user), may update editable profile fields, and
 
 - **Verified by**: [🧪 `TestRiderRegistered`](#test-testriderregistered), [🧪 `TestRiderRegisterAgainIsRejected`](#test-testriderregisteragainisrejected), [🧪 `TestRiderInfoUpdated`](#test-testriderinfoupdated), [🧪 `TestRiderUpdateIsRejectedWhenNotFound`](#test-testriderupdateisrejectedwhennotfound), [🧪 `TestRiderStatusChanged`](#test-testriderstatuschanged), [🧪 `TestRiderStatusChangeIsRejected`](#test-testriderstatuschangeisrejected)
 
-### 🧪 Tests _(3)_
+### 🧪 Tests _(4)_
+
+**[🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)**
+
+<a id="test-testdeliverypartneravailabilityrequested"></a>
+#### 🧪 Test: `TestDeliveryPartnerAvailabilityRequested`
+
+_A delivery partner self-registers availability to serve a city on a catalog channel_
+
+- **Given**: _(none)_
+- **When**: [📩 `RegisterDeliveryPartnerAvailability`](#command-registerdeliverypartneravailability)
+- **Then**: [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested)
+- **Verifies**: [📐 `DeliveryPartnerSelfRegistersCityAvailability`](#rule-deliverypartnerselfregisterscityavailability)
+
+<a id="test-testdeliverypartnerregisteragainisrejected"></a>
+#### 🧪 Test: `TestDeliveryPartnerRegisterAgainIsRejected`
+
+_Re-registering the same availability id is rejected (idempotent birth)_
+
+- **Given**: [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested)
+- **When**: [📩 `RegisterDeliveryPartnerAvailability`](#command-registerdeliverypartneravailability)
+- **Thrown**: [⛔ `DeliveryPartnerAvailabilityAlreadyRequested`](#error-deliverypartneravailabilityalreadyrequested)
+- **Verifies**: [📐 `DeliveryPartnerSelfRegistersCityAvailability`](#rule-deliverypartnerselfregisterscityavailability)
+
+<a id="test-testdeliverypartneravailabilityapproved"></a>
+#### 🧪 Test: `TestDeliveryPartnerAvailabilityApproved`
+
+_An admin approves a pending city-availability registration_
+
+- **Given**: [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested)
+- **When**: [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability)
+- **Then**: [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved)
+- **Verifies**: [📐 `DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval`](#rule-deliverypartneravailabilitygoesliveonlyafterapproval)
+
+<a id="test-testdeliverypartnerapprovemissingisrejected"></a>
+#### 🧪 Test: `TestDeliveryPartnerApproveMissingIsRejected`
+
+_Approving an unknown availability registration is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability)
+- **Thrown**: [⛔ `DeliveryPartnerAvailabilityNotFound`](#error-deliverypartneravailabilitynotfound)
+- **Verifies**: [📐 `DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval`](#rule-deliverypartneravailabilitygoesliveonlyafterapproval)
+
+<a id="test-testdeliverypartnerapprovenonpendingisrejected"></a>
+#### 🧪 Test: `TestDeliveryPartnerApproveNonPendingIsRejected`
+
+_Approving an already-approved registration is rejected (not pending)_
+
+- **Given**: [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested), [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved)
+- **When**: [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability)
+- **Thrown**: [⛔ `DeliveryPartnerAvailabilityNotPending`](#error-deliverypartneravailabilitynotpending)
+- **Verifies**: [📐 `DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval`](#rule-deliverypartneravailabilitygoesliveonlyafterapproval)
+
+<a id="test-testdeliverypartneravailabilityrevoked"></a>
+#### 🧪 Test: `TestDeliveryPartnerAvailabilityRevoked`
+
+_A partner (or admin) revokes a city-availability registration_
+
+- **Given**: [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested)
+- **When**: [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability)
+- **Then**: [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked)
+- **Verifies**: [📐 `DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval`](#rule-deliverypartneravailabilitygoesliveonlyafterapproval)
+
+<a id="test-testdeliverypartnerrevokemissingisrejected"></a>
+#### 🧪 Test: `TestDeliveryPartnerRevokeMissingIsRejected`
+
+_Revoking an unknown availability registration is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability)
+- **Thrown**: [⛔ `DeliveryPartnerAvailabilityNotFound`](#error-deliverypartneravailabilitynotfound)
+- **Verifies**: [📐 `DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval`](#rule-deliverypartneravailabilitygoesliveonlyafterapproval)
 
 **[🎭 `DeliveryJob`](#actor-deliveryjob)**
 
@@ -7665,7 +7942,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(41)_
+### 🔤 Scalars _(40)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -7689,7 +7966,6 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-emailaddress"></a>🔤 `EmailAddress` | string _email_ |  |
 | <a id="scalar-phonenumber"></a>🔤 `PhoneNumber` | string | Canonical E.164 phone (e.g. '+33612345678'). Composed server-side from DialingCode + NationalPhoneNumber and stored on events/views. Validation enforced at application level.  |
 | <a id="scalar-addressline"></a>🔤 `AddressLine` | string |  |
-| <a id="scalar-cityid"></a>🔤 `CityId` | string _uuid_ | A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60). |
 | <a id="scalar-postalcode"></a>🔤 `PostalCode` | string |  |
 | <a id="scalar-countrycode"></a>🔤 `CountryCode` | string `^[A-Z]{2}$` | ISO 3166-1 alpha-2 country code. Example: 'FR'. |
 | <a id="scalar-timezone"></a>🔤 `TimeZone` | string | IANA timezone. Example: 'Europe/Paris'. |
@@ -8288,7 +8564,7 @@ aggregates; components bind the aggregates they handle and the read models they 
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
 | 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess) |
 | 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
-| 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider) · [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
+| 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
 
 ### 🧱 L2 — Containers
 

@@ -157,6 +157,25 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `View_DeliveryPartnerAvailability` · 🔭 V1 · source aggregate `DeliveryPartnerRegistration`
+
+- **Fed by**: `DeliveryPartnerAvailabilityRequested`, `DeliveryPartnerAvailabilityApproved`, `DeliveryPartnerAvailabilityRevoked`
+- **Rules**: `status` is derived from the latest lifecycle event type: PENDING on Requested → APPROVED on Approved → REVOKED on Revoked. Set-once identity fields (channel, city_id, partner_name, contact_email) are carried only by the Requested birth fact.
+- **Indexes**: `(city_id, status)`, `(channel)`
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `registration_id` | `DeliveryPartnerRegistrationId` | `UUID` | PK |  |
+| `channel` | `DeliveryChannelKey` | `TEXT` | — |  |
+| `city_id` | `CityId` | `UUID` | index |  |
+| `partner_name` | `DeliveryPartnerName` | `TEXT` | — |  |
+| `contact_email` | `EmailAddress` | `TEXT` | — |  |
+| `status` | `CityAvailabilityStatus` | `INTEGER` | — | Derived from the latest lifecycle event type. |
+| `requested_at` | `timestamptz` | `TIMESTAMPTZ` | — | occurrence: max(occurred_at) of the birth fact. |
+| `decided_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | occurrence: max(occurred_at) of the latest decision (approve/revoke); null while PENDING. |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 ### `View_PendingRefunds` · 🛶 V0 · source aggregate `Payment`
 
 - **Fed by**: `RefundOpened`, `RefundApproved`, `RefundDenied`, `PaymentRefunded`

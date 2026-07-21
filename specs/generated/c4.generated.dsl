@@ -31,6 +31,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
         group "delivery" {
           a_DeliveryJob = component "DeliveryJob" "Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)." "Aggregate"
           a_Rider = component "Rider" "Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)." "Aggregate"
+          a_DeliveryPartnerRegistration = component "DeliveryPartnerRegistration" "Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)." "Aggregate"
           a_DeliveryDispatchProcess = component "DeliveryDispatchProcess" "Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)." "ProcessManager"
         }
         group "Infrastructure" {

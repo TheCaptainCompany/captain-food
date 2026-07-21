@@ -1496,6 +1496,43 @@ DeliveryIssueResolved:
   required: [deliveryJobId, resolution]
 
 # =====================================================================
+# Delivery partner self-registration (#61)
+# =====================================================================
+# A delivery partner declares availability to serve a city on a known catalog channel via the EXTERNAL
+# API; an admin approves or the partner/admin revokes. Facts on the DeliveryPartnerRegistration stream.
+
+DeliveryPartnerAvailabilityRequested:
+  description: >
+    A delivery partner self-registered its availability to serve a city on a catalog channel (#61). The
+    registration's birth fact; lands PENDING until an admin approves it.
+  type: object
+  properties:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+    channel: { $ref: 'scalars.yaml#/DeliveryChannelKey' }
+    cityId: { $ref: 'scalars.yaml#/CityId' }
+    partnerName: { $ref: 'scalars.yaml#/DeliveryPartnerName' }
+    contactEmail: { $ref: 'scalars.yaml#/EmailAddress' }
+  required: [registrationId, channel, cityId, partnerName, contactEmail]
+
+DeliveryPartnerAvailabilityApproved:
+  description: "An admin approved a delivery partner's city availability (#61); it becomes eligible for the city's dispatch ranking."
+  type: object
+  properties:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+  required: [registrationId]
+
+DeliveryPartnerAvailabilityRevoked:
+  description: "A delivery partner's city availability was revoked — withdrawn by the partner or disabled by an admin (#61); no longer eligible."
+  type: object
+  properties:
+    registrationId: { $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId' }
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [registrationId]
+
+# =====================================================================
 # Rider (independent Captain courier)
 # =====================================================================
 

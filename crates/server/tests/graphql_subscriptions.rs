@@ -160,6 +160,15 @@ impl application::queries::RefundReadRepository for Empty {
         Ok(vec![])
     }
 }
+#[async_trait]
+impl application::queries::DeliveryPartnerAvailabilityReadRepository for Empty {
+    async fn list(
+        &self,
+        _f: application::queries::DeliveryPartnerAvailabilityFilter,
+    ) -> Result<Vec<application::queries::DeliveryPartnerAvailabilityRow>, DomainError> {
+        Ok(vec![])
+    }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Fixtures.
@@ -257,6 +266,7 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
             customers: Arc::new(Empty),
             deliveries: Arc::new(Empty),
             refunds: Arc::new(Empty),
+            delivery_partner_availabilities: Arc::new(Empty),
         }),
         None,
         Some(bus),

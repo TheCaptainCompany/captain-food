@@ -108,6 +108,10 @@ INSERT INTO ref_restaurant_dispatch_mode (value, sort_order) VALUES ('CAPTAIN',0
 CREATE TABLE ref_delivery_channel_kind(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_delivery_channel_kind (value, sort_order) VALUES ('POOL',0),('PARTNER',1);
 
+-- CityAvailabilityStatus
+CREATE TABLE ref_city_availability_status(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_city_availability_status (value, sort_order) VALUES ('PENDING',0),('APPROVED',1),('REVOKED',2);
+
 -- CatalogItemAvailability
 CREATE TABLE ref_catalog_item_availability(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_catalog_item_availability (value, sort_order) VALUES ('AVAILABLE',0),('UNAVAILABLE',1);

@@ -436,6 +436,17 @@ fixtures:
     type: { $ref: 'events.yaml#/DeliveryIssueResolved' }
     data: { deliveryJobId: "deliv-1", resolution: "Customer called back; order handed over" }
 
+  # --- Delivery partner self-registration (#61) ---
+  deliveryPartnerAvailabilityRequested:
+    type: { $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested' }
+    data: { registrationId: "reg-1", channel: "uber_direct", cityId: "city-1", partnerName: "Uber Direct", contactEmail: "ops@uberdirect.example" }
+  deliveryPartnerAvailabilityApproved:
+    type: { $ref: 'events.yaml#/DeliveryPartnerAvailabilityApproved' }
+    data: { registrationId: "reg-1" }
+  deliveryPartnerAvailabilityRevoked:
+    type: { $ref: 'events.yaml#/DeliveryPartnerAvailabilityRevoked' }
+    data: { registrationId: "reg-1", reason: "Partner paused service in this city" }
+
   # --- Rider ---
   riderRegistered:
     type: { $ref: 'events.yaml#/RiderRegistered' }
@@ -2630,6 +2641,89 @@ tests:
       data: { deliveryJobId: "deliv-1", resolution: "Customer called back; order handed over" }
     then:
       - { $ref: '#/fixtures/deliveryIssueResolved' }
+
+  # -------------- Delivery partner self-registration (#61) ------------
+  TestDeliveryPartnerAvailabilityRequested:
+    name: "A delivery partner self-registers availability to serve a city on a catalog channel"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerSelfRegistersCityAvailability' }]
+    actor: { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RegisterDeliveryPartnerAvailability' }
+      data: { registrationId: "reg-1", channel: "uber_direct", cityId: "city-1", partnerName: "Uber Direct", contactEmail: "ops@uberdirect.example" }
+    then:
+      - { $ref: '#/fixtures/deliveryPartnerAvailabilityRequested' }
+
+  TestDeliveryPartnerRegisterAgainIsRejected:
+    name: "Re-registering the same availability id is rejected (idempotent birth)"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerSelfRegistersCityAvailability' }]
+    actor: { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
+    given:
+      - { $ref: '#/fixtures/deliveryPartnerAvailabilityRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/RegisterDeliveryPartnerAvailability' }
+      data: { registrationId: "reg-1", channel: "uber_direct", cityId: "city-1", partnerName: "Uber Direct", contactEmail: "ops@uberdirect.example" }
+    thrown:
+      - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityAlreadyRequested' }
+
+  TestDeliveryPartnerAvailabilityApproved:
+    name: "An admin approves a pending city-availability registration"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval' }]
+    actor: { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
+    given:
+      - { $ref: '#/fixtures/deliveryPartnerAvailabilityRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/ApproveDeliveryPartnerAvailability' }
+      data: { registrationId: "reg-1" }
+    then:
+      - { $ref: '#/fixtures/deliveryPartnerAvailabilityApproved' }
+
+  TestDeliveryPartnerApproveMissingIsRejected:
+    name: "Approving an unknown availability registration is rejected"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval' }]
+    actor: { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/ApproveDeliveryPartnerAvailability' }
+      data: { registrationId: "reg-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotFound' }
+
+  TestDeliveryPartnerApproveNonPendingIsRejected:
+    name: "Approving an already-approved registration is rejected (not pending)"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval' }]
+    actor: { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
+    given:
+      - { $ref: '#/fixtures/deliveryPartnerAvailabilityRequested' }
+      - { $ref: '#/fixtures/deliveryPartnerAvailabilityApproved' }
+    when:
+      type: { $ref: 'commands.yaml#/ApproveDeliveryPartnerAvailability' }
+      data: { registrationId: "reg-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotPending' }
+
+  TestDeliveryPartnerAvailabilityRevoked:
+    name: "A partner (or admin) revokes a city-availability registration"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval' }]
+    actor: { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
+    given:
+      - { $ref: '#/fixtures/deliveryPartnerAvailabilityRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/RevokeDeliveryPartnerAvailability' }
+      data: { registrationId: "reg-1", reason: "Partner paused service in this city" }
+    then:
+      - { $ref: '#/fixtures/deliveryPartnerAvailabilityRevoked' }
+
+  TestDeliveryPartnerRevokeMissingIsRejected:
+    name: "Revoking an unknown availability registration is rejected"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval' }]
+    actor: { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RevokeDeliveryPartnerAvailability' }
+      data: { registrationId: "reg-1", reason: "Partner paused service in this city" }
+    thrown:
+      - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotFound' }
 
   # ----------------------- Rider --------------------------------------
   TestRiderRegistered:

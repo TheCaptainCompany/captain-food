@@ -76,6 +76,8 @@ scalar RatingComment
 scalar TimeOfDay
 scalar ProspectionScore
 scalar DeliveryChannelKey
+scalar DeliveryPartnerRegistrationId
+scalar DeliveryPartnerName
 
 # ==============================================================================
 # Enums
@@ -258,6 +260,12 @@ enum RestaurantDispatchMode {
 enum DeliveryChannelKind {
   POOL
   PARTNER
+}
+
+enum CityAvailabilityStatus {
+  PENDING
+  APPROVED
+  REVOKED
 }
 
 enum CatalogItemAvailability {
@@ -664,6 +672,17 @@ type DeliveryJob {
   deliveredAt: DateTime
   order: Order!
   restaurant: Restaurant!
+}
+
+type DeliveryPartnerAvailability {
+  registrationId: DeliveryPartnerRegistrationId!
+  channel: DeliveryChannelKey!
+  cityId: CityId!
+  partnerName: DeliveryPartnerName!
+  contactEmail: EmailAddress!
+  status: CityAvailabilityStatus!
+  requestedAt: DateTime!
+  decidedAt: DateTime
 }
 
 type Refund {
@@ -1157,6 +1176,23 @@ input EscalateDeliveryInput {
   reason: String
 }
 
+input RegisterDeliveryPartnerAvailabilityInput {
+  registrationId: DeliveryPartnerRegistrationId!
+  channel: DeliveryChannelKey!
+  cityId: CityId!
+  partnerName: DeliveryPartnerName!
+  contactEmail: EmailAddress!
+}
+
+input ApproveDeliveryPartnerAvailabilityInput {
+  registrationId: DeliveryPartnerRegistrationId!
+}
+
+input RevokeDeliveryPartnerAvailabilityInput {
+  registrationId: DeliveryPartnerRegistrationId!
+  reason: String
+}
+
 input OperationStatusQueryInput {
   messageId: MessageId!
 }
@@ -1227,6 +1263,12 @@ input RestaurantDeliveriesQueryInput {
 input PendingRefundsQueryInput {
   restaurantId: RestaurantId
   status: RefundStatus
+}
+
+input DeliveryPartnerAvailabilitiesQueryInput {
+  cityId: CityId
+  channel: DeliveryChannelKey
+  status: CityAvailabilityStatus
 }
 
 input RestaurantLocationsByAccountQueryInput {
@@ -1398,6 +1440,7 @@ type Query {
   myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
   pendingRefunds(input: PendingRefundsQueryInput): [Refund!]! @auth(requires: [RESTAURANT, ADMIN]) @reads(views: ["View_PendingRefunds"])
+  deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
   prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
   pricingPolicy: [PricingPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["PricingPolicy"])
@@ -1476,6 +1519,9 @@ type Mutation {
   completeDelivery(input: CompleteDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")
   cancelDelivery(input: CancelDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "CancelDelivery")
   escalateDelivery(input: EscalateDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "EscalateDelivery")
+  registerDeliveryPartnerAvailability(input: RegisterDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RegisterDeliveryPartnerAvailability")
+  approveDeliveryPartnerAvailability(input: ApproveDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ApproveDeliveryPartnerAvailability")
+  revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")
 }
 
 # ==============================================================================

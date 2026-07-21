@@ -9,6 +9,7 @@ pub mod command_journal;
 pub mod customer;
 pub mod customer_store;
 pub mod delivery;
+pub mod delivery_partner_availability;
 pub mod enum_sql;
 pub mod event_bus;
 pub mod event_store;
@@ -43,6 +44,7 @@ pub use referential::PgDispatchStrategy;
 pub use referential::{
     PgPricingPolicyRepository, PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
 };
+pub use delivery_partner_availability::PgDeliveryPartnerAvailabilityRepository;
 pub use refund_queue::PgRefundQueueRepository;
 pub use restaurant::PgRestaurantRepository;
 

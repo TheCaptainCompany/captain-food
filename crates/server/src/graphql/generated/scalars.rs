@@ -1859,6 +1859,65 @@ impl From<DeliveryChannelKind> for ds::DeliveryChannelKind {
     }
 }
 
+/// A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryPartnerRegistrationId(pub uuid::Uuid);
+async_graphql::scalar!(DeliveryPartnerRegistrationId, "DeliveryPartnerRegistrationId", "A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration.");
+impl From<ds::DeliveryPartnerRegistrationId> for DeliveryPartnerRegistrationId {
+    fn from(v: ds::DeliveryPartnerRegistrationId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryPartnerRegistrationId> for ds::DeliveryPartnerRegistrationId {
+    fn from(v: DeliveryPartnerRegistrationId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The delivery partner's display/legal name as stated on self-registration (#61).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryPartnerName(pub String);
+async_graphql::scalar!(DeliveryPartnerName, "DeliveryPartnerName", "The delivery partner's display/legal name as stated on self-registration (#61).");
+impl From<ds::DeliveryPartnerName> for DeliveryPartnerName {
+    fn from(v: ds::DeliveryPartnerName) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryPartnerName> for ds::DeliveryPartnerName {
+    fn from(v: DeliveryPartnerName) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum CityAvailabilityStatus {
+    #[graphql(name = "PENDING")]
+    PENDING,
+    #[graphql(name = "APPROVED")]
+    APPROVED,
+    #[graphql(name = "REVOKED")]
+    REVOKED,
+}
+impl From<ds::CityAvailabilityStatus> for CityAvailabilityStatus {
+    fn from(v: ds::CityAvailabilityStatus) -> Self {
+        match v {
+            ds::CityAvailabilityStatus::PENDING => Self::PENDING,
+            ds::CityAvailabilityStatus::APPROVED => Self::APPROVED,
+            ds::CityAvailabilityStatus::REVOKED => Self::REVOKED,
+        }
+    }
+}
+impl From<CityAvailabilityStatus> for ds::CityAvailabilityStatus {
+    fn from(v: CityAvailabilityStatus) -> Self {
+        match v {
+            CityAvailabilityStatus::PENDING => Self::PENDING,
+            CityAvailabilityStatus::APPROVED => Self::APPROVED,
+            CityAvailabilityStatus::REVOKED => Self::REVOKED,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum CatalogItemAvailability {
     #[graphql(name = "AVAILABLE")]

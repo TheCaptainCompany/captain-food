@@ -186,6 +186,29 @@ Prospect:
       throws:
         - { $ref: 'errors.yaml#/ProspectNotFound' }
 
+DeliveryPartnerRegistration:
+  type: aggregate
+  description: >
+    A delivery partner's self-registration of availability to serve one city on one catalog channel (#61);
+    id = registrationId. RegisterDeliveryPartnerAvailability is its birth (lands PENDING); an admin
+    approves it, and the partner or an admin may revoke it. Status invariants read only this stream's fold
+    — the review state, not referential FK integrity (channel/city existence is enforced at the boundary,
+    a follow-up). The approved set is the substrate the #60 city dispatch ranking consumes (wiring deferred).
+  receives:
+    - message: { $ref: 'commands.yaml#/RegisterDeliveryPartnerAvailability' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityAlreadyRequested' }
+    - message: { $ref: 'commands.yaml#/ApproveDeliveryPartnerAvailability' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityApproved' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotFound' }
+        - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotPending' }
+    - message: { $ref: 'commands.yaml#/RevokeDeliveryPartnerAvailability' }
+      emits: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRevoked' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryPartnerAvailabilityNotFound' }
+
 Catalog:
   type: aggregate
   description: "A restaurant catalog: catalog, category tree, products, offers (SKUs), option lists and per-offer stock."

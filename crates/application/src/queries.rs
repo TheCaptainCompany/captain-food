@@ -6,7 +6,8 @@ use async_trait::async_trait;
 
 use domain::generated::entities::{Money, OptionList, Product};
 use domain::generated::scalars::{
-    CartId, CatalogItemAvailability, CuisineCategory, CurrencyCode, CustomerId, DeliveryJobId,
+    CartId, CatalogItemAvailability, CityAvailabilityStatus, CityId, CuisineCategory, CurrencyCode,
+    CustomerId, DeliveryChannelKey, DeliveryJobId, DeliveryPartnerName, DeliveryPartnerRegistrationId,
     DeliveryProvider, DeliveryStatus, EmailAddress, ExternalReference, OfferId, OfferName,
     OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId, ProductName,
     ProspectPipelineStatus, Quantity, RefundId, RefundStatus, RestaurantAccountId, RestaurantId,
@@ -328,6 +329,45 @@ pub struct RefundFilter {
 pub trait RefundReadRepository: Send + Sync {
     /// The refund queue, newest-request-first, honouring the filter.
     async fn list(&self, filter: RefundFilter) -> Result<Vec<RefundRow>, DomainError>;
+}
+
+/// One `View_DeliveryPartnerAvailability` fold-view row (delivery partner self-registration, #61 —
+/// ADR-0039). Hand-written (view-backed read models get no generated row): field order/types mirror the
+/// view's columns; `status` comes back as its INTEGER ordinal (ADR-0037); set-once identity is carried
+/// by the Requested birth fact, `decided_at` is null while PENDING.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeliveryPartnerAvailabilityRow {
+    pub registration_id: DeliveryPartnerRegistrationId,
+    pub channel: DeliveryChannelKey,
+    pub city_id: CityId,
+    pub partner_name: DeliveryPartnerName,
+    pub contact_email: EmailAddress,
+    /// PENDING (awaiting review) → APPROVED / REVOKED.
+    pub status: CityAvailabilityStatus,
+    pub requested_at: chrono::DateTime<chrono::Utc>,
+    /// The decision's occurrence time; `None` while PENDING.
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Optional filters for the delivery-partner availability queue — mirrors the
+/// `deliveryPartnerAvailabilities` query args in api.yaml (`cityId` / `channel` / `status`;
+/// status PENDING = the admin review queue).
+#[derive(Debug, Clone, Default)]
+pub struct DeliveryPartnerAvailabilityFilter {
+    pub city_id: Option<CityId>,
+    pub channel: Option<DeliveryChannelKey>,
+    pub status: Option<CityAvailabilityStatus>,
+}
+
+/// Read port over the `View_DeliveryPartnerAvailability` read model (delivery partner self-registration,
+/// #61). Backs the EXTERNAL/admin `deliveryPartnerAvailabilities` GraphQL query.
+#[async_trait]
+pub trait DeliveryPartnerAvailabilityReadRepository: Send + Sync {
+    /// The availability registrations, newest-request-first, honouring the filter.
+    async fn list(
+        &self,
+        filter: DeliveryPartnerAvailabilityFilter,
+    ) -> Result<Vec<DeliveryPartnerAvailabilityRow>, DomainError>;
 }
 
 /// Optional filters for the admin prospection pipeline — mirrors the `prospectionPipeline` query args

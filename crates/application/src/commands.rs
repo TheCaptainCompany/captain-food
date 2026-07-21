@@ -94,6 +94,18 @@ use domain::generated::scalars::{
 use domain::order::OrderState;
 use domain::rider::RiderState;
 
+// Delivery partner self-registration (#61) — the DeliveryPartnerRegistration aggregate.
+use domain::delivery_partner_registration::DeliveryPartnerRegistrationState;
+use domain::generated::commands::{
+    ApproveDeliveryPartnerAvailability, RegisterDeliveryPartnerAvailability,
+    RevokeDeliveryPartnerAvailability,
+};
+use domain::generated::events::{
+    DeliveryPartnerAvailabilityApproved, DeliveryPartnerAvailabilityRequested,
+    DeliveryPartnerAvailabilityRevoked,
+};
+use domain::generated::scalars::{CityAvailabilityStatus, DeliveryPartnerRegistrationId};
+
 use crate::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
@@ -1480,6 +1492,101 @@ pub async fn update_rider_info(
         phone: cmd.phone,
     });
     Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// DeliveryPartnerRegistration (actors.yaml#/DeliveryPartnerRegistration) — self-registration (#61).
+// ================================================================================================
+
+pub(crate) fn delivery_partner_registration_stream(id: &DeliveryPartnerRegistrationId) -> String {
+    format!("DeliveryPartnerRegistration-{}", id.0)
+}
+
+/// Rehydrate the DeliveryPartnerRegistration aggregate and require existence, or reject with
+/// `errors.yaml#/DeliveryPartnerAvailabilityNotFound`.
+pub(crate) async fn require_delivery_partner_registration(
+    store: &dyn EventStore,
+    id: &DeliveryPartnerRegistrationId,
+) -> Result<(DeliveryPartnerRegistrationState, i64), DomainError> {
+    Repository::new(store)
+        .require::<DeliveryPartnerRegistrationState>(*id, || {
+            reject("DeliveryPartnerAvailabilityNotFound", json!({ "registrationId": id }))
+        })
+        .await
+}
+
+/// Handle `commands.yaml#/RegisterDeliveryPartnerAvailability` → emit
+/// `events.yaml#/DeliveryPartnerAvailabilityRequested` on the new `DeliveryPartnerRegistration-<id>`
+/// stream. A partner self-registers ONCE per (client-generated) registrationId: an existing fold — or
+/// losing the version-0 race — rejects with `errors.yaml#/DeliveryPartnerAvailabilityAlreadyRequested`
+/// (the declared throw; not absorbed as a replay, per tests.yaml TestDeliveryPartnerRegisterAgainIsRejected).
+/// The registration lands PENDING (rules.yaml#/DeliveryPartnerSelfRegistersCityAvailability).
+pub async fn register_delivery_partner_availability(
+    store: &dyn EventStore,
+    cmd: RegisterDeliveryPartnerAvailability,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let already = |id: &DeliveryPartnerRegistrationId| {
+        reject("DeliveryPartnerAvailabilityAlreadyRequested", json!({ "registrationId": id }))
+    };
+    let (state, _version) =
+        Repository::new(store).load::<DeliveryPartnerRegistrationState>(cmd.registration_id).await?;
+    if state.is_some() {
+        return Err(already(&cmd.registration_id));
+    }
+    let event = DomainEvent::DeliveryPartnerAvailabilityRequested(DeliveryPartnerAvailabilityRequested {
+        registration_id: cmd.registration_id,
+        channel: cmd.channel,
+        city_id: cmd.city_id,
+        partner_name: cmd.partner_name,
+        contact_email: cmd.contact_email,
+    });
+    let stream = delivery_partner_registration_stream(&cmd.registration_id);
+    match Repository::new(store).save(&stream, 0, &[event], actor).await {
+        Ok(_) => Ok(()),
+        Err(e) if is_version_conflict(&e) => Err(already(&cmd.registration_id)),
+        Err(e) => Err(e),
+    }
+}
+
+/// Handle `commands.yaml#/ApproveDeliveryPartnerAvailability` → emit
+/// `events.yaml#/DeliveryPartnerAvailabilityApproved`. Requires an existing PENDING registration:
+/// unknown rejects `DeliveryPartnerAvailabilityNotFound`, a non-PENDING one (already approved/revoked)
+/// rejects `DeliveryPartnerAvailabilityNotPending` (rules.yaml#/DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval).
+pub async fn approve_delivery_partner_availability(
+    store: &dyn EventStore,
+    cmd: ApproveDeliveryPartnerAvailability,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_delivery_partner_registration(store, &cmd.registration_id).await?;
+    if state.status != CityAvailabilityStatus::PENDING {
+        return Err(reject(
+            "DeliveryPartnerAvailabilityNotPending",
+            json!({ "registrationId": cmd.registration_id, "currentStatus": state.status }),
+        ));
+    }
+    let event = DomainEvent::DeliveryPartnerAvailabilityApproved(DeliveryPartnerAvailabilityApproved {
+        registration_id: cmd.registration_id,
+    });
+    let stream = delivery_partner_registration_stream(&cmd.registration_id);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RevokeDeliveryPartnerAvailability` → emit
+/// `events.yaml#/DeliveryPartnerAvailabilityRevoked`. Requires an existing registration
+/// (`DeliveryPartnerAvailabilityNotFound`); revoking is legal from any live status (withdraw/disable).
+pub async fn revoke_delivery_partner_availability(
+    store: &dyn EventStore,
+    cmd: RevokeDeliveryPartnerAvailability,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = require_delivery_partner_registration(store, &cmd.registration_id).await?;
+    let event = DomainEvent::DeliveryPartnerAvailabilityRevoked(DeliveryPartnerAvailabilityRevoked {
+        registration_id: cmd.registration_id,
+        reason: cmd.reason,
+    });
+    let stream = delivery_partner_registration_stream(&cmd.registration_id);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
 }
 
 // ================================================================================================

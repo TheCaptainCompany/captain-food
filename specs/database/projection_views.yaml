@@ -202,6 +202,58 @@ View_DeliveryJob:
       from: [{ $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/reason' }]
       nullable: true
       note: "Reason of the latest partner decline (the job stays PENDING and is re-offered, up to the 3-offer cap — ADR-20260720-004556); null if never rejected."
+# Delivery partner self-registration (#61) — one row per DeliveryPartnerRegistration: a partner's declared
+# availability to serve a city on a catalog channel, with its review status. Feeds the EXTERNAL/admin
+# `deliveryPartnerAvailabilities` query; the APPROVED subset is what the #60 city dispatch ranking will
+# consume (that wiring is a follow-up).
+View_DeliveryPartnerAvailability:
+  aggregate: DeliveryPartnerRegistration
+  slice: V1
+  fedBy:
+    - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested' }
+    - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityApproved' }
+    - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityRevoked' }
+  rules:
+    - "`status` is derived from the latest lifecycle event type: PENDING on Requested → APPROVED on Approved → REVOKED on Revoked."
+    - "Set-once identity fields (channel, city_id, partner_name, contact_email) are carried only by the Requested birth fact."
+  indexes:
+    - [city_id, status]   # the city's approved partners; the dispatch-ranking follow-up filters status = APPROVED
+    - [channel]
+  columns:
+    registration_id:
+      from: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested/properties/registrationId' }]
+      pk: true
+    channel:
+      from: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested/properties/channel' }]
+    city_id:
+      from: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested/properties/cityId' }]
+      index: true
+    partner_name:
+      from: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested/properties/partnerName' }]
+    contact_email:
+      from: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested/properties/contactEmail' }]
+    status:
+      type: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
+      derive:
+        DeliveryPartnerAvailabilityRequested: PENDING
+        DeliveryPartnerAvailabilityApproved: APPROVED
+        DeliveryPartnerAvailabilityRevoked: REVOKED
+      from:
+        - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested' }
+        - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityApproved' }
+        - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityRevoked' }
+      note: "Derived from the latest lifecycle event type."
+    requested_at:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/DeliveryPartnerAvailabilityRequested' }]
+      note: "occurrence: max(occurred_at) of the birth fact."
+    decided_at:
+      type: timestamptz
+      nullable: true
+      from:
+        - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityApproved' }
+        - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityRevoked' }
+      note: "occurrence: max(occurred_at) of the latest decision (approve/revoke); null while PENDING."
 # Refund queue (RefundProcess) — the pendingRefunds read model. One row per refund opened on a captured
 # payment (RefundOpened, delivered by RefundProcess to the Payment aggregate), folded with the decision
 # and settlement facts recorded on the same Payment stream. The full lifecycle stays in the view

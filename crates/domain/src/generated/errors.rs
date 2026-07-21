@@ -515,6 +515,30 @@ pub const DELIVERY_ALREADY_ASSIGNED: ErrorDef = ErrorDef {
     message_fr: "Cette livraison a déjà été prise en charge.",
 };
 
+/// A registration with this id already exists (idempotent self-registration guard).
+/// Context: `registrationId`.
+pub const DELIVERY_PARTNER_AVAILABILITY_ALREADY_REQUESTED: ErrorDef = ErrorDef {
+    code: "DeliveryPartnerAvailabilityAlreadyRequested",
+    message_en: "This availability registration already exists.",
+    message_fr: "Cette demande de disponibilité existe déjà.",
+};
+
+/// No delivery-partner availability registration with this id.
+/// Context: `registrationId`.
+pub const DELIVERY_PARTNER_AVAILABILITY_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "DeliveryPartnerAvailabilityNotFound",
+    message_en: "Availability registration not found.",
+    message_fr: "Demande de disponibilité introuvable.",
+};
+
+/// The availability registration is not PENDING, so it cannot be approved.
+/// Context: `registrationId`, `currentStatus`.
+pub const DELIVERY_PARTNER_AVAILABILITY_NOT_PENDING: ErrorDef = ErrorDef {
+    code: "DeliveryPartnerAvailabilityNotPending",
+    message_en: "This availability registration is not awaiting review.",
+    message_fr: "Cette demande de disponibilité n'est pas en attente de validation.",
+};
+
 /// A rider is already registered for this identity (authRef/id).
 /// Context: `riderId`.
 pub const RIDER_ALREADY_REGISTERED: ErrorDef = ErrorDef {
@@ -652,6 +676,9 @@ pub const ERRORS: &[ErrorDef] = &[
     DELIVERY_JOB_NOT_FOUND,
     INVALID_DELIVERY_STATUS,
     DELIVERY_ALREADY_ASSIGNED,
+    DELIVERY_PARTNER_AVAILABILITY_ALREADY_REQUESTED,
+    DELIVERY_PARTNER_AVAILABILITY_NOT_FOUND,
+    DELIVERY_PARTNER_AVAILABILITY_NOT_PENDING,
     RIDER_ALREADY_REGISTERED,
     RIDER_NOT_FOUND,
     INVALID_RIDER_STATUS_TRANSITION,

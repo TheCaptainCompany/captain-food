@@ -57,6 +57,7 @@ boundedContexts:
     aggregates:
       - { $ref: 'actors.yaml#/DeliveryJob' }
       - { $ref: 'actors.yaml#/Rider' }
+      - { $ref: 'actors.yaml#/DeliveryPartnerRegistration' }
     processManagers:
       - { $ref: 'processmanager.yaml#/DeliveryDispatchProcess' }
 

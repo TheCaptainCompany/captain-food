@@ -610,6 +610,28 @@ DeliveryChannelKind:
     - PARTNER           # an outbound delivery partner reached through a DeliveryService adapter
   description: "Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60)."
 
+# --- Delivery partner self-registration (#61) ---
+# A delivery partner declares its availability to serve a city on a known catalog channel through the
+# EXTERNAL GraphQL API; an admin reviews it. The approved set is the substrate the city dispatch
+# ranking (#60) consumes (dispatch wiring is a follow-up). Runtime write-path over domain_events.
+DeliveryPartnerRegistrationId:
+  type: string
+  format: uuid
+  description: "A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration."
+
+DeliveryPartnerName:
+  type: string
+  maxLength: 200
+  description: "The delivery partner's display/legal name as stated on self-registration (#61)."
+
+CityAvailabilityStatus:
+  type: string
+  enum:
+    - PENDING           # self-registered, awaiting admin review
+    - APPROVED          # an admin approved it; eligible for the city's dispatch ranking (#60 consumption is a follow-up)
+    - REVOKED           # withdrawn by the partner or disabled by an admin; not eligible
+  description: "Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled."
+
 # Manual listing flag, set by the restaurant/admin. Useful for UI.
 # Orthogonal to StockStatus: an item is orderable when AVAILABLE *and* stock > 0.
 CatalogItemAvailability:

@@ -1267,6 +1267,53 @@ UpdateDeliveryPartnerStatus:
   required: [deliveryJobId, status]
 
 # =====================================================================
+# Delivery partner self-registration (#61)
+# =====================================================================
+# A delivery partner (already integrated: a known catalog channel) declares availability to serve a city
+# through the EXTERNAL API; an admin approves. Derived from the story-map "partner self-registers" use case.
+
+RegisterDeliveryPartnerAvailability:
+  description: >
+    A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth
+    of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is
+    client-generated (idempotent).
+  type: object
+  properties:
+    registrationId:
+      $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId'
+      description: "Client-generated id for the new availability registration."
+    channel:
+      $ref: 'scalars.yaml#/DeliveryChannelKey'
+      description: "The catalog channel this partner operates (e.g. 'uber_direct')."
+    cityId:
+      $ref: 'scalars.yaml#/CityId'
+    partnerName:
+      $ref: 'scalars.yaml#/DeliveryPartnerName'
+    contactEmail:
+      $ref: 'scalars.yaml#/EmailAddress'
+  required: [registrationId, channel, cityId, partnerName, contactEmail]
+
+ApproveDeliveryPartnerAvailability:
+  description: "An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking."
+  type: object
+  properties:
+    registrationId:
+      $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId'
+  required: [registrationId]
+
+RevokeDeliveryPartnerAvailability:
+  description: "Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it."
+  type: object
+  properties:
+    registrationId:
+      $ref: 'scalars.yaml#/DeliveryPartnerRegistrationId'
+    reason:
+      type: string
+      maxLength: 500
+      nullable: true
+  required: [registrationId]
+
+# =====================================================================
 # Rider (independent Captain courier)
 # =====================================================================
 

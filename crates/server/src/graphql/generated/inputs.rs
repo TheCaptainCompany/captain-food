@@ -927,6 +927,42 @@ pub struct EscalateDeliveryInput {
     pub reason: Option<String>,
 }
 
+/// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDeliveryPartnerAvailabilityInput {
+    /// Client-generated id for the new availability registration.
+    #[graphql(name = "registrationId")]
+    pub registration_id: DeliveryPartnerRegistrationId,
+    /// The catalog channel this partner operates (e.g. 'uber_direct').
+    #[graphql(name = "channel")]
+    pub channel: DeliveryChannelKey,
+    #[graphql(name = "cityId")]
+    pub city_id: CityId,
+    #[graphql(name = "partnerName")]
+    pub partner_name: DeliveryPartnerName,
+    #[graphql(name = "contactEmail")]
+    pub contact_email: EmailAddress,
+}
+
+/// An admin approves a PENDING delivery-partner availability registration (#61); it becomes eligible for the city's dispatch ranking.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproveDeliveryPartnerAvailabilityInput {
+    #[graphql(name = "registrationId")]
+    pub registration_id: DeliveryPartnerRegistrationId,
+}
+
+/// Revoke a delivery-partner availability registration (#61) — the partner withdraws or an admin disables it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeDeliveryPartnerAvailabilityInput {
+    #[graphql(name = "registrationId")]
+    pub registration_id: DeliveryPartnerRegistrationId,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationStatusQueryInput {
@@ -1054,6 +1090,17 @@ pub struct PendingRefundsQueryInput {
     pub restaurant_id: Option<RestaurantId>,
     #[graphql(name = "status")]
     pub status: Option<RefundStatus>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryPartnerAvailabilitiesQueryInput {
+    #[graphql(name = "cityId")]
+    pub city_id: Option<CityId>,
+    #[graphql(name = "channel")]
+    pub channel: Option<DeliveryChannelKey>,
+    #[graphql(name = "status")]
+    pub status: Option<CityAvailabilityStatus>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

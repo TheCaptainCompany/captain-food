@@ -800,6 +800,32 @@ pub struct DeliveryIssueResolved {
     pub resolved_at: Option<String>,
 }
 
+/// A delivery partner self-registered its availability to serve a city on a catalog channel (#61). The registration's birth fact; lands PENDING until an admin approves it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryPartnerAvailabilityRequested {
+    pub registration_id: DeliveryPartnerRegistrationId,
+    pub channel: DeliveryChannelKey,
+    pub city_id: CityId,
+    pub partner_name: DeliveryPartnerName,
+    pub contact_email: EmailAddress,
+}
+
+/// An admin approved a delivery partner's city availability (#61); it becomes eligible for the city's dispatch ranking.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryPartnerAvailabilityApproved {
+    pub registration_id: DeliveryPartnerRegistrationId,
+}
+
+/// A delivery partner's city availability was revoked — withdrawn by the partner or disabled by an admin (#61); no longer eligible.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryPartnerAvailabilityRevoked {
+    pub registration_id: DeliveryPartnerRegistrationId,
+    pub reason: Option<String>,
+}
+
 /// An independent Captain rider registered (linked to the auth provider user).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -941,6 +967,9 @@ pub enum DomainEvent {
     DeliveryDeclinedByRider(DeliveryDeclinedByRider),
     DeliveryIssueReported(DeliveryIssueReported),
     DeliveryIssueResolved(DeliveryIssueResolved),
+    DeliveryPartnerAvailabilityRequested(DeliveryPartnerAvailabilityRequested),
+    DeliveryPartnerAvailabilityApproved(DeliveryPartnerAvailabilityApproved),
+    DeliveryPartnerAvailabilityRevoked(DeliveryPartnerAvailabilityRevoked),
     RiderRegistered(RiderRegistered),
     RiderInfoUpdated(RiderInfoUpdated),
     RiderStatusChanged(RiderStatusChanged),

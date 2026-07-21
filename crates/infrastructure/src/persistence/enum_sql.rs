@@ -7,8 +7,8 @@
 //! `specs/scalars.yaml`, the same source the `ref_*` seed rows come from).
 
 use domain::generated::scalars::{
-    CartStatus, CommandChannel, CommandJournalStatus, ComparisonBasis, CuisineCategory,
-    DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus, GbpLinkStatus,
+    CartStatus, CityAvailabilityStatus, CommandChannel, CommandJournalStatus, ComparisonBasis,
+    CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus, GbpLinkStatus,
     InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     ProspectPipelineStatus, RefundProcessStatus, RefundStatus, RestaurantDispatchMode,
     RestaurantListingStatus, RestaurantStatus, ServiceType, ThumbRating,
@@ -106,6 +106,7 @@ enum_ord!(DeliveryDispatchProcessStatus {
     SELF_DISPATCHED => 4,
 });
 enum_ord!(RestaurantDispatchMode { CAPTAIN => 0, RESTAURANT => 1 });
+enum_ord!(CityAvailabilityStatus { PENDING => 0, APPROVED => 1, REVOKED => 2 });
 enum_ord!(CommandJournalStatus { RECEIVED => 0, SUCCEEDED => 1, REJECTED => 2, FAILED => 3 });
 enum_ord!(CommandChannel { GRAPHQL => 0, WORKER => 1, INTERNAL => 2 });
 enum_ord!(InboundEventStatus { RECEIVED => 0, DELIVERED => 1, FAILED => 2 });
