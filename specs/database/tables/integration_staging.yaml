@@ -105,6 +105,33 @@ external_coopcycle_events:
     received_at:        { type: timestamptz, index: true }
     processed_at:       { type: timestamptz, nullable: true, index: true }   # NULL ⇒ not yet translated into inbound_events
 
+external_uber_direct_events:
+  staging: true
+  description: >
+    Raw VERIFIED Uber Direct delivery-partner webhook mirror (ADR-20260721-172500, issue #57) — a
+    DeliveryProvider=PARTNER seam via the Uber DIRECT delivery API (not the Uber Eats marketplace),
+    adopting the same two-layer inbox pattern as Avelo37/CoopCycle (ADR-20260720-015400). Uber Direct
+    is ONE central API (no CoopCycle-style federation), so there is no instance dimension; the delta
+    from the other partners is the signature scheme — Uber signs with a plain X-Uber-Signature =
+    hex(HMAC-SHA256(webhook_secret, raw_body)), no timestamp. The endpoint UPSERTs one row per event
+    AFTER raw-body signature verification (fail-closed), then the uber_direct-acl translates it into an
+    adapted business event (DeliveryAcceptedByPartner / DeliveryRejectedByPartner /
+    DeliveryStatusUpdated) staged in journals.yaml#/inbound_events. Redelivery dedupes on the pk and
+    ACKs immediately; processed_at is the translation high-water mark, enabling replay/backfill without
+    asking Uber to resend.
+  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
+    max_age: '90 days'
+    applies_to: >
+      Processed rows only (processed_at set), aged from processed_at — the replay/backfill horizon,
+      and the PII cap on verbatim partner payloads (courier names/phones). Unprocessed rows are
+      never swept.
+  columns:
+    uber_event_id: { type: text, pk: true }               # idempotent external key = the Uber event id (globally unique on Uber's side)
+    event_type:    { type: text, index: true }            # Uber webhook kind, e.g. 'event.delivery_status' / 'event.courier_update'
+    payload:       { type: jsonb }                         # raw verified partner event, verbatim
+    received_at:   { type: timestamptz, index: true }
+    processed_at:  { type: timestamptz, nullable: true, index: true }   # NULL ⇒ not yet translated into inbound_events
+
 external_hubrise_callbacks:
   staging: true
   description: >

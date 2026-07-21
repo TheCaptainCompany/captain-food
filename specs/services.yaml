@@ -103,6 +103,20 @@ delivery:
         ADR-20260720-015400 / ADR-20260721-122910).
       routes:
         offer_job: 'POST /adapters/coopcycle/deliveries'
+    uber_direct:
+      description: >
+        Uber Direct partner ACL (crates/adapters/uber_direct, issue #57): a DeliveryProvider=PARTNER
+        implementation of the Avelo37 pattern via the Uber DIRECT delivery API (not the Uber Eats
+        marketplace; distinct from the price-comparison ADRs 0022/0023/0024/0030). ONE central API
+        (no CoopCycle-style federation) gated by UBER_DIRECT_* env; the delta from Avelo37 is
+        authentication — OAuth2 client-credentials with a token manager, not a static key. An outbound
+        offer_job fetches the OAuth2 token and POSTs a Create Delivery carrying our deliveryJobId as
+        external_id; unconfigured deployments keep the logged no-op stand-in (jobs fall through to the
+        next ranked channel via the offer timeout, #60). Uber's answers come back through its verified
+        X-Uber-Signature webhook and the two-layer inbox (external_uber_direct_events → inbound_events,
+        ADR-20260720-015400 / ADR-20260721-172500).
+      routes:
+        offer_job: 'POST /adapters/uber-direct/deliveries'
 
 identity:
   description: >

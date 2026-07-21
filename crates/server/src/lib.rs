@@ -51,6 +51,7 @@ use infrastructure::{
 };
 use avelo37_adapter::Avelo37WebhookIngestor;
 use coopcycle_adapter::CoopCycleWebhookIngestor;
+use uber_direct_adapter::UberDirectWebhookIngestor;
 use stripe_adapter::StripeWebhookIngestor;
 use shared_types::HealthDto;
 
@@ -85,7 +86,9 @@ pub fn wire() -> HealthDto {
 /// The gate is `>=` (never `==`) so an older build still runs against a newer DB (rollback-by-redeploy).
 /// `20260720030000` = the command/inbound journals (ADR-20260720-015300/-015400): every mutation now
 /// writes `command_journal` at acceptance, so the app cannot serve writes without it.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721140000;
+/// `20260721150000` = the Uber Direct webhook mirror (external_uber_direct_events, #57): the adapter's
+/// inbound ingestor stages verified facts into it, so the app must not serve without the table.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721150000;
 
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
@@ -149,6 +152,13 @@ pub fn router() -> Router {
             None
         })
         .unwrap_or_default();
+    let mut uber_direct_ingestor: Option<Arc<UberDirectWebhookIngestor>> = None;
+    // The Uber Direct config (UBER_DIRECT_*) — shared by the outbound gateway (OAuth2 + create
+    // delivery) and the inbound webhook route (signing secret). None ⇒ unconfigured (no-op stand-in).
+    let uber_direct_config = uber_direct_adapter::UberDirectConfig::from_env().unwrap_or_else(|e| {
+        eprintln!("UBER_DIRECT_* misconfigured, treating as unset: {e}");
+        None
+    });
     let mut hubrise_state = hubrise_adapter::HubRiseWebhookState::default();
     let mut inbound_drain: Option<Arc<infrastructure::InboundEventsDrainWorker>> = None;
 
@@ -298,6 +308,12 @@ pub fn router() -> Router {
                                 )),
                             );
                         }
+                        if let Some(config) = uber_direct_config.clone() {
+                            gateway = gateway.with_channel(
+                                "uber_direct",
+                                Arc::new(uber_direct_adapter::UberDirectDeliveryGateway::new(config)),
+                            );
+                        }
                         println!(
                             "delivery gateway: composite — wired channels {:?} (unwired channels fall through via offer timeout)",
                             gateway.wired_channels()
@@ -388,6 +404,23 @@ pub fn router() -> Router {
                 coopcycle_ingestor = Some(Arc::new(
                     CoopCycleWebhookIngestor::new(
                         Arc::new(coopcycle_adapter::PgRawCoopCycleEvents::new(pool.clone())),
+                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
+                    )
+                    .with_nudge(Arc::new(move || {
+                        let w = nudge_worker.clone();
+                        tokio::spawn(async move { w.run_once().await });
+                    })),
+                ));
+
+                // Uber Direct delivery-partner webhook ingestor (issue #57, same two-layer inbox as
+                // Avelo37/CoopCycle): verify the X-Uber-Signature → mirror the verbatim delivery into
+                // external_uber_direct_events → ACL → stage the adapted DeliveryAcceptedByPartner/
+                // RejectedByPartner/StatusUpdated fact in inbound_events → ACK, nudging the drain
+                // worker. Mounted at `POST /adapters/uber-direct/webhooks` below with the signing secret.
+                let nudge_worker = drain.clone();
+                uber_direct_ingestor = Some(Arc::new(
+                    UberDirectWebhookIngestor::new(
+                        Arc::new(uber_direct_adapter::PgRawUberDirectEvents::new(pool.clone())),
                         Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
                     )
                     .with_nudge(Arc::new(move || {
@@ -487,6 +520,12 @@ pub fn router() -> Router {
         .merge(coopcycle_adapter::routes(coopcycle_adapter::CoopCycleWebhookState {
             ingestor: coopcycle_ingestor,
             registry: Arc::new(coopcycle_registry),
+        }))
+        // Uber Direct webhooks (issue #57): `POST /adapters/uber-direct/webhooks`, verified with the
+        // X-Uber-Signature raw-body HMAC. State carries the ingestor + the signing secret.
+        .merge(uber_direct_adapter::routes(uber_direct_adapter::UberDirectWebhookState {
+            ingestor: uber_direct_ingestor,
+            webhook_secret: uber_direct_config.map(|c| Arc::new(c.webhook_secret)),
         }))
         .merge(hubrise_adapter::routes(hubrise_state))
         // The DERIVED `/services/<service>/<op>` surface (issue #26): emitted per the spec's

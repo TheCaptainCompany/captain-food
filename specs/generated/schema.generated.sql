@@ -234,6 +234,17 @@ CREATE INDEX ON external_coopcycle_events (event_type);
 CREATE INDEX ON external_coopcycle_events (received_at);
 CREATE INDEX ON external_coopcycle_events (processed_at);
 
+CREATE TABLE external_uber_direct_events (
+  uber_event_id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL,
+  processed_at TIMESTAMPTZ NULL
+);
+CREATE INDEX ON external_uber_direct_events (event_type);
+CREATE INDEX ON external_uber_direct_events (received_at);
+CREATE INDEX ON external_uber_direct_events (processed_at);
+
 CREATE TABLE external_hubrise_callbacks (
   callback_id TEXT PRIMARY KEY,
   resource_type TEXT NOT NULL,
@@ -590,6 +601,7 @@ $$;
 --   external_stripe_events     processed rows (processed_at set)          90 days from processed_at
 --   external_hubrise_callbacks processed rows (processed_at set)          90 days from processed_at
 --   external_avelo37_events    processed rows (processed_at set)          90 days from processed_at
+--   external_uber_direct_events processed rows (processed_at set)         90 days from processed_at
 --
 -- NEVER swept, at any age: domain_events / domain_stream (the forever log — deliberately not
 -- referenced here; its only trimming is the opt-in per-stream $maxAge/$maxCount machinery),
@@ -638,6 +650,12 @@ BEGIN
      AND processed_at < now() - INTERVAL '90 days';
   GET DIAGNOSTICS n = ROW_COUNT;
   swept_table := 'external_avelo37_events'; deleted := n; RETURN NEXT;
+
+  DELETE FROM external_uber_direct_events
+   WHERE processed_at IS NOT NULL
+     AND processed_at < now() - INTERVAL '90 days';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  swept_table := 'external_uber_direct_events'; deleted := n; RETURN NEXT;
 END;
 $$;
 

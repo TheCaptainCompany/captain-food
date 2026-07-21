@@ -1,7 +1,26 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (16:20 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (17:25 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #57: Uber Direct delivery-partner adapter COMPLETE (ADR-20260721-172500).** A
+> `DeliveryProvider=PARTNER` adapter via the Uber **Direct** delivery API (not the Uber Eats
+> marketplace; distinct from the price-comparison ADRs 0022/0023/0024/0030), applying the Avelo37/
+> CoopCycle pattern and plugging into the #60 dispatch foundation as the `uber_direct` channel (the
+> Tours ranking seed already ranks it — no saga change). New crate `crates/adapters/uber_direct`:
+> `config.rs` (single-endpoint config + OAuth2 client-credentials, env-gated by `UBER_DIRECT_*`,
+> fail-closed; partial config ⇒ error), `outbound.rs` (`UberDirectDeliveryGateway` — OAuth2 token
+> manager + Create Delivery, `external_id` = our `deliveryJobId` read-back key), `acl.rs`
+> (`X-Uber-Signature` **raw-body HMAC** verify — no timestamp, the delta from the Stripe-style scheme;
+> Uber status → `DeliveryAcceptedByPartner`/`RejectedByPartner`/`StatusUpdated`; the two-layer-inbox
+> `UberDirectWebhookIngestor`), `raw.rs` (`PgRawUberDirectEvents`), `http.rs`
+> (`POST /adapters/uber-direct/webhooks`) + standalone `main.rs`. New staging table
+> `external_uber_direct_events` (integration_staging.yaml; migration `20260721150000` also extends
+> `sweep_retention()`; `REQUIRED_SCHEMA_VERSION` bumped). Spec surface: `services.yaml`
+> `delivery.implementations.uber_direct`, `c4-l3.yaml` `uber_direct-acl`, `uber_direct-webhook-ingestion`
+> observability contract, `specs/integrations/uber-direct.md`. No new events/commands/errors (reuses the
+> partner-generic facts), so ADR-0032 completeness holds. Composition root wires the channel + webhook
+> route. `make rust` green (build + tests + validate 0 errors + generate, no drift).
 
 > ✅ **2026-07-21 — #60: delivery dispatch strategy foundation COMPLETE (ADR-20260721-161939 —
 > supersedes ADR-20260720-004556).** Multi-partner routing built ONCE so #57 (Uber Direct) and #58

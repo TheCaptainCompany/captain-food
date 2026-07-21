@@ -16,6 +16,7 @@ members = [
     "crates/adapters/hubrise", # HubRise partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
     "crates/adapters/avelo37",  # Avelo37 delivery-partner adapter (ADR-20260718-213352, issue #28) — ACL + webhook shell + outbound + standalone bin
     "crates/adapters/coopcycle", # CoopCycle delivery-partner adapter (ADR-20260721-122910, issue #58) — federated per-instance ACL + webhook shell + outbound + standalone bin
+    "crates/adapters/uber_direct", # Uber Direct delivery-partner adapter (ADR-20260721-172500, issue #57) — OAuth2 outbound + X-Uber-Signature ACL + webhook shell + standalone bin
     "crates/shared_types",     # serde DTOs (+ UniFFI later)
     "crates/core",             # Crux core over domain — depends on domain, shared_types
     "crates/server",           # Axum BFF — depends on application, infrastructure, shared_types

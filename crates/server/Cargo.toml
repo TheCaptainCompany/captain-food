@@ -18,6 +18,7 @@ shared_types = { path = "../shared_types" }
 stripe-adapter = { path = "../adapters/stripe" }
 avelo37-adapter = { path = "../adapters/avelo37" }
 coopcycle-adapter = { path = "../adapters/coopcycle" }
+uber-direct-adapter = { path = "../adapters/uber_direct" }
 hubrise-adapter = { path = "../adapters/hubrise" }
 
 # Generated GraphQL type layer: wrapper scalar inners (uuid/chrono) + serde derives.

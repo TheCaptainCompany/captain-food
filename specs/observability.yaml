@@ -595,6 +595,87 @@ coopcycle-webhook-ingestion:
   error_budget: { max_error_rate_pct: 1.0 }
 
 # =====================================================================
+# uber_direct-webhook-ingestion — inbound event sourcing at the Uber
+# Direct delivery seam (issue #57, ADR-20260721-172500). Same two-layer
+# inbox as avelo37-webhook-ingestion; Uber Direct is ONE central API (no
+# federation instance dimension) and signs with a plain X-Uber-Signature
+# raw-body HMAC (no timestamp).
+# webhook -> verify signature -> external_uber_direct_events UPSERT
+#   -> ACL translate -> inbound_events (RECEIVED) -> drain -> Repository append (DeliveryJob stream)
+# =====================================================================
+uber_direct-webhook-ingestion:
+  feature: uber_direct-webhook-ingestion
+  criticality: high
+  workflow:
+    aggregate: { $ref: 'actors.yaml#/DeliveryJob' }
+    inbound:
+      - { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
+      - { $ref: 'events.yaml#/DeliveryRejectedByPartner' }
+      - { $ref: 'events.yaml#/DeliveryStatusUpdated' }
+
+  run_identity:
+    - { name: correlation_id, source: "inbound.correlation_id", required: true }   # UUIDv5(uber event id)
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: inbound_event_id, source: "inbound.inbound_event_id", required: true }   # inbound_events pk → domain_events.cause_id
+    - { name: external_event_id, source: "uber_direct.event_id", required: true }
+
+  spans:
+    - name: "webhook.verify"
+      kind: SERVER
+      required: true
+      attributes:
+        - { key: "business.source", type: string, required: true }          # 'uber_direct'
+        - { key: "business.signature_status", type: string, required: true } # verified | rejected
+    - name: "external.persist"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.external_event_id", type: string, required: true }
+        - { key: "business.dedupe", type: string, required: true }           # new | duplicate
+    - name: "acl.translate"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+    - name: "inbound.persist"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.inbound_event_id", type: string, required: true }
+    - name: "inbound.drain.deliver"
+      kind: CONSUMER
+      required: true
+      attributes:
+        - { key: "business.inbound_event_id", type: string, required: true }
+        - { key: "business.delivery_outcome", type: string, required: true } # recorded | already_recorded | failed
+    - name: "event.store.append"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+        - { key: "business.stream_id", type: string, required: true }
+
+  metrics:
+    - { name: "uber_direct_webhook_ingest_duration_ms", type: histogram, attributes: ["result"] }
+    - { name: "inbound_drain_lag_ms", type: histogram, attributes: ["source"] }
+  business_metrics:
+    - { name: "inbound_events_staged_total", type: counter, attributes: ["source", "event_type"] }
+    - { name: "inbound_events_delivered_total", type: counter, attributes: ["source", "outcome"] }
+    - { name: "webhook_duplicates_total", type: counter, attributes: ["source"] }
+
+  status_rules:
+    success:
+      required_spans: ["webhook.verify", "external.persist", "acl.translate", "inbound.persist", "inbound.drain.deliver", "event.store.append"]
+      conditions: ["inbound.drain.deliver.business.delivery_outcome != 'failed'"]
+    technical_error:
+      any_span_errors: true
+    business_rejected:
+      conditions: ["webhook.verify.business.signature_status == 'rejected'"]
+
+  latency_budget: { max_p95_ms: 1000, max_p99_ms: 3000 }
+  error_budget: { max_error_rate_pct: 1.0 }
+
+# =====================================================================
 # delivery-dispatch-strategy — the resolve→walk dispatch saga (#60)
 # OrderMarkedReady (DELIVERY) -> resolve strategy (restaurant mode / city ranking)
 #   -> RESTAURANT: SELF_DISPATCHED (Captain tracks only)
