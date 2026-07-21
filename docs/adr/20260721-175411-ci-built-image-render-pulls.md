@@ -132,6 +132,10 @@ still runs against a newer DB; migrations are expand/contract and never destruct
   back is redeploying a previous tag (no rebuild).
 - **Same safety gate**: image publish is gated on green `ci`, mirroring db-migrate — no drift, no untested
   image shipped.
+- **No wasted deploys on docs-only merges**: the workflow diffs the merge and skips build+deploy when only
+  specs/docs/ADRs/tooling changed (fail-safe: builds if the diff is unavailable), so the many non-code
+  merges don't churn an identical image. The live `X-VERSION`/`version` then tracks the last *code* commit,
+  which is correct — the running binary didn't change.
 
 ### Negative
 
