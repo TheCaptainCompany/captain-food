@@ -5,9 +5,15 @@
 # BUILD MODEL (ADR-20260721-175411): Render does NOT build this service. The Rust image is compiled in
 # GitHub Actions (.github/workflows/build-image.yml — free/unlimited on this PUBLIC repo) and pushed to
 # GHCR; Render only PULLS and runs it, so it spends ZERO build-pipeline minutes. Deploys are triggered by
-# that workflow via a Render deploy hook that pins the exact image (`imgURL=...:sha-<commit>`); therefore
-# git-push auto-deploy is OFF (`autoDeploy: false`). The `image.url` below is only the bootstrap default
-# Render pulls when the blueprint is first synced / re-created.
+# that workflow via a Render deploy hook that pins the exact image **by immutable digest**
+# (`imgURL=...@sha256:<digest>`); therefore git-push auto-deploy is OFF (`autoDeploy: false`).
+#
+# VERSION PINNING: production NEVER resolves a moving tag. Every deploy runs a content-addressed digest, and
+# Render's deploy/event history is the version-of-record (it names the exact digest, even for a container
+# that never starts). The `image.url: ...:latest` below is ONLY the bootstrap seed Render pulls the first
+# time the blueprint is created/synced — it is not what running deploys resolve. Rollback = re-hit the
+# deploy hook with a previous `sha-<commit>`/digest (no rebuild). Optionally, after the first digest deploy,
+# pin `image.url` to that exact `@sha256:...` so even the bootstrap carries no moving tag.
 #
 # GHCR image visibility: the package `ghcr.io/captain-food/captain-food` must be PUBLIC for Render to pull
 # it without credentials (Packages -> package settings -> change visibility -> Public). If kept private,

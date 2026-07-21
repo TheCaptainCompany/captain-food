@@ -51,13 +51,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }} # scoped by the workflow's `packages: write`
 
       - name: Build and push (cargo-chef Dockerfile + buildx GHA layer cache)
+        id: build # exposes steps.build.outputs.digest — the content-addressed image reference
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: true
-          # Immutable SHA tag = the pinned artifact each deploy runs (traceable, rollback-friendly);
-          # `latest` is the moving default the render.yaml blueprint bootstraps from.
+          # `sha-<commit>` = a human/git-readable immutable tag (for correlating an image to a commit);
+          # `latest` is ONLY the blueprint bootstrap seed — deploys never resolve it (they pin the digest
+          # below). The digest (steps.build.outputs.digest) is the reference each deploy actually runs.
           tags: |
             ${{ env.IMAGE }}:sha-${{ github.event.workflow_run.head_sha }}
             ${{ env.IMAGE }}:latest
@@ -70,15 +72,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trigger Render to deploy the pinned image
+      - name: Trigger Render to deploy the pinned image (by immutable digest)
         env:
           HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           if [ -z "$HOOK" ]; then
             echo "::error::repo secret RENDER_DEPLOY_HOOK_URL is not set — image pushed but Render was not told to deploy it"
             exit 1
           fi
-          # Render image-backed deploy hook: the `imgURL` query param pins the EXACT image this deploy runs
-          # (Render docs: "Deploy hooks for image-backed services"). We pin the immutable SHA tag, not latest.
-          curl -fsS -X POST "${HOOK}&imgURL=${IMAGE}:sha-${{ github.event.workflow_run.head_sha }}" >/dev/null
-          echo "✓ triggered Render deploy of ${IMAGE}:sha-${{ github.event.workflow_run.head_sha }}"
+          if [ -z "$DIGEST" ]; then
+            echo "::error::no image digest from the build step — refusing to deploy an unpinned reference"
+            exit 1
+          fi
+          # Deploy by DIGEST — content-addressed, so the reference is cryptographically immutable and can
+          # never be repointed (stronger than a tag, which can be moved). The `imgURL` query param tells the
+          # Render image-backed deploy hook the EXACT image to run (Render docs: "Deploy hooks for
+          # image-backed services"). `latest` is never what production resolves.
+          REF="${IMAGE}@${DIGEST}"
+          curl -fsS -X POST "${HOOK}&imgURL=${REF}" >/dev/null
+          echo "✓ triggered Render deploy of ${REF} (sha-${{ github.event.workflow_run.head_sha }})"

@@ -39,8 +39,18 @@ repositories** — and this repo is public.
   spec-validation.
 - **Render pulls, never builds** (`render.yaml`): `runtime: image` with `image.url` pointing at GHCR, and
   `autoDeploy: false`. Deploys are triggered by the workflow calling a **Render deploy hook** with
-  `imgURL=…:sha-<commit>` so Render runs the exact image CI just built. Render spends **zero
+  `imgURL=…@sha256:<digest>` so Render runs the exact image CI just built. Render spends **zero
   build-pipeline minutes**.
+- **Deploy by immutable digest, never a moving tag** (best practice). Production never resolves `latest`:
+  the deploy hook pins the **content-addressed digest** (`@sha256:…`, from `build-push-action`'s output),
+  which is cryptographically immutable and cannot be repointed — strictly stronger than a tag (tags can be
+  moved). Images also carry a human-readable immutable `sha-<commit>` tag for git correlation. `render.yaml`
+  keeps a `:latest` reference ONLY as the blueprint bootstrap seed (the first pull when a blueprint is
+  created); with `autoDeploy: false`, no running deploy ever resolves it. The version-of-record is Render's
+  deploy/event history (it names the exact digest even for a container that never starts). Rollback = hit
+  the deploy hook with a prior `sha-<commit>`/digest — no rebuild. (A full-GitOps variant — CI writes the
+  deployed digest back into `render.yaml` so the repo is the source of truth — was rejected for now: it
+  needs CI push access to the protected `main` and adds a chore commit per deploy at our high merge cadence.)
 
 The ordering property from ADR-0043 is preserved unchanged: db-migrate and build-image both fire off the
 same green `ci` run; if a deploy races ahead of its migration, the app's `/health` schema-version gate
