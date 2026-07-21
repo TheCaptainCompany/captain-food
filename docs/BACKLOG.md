@@ -32,21 +32,34 @@ The backlog is ordered by **value, not effort** (product-owner directive, 2026-0
 
 Within a tier, order stays dependency-consistent (an issue never ranks above one it needs).
 
-## Field semantics on the board
+## How an issue represents its value and cost
 
-- **Priority** = the **value bucket** (from the method above):
+- **Priority** (org field) = the **value bucket** (from the method above):
   `Urgent` = tier-1 contract/security/correctness/observability/NFR foundations ·
   `High` = operating-model / codegen foundations ·
   `Medium` = V0 features in value-stream order ·
   `Low` = post-V0.
-- **Effort** mirrors the `size/*` label (XXS–S → `Low`, M → `Medium`, L and up → `High`).
-  Effort is displayed for planning but **never drives the order** — value does.
-- Sizing/estimation rules are unchanged: ADR-20260720-143000 (shirt sizes, pre-task documentation
-  in the issue, PR as the post-task record).
+  Within a bucket the fine order is the **row order** on the board — no numeric value field is
+  used for ordering.
+- **Value Size** (org field, T-shirt `XS`–`XL`) = how much value the issue delivers, graded from
+  its **Impact** section (what it unblocks / what breaks if delayed). Informational — it explains
+  the Priority placement, it does not sort.
+- **`impact/*` label** (repo label, `impact/XS`…`impact/XL`) = the same T-shirt as Value Size,
+  mirrored as a label so the value is visible on issue lists and cards outside the project.
+  The former `size/*` labels are **retired** (labels can't sort, and they displayed effort where
+  value should be).
+- **Effort** (org field, `Low`/`Medium`/`High`) = delivery cost, derived from the issue's
+  **Estimation** section (ADR-20260720-143000 shirt-size table: XXS–S → `Low`, M → `Medium`,
+  L and up → `High`). Effort is displayed for planning but **never drives the order** — value does.
+- **Type** = `Foundation` (non-functional: contracts, security, invariants, observability,
+  retention, codegen/operating-model) or `Feature` (functional, user-visible capability) —
+  matching the two value tiers; `Bug`/`Task` for the rest.
+- Estimation rules are unchanged: ADR-20260720-143000 (the shirt-size **estimate** now lives only
+  in the issue body's Estimation section + the Effort field, no longer as a label).
 
 ## Triage of new issues
 
-A new issue gets, at triage time: the standard pre-task sections + a `size/*` label
-(ADR-20260720-143000), then **Priority + Effort set on the project** using the definitions above.
-The product owner adjusts its row position in the project if the default bucket placement isn't
-enough.
+A new issue gets, at triage time: the standard pre-task sections (ADR-20260720-143000), a **Type**
+(`Foundation`/`Feature`/`Bug`/`Task`), then on the project **Priority + Value Size + Effort** and
+the mirroring **`impact/*` label**, using the definitions above. The product owner adjusts its row
+position in the project if the default bucket placement isn't enough.

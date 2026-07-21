@@ -6,6 +6,11 @@ Accepted — §4's simplest-first ordering (and §1's rank stamp) amended by
 [ADR-20260720-213024](20260720-213024-value-first-issue-prioritisation.md): the queue is now
 ordered by **value** (foundations/cross-functional first, then features by value stream).
 Sizing, pre-task documentation and the PR-as-post-task-record rules stand unchanged.
+Further amendment (2026-07-20, product-owner directive): §1's **`size/*` label scheme is
+retired** — labels were not sortable and displayed effort where value should be. The shirt-size
+**estimate** now lives only in the issue body's Estimation section, mirrored coarsely by the org
+**Effort** field; issue labels now carry **`impact/*`** (the issue's value T-shirt, mirroring the
+org **Value Size** field). See [docs/BACKLOG.md](../BACKLOG.md).
 
 ## Context
 

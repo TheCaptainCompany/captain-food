@@ -1,7 +1,16 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-20 (21:30 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-20 (23:45 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-20 — value made explicit per issue (product-owner directive, amends
+> ADR-20260720-143000 §1).** New org field **Value Size** (T-shirt XS–XL, graded from the issue's
+> Impact section) + issue **Type** `Foundation` (non-functional) vs `Feature` (functional),
+> matching the two value tiers. The `size/*` labels are **retired** (not sortable; displayed
+> effort where value should be) and replaced by **`impact/*`** labels mirroring Value Size; the
+> shirt-size estimate lives only in the body's Estimation section + the Effort field. Within a
+> Priority bucket no numeric value ordering — row order on the board. Applied to all 15 open
+> issues (+#12/#13/#31 for consistency); process recorded in docs/BACKLOG.md.
 
 > ✅ **2026-07-20 — backlog re-ordered by VALUE, not effort (ADR-20260720-213024, product-owner
 > directive).** ADR-20260720-143000 §4's simplest-first queue is amended: tier 1 = foundations &
