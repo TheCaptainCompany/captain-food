@@ -471,6 +471,23 @@ _🧩 aggregate_ — A single restaurant location: profile, operational status (
 | [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
 | [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink) | [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `GbpOrderLinkNotConfigured`](#error-gbporderlinknotconfigured) |
 
+Lifecycle (generated from the declared state machine):
+
+```mermaid
+stateDiagram-v2
+  [*] --> DRAFT : RestaurantRegistered
+  DRAFT --> ACTIVE : RestaurantActivated
+  INACTIVE --> ACTIVE : RestaurantActivated
+  DRAFT --> INACTIVE : RestaurantDeactivated
+  ACTIVE --> INACTIVE : RestaurantDeactivated
+  DRAFT --> INACTIVE : RestaurantRemoved
+  ACTIVE --> INACTIVE : RestaurantRemoved
+  INACTIVE --> INACTIVE : RestaurantRemoved
+  DRAFT --> INACTIVE : RestaurantMarkedClosed
+  ACTIVE --> INACTIVE : RestaurantMarkedClosed
+  INACTIVE --> INACTIVE : RestaurantMarkedClosed
+```
+
 <a id="actor-prospect"></a>
 #### 🎭 Actor: `Prospect`
 
@@ -6096,6 +6113,54 @@ _🧩 aggregate_ — One delivery of an order (bounded context: delivery). Born 
 | [📩 `UpdateDeliveryPartnerStatus`](#command-updatedeliverypartnerstatus) | [⚡ `DeliveryPartnerStatusUpdated`](#event-deliverypartnerstatusupdated) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `DeclineDelivery`](#command-declinedelivery) | [⚡ `DeliveryDeclinedByRider`](#event-deliverydeclinedbyrider) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned) |
 
+Lifecycle (generated from the declared state machine):
+
+```mermaid
+stateDiagram-v2
+  [*] --> PENDING : DeliveryRequested
+  PENDING --> ASSIGNED : DeliveryAcceptedByRider
+  PENDING --> ASSIGNED : DeliveryAcceptedByPartner
+  PENDING --> ASSIGNED : DeliveryAssignedToPartner
+  ASSIGNED --> PENDING : DeliveryUnassignedFromPartner
+  ASSIGNED --> PICKED_UP : DeliveryPickedUp
+  PICKED_UP --> DELIVERED : DeliveryCompleted
+  OUT_FOR_DELIVERY --> DELIVERED : DeliveryCompleted
+  PENDING --> CANCELLED : DeliveryCancelled
+  ASSIGNED --> CANCELLED : DeliveryCancelled
+  PICKED_UP --> CANCELLED : DeliveryCancelled
+  OUT_FOR_DELIVERY --> CANCELLED : DeliveryCancelled
+  FAILED --> CANCELLED : DeliveryCancelled
+  PENDING --> FAILED : DeliveryDispatchFailed
+  PENDING --> ASSIGNED : DeliveryStatusUpdated(status)
+  ASSIGNED --> PICKED_UP : DeliveryStatusUpdated(status)
+  PICKED_UP --> OUT_FOR_DELIVERY : DeliveryStatusUpdated(status)
+  PICKED_UP --> DELIVERED : DeliveryStatusUpdated(status)
+  OUT_FOR_DELIVERY --> DELIVERED : DeliveryStatusUpdated(status)
+  PENDING --> CANCELLED : DeliveryStatusUpdated(status)
+  ASSIGNED --> CANCELLED : DeliveryStatusUpdated(status)
+  PICKED_UP --> CANCELLED : DeliveryStatusUpdated(status)
+  OUT_FOR_DELIVERY --> CANCELLED : DeliveryStatusUpdated(status)
+  PENDING --> FAILED : DeliveryStatusUpdated(status)
+  ASSIGNED --> FAILED : DeliveryStatusUpdated(status)
+  PICKED_UP --> FAILED : DeliveryStatusUpdated(status)
+  OUT_FOR_DELIVERY --> FAILED : DeliveryStatusUpdated(status)
+  PENDING --> ASSIGNED : DeliveryPartnerStatusUpdated(status)
+  ASSIGNED --> PICKED_UP : DeliveryPartnerStatusUpdated(status)
+  PICKED_UP --> OUT_FOR_DELIVERY : DeliveryPartnerStatusUpdated(status)
+  PICKED_UP --> DELIVERED : DeliveryPartnerStatusUpdated(status)
+  OUT_FOR_DELIVERY --> DELIVERED : DeliveryPartnerStatusUpdated(status)
+  PENDING --> CANCELLED : DeliveryPartnerStatusUpdated(status)
+  ASSIGNED --> CANCELLED : DeliveryPartnerStatusUpdated(status)
+  PICKED_UP --> CANCELLED : DeliveryPartnerStatusUpdated(status)
+  OUT_FOR_DELIVERY --> CANCELLED : DeliveryPartnerStatusUpdated(status)
+  PENDING --> FAILED : DeliveryPartnerStatusUpdated(status)
+  ASSIGNED --> FAILED : DeliveryPartnerStatusUpdated(status)
+  PICKED_UP --> FAILED : DeliveryPartnerStatusUpdated(status)
+  OUT_FOR_DELIVERY --> FAILED : DeliveryPartnerStatusUpdated(status)
+  DELIVERED --> [*]
+  CANCELLED --> [*]
+```
+
 <a id="actor-rider"></a>
 #### 🎭 Actor: `Rider`
 
@@ -6106,6 +6171,22 @@ _🧩 aggregate_ — A rider identity, linked to the auth provider user (authRef
 | [📩 `RegisterRider`](#command-registerrider) | [⚡ `RiderRegistered`](#event-riderregistered) | [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered) |
 | [📩 `UpdateRiderInfo`](#command-updateriderinfo) | [⚡ `RiderInfoUpdated`](#event-riderinfoupdated) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `NoEditableFieldProvided`](#error-noeditablefieldprovided) |
 | [📩 `ChangeRiderStatus`](#command-changeriderstatus) | [⚡ `RiderStatusChanged`](#event-riderstatuschanged) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition) |
+
+Lifecycle (generated from the declared state machine):
+
+```mermaid
+stateDiagram-v2
+  [*] --> OFFLINE : RiderRegistered(status)
+  OFFLINE --> AVAILABLE : RiderStatusChanged(status)
+  ON_DELIVERY --> AVAILABLE : RiderStatusChanged(status)
+  AVAILABLE --> OFFLINE : RiderStatusChanged(status)
+  SUSPENDED --> OFFLINE : RiderStatusChanged(status)
+  AVAILABLE --> ON_DELIVERY : RiderStatusChanged(status)
+  OFFLINE --> SUSPENDED : RiderStatusChanged(status)
+  AVAILABLE --> SUSPENDED : RiderStatusChanged(status)
+  ON_DELIVERY --> SUSPENDED : RiderStatusChanged(status)
+  SUSPENDED --> SUSPENDED : RiderStatusChanged(status)
+```
 
 <a id="actor-deliverydispatchprocess"></a>
 #### 🎭 Actor: `DeliveryDispatchProcess`

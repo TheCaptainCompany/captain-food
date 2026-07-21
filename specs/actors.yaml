@@ -79,6 +79,23 @@ Restaurant:
     Sirene/Google sync is an EXTERNAL ACL that calls RegisterRestaurant /
     UpdateRestaurantGoogleBusinessProfile / MarkRestaurantClosed here AS THE OWNER — there is no dedicated
     pre-registration command; an account-less registration with listingStatus NON_PARTNER is a seeded listing.
+  # Operational machine only (DRAFT → ACTIVE ⇄ INACTIVE): the LISTING funnel
+  # (RestaurantListingStatus) is an orthogonal dimension, not part of this machine. No terminal
+  # state — an INACTIVE restaurant can be re-activated. Activate/Deactivate are ensure-commands
+  # (already-there → idempotent no-op, no event), so the machine declares only the actual moves.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/RestaurantStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/RestaurantRegistered' }
+        to: DRAFT
+    transitions:
+      - { from: [DRAFT, INACTIVE], event: { $ref: 'events.yaml#/RestaurantActivated' }, to: ACTIVE }
+      - { from: [DRAFT, ACTIVE], event: { $ref: 'events.yaml#/RestaurantDeactivated' }, to: INACTIVE }
+      # Removal / reported closure (e.g. Sirene) force INACTIVE from anywhere — recording the fact
+      # on an already-INACTIVE restaurant is legal, the fact still lands.
+      - { from: [DRAFT, ACTIVE, INACTIVE], event: { $ref: 'events.yaml#/RestaurantRemoved' }, to: INACTIVE }
+      - { from: [DRAFT, ACTIVE, INACTIVE], event: { $ref: 'events.yaml#/RestaurantMarkedClosed' }, to: INACTIVE }
+    terminal: []
   receives:
     - message: { $ref: 'commands.yaml#/RegisterRestaurant' }
       emits: [{ $ref: 'events.yaml#/RestaurantRegistered' }]
@@ -491,6 +508,40 @@ DeliveryJob:
     DeliveryDispatchProcess), then fulfilled by EITHER an independent Captain rider (these commands) OR a
     delivery partner (inbound DeliveryAcceptedByPartner/RejectedByPartner/StatusUpdated, recorded via the
     avelo37-acl — no command). ADR-0031.
+  # PENDING → ASSIGNED → PICKED_UP → OUT_FOR_DELIVERY → DELIVERED, with the PICKED_UP → DELIVERED
+  # hand-over shortcut; CANCELLED/FAILED close the job early. DeliveryStatusUpdated (rider/admin
+  # correction) and DeliveryPartnerStatusUpdated (partner report) carry their target state in the
+  # payload — the DSL's dynamic-target form (`via: status`, ADR-20260721-093027): one event, one
+  # declared edge per target. FAILED is NOT terminal: a failed dispatch can still be manually
+  # cancelled (rules.yaml#/DeliveryCancellableBeforeCompletion), but no status report leaves it.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/DeliveryStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/DeliveryRequested' }
+        to: PENDING
+    transitions:
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }, to: ASSIGNED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }, to: ASSIGNED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryAssignedToPartner' }, to: ASSIGNED }
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }, to: PENDING }
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryPickedUp' }, to: PICKED_UP }
+      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryCompleted' }, to: DELIVERED }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY, FAILED], event: { $ref: 'events.yaml#/DeliveryCancelled' }, to: CANCELLED }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryDispatchFailed' }, to: FAILED }
+      # Dynamic targets — the reported status IS the target state (event payload `status`).
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: ASSIGNED, via: status }
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: PICKED_UP, via: status }
+      - { from: [PICKED_UP], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: OUT_FOR_DELIVERY, via: status }
+      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: DELIVERED, via: status }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: CANCELLED, via: status }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: FAILED, via: status }
+      - { from: [PENDING], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: ASSIGNED, via: status }
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: PICKED_UP, via: status }
+      - { from: [PICKED_UP], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: OUT_FOR_DELIVERY, via: status }
+      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: DELIVERED, via: status }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: CANCELLED, via: status }
+      - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryPartnerStatusUpdated' }, to: FAILED, via: status }
+    terminal: [DELIVERED, CANCELLED]
   receives:
     - message: { $ref: 'events.yaml#/DeliveryRequested' }
       emits: [{ $ref: 'events.yaml#/DeliveryRequested' }]
@@ -569,6 +620,23 @@ DeliveryJob:
 Rider:
   type: aggregate
   description: "A rider identity, linked to the auth provider user (authRef)."
+  # Availability machine. RiderRegistered carries the birth status in its payload (`via: status`,
+  # ADR-20260721-093027) — canonically OFFLINE (rules.yaml#/RiderLifecycle); RiderStatusChanged
+  # carries its target state the same way. SUSPENDED is admin-imposed from anywhere (idempotently
+  # re-suspendable — the self-loop is deliberate); reinstatement goes through OFFLINE only. No
+  # terminal state.
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/RiderStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/RiderRegistered' }
+        to: OFFLINE
+        via: status
+    transitions:
+      - { from: [OFFLINE, ON_DELIVERY], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: AVAILABLE, via: status }
+      - { from: [AVAILABLE, SUSPENDED], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: OFFLINE, via: status }
+      - { from: [AVAILABLE], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: ON_DELIVERY, via: status }
+      - { from: [OFFLINE, AVAILABLE, ON_DELIVERY, SUSPENDED], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: SUSPENDED, via: status }
+    terminal: []
   receives:
     - message: { $ref: 'commands.yaml#/RegisterRider' }
       emits: [{ $ref: 'events.yaml#/RiderRegistered' }]

@@ -2,6 +2,61 @@
 // — do not edit by hand. Aggregate lifecycle state machines as plain data/match: the fold and the
 // command handlers consult `transition` so the write side can never disagree with the declared spec.
 
+/// Restaurant lifecycle over [`RestaurantStatus`] (specs/actors.yaml#/Restaurant/lifecycle).
+pub mod restaurant {
+    use crate::generated::events::DomainEvent;
+    use crate::generated::scalars::RestaurantStatus;
+
+    /// Terminal states — no outgoing transitions.
+    pub const TERMINAL: &[RestaurantStatus] = &[];
+
+    /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.
+    pub fn initial(event: &DomainEvent) -> Option<RestaurantStatus> {
+        match event {
+            DomainEvent::RestaurantRegistered(_) => Some(RestaurantStatus::DRAFT),
+            _ => None,
+        }
+    }
+
+    /// The declared transition table: `Some(next)` iff `event` legally moves the machine from
+    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A
+    /// dynamic-target arm matches only when the event's carried state equals the declared target.
+    pub fn transition(from: RestaurantStatus, event: &DomainEvent) -> Option<RestaurantStatus> {
+        match (from, event) {
+            (RestaurantStatus::DRAFT, DomainEvent::RestaurantActivated(_)) => Some(RestaurantStatus::ACTIVE),
+            (RestaurantStatus::INACTIVE, DomainEvent::RestaurantActivated(_)) => Some(RestaurantStatus::ACTIVE),
+            (RestaurantStatus::DRAFT, DomainEvent::RestaurantDeactivated(_)) => Some(RestaurantStatus::INACTIVE),
+            (RestaurantStatus::ACTIVE, DomainEvent::RestaurantDeactivated(_)) => Some(RestaurantStatus::INACTIVE),
+            (RestaurantStatus::DRAFT, DomainEvent::RestaurantRemoved(_)) => Some(RestaurantStatus::INACTIVE),
+            (RestaurantStatus::ACTIVE, DomainEvent::RestaurantRemoved(_)) => Some(RestaurantStatus::INACTIVE),
+            (RestaurantStatus::INACTIVE, DomainEvent::RestaurantRemoved(_)) => Some(RestaurantStatus::INACTIVE),
+            (RestaurantStatus::DRAFT, DomainEvent::RestaurantMarkedClosed(_)) => Some(RestaurantStatus::INACTIVE),
+            (RestaurantStatus::ACTIVE, DomainEvent::RestaurantMarkedClosed(_)) => Some(RestaurantStatus::INACTIVE),
+            (RestaurantStatus::INACTIVE, DomainEvent::RestaurantMarkedClosed(_)) => Some(RestaurantStatus::INACTIVE),
+            _ => None,
+        }
+    }
+
+    /// The state `event` drives the machine to, irrespective of the current state — at fold
+    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
+    /// for an event outside the machine (or whose target depends on the current state). A dynamic
+    /// (event-carried) target is the event's payload field.
+    pub fn target(event: &DomainEvent) -> Option<RestaurantStatus> {
+        match event {
+            DomainEvent::RestaurantActivated(_) => Some(RestaurantStatus::ACTIVE),
+            DomainEvent::RestaurantDeactivated(_) => Some(RestaurantStatus::INACTIVE),
+            DomainEvent::RestaurantRemoved(_) => Some(RestaurantStatus::INACTIVE),
+            DomainEvent::RestaurantMarkedClosed(_) => Some(RestaurantStatus::INACTIVE),
+            _ => None,
+        }
+    }
+
+    /// Whether `state` is terminal (no outgoing transitions).
+    pub fn is_terminal(state: RestaurantStatus) -> bool {
+        TERMINAL.contains(&state)
+    }
+}
+
 /// Cart lifecycle over [`CartStatus`] (specs/actors.yaml#/Cart/lifecycle).
 pub mod cart {
     use crate::generated::events::DomainEvent;
@@ -19,7 +74,8 @@ pub mod cart {
     }
 
     /// The declared transition table: `Some(next)` iff `event` legally moves the machine from
-    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op).
+    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A
+    /// dynamic-target arm matches only when the event's carried state equals the declared target.
     pub fn transition(from: CartStatus, event: &DomainEvent) -> Option<CartStatus> {
         match (from, event) {
             (CartStatus::OPEN, DomainEvent::CartCheckedOut(_)) => Some(CartStatus::CHECKED_OUT),
@@ -29,7 +85,8 @@ pub mod cart {
 
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
-    /// for an event outside the machine (or whose target depends on the current state).
+    /// for an event outside the machine (or whose target depends on the current state). A dynamic
+    /// (event-carried) target is the event's payload field.
     pub fn target(event: &DomainEvent) -> Option<CartStatus> {
         match event {
             DomainEvent::CartCheckedOut(_) => Some(CartStatus::CHECKED_OUT),
@@ -60,7 +117,8 @@ pub mod order {
     }
 
     /// The declared transition table: `Some(next)` iff `event` legally moves the machine from
-    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op).
+    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A
+    /// dynamic-target arm matches only when the event's carried state equals the declared target.
     pub fn transition(from: OrderStatus, event: &DomainEvent) -> Option<OrderStatus> {
         match (from, event) {
             (OrderStatus::PLACED, DomainEvent::OrderAcceptedByRestaurant(_)) => Some(OrderStatus::ACCEPTED),
@@ -79,7 +137,8 @@ pub mod order {
 
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
-    /// for an event outside the machine (or whose target depends on the current state).
+    /// for an event outside the machine (or whose target depends on the current state). A dynamic
+    /// (event-carried) target is the event's payload field.
     pub fn target(event: &DomainEvent) -> Option<OrderStatus> {
         match event {
             DomainEvent::OrderAcceptedByRestaurant(_) => Some(OrderStatus::ACCEPTED),
@@ -116,7 +175,8 @@ pub mod payment {
     }
 
     /// The declared transition table: `Some(next)` iff `event` legally moves the machine from
-    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op).
+    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A
+    /// dynamic-target arm matches only when the event's carried state equals the declared target.
     pub fn transition(from: PaymentStatus, event: &DomainEvent) -> Option<PaymentStatus> {
         match (from, event) {
             (PaymentStatus::PENDING, DomainEvent::PaymentCaptured(_)) => Some(PaymentStatus::CAPTURED),
@@ -128,7 +188,8 @@ pub mod payment {
 
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
-    /// for an event outside the machine (or whose target depends on the current state).
+    /// for an event outside the machine (or whose target depends on the current state). A dynamic
+    /// (event-carried) target is the event's payload field.
     pub fn target(event: &DomainEvent) -> Option<PaymentStatus> {
         match event {
             DomainEvent::PaymentCaptured(_) => Some(PaymentStatus::CAPTURED),
@@ -140,6 +201,147 @@ pub mod payment {
 
     /// Whether `state` is terminal (no outgoing transitions).
     pub fn is_terminal(state: PaymentStatus) -> bool {
+        TERMINAL.contains(&state)
+    }
+}
+
+/// DeliveryJob lifecycle over [`DeliveryStatus`] (specs/actors.yaml#/DeliveryJob/lifecycle).
+pub mod delivery_job {
+    use crate::generated::events::DomainEvent;
+    use crate::generated::scalars::DeliveryStatus;
+
+    /// Terminal states — no outgoing transitions.
+    pub const TERMINAL: &[DeliveryStatus] = &[DeliveryStatus::DELIVERED, DeliveryStatus::CANCELLED];
+
+    /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.
+    pub fn initial(event: &DomainEvent) -> Option<DeliveryStatus> {
+        match event {
+            DomainEvent::DeliveryRequested(_) => Some(DeliveryStatus::PENDING),
+            _ => None,
+        }
+    }
+
+    /// The declared transition table: `Some(next)` iff `event` legally moves the machine from
+    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A
+    /// dynamic-target arm matches only when the event's carried state equals the declared target.
+    pub fn transition(from: DeliveryStatus, event: &DomainEvent) -> Option<DeliveryStatus> {
+        match (from, event) {
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryAcceptedByRider(_)) => Some(DeliveryStatus::ASSIGNED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryAcceptedByPartner(_)) => Some(DeliveryStatus::ASSIGNED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryAssignedToPartner(_)) => Some(DeliveryStatus::ASSIGNED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryUnassignedFromPartner(_)) => Some(DeliveryStatus::PENDING),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryPickedUp(_)) => Some(DeliveryStatus::PICKED_UP),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryCompleted(_)) => Some(DeliveryStatus::DELIVERED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryCompleted(_)) => Some(DeliveryStatus::DELIVERED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryCancelled(_)) => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryCancelled(_)) => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryCancelled(_)) => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryCancelled(_)) => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::FAILED, DomainEvent::DeliveryCancelled(_)) => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryDispatchFailed(_)) => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::ASSIGNED => Some(DeliveryStatus::ASSIGNED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::PICKED_UP => Some(DeliveryStatus::PICKED_UP),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::OUT_FOR_DELIVERY => Some(DeliveryStatus::OUT_FOR_DELIVERY),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::DELIVERED => Some(DeliveryStatus::DELIVERED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::DELIVERED => Some(DeliveryStatus::DELIVERED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::ASSIGNED => Some(DeliveryStatus::ASSIGNED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::PICKED_UP => Some(DeliveryStatus::PICKED_UP),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::OUT_FOR_DELIVERY => Some(DeliveryStatus::OUT_FOR_DELIVERY),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::DELIVERED => Some(DeliveryStatus::DELIVERED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::DELIVERED => Some(DeliveryStatus::DELIVERED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::CANCELLED => Some(DeliveryStatus::CANCELLED),
+            (DeliveryStatus::PENDING, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryPartnerStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            _ => None,
+        }
+    }
+
+    /// The state `event` drives the machine to, irrespective of the current state — at fold
+    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
+    /// for an event outside the machine (or whose target depends on the current state). A dynamic
+    /// (event-carried) target is the event's payload field.
+    pub fn target(event: &DomainEvent) -> Option<DeliveryStatus> {
+        match event {
+            DomainEvent::DeliveryAcceptedByRider(_) => Some(DeliveryStatus::ASSIGNED),
+            DomainEvent::DeliveryAcceptedByPartner(_) => Some(DeliveryStatus::ASSIGNED),
+            DomainEvent::DeliveryAssignedToPartner(_) => Some(DeliveryStatus::ASSIGNED),
+            DomainEvent::DeliveryUnassignedFromPartner(_) => Some(DeliveryStatus::PENDING),
+            DomainEvent::DeliveryPickedUp(_) => Some(DeliveryStatus::PICKED_UP),
+            DomainEvent::DeliveryCompleted(_) => Some(DeliveryStatus::DELIVERED),
+            DomainEvent::DeliveryCancelled(_) => Some(DeliveryStatus::CANCELLED),
+            DomainEvent::DeliveryDispatchFailed(_) => Some(DeliveryStatus::FAILED),
+            DomainEvent::DeliveryStatusUpdated(e) => Some(e.status),
+            DomainEvent::DeliveryPartnerStatusUpdated(e) => Some(e.status),
+            _ => None,
+        }
+    }
+
+    /// Whether `state` is terminal (no outgoing transitions).
+    pub fn is_terminal(state: DeliveryStatus) -> bool {
+        TERMINAL.contains(&state)
+    }
+}
+
+/// Rider lifecycle over [`RiderStatus`] (specs/actors.yaml#/Rider/lifecycle).
+pub mod rider {
+    use crate::generated::events::DomainEvent;
+    use crate::generated::scalars::RiderStatus;
+
+    /// Terminal states — no outgoing transitions.
+    pub const TERMINAL: &[RiderStatus] = &[];
+
+    /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.
+    pub fn initial(event: &DomainEvent) -> Option<RiderStatus> {
+        match event {
+            DomainEvent::RiderRegistered(e) => Some(e.status),
+            _ => None,
+        }
+    }
+
+    /// The declared transition table: `Some(next)` iff `event` legally moves the machine from
+    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A
+    /// dynamic-target arm matches only when the event's carried state equals the declared target.
+    pub fn transition(from: RiderStatus, event: &DomainEvent) -> Option<RiderStatus> {
+        match (from, event) {
+            (RiderStatus::OFFLINE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::AVAILABLE => Some(RiderStatus::AVAILABLE),
+            (RiderStatus::ON_DELIVERY, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::AVAILABLE => Some(RiderStatus::AVAILABLE),
+            (RiderStatus::AVAILABLE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::OFFLINE => Some(RiderStatus::OFFLINE),
+            (RiderStatus::SUSPENDED, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::OFFLINE => Some(RiderStatus::OFFLINE),
+            (RiderStatus::AVAILABLE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::ON_DELIVERY => Some(RiderStatus::ON_DELIVERY),
+            (RiderStatus::OFFLINE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::SUSPENDED => Some(RiderStatus::SUSPENDED),
+            (RiderStatus::AVAILABLE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::SUSPENDED => Some(RiderStatus::SUSPENDED),
+            (RiderStatus::ON_DELIVERY, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::SUSPENDED => Some(RiderStatus::SUSPENDED),
+            (RiderStatus::SUSPENDED, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::SUSPENDED => Some(RiderStatus::SUSPENDED),
+            _ => None,
+        }
+    }
+
+    /// The state `event` drives the machine to, irrespective of the current state — at fold
+    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
+    /// for an event outside the machine (or whose target depends on the current state). A dynamic
+    /// (event-carried) target is the event's payload field.
+    pub fn target(event: &DomainEvent) -> Option<RiderStatus> {
+        match event {
+            DomainEvent::RiderStatusChanged(e) => Some(e.status),
+            _ => None,
+        }
+    }
+
+    /// Whether `state` is terminal (no outgoing transitions).
+    pub fn is_terminal(state: RiderStatus) -> bool {
         TERMINAL.contains(&state)
     }
 }

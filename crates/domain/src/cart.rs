@@ -4,11 +4,14 @@
 //! only the fields those invariants read are folded — the priced read model lives in the `Cart`
 //! projection (ADR-0040), not here. No I/O, no serialization logic (dependency rule).
 //!
-//! The lifecycle mapping mirrors the read-side `CartProjector` so write-side decisions and the projected
-//! `status` column can never disagree: `CartStarted` → OPEN, `CartCheckedOut` → CHECKED_OUT.
+//! The status machine is the DECLARED lifecycle (`specs/actors.yaml#/Cart/lifecycle`,
+//! ADR-20260720-004419): the fold moves `status` exclusively through the GENERATED tables
+//! ([`lifecycle::initial`] births it OPEN, [`lifecycle::target`] applies `CartCheckedOut` →
+//! CHECKED_OUT), so write-side decisions and the projected `status` column can never disagree.
 
 use crate::generated::entities::CartLineItem;
 use crate::generated::events::DomainEvent;
+pub use crate::generated::lifecycles::cart as lifecycle;
 use crate::generated::scalars::{CartLineId, CartStatus, CustomerId, RestaurantId};
 
 /// Per-line quantity cap enforced on AddCartLine / ChangeCartLineQuantity
@@ -47,16 +50,23 @@ pub fn fold(events: &[DomainEvent]) -> Option<CartState> {
 /// Apply one event to the state — a pure transition, total over the whole event union (events not
 /// touching the folded fields are no-ops, so a fatter stream never breaks rehydration).
 fn apply(state: Option<CartState>, event: &DomainEvent) -> Option<CartState> {
-    if let DomainEvent::CartStarted(e) = event {
-        return Some(CartState {
-            status: CartStatus::OPEN,
-            restaurant_id: e.restaurant_id,
-            line_ids: Vec::new(),
-            lines: Vec::new(),
-            customer_id: e.customer_id,
-        });
+    if let Some(status) = lifecycle::initial(event) {
+        if let DomainEvent::CartStarted(e) = event {
+            return Some(CartState {
+                status,
+                restaurant_id: e.restaurant_id,
+                line_ids: Vec::new(),
+                lines: Vec::new(),
+                customer_id: e.customer_id,
+            });
+        }
     }
     let mut s = state?;
+    // The recorded fact wins at fold time: `target` maps a lifecycle event to its state regardless
+    // of the current one (legality is enforced at append time).
+    if let Some(next) = lifecycle::target(event) {
+        s.status = next;
+    }
     match event {
         DomainEvent::CartLineAdded(e) => {
             if !s.line_ids.contains(&e.line.cart_line_id) {
@@ -74,7 +84,6 @@ fn apply(state: Option<CartState>, event: &DomainEvent) -> Option<CartState> {
             s.lines.retain(|line| line.cart_line_id != e.cart_line_id);
         }
         DomainEvent::CartBoundToCustomer(e) => s.customer_id = Some(e.customer_id),
-        DomainEvent::CartCheckedOut(_) => s.status = CartStatus::CHECKED_OUT,
         _ => {}
     }
     Some(s)

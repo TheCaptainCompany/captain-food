@@ -1,38 +1,30 @@
 //! Rider aggregate — the PURE write-side state fold (ADR-0035), mirroring `customer.rs`. A rider
 //! identity linked to the auth provider user (`specs/actors.yaml#/Rider`); the fold tracks just what
 //! the declared invariants read: existence (`RiderNotFound`), profile fields, and the availability
-//! machine guarded by [`can_transition`] (`errors.yaml#/InvalidRiderStatusTransition`). No I/O, no
-//! serialization logic (dependency rule).
+//! machine (`errors.yaml#/InvalidRiderStatusTransition`). No I/O, no serialization logic
+//! (dependency rule).
+//!
+//! The availability machine is the DECLARED lifecycle (`specs/actors.yaml#/Rider/lifecycle`,
+//! ADR-20260721-093027) in its dynamic-target form: `RiderRegistered` and `RiderStatusChanged` carry
+//! the target state in their `status` payload field, so the fold moves `status` exclusively through
+//! the GENERATED tables ([`lifecycle::initial`] births from the payload, [`lifecycle::target`]
+//! applies recorded facts) and the command handlers guard with [`lifecycle::transition`].
 
 use crate::generated::events::DomainEvent;
+pub use crate::generated::lifecycles::rider as lifecycle;
 use crate::generated::scalars::{PhoneNumber, RiderStatus};
 
 /// What the Rider command handlers need to know to accept or reject a command. `None` (from
 /// [`fold`]) means no `RiderRegistered` yet on this stream.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RiderState {
-    /// Availability/lifecycle machine (OFFLINE/AVAILABLE/ON_DELIVERY/SUSPENDED) — see [`can_transition`].
+    /// Availability/lifecycle machine (OFFLINE/AVAILABLE/ON_DELIVERY/SUSPENDED) — guarded by
+    /// [`lifecycle::transition`].
     pub status: RiderStatus,
     /// Current display name (profile field, edited via UpdateRiderInfo).
     pub display_name: String,
     /// Current canonical E.164 phone (profile field, edited via UpdateRiderInfo).
     pub phone: PhoneNumber,
-}
-
-/// Whether `from` → `to` is a legal rider status transition (`ChangeRiderStatus`). SUSPENDED is
-/// admin-imposed from anywhere and terminal until reinstated (back to OFFLINE only); a delivery can
-/// only be entered from AVAILABLE — notably OFFLINE → ON_DELIVERY is invalid.
-pub fn can_transition(from: RiderStatus, to: RiderStatus) -> bool {
-    use RiderStatus::*;
-    matches!(
-        (from, to),
-        (_, SUSPENDED)
-            | (OFFLINE, AVAILABLE)
-            | (AVAILABLE, OFFLINE)
-            | (AVAILABLE, ON_DELIVERY)
-            | (ON_DELIVERY, AVAILABLE)
-            | (SUSPENDED, OFFLINE)
-    )
 }
 
 /// Fold a Rider stream (events in version order) into its current state. `None` ⇔ the stream has no
@@ -41,28 +33,32 @@ pub fn fold(events: &[DomainEvent]) -> Option<RiderState> {
     events.iter().fold(None, apply)
 }
 
-/// Apply one event — a pure transition, total over the whole event union.
+/// Apply one event — a pure transition, total over the whole event union. The status moves ONLY
+/// through the generated lifecycle table; the hand-written part is payload extraction.
 fn apply(state: Option<RiderState>, event: &DomainEvent) -> Option<RiderState> {
-    if let DomainEvent::RiderRegistered(e) = event {
-        return Some(RiderState {
-            status: e.status,
-            display_name: e.display_name.clone(),
-            phone: e.phone.clone(),
-        });
+    if let Some(status) = lifecycle::initial(event) {
+        if let DomainEvent::RiderRegistered(e) = event {
+            return Some(RiderState {
+                status,
+                display_name: e.display_name.clone(),
+                phone: e.phone.clone(),
+            });
+        }
     }
     let mut s = state?;
-    match event {
-        DomainEvent::RiderInfoUpdated(e) => {
-            // Partial update: only the provided profile fields change; the status never does.
-            if let Some(name) = &e.display_name {
-                s.display_name = name.clone();
-            }
-            if let Some(phone) = &e.phone {
-                s.phone = phone.clone();
-            }
+    // The recorded fact wins at fold time: `target` reads the event-carried status regardless of
+    // the current state (legality is `transition`'s job, enforced by the handlers at append time).
+    if let Some(next) = lifecycle::target(event) {
+        s.status = next;
+    }
+    if let DomainEvent::RiderInfoUpdated(e) = event {
+        // Partial update: only the provided profile fields change; the status never does.
+        if let Some(name) = &e.display_name {
+            s.display_name = name.clone();
         }
-        DomainEvent::RiderStatusChanged(e) => s.status = e.status,
-        _ => {}
+        if let Some(phone) = &e.phone {
+            s.phone = phone.clone();
+        }
     }
     Some(s)
 }
@@ -128,26 +124,34 @@ mod tests {
         assert_eq!(s.status, RiderStatus::ON_DELIVERY);
     }
 
+    /// The generated table IS the declared machine (actors.yaml#/Rider/lifecycle, dynamic-target
+    /// form: `RiderStatusChanged` carries the target in `status`) — the same legality set the old
+    /// hand `can_transition` encoded, now spec-checked (rules.yaml#/RiderLifecycle).
     #[test]
-    fn transition_table_matches_the_spec() {
+    fn generated_transition_table_matches_the_declared_machine() {
         use RiderStatus::*;
+        let t = |from: RiderStatus, to: RiderStatus| lifecycle::transition(from, &status_changed(to));
         // The legal moves.
-        assert!(can_transition(OFFLINE, AVAILABLE));
-        assert!(can_transition(AVAILABLE, OFFLINE));
-        assert!(can_transition(AVAILABLE, ON_DELIVERY));
-        assert!(can_transition(ON_DELIVERY, AVAILABLE));
-        assert!(can_transition(SUSPENDED, OFFLINE)); // reinstate
-        // Suspension is admin-imposed from anywhere.
-        assert!(can_transition(OFFLINE, SUSPENDED));
-        assert!(can_transition(AVAILABLE, SUSPENDED));
-        assert!(can_transition(ON_DELIVERY, SUSPENDED));
+        assert_eq!(t(OFFLINE, AVAILABLE), Some(AVAILABLE));
+        assert_eq!(t(AVAILABLE, OFFLINE), Some(OFFLINE));
+        assert_eq!(t(AVAILABLE, ON_DELIVERY), Some(ON_DELIVERY));
+        assert_eq!(t(ON_DELIVERY, AVAILABLE), Some(AVAILABLE));
+        assert_eq!(t(SUSPENDED, OFFLINE), Some(OFFLINE)); // reinstate
+        // Suspension is admin-imposed from anywhere, idempotently (SUSPENDED → SUSPENDED).
+        assert_eq!(t(OFFLINE, SUSPENDED), Some(SUSPENDED));
+        assert_eq!(t(AVAILABLE, SUSPENDED), Some(SUSPENDED));
+        assert_eq!(t(ON_DELIVERY, SUSPENDED), Some(SUSPENDED));
+        assert_eq!(t(SUSPENDED, SUSPENDED), Some(SUSPENDED));
         // The notable invalid jumps.
-        assert!(!can_transition(OFFLINE, ON_DELIVERY));
-        assert!(!can_transition(ON_DELIVERY, OFFLINE));
-        assert!(!can_transition(SUSPENDED, AVAILABLE));
-        assert!(!can_transition(SUSPENDED, ON_DELIVERY));
-        assert!(!can_transition(OFFLINE, OFFLINE));
-        assert!(!can_transition(AVAILABLE, AVAILABLE));
+        assert_eq!(t(OFFLINE, ON_DELIVERY), None);
+        assert_eq!(t(ON_DELIVERY, OFFLINE), None);
+        assert_eq!(t(SUSPENDED, AVAILABLE), None);
+        assert_eq!(t(SUSPENDED, ON_DELIVERY), None);
+        assert_eq!(t(OFFLINE, OFFLINE), None);
+        assert_eq!(t(AVAILABLE, AVAILABLE), None);
+        // The birth is event-carried too, and no state is terminal.
+        assert_eq!(lifecycle::initial(&registered(AVAILABLE)), Some(AVAILABLE));
+        assert!(lifecycle::TERMINAL.is_empty());
     }
 
     #[test]

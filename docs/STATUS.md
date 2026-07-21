@@ -1,7 +1,26 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-21 (05:40 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-21 (09:50 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-21 — #23: aggregate lifecycle state machines COMPLETE (ADR-20260721-093027,
+> codegen-roadmap item 1 closed — completes ADR-20260720-004419's first slice).** (1) **Dynamic
+> targets**: a lifecycle entry may declare `via: <payloadField>` — the event carries the target
+> state (one entry per `from × to`, determinism per event instance); new `lc-via` validator rule
+> (field exists, required, same scalar; static/dynamic mixing = `lc-ambiguous`), emitter emits
+> guarded arms + payload-read `target()`/`initial()`, mermaid labels dynamic edges `Event(field)`.
+> (2) **Full adoption**: Restaurant (static machine), Rider and DeliveryJob (dynamic) declared in
+> actors.yaml — 6 machines / 72 transitions, `lc-missing` warnings 3 → 0; the declared DeliveryJob
+> machine resolved a real hand-code drift (cancel-from-FAILED allowed by `cancel_delivery` but not
+> by `delivery_can_transition`) preserving both behaviours. (3) **Folds rewired**: Cart, Payment,
+> Restaurant, Rider, DeliveryJob status now moves ONLY through `lifecycle::initial`/`target`;
+> `rider::can_transition` and `delivery_can_transition` are deleted; the remaining hand delivery
+> handlers guard through `lifecycle::transition`. (4) **Generated handlers**: new emitter →
+> `application/src/generated/handlers.rs` — the 7 Order lifecycle commands + `ChangeRiderStatus` +
+> `UpdateDeliveryStatus`/`UpdateDeliveryPartnerStatus` are generated require+guard+append fns
+> (event built from same-named command fields; per-aggregate require/reject/stream seams stay
+> `pub(crate)` in commands.rs), re-exported so call sites are unchanged; the hand behaviour suite
+> is the parity gate until #24. `make rust` green: 57 test suites pass, validate 0 errors, no drift.
 
 > ✅ **2026-07-21 — #25: the PM orchestrator step pipelines are GENERATED
 > (ADR-20260721-053456, codegen-roadmap item 3, implements the deferral of ADR-20260719-193500).**

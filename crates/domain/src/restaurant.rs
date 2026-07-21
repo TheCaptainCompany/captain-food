@@ -4,11 +4,14 @@
 //! MINIMAL: only the fields those invariants read are folded — the full read model lives in the
 //! `Restaurant` projection (ADR-0040), not here. No I/O, no serialization logic (dependency rule).
 //!
-//! The lifecycle mapping mirrors the read-side `RestaurantProjector` so write-side decisions and the
-//! projected `status` column can never disagree: `RestaurantRegistered` → DRAFT, `RestaurantActivated`
-//! → ACTIVE, `RestaurantDeactivated`/`RestaurantRemoved`/`RestaurantMarkedClosed` → INACTIVE.
+//! The status machine is the DECLARED lifecycle (`specs/actors.yaml#/Restaurant/lifecycle`,
+//! ADR-20260721-093027): the fold moves `status` exclusively through the GENERATED tables
+//! ([`lifecycle::initial`] births it DRAFT, [`lifecycle::target`] applies `RestaurantActivated` →
+//! ACTIVE and `RestaurantDeactivated`/`RestaurantRemoved`/`RestaurantMarkedClosed` → INACTIVE), so
+//! write-side decisions and the projected `status` column can never disagree.
 
 use crate::generated::events::DomainEvent;
+pub use crate::generated::lifecycles::restaurant as lifecycle;
 use crate::generated::scalars::{
     ExternalReference, OrderAcceptanceMode, RestaurantDisplayName, RestaurantListingStatus,
     RestaurantStatus, Slug, WebUrl,
@@ -46,24 +49,27 @@ pub fn fold(events: &[DomainEvent]) -> Option<RestaurantState> {
 /// Apply one event to the state — a pure transition, total over the whole event union (events not
 /// touching the folded fields are no-ops, so a fatter stream never breaks rehydration).
 fn apply(state: Option<RestaurantState>, event: &DomainEvent) -> Option<RestaurantState> {
-    if let DomainEvent::RestaurantRegistered(e) = event {
-        return Some(RestaurantState {
-            status: RestaurantStatus::DRAFT,
-            order_acceptance: OrderAcceptanceMode::NORMAL,
-            listing_status: e.listing_status,
-            listing_claimed: false,
-            gbp_order_url: None,
-            slug: e.slug.clone(),
-            display_name: e.display_name.clone(),
-            r#ref: e.r#ref.clone(),
-        });
+    if let Some(status) = lifecycle::initial(event) {
+        if let DomainEvent::RestaurantRegistered(e) = event {
+            return Some(RestaurantState {
+                status,
+                order_acceptance: OrderAcceptanceMode::NORMAL,
+                listing_status: e.listing_status,
+                listing_claimed: false,
+                gbp_order_url: None,
+                slug: e.slug.clone(),
+                display_name: e.display_name.clone(),
+                r#ref: e.r#ref.clone(),
+            });
+        }
     }
     let mut s = state?;
+    // The recorded fact wins at fold time: `target` maps a lifecycle event to its state regardless
+    // of the current one (legality is `transition`'s job at append time).
+    if let Some(next) = lifecycle::target(event) {
+        s.status = next;
+    }
     match event {
-        DomainEvent::RestaurantActivated(_) => s.status = RestaurantStatus::ACTIVE,
-        DomainEvent::RestaurantDeactivated(_)
-        | DomainEvent::RestaurantRemoved(_)
-        | DomainEvent::RestaurantMarkedClosed(_) => s.status = RestaurantStatus::INACTIVE,
         DomainEvent::RestaurantAcceptanceModeChanged(e) => s.order_acceptance = e.mode,
         DomainEvent::RestaurantUpdated(e) => {
             if let Some(name) = &e.display_name {

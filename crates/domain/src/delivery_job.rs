@@ -8,8 +8,16 @@
 //! fulfilled by EITHER an independent Captain rider (the commands folded here) OR a delivery partner
 //! (inbound `DeliveryAcceptedByPartner`/`DeliveryStatusUpdated` facts, folded too so a partner-tracked
 //! job rejects rider commands with the right status).
+//!
+//! The status machine is the DECLARED lifecycle (`specs/actors.yaml#/DeliveryJob/lifecycle`,
+//! ADR-20260721-093027): static edges for the operational facts plus DYNAMIC (event-carried) edges
+//! for `DeliveryStatusUpdated`/`DeliveryPartnerStatusUpdated`, whose `status` payload field names
+//! the target state. The fold moves `status` exclusively through the GENERATED tables
+//! ([`lifecycle::initial`] births it, [`lifecycle::target`] applies recorded facts) and the command
+//! handlers guard with [`lifecycle::transition`].
 
 use crate::generated::events::DomainEvent;
+pub use crate::generated::lifecycles::delivery_job as lifecycle;
 use crate::generated::scalars::{DeliveryStatus, ExternalReference, RiderId};
 
 /// What the DeliveryJob command handlers need to know about the aggregate to accept or reject a
@@ -38,11 +46,14 @@ pub fn fold(events: &[DomainEvent]) -> Option<DeliveryJobState> {
 }
 
 /// Apply one event to the state — a pure transition, total over the whole event union (events not
-/// touching the folded fields are no-ops, so a fatter stream never breaks rehydration).
+/// touching the folded fields are no-ops, so a fatter stream never breaks rehydration). The status
+/// moves ONLY through the generated lifecycle table (a rider decline or partner rejection is not in
+/// the machine, so it folds as a status no-op); the hand-written part is the assignment fields and
+/// the issue flag.
 fn apply(state: Option<DeliveryJobState>, event: &DomainEvent) -> Option<DeliveryJobState> {
-    if let DomainEvent::DeliveryRequested(_) = event {
+    if let Some(status) = lifecycle::initial(event) {
         return Some(DeliveryJobState {
-            status: DeliveryStatus::PENDING,
+            status,
             rider_id: None,
             assigned: false,
             partner_ref: None,
@@ -50,38 +61,30 @@ fn apply(state: Option<DeliveryJobState>, event: &DomainEvent) -> Option<Deliver
         });
     }
     let mut s = state?;
+    // The recorded fact wins at fold time: `target` maps a lifecycle event to its state — for the
+    // dynamic events the event-carried `status` payload field — regardless of the current one
+    // (legality is `transition`'s job, enforced by the handlers at append time).
+    if let Some(next) = lifecycle::target(event) {
+        s.status = next;
+    }
     match event {
         DomainEvent::DeliveryAcceptedByRider(e) => {
-            s.status = DeliveryStatus::ASSIGNED;
             s.rider_id = Some(e.rider_id);
             s.assigned = true;
         }
         DomainEvent::DeliveryAcceptedByPartner(e) => {
-            s.status = DeliveryStatus::ASSIGNED;
             s.assigned = true;
             s.partner_ref = Some(e.partner_ref.clone());
         }
         DomainEvent::DeliveryAssignedToPartner(e) => {
-            s.status = DeliveryStatus::ASSIGNED;
             s.assigned = true;
             s.partner_ref = Some(e.partner_ref.clone());
         }
         DomainEvent::DeliveryUnassignedFromPartner(_) => {
-            // Back to PENDING so the job is re-offerable (assign/accept both require PENDING).
-            s.status = DeliveryStatus::PENDING;
+            // Back to PENDING (the lifecycle edge) so the job is re-offerable.
             s.assigned = false;
             s.partner_ref = None;
         }
-        DomainEvent::DeliveryPickedUp(_) => s.status = DeliveryStatus::PICKED_UP,
-        DomainEvent::DeliveryStatusUpdated(e) => s.status = e.status,
-        DomainEvent::DeliveryPartnerStatusUpdated(e) => s.status = e.status,
-        DomainEvent::DeliveryCompleted(_) => s.status = DeliveryStatus::DELIVERED,
-        DomainEvent::DeliveryCancelled(_) => s.status = DeliveryStatus::CANCELLED,
-        // A rider decline leaves the job PENDING and re-offerable — nothing to fold.
-        DomainEvent::DeliveryDeclinedByRider(_) => {}
-        // Terminal dispatch failure (offer cap exhausted, ADR-20260720-004556): the job is FAILED
-        // and surfaced for manual handling.
-        DomainEvent::DeliveryDispatchFailed(_) => s.status = DeliveryStatus::FAILED,
         DomainEvent::DeliveryIssueReported(_) => s.open_issue = true,
         DomainEvent::DeliveryIssueResolved(_) => s.open_issue = false,
         _ => {}

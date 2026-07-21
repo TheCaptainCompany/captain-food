@@ -3377,17 +3377,22 @@ fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) {
 
 // ─── §2c — aggregate lifecycle state machines (actors.yaml `lifecycle`, ADR-20260720-004419) ────
 
-/// One `{ from: [states], event, to }` transition of a declared lifecycle.
+/// One `{ from: [states], event, to[, via] }` transition of a declared lifecycle. `via` names the
+/// event payload field carrying the target state (dynamic target, ADR-20260721-093027): the entry
+/// legalizes `from × {to}` when `event.<via> == to`.
 struct LifecycleTransition {
     from: Vec<String>,
     event_ref: String,
     to: String,
+    via: Option<String>,
 }
 
-/// One `{ event, to }` birth entry of a declared lifecycle.
+/// One `{ event, to[, via] }` birth entry of a declared lifecycle. With `via`, the birth state is
+/// event-carried (the fold births from the payload field); `to` stays the canonical birth state.
 struct LifecycleInitial {
     event_ref: String,
     to: String,
+    via: Option<String>,
 }
 
 /// A parsed `lifecycle:` block of an actors.yaml aggregate: the status machine as declared data.
@@ -3434,6 +3439,7 @@ fn parse_lifecycles(model: &Model) -> Vec<Lifecycle> {
                     .map(|e| LifecycleInitial {
                         event_ref: event_ref(e),
                         to: e.get("to").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                        via: e.get("via").and_then(|x| x.as_str()).map(str::to_string),
                     })
                     .collect()
             })
@@ -3447,6 +3453,7 @@ fn parse_lifecycles(model: &Model) -> Vec<Lifecycle> {
                         from: str_seq(t.get("from")),
                         event_ref: event_ref(t),
                         to: t.get("to").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                        via: t.get("via").and_then(|x| x.as_str()).map(str::to_string),
                     })
                     .collect()
             })
@@ -3583,6 +3590,67 @@ fn validate_lifecycles(model: &Model, issues: &mut Vec<Issue>) {
             }
             Some(name)
         };
+        // via — a dynamic target (ADR-20260721-093027): the named field must exist on the event's
+        // events.yaml payload, be REQUIRED (an optional target cannot drive a machine), and $ref the
+        // same scalar as `lifecycle.status`.
+        let status_scalar = ref_name(&lc.status_ref).unwrap_or_default();
+        let check_via = |issues: &mut Vec<Issue>, event: &str, via: &str, where_: String| {
+            let node = model.defs.get("events.yaml").and_then(|e| e.get(event));
+            let prop = node.and_then(|n| n.get("properties")).and_then(|p| p.get(via));
+            match prop {
+                None => issues.push(err(
+                    "lc-via",
+                    where_,
+                    format!("via field '{}' does not exist on events.yaml#/{}'s payload.", via, event),
+                )),
+                Some(p) => {
+                    let target = p.get("$ref").and_then(|r| r.as_str()).unwrap_or("");
+                    let same_scalar = ref_name(target).as_deref() == Some(status_scalar.as_str())
+                        && ref_target_file(target, "events.yaml").as_deref() == Some("scalars.yaml");
+                    if !same_scalar {
+                        issues.push(err(
+                            "lc-via",
+                            where_.clone(),
+                            format!("via field '{}' on events.yaml#/{} must $ref scalars.yaml#/{} (the lifecycle status scalar).", via, event, status_scalar),
+                        ));
+                    }
+                    let required = node
+                        .and_then(|n| n.get("required"))
+                        .and_then(|r| r.as_sequence())
+                        .map(|s| s.iter().any(|v| v.as_str() == Some(via)))
+                        .unwrap_or(false);
+                    if !required {
+                        issues.push(err(
+                            "lc-via",
+                            where_,
+                            format!("via field '{}' on events.yaml#/{} must be required — an optional target cannot drive the machine.", via, event),
+                        ));
+                    }
+                }
+            }
+        };
+        // An event must use ONE consistent `via` across all its lifecycle entries — mixing static
+        // and dynamic arms (or two different fields) for the same event is ambiguous.
+        let mut via_by_event: BTreeMap<String, BTreeSet<Option<String>>> = BTreeMap::new();
+        for ini in &lc.initial {
+            if let Some(name) = ref_name(&ini.event_ref) {
+                via_by_event.entry(name).or_default().insert(ini.via.clone());
+            }
+        }
+        for t in &lc.transitions {
+            if let Some(name) = ref_name(&t.event_ref) {
+                via_by_event.entry(name).or_default().insert(t.via.clone());
+            }
+        }
+        for (event, vias) in &via_by_event {
+            if vias.len() > 1 {
+                issues.push(err(
+                    "lc-ambiguous",
+                    at.clone(),
+                    format!("event '{}' mixes static and dynamic (`via`) entries (or two different via fields) — one event, one consistent target mode.", event),
+                ));
+            }
+        }
         // initial — at least one birth entry; unique events; states in the enum.
         if lc.initial.is_empty() {
             issues.push(err("lc-shape", format!("{}.initial", at), "lifecycle must declare at least one `initial` { event, to } entry.".into()));
@@ -3592,13 +3660,17 @@ fn validate_lifecycles(model: &Model, issues: &mut Vec<Issue>) {
             let w = format!("{}.initial[{}]", at, i);
             check_state(issues, &ini.to, w.clone());
             if let Some(name) = check_event(issues, &ini.event_ref, w.clone()) {
+                if let Some(via) = &ini.via {
+                    check_via(issues, &name, via, w.clone());
+                }
                 if !initial_events.insert(name.clone()) {
                     issues.push(err("lc-ambiguous", w, format!("duplicate initial event '{}' — the machine must be deterministic.", name)));
                 }
             }
         }
-        // transitions — states/events valid, deterministic per (from, event).
-        let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+        // transitions — states/events valid, deterministic: one arm per (from, event) for a static
+        // target; per (from, event, to) for a dynamic one (the event INSTANCE picks the arm).
+        let mut seen: BTreeSet<(String, String, String)> = BTreeSet::new();
         for (i, t) in lc.transitions.iter().enumerate() {
             let w = format!("{}.transitions[{}]", at, i);
             if t.from.is_empty() {
@@ -3606,10 +3678,14 @@ fn validate_lifecycles(model: &Model, issues: &mut Vec<Issue>) {
             }
             check_state(issues, &t.to, w.clone());
             let ev = check_event(issues, &t.event_ref, w.clone());
+            if let (Some(name), Some(via)) = (&ev, &t.via) {
+                check_via(issues, name, via, w.clone());
+            }
             for f in &t.from {
                 check_state(issues, f, w.clone());
                 if let Some(name) = &ev {
-                    if !seen.insert((f.clone(), name.clone())) {
+                    let key_to = if t.via.is_some() { t.to.clone() } else { String::new() };
+                    if !seen.insert((f.clone(), name.clone(), key_to)) {
                         issues.push(err(
                             "lc-ambiguous",
                             w.clone(),
@@ -8032,39 +8108,65 @@ fn emit_domain_lifecycles(model: &Model) -> String {
             status
         ));
         for ini in &lc.initial {
-            out.push_str(&format!(
-                "            DomainEvent::{}(_) => Some({}::{}),\n",
-                ref_name(&ini.event_ref).unwrap_or_default(),
-                status,
-                ini.to
-            ));
+            let ev = ref_name(&ini.event_ref).unwrap_or_default();
+            match &ini.via {
+                // Event-carried birth state (dynamic, ADR-20260721-093027): the recorded fact wins.
+                Some(via) => out.push_str(&format!(
+                    "            DomainEvent::{}(e) => Some(e.{}),\n",
+                    ev,
+                    snake_field(via)
+                )),
+                None => out.push_str(&format!("            DomainEvent::{}(_) => Some({}::{}),\n", ev, status, ini.to)),
+            }
         }
         out.push_str("            _ => None,\n        }\n    }\n\n");
         out.push_str(&format!(
-            "    /// The declared transition table: `Some(next)` iff `event` legally moves the machine from\n    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op).\n    pub fn transition(from: {}, event: &DomainEvent) -> Option<{}> {{\n        match (from, event) {{\n",
+            "    /// The declared transition table: `Some(next)` iff `event` legally moves the machine from\n    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A\n    /// dynamic-target arm matches only when the event's carried state equals the declared target.\n    pub fn transition(from: {}, event: &DomainEvent) -> Option<{}> {{\n        match (from, event) {{\n",
             status, status
         ));
         for t in &lc.transitions {
             let ev = ref_name(&t.event_ref).unwrap_or_default();
             for f in &t.from {
-                out.push_str(&format!(
-                    "            ({}::{}, DomainEvent::{}(_)) => Some({}::{}),\n",
-                    status, f, ev, status, t.to
-                ));
+                match &t.via {
+                    Some(via) => out.push_str(&format!(
+                        "            ({}::{}, DomainEvent::{}(e)) if e.{} == {}::{} => Some({}::{}),\n",
+                        status,
+                        f,
+                        ev,
+                        snake_field(via),
+                        status,
+                        t.to,
+                        status,
+                        t.to
+                    )),
+                    None => out.push_str(&format!(
+                        "            ({}::{}, DomainEvent::{}(_)) => Some({}::{}),\n",
+                        status, f, ev, status, t.to
+                    )),
+                }
             }
         }
         out.push_str("            _ => None,\n        }\n    }\n\n");
         // target: the state an event drives the machine to IRRESPECTIVE of the current state — at
         // fold time the recorded fact wins (legality was enforced at append time by `transition`).
-        // Only emitted for events with a single target across all their transitions.
+        // A dynamic (`via`) event's target is its carried payload field; a static event is only
+        // emitted when it has a single target across all its transitions.
         let mut targets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut dynamic_via: BTreeMap<String, String> = BTreeMap::new();
         for t in &lc.transitions {
             if let Some(ev) = ref_name(&t.event_ref) {
-                targets.entry(ev).or_default().insert(t.to.clone());
+                match &t.via {
+                    Some(via) => {
+                        dynamic_via.insert(ev, via.clone());
+                    }
+                    None => {
+                        targets.entry(ev).or_default().insert(t.to.clone());
+                    }
+                }
             }
         }
         out.push_str(&format!(
-            "    /// The state `event` drives the machine to, irrespective of the current state — at fold\n    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`\n    /// for an event outside the machine (or whose target depends on the current state).\n    pub fn target(event: &DomainEvent) -> Option<{}> {{\n        match event {{\n",
+            "    /// The state `event` drives the machine to, irrespective of the current state — at fold\n    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`\n    /// for an event outside the machine (or whose target depends on the current state). A dynamic\n    /// (event-carried) target is the event's payload field.\n    pub fn target(event: &DomainEvent) -> Option<{}> {{\n        match event {{\n",
             status
         ));
         for t in &lc.transitions {
@@ -8072,6 +8174,11 @@ fn emit_domain_lifecycles(model: &Model) -> String {
                 Some(e) => e,
                 None => continue,
             };
+            if let Some(via) = dynamic_via.remove(&ev) {
+                // emit each dynamic event once, in declaration order
+                out.push_str(&format!("            DomainEvent::{}(e) => Some(e.{}),\n", ev, snake_field(&via)));
+                continue;
+            }
             if targets.get(&ev).map(|s| s.len()) != Some(1) {
                 continue;
             }
@@ -8094,12 +8201,22 @@ fn lifecycle_state_map(model: &Model) -> Vec<(String, String)> {
     parse_lifecycles(model)
         .into_iter()
         .map(|lc| {
+            // A dynamic (event-carried) edge is labelled `Event(field)` so the docs show which
+            // payload field names the target state (ADR-20260721-093027).
+            let label = |ev: &str, via: &Option<String>| match via {
+                Some(v) => format!("{}({})", ev, v),
+                None => ev.to_string(),
+            };
             let mut lines: Vec<String> = vec!["stateDiagram-v2".into()];
             for ini in &lc.initial {
-                lines.push(format!("  [*] --> {} : {}", ini.to, ref_name(&ini.event_ref).unwrap_or_default()));
+                lines.push(format!(
+                    "  [*] --> {} : {}",
+                    ini.to,
+                    label(&ref_name(&ini.event_ref).unwrap_or_default(), &ini.via)
+                ));
             }
             for t in &lc.transitions {
-                let ev = ref_name(&t.event_ref).unwrap_or_default();
+                let ev = label(&ref_name(&t.event_ref).unwrap_or_default(), &t.via);
                 for f in &t.from {
                     lines.push(format!("  {} --> {} : {}", f, t.to, ev));
                 }
@@ -8110,6 +8227,172 @@ fn lifecycle_state_map(model: &Model) -> Vec<(String, String)> {
             (lc.aggregate, lines.join("\n"))
         })
         .collect()
+}
+
+// ─── crates/application/src/generated/handlers.rs (issue #23 — require+guard+append handlers) ────
+
+/// The per-aggregate SEAMS of the generated require+guard+append handlers (ADR-20260721-093027):
+/// rehydration (existence + tenant scoping), stream naming and the illegal-move rejection stay
+/// hand-written policy in `crates/application/src/commands.rs` (`pub(crate)`), referenced here by
+/// expression — error-context construction is per-aggregate policy, not mechanics. Folded into the
+/// DSL if a second consumer appears (PM-pipeline precedent, ADR-20260721-053456).
+struct LifecycleHandlerSeam {
+    aggregate: &'static str,
+    /// The domain module whose `lifecycle` re-export holds this aggregate's generated tables.
+    lifecycle: &'static str,
+    /// Rehydration expression yielding `(state, version)` (awaited with `?`).
+    require: &'static str,
+    /// Rejection expression for a move the declared machine does not contain.
+    reject: &'static str,
+    /// Stream-name expression for the append.
+    stream: &'static str,
+}
+
+const LIFECYCLE_HANDLER_SEAMS: &[LifecycleHandlerSeam] = &[
+    LifecycleHandlerSeam {
+        aggregate: "Order",
+        lifecycle: "domain::order::lifecycle",
+        require: "require_order(store, &cmd.order_id, &cmd.restaurant_id)",
+        reject: "invalid_order_status(&cmd.order_id, state.status)",
+        stream: "order_stream(&cmd.order_id)",
+    },
+    LifecycleHandlerSeam {
+        aggregate: "Rider",
+        lifecycle: "domain::rider::lifecycle",
+        require: "require_rider(store, &cmd.rider_id)",
+        reject: "reject(\"InvalidRiderStatusTransition\", json!({ \"riderId\": cmd.rider_id, \"currentStatus\": state.status, \"targetStatus\": cmd.status }))",
+        stream: "rider_stream(&cmd.rider_id)",
+    },
+    LifecycleHandlerSeam {
+        aggregate: "DeliveryJob",
+        lifecycle: "domain::delivery_job::lifecycle",
+        require: "require_delivery_job(store, &cmd.delivery_job_id)",
+        reject: "invalid_delivery_status(&cmd.delivery_job_id, state.status, canonical_predecessor(cmd.status))",
+        stream: "delivery_job_stream(&cmd.delivery_job_id)",
+    },
+];
+
+/// The commands whose WHOLE handler is mechanical require+guard+append — the single emitted event is
+/// built from the command by name and legalized by the declared lifecycle table. A command with
+/// business checks beyond the machine (`DeliveryAlreadyAssigned` arbitration, rider-identity checks,
+/// ensure-command idempotency, cross-aggregate invariants) stays hand-written in commands.rs.
+const LIFECYCLE_GENERATED_HANDLERS: &[(&str, &str)] = &[
+    ("Order", "AcceptOrder"),
+    ("Order", "StartPreparation"),
+    ("Order", "MarkOrderReady"),
+    ("Order", "MarkOrderDelivered"),
+    ("Order", "RejectOrder"),
+    ("Order", "CancelOrderByCustomer"),
+    ("Order", "CancelOrderByRestaurant"),
+    ("Rider", "ChangeRiderStatus"),
+    ("DeliveryJob", "UpdateDeliveryStatus"),
+    ("DeliveryJob", "UpdateDeliveryPartnerStatus"),
+];
+
+/// Emit `crates/application/src/generated/handlers.rs` — one require+guard+append command handler per
+/// [`LIFECYCLE_GENERATED_HANDLERS`] row (issue #23, ADR-20260721-093027): rehydrate through the
+/// aggregate's seam, build the single emitted event from the command's same-named fields (`None` for
+/// an optional field the command does not carry), consult the GENERATED lifecycle transition table,
+/// append. Generation FAILS if the actors.yaml wiring stops matching (≠1 emitted event, an event
+/// outside the declared machine, or a required event field the command cannot supply).
+fn emit_application_handlers(model: &Model) -> String {
+    let lifecycles: BTreeSet<String> = parse_lifecycles(model).into_iter().map(|l| l.aggregate).collect();
+    let mut commands: BTreeSet<String> = BTreeSet::new();
+    let mut events: BTreeSet<String> = BTreeSet::new();
+    let mut fns = String::new();
+    for (aggregate, command) in LIFECYCLE_GENERATED_HANDLERS {
+        let seam = LIFECYCLE_HANDLER_SEAMS
+            .iter()
+            .find(|s| s.aggregate == *aggregate)
+            .unwrap_or_else(|| panic!("handlers: no seam for aggregate '{}'", aggregate));
+        if !lifecycles.contains(*aggregate) {
+            panic!("handlers: aggregate '{}' declares no lifecycle", aggregate);
+        }
+        // The command's single emitted event, per the aggregate's receives wiring.
+        let receives = model
+            .defs
+            .get("actors.yaml")
+            .and_then(|a| a.get(*aggregate))
+            .and_then(|n| n.get("receives"))
+            .and_then(|r| r.as_sequence())
+            .unwrap_or_else(|| panic!("handlers: actors.yaml#/{} has no receives", aggregate));
+        let entry = receives
+            .iter()
+            .find(|e| {
+                e.get("message")
+                    .and_then(|m| m.get("$ref"))
+                    .and_then(|r| r.as_str())
+                    .map(|r| {
+                        ref_target_file(r, "actors.yaml").as_deref() == Some("commands.yaml")
+                            && ref_name(r).as_deref() == Some(command)
+                    })
+                    .unwrap_or(false)
+            })
+            .unwrap_or_else(|| panic!("handlers: actors.yaml#/{} does not receive '{}'", aggregate, command));
+        let emits: Vec<String> = ref_strings(entry.get("emits")).iter().filter_map(|r| ref_name(r)).collect();
+        let event = match emits.as_slice() {
+            [one] => one.clone(),
+            other => panic!("handlers: '{}' must emit exactly one event, got {:?}", command, other),
+        };
+        // Build the event payload from the command's same-named fields.
+        let event_node = model
+            .defs
+            .get("events.yaml")
+            .and_then(|e| e.get(event.as_str()))
+            .unwrap_or_else(|| panic!("handlers: events.yaml#/{} missing", event));
+        let required: BTreeSet<String> = event_node
+            .get("required")
+            .and_then(|r| r.as_sequence())
+            .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        let cmd_props: BTreeSet<String> = model
+            .defs
+            .get("commands.yaml")
+            .and_then(|c| c.get(*command))
+            .and_then(|n| n.get("properties"))
+            .and_then(|p| p.as_mapping())
+            .map(|m| m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        let mut fields = String::new();
+        if let Some(props) = event_node.get("properties").and_then(|p| p.as_mapping()) {
+            for (k, _) in props {
+                let prop = k.as_str().unwrap_or_default();
+                let field = snake_field(prop);
+                if cmd_props.contains(prop) {
+                    fields.push_str(&format!("        {}: cmd.{},\n", field, field));
+                } else if required.contains(prop) {
+                    panic!(
+                        "handlers: required event field {}.{} has no same-named field on command {}",
+                        event, prop, command
+                    );
+                } else {
+                    fields.push_str(&format!("        {}: None,\n", field));
+                }
+            }
+        }
+        commands.insert((*command).to_string());
+        events.insert(event.clone());
+        fns.push_str(&format!(
+            "\n/// Handle `commands.yaml#/{cmd}` → emit `events.yaml#/{evt}` — require + guard + append over\n/// the declared machine (`{lc}::transition`); an illegal move rejects through the\n/// aggregate's seam (specs/actors.yaml#/{agg}/lifecycle).\npub async fn {f}(\n    store: &dyn EventStore,\n    cmd: {cmd},\n    actor: &Actor,\n) -> Result<(), DomainError> {{\n    let (state, version) = {require}.await?;\n    let event = DomainEvent::{evt}({evt} {{\n{fields}    }});\n    if {lc}::transition(state.status, &event).is_none() {{\n        return Err({reject});\n    }}\n    Repository::new(store).save(&{stream}, version, &[event], actor).await.map(|_| ())\n}}\n",
+            cmd = command,
+            evt = event,
+            agg = aggregate,
+            lc = seam.lifecycle,
+            f = snake_type(command),
+            require = seam.require,
+            reject = seam.reject,
+            stream = seam.stream,
+            fields = fields,
+        ));
+    }
+    let cmd_list = commands.into_iter().collect::<Vec<_>>().join(", ");
+    let evt_list = events.into_iter().collect::<Vec<_>>().join(", ");
+    format!(
+        "// GENERATED by the Captain.Food codegen from specs/actors.yaml (receives wiring + `lifecycle`\n// blocks), specs/commands.yaml and specs/events.yaml (issue #23, ADR-20260721-093027) — do not edit\n// by hand. The mechanical \"require + guard + append\" command handlers: rehydrate the aggregate\n// through its hand-written seam, build the single emitted event from the command's same-named\n// fields, legalize the move against the GENERATED lifecycle transition table, append.\n// `crates/application/src/commands.rs` re-exports these, so call sites and the behaviour suite (the\n// parity gate until #24's generated harness lands) are unchanged.\n\nuse serde_json::json;\n\nuse domain::generated::commands::{{{cmds}}};\nuse domain::generated::events::{{DomainEvent, {evts}}};\nuse domain::shared::errors::DomainError;\n\nuse crate::commands::{{\n    canonical_predecessor, delivery_job_stream, invalid_delivery_status, invalid_order_status,\n    order_stream, reject, require_delivery_job, require_order, require_rider, rider_stream,\n}};\nuse crate::ports::{{Actor, EventStore}};\nuse crate::repository::Repository;\n{fns}",
+        cmds = cmd_list,
+        evts = evt_list,
+        fns = fns,
+    )
 }
 
 // ─── crates/server/src/graphql/generated/ (Stage 1a — async-graphql type layer from api.yaml) ───
@@ -11079,7 +11362,8 @@ fn main() {
         ("pm_state.rs", emit_pm_state_application(&model)),
         ("services.rs", emit_services_application(&model)),
         ("process_managers.rs", emit_pm_orchestrators(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod process_managers;\npub mod services;\n".to_string()),
+        ("handlers.rs", emit_application_handlers(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod process_managers;\npub mod services;\npub mod handlers;\n".to_string()),
     ] {
         let path = app_gen.join(name);
         if let Err(e) = fs::write(&path, content) {

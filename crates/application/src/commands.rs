@@ -72,24 +72,18 @@ use crate::queries::{
 use domain::cart::{CartState, MAX_LINE_QUANTITY};
 use domain::delivery_job::DeliveryJobState;
 use domain::generated::commands::{
-    AcceptDelivery, AcceptOrder, AddCartLine, AssignDeliveryToPartner, BindCartToCustomer,
-    CancelDelivery, CancelOrderByCustomer, CancelOrderByRestaurant, ChangeCartLineQuantity,
-    ChangeRiderStatus, CompleteDelivery, ConfirmPickup, DeclineDelivery, MarkOrderDelivered,
-    MarkOrderReady, PlaceOrder, RateOrder, RateRestaurant, RegisterRider, RejectOrder,
-    RemoveCartLine, ReportDeliveryIssue, RequestRefund, ResolveDeliveryIssue, StartPreparation,
-    TipOrder, UnassignDeliveryFromPartner, UpdateDeliveryPartnerStatus, UpdateDeliveryStatus,
-    UpdateRiderInfo,
+    AcceptDelivery, AddCartLine, AssignDeliveryToPartner, BindCartToCustomer, CancelDelivery,
+    ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, PlaceOrder, RateOrder,
+    RateRestaurant, RegisterRider, RemoveCartLine, ReportDeliveryIssue, RequestRefund,
+    ResolveDeliveryIssue, TipOrder, UnassignDeliveryFromPartner, UpdateRiderInfo,
 };
 use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
     CartBoundToCustomer, CartLineAdded, CartLineQuantityChanged, CartLineRemoved, CartStarted,
     DeliveryAcceptedByRider, DeliveryAssignedToPartner, DeliveryCancelled, DeliveryCompleted,
-    DeliveryDeclinedByRider, DeliveryIssueReported, DeliveryIssueResolved,
-    DeliveryPartnerStatusUpdated, DeliveryPickedUp, DeliveryStatusUpdated,
-    DeliveryUnassignedFromPartner, OrderAcceptedByRestaurant, OrderCancelledByCustomer,
-    OrderCancelledByRestaurant, OrderDelivered, OrderMarkedReady, OrderPreparationStarted,
-    OrderRated, OrderRejectedByRestaurant, OrderTipped, PaymentIntentCreated, RefundRequested,
-    RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered, RiderStatusChanged,
+    DeliveryDeclinedByRider, DeliveryIssueReported, DeliveryIssueResolved, DeliveryPickedUp,
+    DeliveryUnassignedFromPartner, OrderRated, OrderTipped, PaymentIntentCreated, RefundRequested,
+    RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered,
 };
 use domain::generated::scalars::{
     CartId, CartStatus, CatalogItemAvailability, DeliveryJobId, DeliveryStatus, Mode,
@@ -108,6 +102,16 @@ use crate::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
 use crate::queries::{CatalogReadRepository, OfferView};
 use crate::repository::Repository;
 
+// The mechanical "require + guard + append" lifecycle handlers are GENERATED from the specs
+// (issue #23, ADR-20260721-093027) and re-exported here so call sites and the behaviour suite are
+// unchanged; their seams (require_*/invalid_*/…_stream/canonical_predecessor) stay below as
+// pub(crate) hand-written policy.
+pub use crate::generated::handlers::{
+    accept_order, cancel_order_by_customer, cancel_order_by_restaurant, change_rider_status,
+    mark_order_delivered, mark_order_ready, reject_order, start_preparation,
+    update_delivery_partner_status, update_delivery_status,
+};
+
 /// Absorb the optimistic-concurrency clash of a CREATION command (expected_version = 0) as success:
 /// the aggregate already exists under this client-generated id, so re-running the command is a no-op.
 fn idempotent_on_existing(result: Result<i64, DomainError>) -> Result<(), DomainError> {
@@ -122,7 +126,7 @@ fn idempotent_on_existing(result: Result<i64, DomainError>) -> Result<(), Domain
 /// typed context as a JSON object (keys = the error's errors.yaml `context` fields, camelCase).
 /// [`rejection_code`] is the matching reader; the GraphQL layer maps the rejection onto
 /// `extensions.code` + the interpolated localized message (P-10).
-fn reject(code: &str, context: serde_json::Value) -> DomainError {
+pub(crate) fn reject(code: &str, context: serde_json::Value) -> DomainError {
     DomainError::rejected(code, context)
 }
 
@@ -892,14 +896,14 @@ pub async fn bind_cart_to_customer(
 // ================================================================================================
 
 /// The stream an Order aggregate lives on (matches the projection worker's `Order-` registry group).
-fn order_stream(id: &OrderId) -> String {
+pub(crate) fn order_stream(id: &OrderId) -> String {
     format!("Order-{}", id.0)
 }
 
 /// Rehydrate the Order aggregate and require existence UNDER the commanding restaurant: a missing
 /// stream — or an order belonging to another restaurant (tenant scoping) — rejects with
 /// `errors.yaml#/OrderNotFound`.
-async fn require_order(
+pub(crate) async fn require_order(
     store: &dyn EventStore,
     order_id: &OrderId,
     restaurant_id: &domain::generated::scalars::RestaurantId,
@@ -912,144 +916,8 @@ async fn require_order(
 }
 
 /// The `errors.yaml#/InvalidOrderStatus` rejection for `order_id` currently in `status`.
-fn invalid_order_status(order_id: &OrderId, status: OrderStatus) -> DomainError {
+pub(crate) fn invalid_order_status(order_id: &OrderId, status: OrderStatus) -> DomainError {
     reject("InvalidOrderStatus", json!({ "orderId": order_id, "currentStatus": status }))
-}
-
-/// Guard an Order lifecycle move with the GENERATED transition table
-/// (`domain::order::lifecycle::transition`, from `specs/actors.yaml#/Order/lifecycle`,
-/// ADR-20260720-004419): a move the declared machine does not contain rejects with
-/// `errors.yaml#/InvalidOrderStatus` (rules.yaml#/OrderLifecycleIsExplicit).
-fn require_order_transition(
-    order_id: &OrderId,
-    status: OrderStatus,
-    event: &DomainEvent,
-) -> Result<(), DomainError> {
-    match domain::order::lifecycle::transition(status, event) {
-        Some(_) => Ok(()),
-        None => Err(invalid_order_status(order_id, status)),
-    }
-}
-
-/// Handle `commands.yaml#/AcceptOrder` → emit `events.yaml#/OrderAcceptedByRestaurant`. Only a PLACED
-/// order can be accepted (rules.yaml#/OrderLifecycleStatusMachine).
-pub async fn accept_order(
-    store: &dyn EventStore,
-    cmd: AcceptOrder,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_order(store, &cmd.order_id, &cmd.restaurant_id).await?;
-    let event = DomainEvent::OrderAcceptedByRestaurant(OrderAcceptedByRestaurant {
-        order_id: cmd.order_id,
-        restaurant_id: cmd.restaurant_id,
-        estimated_ready_at: cmd.estimated_ready_at,
-    });
-    require_order_transition(&cmd.order_id, state.status, &event)?;
-    Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/StartPreparation` → emit `events.yaml#/OrderPreparationStarted`. Only an
-/// ACCEPTED order moves to PREPARING (rules.yaml#/OrderLifecycleStatusMachine).
-pub async fn start_preparation(
-    store: &dyn EventStore,
-    cmd: StartPreparation,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_order(store, &cmd.order_id, &cmd.restaurant_id).await?;
-    let event = DomainEvent::OrderPreparationStarted(OrderPreparationStarted {
-        order_id: cmd.order_id,
-        restaurant_id: cmd.restaurant_id,
-    });
-    require_order_transition(&cmd.order_id, state.status, &event)?;
-    Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/MarkOrderReady` → emit `events.yaml#/OrderMarkedReady`. Allowed from
-/// ACCEPTED or PREPARING — a restaurant may skip the explicit preparation step
-/// (rules.yaml#/OrderLifecycleStatusMachine).
-pub async fn mark_order_ready(
-    store: &dyn EventStore,
-    cmd: MarkOrderReady,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_order(store, &cmd.order_id, &cmd.restaurant_id).await?;
-    let event = DomainEvent::OrderMarkedReady(OrderMarkedReady {
-        order_id: cmd.order_id,
-        restaurant_id: cmd.restaurant_id,
-    });
-    require_order_transition(&cmd.order_id, state.status, &event)?;
-    Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/MarkOrderDelivered` → emit `events.yaml#/OrderDelivered`. Allowed from READY
-/// (hand-over/collection) per the declared machine (rules.yaml#/OrderLifecycleStatusMachine;
-/// OUT_FOR_DELIVERY is a read-side presentation status, unreachable in the write-side fold).
-pub async fn mark_order_delivered(
-    store: &dyn EventStore,
-    cmd: MarkOrderDelivered,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_order(store, &cmd.order_id, &cmd.restaurant_id).await?;
-    let event = DomainEvent::OrderDelivered(OrderDelivered {
-        order_id: cmd.order_id,
-        restaurant_id: cmd.restaurant_id,
-    });
-    require_order_transition(&cmd.order_id, state.status, &event)?;
-    Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/RejectOrder` → emit `events.yaml#/OrderRejectedByRestaurant`. Only a PLACED
-/// (not-yet-accepted) order can be rejected; the refund is driven by RefundProcess reacting to the
-/// emitted fact (rules.yaml#/OrderLifecycleStatusMachine, #/RefundOnRejectionOrCancellation).
-pub async fn reject_order(
-    store: &dyn EventStore,
-    cmd: RejectOrder,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_order(store, &cmd.order_id, &cmd.restaurant_id).await?;
-    let event = DomainEvent::OrderRejectedByRestaurant(OrderRejectedByRestaurant {
-        order_id: cmd.order_id,
-        restaurant_id: cmd.restaurant_id,
-        reason: cmd.reason,
-    });
-    require_order_transition(&cmd.order_id, state.status, &event)?;
-    Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/CancelOrderByCustomer` → emit `events.yaml#/OrderCancelledByCustomer`. Only
-/// BEFORE the restaurant accepted (status PLACED); the refund is RefundProcess's reaction
-/// (rules.yaml#/OrderLifecycleStatusMachine).
-pub async fn cancel_order_by_customer(
-    store: &dyn EventStore,
-    cmd: CancelOrderByCustomer,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_order(store, &cmd.order_id, &cmd.restaurant_id).await?;
-    let event = DomainEvent::OrderCancelledByCustomer(OrderCancelledByCustomer {
-        order_id: cmd.order_id,
-        restaurant_id: cmd.restaurant_id,
-        reason: cmd.reason,
-    });
-    require_order_transition(&cmd.order_id, state.status, &event)?;
-    Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/CancelOrderByRestaurant` → emit `events.yaml#/OrderCancelledByRestaurant`.
-/// Only an order the restaurant had already taken on (ACCEPTED/PREPARING/READY) and not yet delivered;
-/// the refund is RefundProcess's reaction (rules.yaml#/OrderLifecycleStatusMachine).
-pub async fn cancel_order_by_restaurant(
-    store: &dyn EventStore,
-    cmd: CancelOrderByRestaurant,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_order(store, &cmd.order_id, &cmd.restaurant_id).await?;
-    let event = DomainEvent::OrderCancelledByRestaurant(OrderCancelledByRestaurant {
-        order_id: cmd.order_id,
-        restaurant_id: cmd.restaurant_id,
-        reason: cmd.reason,
-    });
-    require_order_transition(&cmd.order_id, state.status, &event)?;
-    Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
 }
 
 /// Handle `commands.yaml#/RateOrder` → emit `events.yaml#/OrderRated`. Only a DELIVERED order, exactly
@@ -1169,13 +1037,13 @@ pub async fn request_refund(
 // ================================================================================================
 
 /// The stream a DeliveryJob aggregate lives on.
-fn delivery_job_stream(id: &DeliveryJobId) -> String {
+pub(crate) fn delivery_job_stream(id: &DeliveryJobId) -> String {
     format!("DeliveryJob-{}", id.0)
 }
 
 /// Rehydrate the DeliveryJob aggregate and require existence, or reject with
 /// `errors.yaml#/DeliveryJobNotFound`.
-async fn require_delivery_job(
+pub(crate) async fn require_delivery_job(
     store: &dyn EventStore,
     id: &DeliveryJobId,
 ) -> Result<(DeliveryJobState, i64), DomainError> {
@@ -1188,7 +1056,7 @@ async fn require_delivery_job(
 
 /// The `errors.yaml#/InvalidDeliveryStatus` rejection for `id` currently in `current` when the
 /// transition needs `expected`.
-fn invalid_delivery_status(
+pub(crate) fn invalid_delivery_status(
     id: &DeliveryJobId,
     current: DeliveryStatus,
     expected: DeliveryStatus,
@@ -1238,7 +1106,13 @@ pub async fn confirm_pickup(
     actor: &Actor,
 ) -> Result<(), DomainError> {
     let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
-    if state.status != DeliveryStatus::ASSIGNED {
+    let event = DomainEvent::DeliveryPickedUp(DeliveryPickedUp {
+        delivery_job_id: cmd.delivery_job_id,
+        rider_id: cmd.rider_id,
+        at: None,
+    });
+    // The declared machine allows the pickup only from ASSIGNED (actors.yaml#/DeliveryJob/lifecycle).
+    if domain::delivery_job::lifecycle::transition(state.status, &event).is_none() {
         return Err(invalid_delivery_status(
             &cmd.delivery_job_id,
             state.status,
@@ -1257,11 +1131,6 @@ pub async fn confirm_pickup(
             }),
         ));
     }
-    let event = DomainEvent::DeliveryPickedUp(DeliveryPickedUp {
-        delivery_job_id: cmd.delivery_job_id,
-        rider_id: cmd.rider_id,
-        at: None,
-    });
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }
 
@@ -1275,7 +1144,13 @@ pub async fn complete_delivery(
     actor: &Actor,
 ) -> Result<(), DomainError> {
     let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
-    if !matches!(state.status, DeliveryStatus::PICKED_UP | DeliveryStatus::OUT_FOR_DELIVERY) {
+    let event = DomainEvent::DeliveryCompleted(DeliveryCompleted {
+        delivery_job_id: cmd.delivery_job_id,
+        at: None,
+    });
+    // The declared machine allows the completion from PICKED_UP or OUT_FOR_DELIVERY
+    // (actors.yaml#/DeliveryJob/lifecycle — the hand-over shortcut).
+    if domain::delivery_job::lifecycle::transition(state.status, &event).is_none() {
         return Err(invalid_delivery_status(
             &cmd.delivery_job_id,
             state.status,
@@ -1294,10 +1169,6 @@ pub async fn complete_delivery(
             }),
         ));
     }
-    let event = DomainEvent::DeliveryCompleted(DeliveryCompleted {
-        delivery_job_id: cmd.delivery_job_id,
-        at: None,
-    });
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }
 
@@ -1311,21 +1182,22 @@ pub async fn cancel_delivery(
     actor: &Actor,
 ) -> Result<(), DomainError> {
     let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
-    match state.status {
-        DeliveryStatus::DELIVERED => {
-            return Err(invalid_delivery_status(
-                &cmd.delivery_job_id,
-                state.status,
-                DeliveryStatus::PENDING,
-            ));
-        }
-        DeliveryStatus::CANCELLED => return Ok(()),
-        _ => {}
+    if state.status == DeliveryStatus::CANCELLED {
+        return Ok(()); // ensure-command idempotency: already cancelled, nothing to append
     }
     let event = DomainEvent::DeliveryCancelled(DeliveryCancelled {
         delivery_job_id: cmd.delivery_job_id,
         reason: cmd.reason,
     });
+    // The declared machine allows the cancellation from any not-yet-delivered state, including a
+    // FAILED dispatch surfaced for manual handling (actors.yaml#/DeliveryJob/lifecycle).
+    if domain::delivery_job::lifecycle::transition(state.status, &event).is_none() {
+        return Err(invalid_delivery_status(
+            &cmd.delivery_job_id,
+            state.status,
+            DeliveryStatus::PENDING,
+        ));
+    }
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }
 
@@ -1333,26 +1205,10 @@ pub async fn cancel_delivery(
 // DeliveryJob ops — decline/issue/status/partner commands (ADR-20260719-193500 command surface).
 // ================================================================================================
 
-/// Whether `from` → `to` is a legal delivery status transition: forward along
-/// PENDING → ASSIGNED → PICKED_UP → OUT_FOR_DELIVERY → DELIVERED (with the same PICKED_UP → DELIVERED
-/// shortcut [`complete_delivery`] allows — a hand-over may skip the explicit OUT_FOR_DELIVERY step),
-/// plus CANCELLED/FAILED from any non-terminal state. DELIVERED/CANCELLED/FAILED are terminal.
-fn delivery_can_transition(from: DeliveryStatus, to: DeliveryStatus) -> bool {
-    use DeliveryStatus::*;
-    matches!(
-        (from, to),
-        (PENDING, ASSIGNED)
-            | (ASSIGNED, PICKED_UP)
-            | (PICKED_UP, OUT_FOR_DELIVERY)
-            | (PICKED_UP, DELIVERED)
-            | (OUT_FOR_DELIVERY, DELIVERED)
-    ) || (matches!(to, CANCELLED | FAILED) && !matches!(from, DELIVERED | CANCELLED | FAILED))
-}
-
 /// The status a job "needed to be in" for a transition INTO `to` — the `expectedStatus` diagnostic on
 /// an `InvalidDeliveryStatus` rejection of an invalid transition (the canonical predecessor in the
 /// lifecycle; only `currentStatus` is interpolated into the catalogued message).
-fn canonical_predecessor(to: DeliveryStatus) -> DeliveryStatus {
+pub(crate) fn canonical_predecessor(to: DeliveryStatus) -> DeliveryStatus {
     use DeliveryStatus::*;
     match to {
         PENDING | ASSIGNED | CANCELLED | FAILED => PENDING,
@@ -1455,33 +1311,6 @@ pub async fn resolve_delivery_issue(
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }
 
-/// Handle `commands.yaml#/UpdateDeliveryStatus` → emit `events.yaml#/DeliveryStatusUpdated` (the
-/// independent-rider path / admin correction). The requested status must be a legal transition from
-/// the current one per [`delivery_can_transition`]
-/// (rules.yaml#/DeliveryPickupAndCompletionByRider).
-pub async fn update_delivery_status(
-    store: &dyn EventStore,
-    cmd: UpdateDeliveryStatus,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
-    if !delivery_can_transition(state.status, cmd.status) {
-        return Err(invalid_delivery_status(
-            &cmd.delivery_job_id,
-            state.status,
-            canonical_predecessor(cmd.status),
-        ));
-    }
-    let event = DomainEvent::DeliveryStatusUpdated(DeliveryStatusUpdated {
-        delivery_job_id: cmd.delivery_job_id,
-        partner_ref: None,
-        status: cmd.status,
-        occurred_at: None, // the record time is the envelope's occurred_at; the payload field is for externally reported times
-        note: None,
-    });
-    Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
-}
-
 /// Handle `commands.yaml#/AssignDeliveryToPartner` → emit `events.yaml#/DeliveryAssignedToPartner`.
 /// Only a PENDING job; a job already taken (rider or partner) rejects with `DeliveryAlreadyAssigned`
 /// (rules.yaml#/DeliveryPartnerAssignmentLifecycle).
@@ -1522,7 +1351,13 @@ pub async fn unassign_delivery_from_partner(
     actor: &Actor,
 ) -> Result<(), DomainError> {
     let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
-    if state.status != DeliveryStatus::ASSIGNED {
+    let event = DomainEvent::DeliveryUnassignedFromPartner(DeliveryUnassignedFromPartner {
+        delivery_job_id: cmd.delivery_job_id,
+        reason: cmd.reason,
+    });
+    // The declared machine allows the unassignment only from ASSIGNED
+    // (actors.yaml#/DeliveryJob/lifecycle).
+    if domain::delivery_job::lifecycle::transition(state.status, &event).is_none() {
         return Err(invalid_delivery_status(
             &cmd.delivery_job_id,
             state.status,
@@ -1542,36 +1377,6 @@ pub async fn unassign_delivery_from_partner(
             }),
         ));
     }
-    let event = DomainEvent::DeliveryUnassignedFromPartner(DeliveryUnassignedFromPartner {
-        delivery_job_id: cmd.delivery_job_id,
-        reason: cmd.reason,
-    });
-    Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/UpdateDeliveryPartnerStatus` → emit
-/// `events.yaml#/DeliveryPartnerStatusUpdated` (the avelo37-acl relays the inbound partner report as
-/// this command so the aggregate applies it). The reported status must be a legal transition from the
-/// current one per [`delivery_can_transition`] (rules.yaml#/DeliveryPartnerAssignmentLifecycle).
-pub async fn update_delivery_partner_status(
-    store: &dyn EventStore,
-    cmd: UpdateDeliveryPartnerStatus,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
-    if !delivery_can_transition(state.status, cmd.status) {
-        return Err(invalid_delivery_status(
-            &cmd.delivery_job_id,
-            state.status,
-            canonical_predecessor(cmd.status),
-        ));
-    }
-    let event = DomainEvent::DeliveryPartnerStatusUpdated(DeliveryPartnerStatusUpdated {
-        delivery_job_id: cmd.delivery_job_id,
-        partner_ref: cmd.partner_ref,
-        status: cmd.status,
-        occurred_at: None, // set only when the partner reported the time; the envelope records ours
-    });
     Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }
 
@@ -1580,12 +1385,12 @@ pub async fn update_delivery_partner_status(
 // ================================================================================================
 
 /// The stream a Rider aggregate lives on.
-fn rider_stream(id: &RiderId) -> String {
+pub(crate) fn rider_stream(id: &RiderId) -> String {
     format!("Rider-{}", id.0)
 }
 
 /// Rehydrate the Rider aggregate and require existence, or reject with `errors.yaml#/RiderNotFound`.
-async fn require_rider(
+pub(crate) async fn require_rider(
     store: &dyn EventStore,
     id: &RiderId,
 ) -> Result<(RiderState, i64), DomainError> {
@@ -1642,32 +1447,6 @@ pub async fn update_rider_info(
         rider_id: cmd.rider_id,
         display_name: cmd.display_name,
         phone: cmd.phone,
-    });
-    Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/ChangeRiderStatus` → emit `events.yaml#/RiderStatusChanged`. The move must
-/// be legal per the availability machine (`domain::rider::can_transition`) or it rejects with
-/// `errors.yaml#/InvalidRiderStatusTransition` (rules.yaml#/RiderLifecycle).
-pub async fn change_rider_status(
-    store: &dyn EventStore,
-    cmd: ChangeRiderStatus,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_rider(store, &cmd.rider_id).await?;
-    if !domain::rider::can_transition(state.status, cmd.status) {
-        return Err(reject(
-            "InvalidRiderStatusTransition",
-            json!({
-                "riderId": cmd.rider_id,
-                "currentStatus": state.status,
-                "targetStatus": cmd.status,
-            }),
-        ));
-    }
-    let event = DomainEvent::RiderStatusChanged(RiderStatusChanged {
-        rider_id: cmd.rider_id,
-        status: cmd.status,
     });
     Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
 }

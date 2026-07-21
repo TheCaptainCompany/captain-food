@@ -13,6 +13,7 @@
 
 use crate::generated::events::DomainEvent;
 use crate::generated::entities::Money;
+pub use crate::generated::lifecycles::payment as lifecycle;
 use crate::generated::scalars::{OrderId, PaymentIntentId, PaymentStatus, RefundId, RestaurantId};
 
 /// The stream-category prefix; the stream is `"Payment-<paymentIntentId>"`.
@@ -62,31 +63,36 @@ pub fn fold(events: &[DomainEvent]) -> Option<PaymentState> {
 
 /// Apply one event — a pure transition, total over the whole event union. Duplicate facts are
 /// harmless: every transition is an idempotent assignment and a re-delivered birth never resets an
-/// existing state.
+/// existing state. The status moves ONLY through the generated lifecycle table
+/// (`specs/actors.yaml#/Payment/lifecycle`, ADR-20260720-004419): [`lifecycle::initial`] births it
+/// PENDING, [`lifecycle::target`] applies the recorded Stripe facts; the hand-written part is
+/// payload extraction and the refund fields.
 fn apply(state: Option<PaymentState>, event: &DomainEvent) -> Option<PaymentState> {
-    if let DomainEvent::PaymentIntentCreated(e) = event {
+    if let Some(status) = lifecycle::initial(event) {
         if state.is_some() {
             return state; // duplicate birth — never reset an already-folded payment
         }
-        return Some(PaymentState {
-            payment_intent_id: e.payment_intent_id.clone(),
-            order_id: e.checkout.order_id,
-            restaurant_id: e.restaurant_id,
-            amount: e.amount.clone(),
-            status: PaymentStatus::PENDING,
-            refund_opened: false,
-            refund_decision: None,
-            refund_id: None,
-        });
+        if let DomainEvent::PaymentIntentCreated(e) = event {
+            return Some(PaymentState {
+                payment_intent_id: e.payment_intent_id.clone(),
+                order_id: e.checkout.order_id,
+                restaurant_id: e.restaurant_id,
+                amount: e.amount.clone(),
+                status,
+                refund_opened: false,
+                refund_decision: None,
+                refund_id: None,
+            });
+        }
     }
     let mut s = state?;
+    // The recorded fact wins at fold time: `target` maps a lifecycle event to its state regardless
+    // of the current one (everything on this inbox is a fact to record, never to reject).
+    if let Some(next) = lifecycle::target(event) {
+        s.status = next;
+    }
     match event {
-        DomainEvent::PaymentCaptured(_) => s.status = PaymentStatus::CAPTURED,
-        DomainEvent::PaymentFailed(_) => s.status = PaymentStatus::FAILED,
-        DomainEvent::PaymentRefunded(e) => {
-            s.status = PaymentStatus::REFUNDED;
-            s.refund_id = Some(e.refund_id.clone());
-        }
+        DomainEvent::PaymentRefunded(e) => s.refund_id = Some(e.refund_id.clone()),
         DomainEvent::RefundOpened(_) => s.refund_opened = true,
         DomainEvent::RefundApproved(_) => s.refund_decision = Some(RefundDecision::Approved),
         DomainEvent::RefundDenied(_) => s.refund_decision = Some(RefundDecision::Denied),
