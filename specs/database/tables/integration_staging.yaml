@@ -1,4 +1,4 @@
-version: 3
+version: 4
 description: >
   Raw-integration STAGING tables (ADR-0045, generalized by ADR-20260720-015400) — a third table
   category alongside the event store (eventstore.yaml), the event-fed projections
@@ -53,6 +53,29 @@ external_stripe_events:
     payload:         { type: jsonb }                          # raw verified Stripe event, verbatim
     received_at:     { type: timestamptz, index: true }
     processed_at:    { type: timestamptz, nullable: true, index: true }   # NULL ⇒ not yet translated into inbound_events
+
+external_avelo37_events:
+  staging: true
+  description: >
+    Raw VERIFIED Avelo37 delivery-partner webhook mirror (ADR-20260720-015400 follow-up, issue #28).
+    The webhook endpoint UPSERTs one row per partner event id AFTER raw-body signature verification
+    (Stripe-style timestamped HMAC, fail-closed), then the avelo37-acl translates it into an adapted
+    business event (DeliveryAcceptedByPartner / DeliveryRejectedByPartner / DeliveryStatusUpdated)
+    staged in journals.yaml#/inbound_events. Redelivery dedupes on the pk and ACKs immediately;
+    processed_at is the translation high-water mark, enabling replay/backfill without asking the
+    partner to resend.
+  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
+    max_age: '90 days'
+    applies_to: >
+      Processed rows only (processed_at set), aged from processed_at — the replay/backfill horizon,
+      and the PII cap on verbatim partner payloads (courier names/phones). Unprocessed rows are
+      never swept.
+  columns:
+    avelo37_event_id: { type: text, pk: true }                # partner event id — the idempotent external key
+    event_type:       { type: text, index: true }             # partner type, e.g. 'delivery.accepted'
+    payload:          { type: jsonb }                         # raw verified partner event, verbatim
+    received_at:      { type: timestamptz, index: true }
+    processed_at:     { type: timestamptz, nullable: true, index: true }   # NULL ⇒ not yet translated into inbound_events
 
 external_hubrise_callbacks:
   staging: true

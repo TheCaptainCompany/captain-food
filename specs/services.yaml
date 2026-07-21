@@ -1,4 +1,4 @@
-version: 1
+version: 2
 description: >
   Captain.Food SERVICE catalog (ADR-20260719-214500) — the abstract capabilities the DOMAIN calls,
   deliberately SEPARATE from api.yaml: api.yaml is the PRODUCT API (GraphQL, role-filtered, for UIs
@@ -81,7 +81,12 @@ delivery:
   expose: false
   implementations:
     avelo37:
-      description: "Avelo37 partner ACL — no-op stand-in until the adapter lands (jobs stay open to independent riders)."
+      description: >
+        Avelo37 partner ACL (crates/adapters/avelo37, issue #28): outbound offer_job posts the job to
+        the partner API (gated on AVELO37_API_KEY — unconfigured deployments keep the logged no-op
+        stand-in, so jobs stay open to independent riders); the partner's answers come back through
+        its verified webhook and the two-layer inbox (external_avelo37_events → inbound_events,
+        ADR-20260720-015400).
       routes:
         offer_job: 'POST /adapters/avelo37/deliveries'
 

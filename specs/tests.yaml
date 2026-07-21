@@ -1,4 +1,4 @@
-version: 1
+version: 2
 description: >
   Captain.Food BEHAVIOUR tests (Given / When / Then) over the actor model. Reusable EVENT instances
   (with their sample data) are CENTRALIZED in `fixtures` and referenced by `$ref: '#/fixtures/<name>'`
@@ -364,6 +364,9 @@ fixtures:
   deliveryStatusUpdatedDelivered:
     type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
     data: { deliveryJobId: "deliv-1", status: "DELIVERED" }
+  deliveryStatusUpdatedPickedUp:
+    type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
+    data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", status: "PICKED_UP" }
   deliveryAssignedToPartner:
     type: { $ref: 'events.yaml#/DeliveryAssignedToPartner' }
     data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77" }
@@ -2375,6 +2378,19 @@ tests:
       data: { deliveryJobId: "deliv-1", orderId: "order-1", restaurantId: "resto-1", attempts: 3, lastReason: "No courier available" }
     then:
       - { $ref: '#/fixtures/deliveryDispatchFailed' }
+
+  TestDeliveryJobRecordsPartnerStatusReport:
+    name: "The DeliveryJob records the inbound partner status report as a valid transition (avelo37 inbox, issue #28)"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAssignmentLifecycle' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByPartner' }
+    when:
+      type: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
+      data: { deliveryJobId: "deliv-1", partnerRef: "avelo-77", status: "PICKED_UP" }
+    then:
+      - { $ref: '#/fixtures/deliveryStatusUpdatedPickedUp' }
 
   TestDeliveryStatusUpdatedByCommand:
     name: "The delivery status is driven through valid transitions to DELIVERED"

@@ -7,6 +7,7 @@
 --   inbound_events             DELIVERED rows                             30 days from delivered_at
 --   external_stripe_events     processed rows (processed_at set)          90 days from processed_at
 --   external_hubrise_callbacks processed rows (processed_at set)          90 days from processed_at
+--   external_avelo37_events    processed rows (processed_at set)          90 days from processed_at
 --
 -- NEVER swept, at any age: domain_events / domain_stream (the forever log — deliberately not
 -- referenced here; its only trimming is the opt-in per-stream $maxAge/$maxCount machinery),
@@ -49,5 +50,11 @@ BEGIN
      AND processed_at < now() - INTERVAL '90 days';
   GET DIAGNOSTICS n = ROW_COUNT;
   swept_table := 'external_hubrise_callbacks'; deleted := n; RETURN NEXT;
+
+  DELETE FROM external_avelo37_events
+   WHERE processed_at IS NOT NULL
+     AND processed_at < now() - INTERVAL '90 days';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  swept_table := 'external_avelo37_events'; deleted := n; RETURN NEXT;
 END;
 $$;
