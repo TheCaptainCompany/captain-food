@@ -61,6 +61,10 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:sha-${{ github.event.workflow_run.head_sha }}
             ${{ env.IMAGE }}:latest
+          # Bake the precise build identity into the image (env + OCI labels) so the running app can report
+          # it at /health — the git SHA is the immutable, unambiguous version for failure diagnostics.
+          build-args: |
+            CAPTAIN_BUILD_VERSION=${{ github.event.workflow_run.head_sha }}
           # Persist the cargo-chef dependency layer across runs — only changed app crates recompile,
           # so warm builds are minutes, not the full cold compile.
           cache-from: type=gha

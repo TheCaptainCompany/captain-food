@@ -7,6 +7,7 @@
 //! - `/ping` → `pong` — liveness (process is up; touches nothing). Used by uptime pingers / keep-warm.
 //! - `/health` — readiness gate (ADR-0043): `200` only when the DB is reachable AND its schema version is
 //!   `>= REQUIRED_SCHEMA_VERSION`; else `503`. Migrations are applied out-of-band by **sqlx-cli in CI**.
+//!   Every response carries `version` (the build's git SHA, ADR-20260721-175411) for failure diagnostics.
 //! - `/projector` — projection-worker readiness (running / checkpoint / head / lag / lastTickAt).
 //! - `/saga` — process-manager (saga) runner readiness, same shape as `/projector`.
 //! - `/{role}/graphql` (+ `/{role}/voyager`) — the GraphQL BFF (ADR-0006), see `graphql`.
@@ -89,6 +90,20 @@ pub fn wire() -> HealthDto {
 /// `20260721150000` = the Uber Direct webhook mirror (external_uber_direct_events, #57): the adapter's
 /// inbound ingestor stages verified facts into it, so the app must not serve without the table.
 pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721150000;
+
+/// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
+/// (the exact git commit SHA the image was built from) into the deployed image — see
+/// `.github/workflows/build-image.yml` + the `Dockerfile` runtime stage — and `/health` reports it in
+/// EVERY state, including `degraded`/`down`: when the app is failing is precisely when you need to know
+/// which build is running. Falls back to `dev-<crate version>` for local / uncontainerized runs where the
+/// env var is unset. Read once and cached (the value never changes for a process).
+pub fn build_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        std::env::var("CAPTAIN_BUILD_VERSION")
+            .unwrap_or_else(|_| format!("dev-{}", env!("CARGO_PKG_VERSION")))
+    })
+}
 
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
@@ -632,22 +647,23 @@ async fn probe(pool: &PgPool) -> Snapshot {
 /// at/after the required version; otherwise `503` with a machine-readable reason.
 async fn health(State(app): State<AppState>) -> impl IntoResponse {
     let snap = app.snap.lock().expect("health snapshot mutex").clone();
+    // `version` is included in EVERY branch (esp. degraded/down) so a failing instance always names its build.
     match snap.state {
         db_state::HEALTHY => (
             StatusCode::OK,
-            Json(json!({ "status": "ok", "db": "up", "schemaVersion": snap.applied_version, "requiredSchemaVersion": REQUIRED_SCHEMA_VERSION })),
+            Json(json!({ "status": "ok", "db": "up", "version": build_version(), "schemaVersion": snap.applied_version, "requiredSchemaVersion": REQUIRED_SCHEMA_VERSION })),
         ),
         db_state::SCHEMA_BEHIND => (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "status": "degraded", "db": "up", "reason": "schema_behind", "schemaVersion": snap.applied_version, "requiredSchemaVersion": REQUIRED_SCHEMA_VERSION })),
+            Json(json!({ "status": "degraded", "db": "up", "reason": "schema_behind", "version": build_version(), "schemaVersion": snap.applied_version, "requiredSchemaVersion": REQUIRED_SCHEMA_VERSION })),
         ),
         db_state::NOT_CONFIGURED => (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "status": "degraded", "db": "not_configured" })),
+            Json(json!({ "status": "degraded", "db": "not_configured", "version": build_version() })),
         ),
         _ => (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "status": "degraded", "db": "down" })),
+            Json(json!({ "status": "degraded", "db": "down", "version": build_version() })),
         ),
     }
 }

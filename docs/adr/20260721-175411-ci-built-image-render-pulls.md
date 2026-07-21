@@ -46,6 +46,15 @@ The ordering property from ADR-0043 is preserved unchanged: db-migrate and build
 same green `ci` run; if a deploy races ahead of its migration, the app's `/health` schema-version gate
 holds it at 503 until the migration lands.
 
+**Precise build identity (diagnostics).** The commit SHA is the version. It flows end-to-end: the workflow
+tags the image `sha-<commit>` (the immutable artifact each deploy pins), passes the same SHA as the
+`CAPTAIN_BUILD_VERSION` Docker build-arg, and the `Dockerfile` bakes it into the runtime image as an env
+var + OCI labels (`org.opencontainers.image.revision`). The server reads it and reports it as `version` in
+**every** `/health` response — including `degraded`/`down` — so a failing instance always names exactly
+which build is running (previously `/health` reported only the DB schema version, not the app build). The
+build-arg is declared only in the Dockerfile's final stage, so a new SHA changes only trailing metadata
+layers and never invalidates the cached cargo-chef build.
+
 ## Alternatives considered
 
 - **Raise Render's build-pipeline spend limit.** Simplest, but pays per-minute to recompile Rust on

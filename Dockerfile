@@ -23,5 +23,13 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/server /usr/local/bin/server
+# Precise build identity for diagnostics (ADR-20260721-175411): CI passes the exact git commit SHA. The
+# ARG is declared ONLY in this final stage (after the COPY) so a new SHA changes just these trailing
+# metadata layers and never invalidates the cached cargo-chef builder layers. The server reads
+# $CAPTAIN_BUILD_VERSION and reports it at /health; the OCI labels make `docker inspect` show it too.
+ARG CAPTAIN_BUILD_VERSION=dev
+ENV CAPTAIN_BUILD_VERSION=$CAPTAIN_BUILD_VERSION
+LABEL org.opencontainers.image.revision=$CAPTAIN_BUILD_VERSION \
+      org.opencontainers.image.source=https://github.com/Captain-Food/captain-food
 # $PORT is injected by Render; the server binds 0.0.0.0:$PORT.
 CMD ["server"]
