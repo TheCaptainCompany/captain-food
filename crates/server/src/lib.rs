@@ -295,8 +295,11 @@ pub fn router() -> Router {
                     Some(Arc::new(hubrise_adapter::PgRawHubRiseCallbacks::new(pool.clone())));
                 match hubrise_adapter::api::HubRiseApiClient::from_env() {
                     Ok(api) => {
+                        // Enricher sends journal on the WORKER channel (ADR-20260720-015300, #15):
+                        // callback redeliveries dedupe on command_journal instead of double-applying.
                         hubrise_state.enricher = Some(Arc::new(hubrise_adapter::HubRiseEnricher::new(
                             Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
+                            Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
                             api,
                         )));
                     }

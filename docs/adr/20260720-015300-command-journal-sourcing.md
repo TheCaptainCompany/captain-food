@@ -76,4 +76,7 @@ command sourcing for inbound write intent, complementing (not replacing) the dom
 
 ### Follow-up actions
 - Retention policy for `command_journal` (usefulness window ≠ event store's forever).
-- Route the HubRise enricher's command sends through the journaling dispatch (`channel: WORKER`).
+- ~~Route the HubRise enricher's command sends through the journaling dispatch (`channel: WORKER`).~~
+  Done (#15): the HubRise enricher AND the SIRENE sync worker dispatch via
+  `application::dispatch::dispatch_journaled`, with deterministic UUIDv5 `message_id`s for
+  idempotent redelivery.
