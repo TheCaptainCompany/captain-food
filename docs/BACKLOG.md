@@ -69,7 +69,7 @@ isn't enough.
 
 ## Claim protocol (multi-session safety) — claim → draft PR → supervised auto-merge
 
-(ADR-20260720-233000, amended by ADR-20260721-042018.)
+(ADR-20260720-233000, amended by ADR-20260721-042018 and ADR-20260721-044613.)
 
 1. **Claim = label + comment + branch + draft PR, immediately** (before any implementation work):
    - add the **`status/in-progress`** label AND post a claim comment naming the **`NN-slug`**
@@ -78,16 +78,16 @@ isn't enough.
      `NN-slug → main` right away** — body starting with **`Closes #NN`** plus the intended
      approach. From minute one the Development sidebar shows the branch + PR, the board flips to
      In progress (native workflow), and the stale-claim reaper sees linked-PR activity.
-     Draft status is the interlock: GitHub refuses auto-merge on a draft, so the early PR can
-     never merge half-done work.
+     Draft status is the interlock: GitHub refuses to merge a draft, so the early PR can never
+     merge half-done work. **Do NOT enable auto-merge here** — see the rule below.
 2. **Never work an issue that carries `status/in-progress`** — pick the next unclaimed rank.
 3. **Work happens on the PR**: push commits to `NN-slug`; the `ci` workflow gates every push.
 4. **Completion = ready + auto-merge + supervision** (never end at "pushed, CI pending"):
-   local gates green (`make rust`), STATUS.md/ADR updated in the same change, then mark the PR
-   **ready for review**, **enable auto-merge** (repo default merge method), and **supervise until
-   MERGED** — watch the checks, fix and push on any failure. The merge auto-closes the issue
-   (`Closes #NN`), which ends the claim. Checks can't be made green / scope exploded? Comment the
-   diagnosis on the PR — don't go silent.
+   local gates green (`make rust`), STATUS.md/ADR updated in the same change, then **mark the PR
+   ready for review and enable auto-merge together, as one indivisible step** (repo default merge
+   method) — never one without the other — and **supervise until MERGED**: watch the checks, fix
+   and push on any failure. The merge auto-closes the issue (`Closes #NN`), which ends the claim.
+   Checks can't be made green / scope exploded? Comment the diagnosis on the PR — don't go silent.
 5. Merge (or close) ends the claim naturally. Abandoning? Remove the label and close the draft PR.
 6. **Board mirror (native Project workflows — no label trigger exists)**: enable
    "Pull request linked to issue → Status: In progress", "Pull request merged → Done" and
@@ -102,6 +102,12 @@ a "fake empty PR" from outside just sits open. The load-bearing config is the **
 it MUST require the **`codegen`** status check (build + tests + validator + drift) — without a
 required check, an armed auto-merge fires immediately. Residual (deliberate) trade: any
 write-access session lands unreviewed code once CI is green — the executable gates are the review.
+
+**Never arm auto-merge early** (ADR-20260721-044613): a claim-time draft PR is close to a no-op
+diff, so its CI passes trivially — draft status blocks the *merge* regardless, but an auto-merge
+armed at claim time would stay armed for the whole task and fire the instant the PR leaves draft,
+even if that happens before the work is actually done. Auto-merge is armed **exactly once**, in
+the same action as marking the PR ready — never earlier, never separately.
 
 ## Stale-claim reaper
 

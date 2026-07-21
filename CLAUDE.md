@@ -124,13 +124,15 @@ mutation/query is reached by a story step, and every test↔rule link holds both
   (value-first, ADR-20260720-213024): foundations/cross-functional/non-functional first, then features
   in value-stream order.
 - **Issue workflow — claim ⇒ draft PR immediately; finish ⇒ supervised auto-merge**
-  (ADR-20260720-233000 + ADR-20260721-042018, method in [docs/BACKLOG.md](docs/BACKLOG.md)): when
-  asked to work an issue, FIRST claim it (`status/in-progress` label + claim comment naming the
-  `NN-slug` branch), create the `NN-slug` branch from `main`, and open a **draft PR** whose body
-  starts with `Closes #NN` — branch, PR and issue are linked before any code is written. When the
-  work is done and local gates are green (`make rust`), mark the PR **ready for review**, **enable
-  auto-merge**, and **supervise the checks until the PR is MERGED** (fix + push on failure; never
-  end at "pushed, CI pending"). The merge closes the issue and ends the claim.
+  (ADR-20260720-233000 + ADR-20260721-042018 + ADR-20260721-044613, method in
+  [docs/BACKLOG.md](docs/BACKLOG.md)): when asked to work an issue, FIRST claim it
+  (`status/in-progress` label + claim comment naming the `NN-slug` branch), create the `NN-slug`
+  branch from `main`, and open a **draft PR** whose body starts with `Closes #NN` — branch, PR and
+  issue are linked before any code is written. **Never enable auto-merge at this point** — a
+  claim-time PR is a near-empty diff and would pass CI trivially. When the work is done and local
+  gates are green (`make rust`), mark the PR **ready for review** and **enable auto-merge**
+  **together, as one indivisible step**, and **supervise the checks until the PR is MERGED** (fix +
+  push on failure; never end at "pushed, CI pending"). The merge closes the issue and ends the claim.
 - Autonomous loops/routines run under the **weekly time budget** (`make budgeted-loop` or the routine
   guard) — Claude Code has no native cap; see [docs/claude/loops.md](docs/claude/loops.md) / ADR-0014.
 
