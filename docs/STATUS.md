@@ -14,7 +14,24 @@
 > `command_duplicates_total{channel}`, `command_sync_conflicts_total{command_type}`,
 > `command_completion_ms{status}` (REJECTED/FAILED split — #19's decision data). Latency budget
 > binds the sync acceptance path only. Runtime emission stays contract-only until the OTel layer
-> exists; `{channel}` covers WORKER once #15 lands. Validate 0 errors.
+> exists; #15 landed in parallel, so `{channel}` already sees all channels. Validate 0 errors.
+
+> ✅ **2026-07-21 — #15: the WORKER channel journals (ADR-20260720-015300 follow-up).** The command
+> journal invariant — ALL command submissions converge on `command_journal`, whatever the channel —
+> is now true: the HubRise enricher (`ImportCatalog` + per-SKU `UpdateOfferStock`) and the SIRENE
+> sync worker (`RegisterRestaurant` / `MarkRestaurantClosed`) no longer call handlers directly but go
+> through the new reusable worker-side journaling dispatch `application::dispatch::dispatch_journaled`
+> (`channel: WORKER`, journal-before-handle, same REJECTED/FAILED discrimination as the generated
+> GraphQL dispatch; a FAILED duplicate is re-executed under the same id — for a worker, redelivery IS
+> the retry). Deterministic idempotency keys: HubRise `message_id` = UUIDv5(callback id, command
+> type[, offer id]), `cause_id` = UUIDv5(callback id) → `external_hubrise_callbacks →
+> command_journal → domain_events` is fully traceable, and a webhook redelivery dedupes instead of
+> double-applying; SIRENE `message_id` = UUIDv5(command type, SIRET, staged `last_seen_at`),
+> `cause_id` = UUIDv5(`row:<SIRET>`) — a re-drained staged version dedupes, an ingestion refresh
+> journals anew. Worker rejections finally leave a durable REJECTED trace. No spec change; unit tests
+> (dispatch + enricher dedup) + Pg-gated worker tests extended with journal/causality assertions;
+> workspace tests green, validate 0 errors. Unblocks #16 (`commands_accepted_total{channel}` now sees
+> all channels).
 
 > ✅ **2026-07-21 — #18: retention policy for write-path journals & adapter mirrors
 > (ADR-20260721-025159).** The unbounded-growth follow-ups of ADR-20260720-015300/-015400 are

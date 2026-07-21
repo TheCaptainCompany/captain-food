@@ -17,11 +17,30 @@ fn db_lock() -> &'static tokio::sync::Mutex<()> {
 
 /// Fresh copies of the tables the slice touches: the staging table (mirrors
 /// migrations/20260718100000) + the write path's `domain_events` + the `restaurant` projection table
-/// backing register_restaurant's SlugAlreadyTaken check (empty is fine — the worker does not project).
+/// backing register_restaurant's SlugAlreadyTaken check (empty is fine — the worker does not project)
+/// + `command_journal` (mirrors migrations/20260720030000), which every worker send writes on the
+/// WORKER channel since #15.
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
         r#"
-        DROP TABLE IF EXISTS external_sirene_restaurants, domain_events, restaurant CASCADE;
+        DROP TABLE IF EXISTS external_sirene_restaurants, domain_events, restaurant, command_journal CASCADE;
+        CREATE TABLE command_journal (
+          message_id UUID PRIMARY KEY,
+          correlation_id UUID NOT NULL,
+          cause_id UUID NULL,
+          session_id UUID NULL,
+          trace_id TEXT NULL,
+          user_id UUID NULL,
+          user_type INTEGER NOT NULL,
+          channel INTEGER NOT NULL,
+          command_type TEXT NOT NULL,
+          payload JSONB NOT NULL,
+          payload_hash TEXT NOT NULL,
+          status INTEGER NOT NULL,
+          error JSONB NULL,
+          received_at TIMESTAMPTZ NOT NULL,
+          completed_at TIMESTAMPTZ NULL
+        );
         CREATE TABLE external_sirene_restaurants (
           siret TEXT PRIMARY KEY,
           payload JSONB NOT NULL,
@@ -161,6 +180,22 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     assert_eq!(payload["ref"], serde_json::json!("85242109900021"));
     assert_eq!(payload["listingStatus"], serde_json::json!("NON_PARTNER"));
 
+    // The send converged on command_journal (channel WORKER=1, status SUCCEEDED=1, #15), and the
+    // appended event's cause_id is the journal row's message_id — the full causal chain holds.
+    let (message_id, channel, status): (uuid::Uuid, i32, i32) = sqlx::query_as(
+        "SELECT message_id, channel, status FROM command_journal WHERE command_type = 'RegisterRestaurant'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("one RegisterRestaurant journal row");
+    assert_eq!((channel, status), (1, 1));
+    let (event_cause,): (Option<uuid::Uuid>,) =
+        sqlx::query_as("SELECT cause_id FROM domain_events WHERE event_type = 'RestaurantRegistered'")
+            .fetch_one(&pool)
+            .await
+            .expect("registered event cause");
+    assert_eq!(event_cause, Some(message_id));
+
     let pending: bool = sqlx::query_scalar(
         "SELECT processed_at IS NULL OR processed_at < last_seen_at \
          FROM external_sirene_restaurants WHERE siret = '85242109900021'",
@@ -191,6 +226,15 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
         .await
         .expect("count events after replay");
     assert_eq!(events, 1);
+    // The refreshed staged version (bumped last_seen_at) journals as a NEW send — the aggregate
+    // no-op is still a SUCCEEDED submission, visible per delivery.
+    let register_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM command_journal WHERE command_type = 'RegisterRestaurant'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count register journal rows");
+    assert_eq!(register_rows, 2);
 
     // 4) Deletion reconciliation (ADR-0045): an explicit etat=F refresh closes the NON_PARTNER
     //    prospect via the ordinary MarkRestaurantClosed handler…
@@ -217,6 +261,24 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
         .await
         .expect("final event count");
     assert_eq!(events, 2, "register + one close, no matter how often the signal repeats");
+    // The repeated signal never reached the dispatch (the aggregate already folds INACTIVE), so the
+    // journal holds exactly ONE MarkRestaurantClosed submission — journaled, WORKER, SUCCEEDED.
+    let (close_rows, close_channel_status): (i64, i64) = (
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM command_journal WHERE command_type = 'MarkRestaurantClosed'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count close journal rows"),
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM command_journal \
+             WHERE command_type = 'MarkRestaurantClosed' AND channel = 1 AND status = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count close journal rows by channel/status"),
+    );
+    assert_eq!((close_rows, close_channel_status), (1, 1));
 }
 
 /// Seed the `restaurant` projection the way production looks for pre-derivation listings: a row
@@ -315,6 +377,17 @@ async fn worker_marks_a_deterministically_rejected_row_processed_instead_of_retr
         .await
         .expect("count events");
     assert_eq!(events, 0);
+
+    // Since #15 the rejection leaves a durable trace: a REJECTED (=2) WORKER-channel journal row
+    // carrying the errors.yaml code — support can finally answer "what happened to this row".
+    let (status, error): (i32, serde_json::Value) = sqlx::query_as(
+        "SELECT status, error FROM command_journal WHERE command_type = 'RegisterRestaurant'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("rejected journal row");
+    assert_eq!(status, 2);
+    assert_eq!(error["code"], serde_json::json!("SlugAlreadyTaken"));
 
     // The row is checkpointed: the next pass has nothing to do — the churn is gone.
     let replay = worker.run_once().await.expect("no-op drain");

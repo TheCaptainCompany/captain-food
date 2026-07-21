@@ -26,26 +26,38 @@
 //! only issued while the aggregate folds to a non-INACTIVE status (an already-closed prospect is a
 //! no-op). A SIRET that REAPPEARS active after a closure re-pends its row; the register replay is
 //! absorbed and the restaurant stays INACTIVE — reactivation is deliberately manual (logged).
+//!
+//! **Journaled sends** (ADR-20260720-015300, #15): every command this worker issues goes through the
+//! WORKER-channel journaling dispatch ([`application::dispatch::dispatch_journaled`]) — `message_id`
+//! = UUIDv5 of (command type, SIRET, the staged row's `last_seen_at`), so re-draining the SAME staged
+//! version dedupes on `command_journal` while an ingestion refresh (which bumps `last_seen_at`)
+//! journals as a new send; `cause_id` = UUIDv5(`row:<SIRET>`) — the staging-mirror row's identity —
+//! making `external_sirene_restaurants → command_journal → domain_events` fully traceable.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use application::commands::{mark_restaurant_closed, register_restaurant};
+use application::dispatch::{dispatch_journaled, JournaledOutcome};
+use application::journal::{payload_hash, CommandJournalEntry};
 use application::ports::Actor;
 use application::repository::Repository;
 use domain::restaurant::RestaurantState;
 use chrono::{DateTime, Utc};
 use domain::generated::commands::MarkRestaurantClosed;
-use domain::generated::scalars::{RestaurantListingStatus, RestaurantStatus};
+use domain::generated::scalars::{
+    CommandChannel, CommandJournalStatus, RestaurantListingStatus, RestaurantStatus,
+};
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 
 use crate::integrations::sirene::{
-    etablissement_to_command, restaurant_id_for_siret, sirene_system_user_id, Etablissement,
+    etablissement_to_command, restaurant_id_for_siret, sirene_system_user_id, sirene_uuid,
+    Etablissement,
 };
 use crate::persistence::db_err;
-use crate::{PgEventStore, PgRestaurantRepository};
+use crate::{PgCommandJournal, PgEventStore, PgRestaurantRepository};
 
 /// Safety-net poll interval. The PRIMARY trigger is the ingestion's ping on
 /// `POST /internal/sirene/drain`; the loop only catches missed pings, so it can be slow.
@@ -61,6 +73,49 @@ const FRESH_INGESTION_DAYS: i64 = 10;
 /// `UserType::EXTERNAL` ordinal for the event envelope (enums stored as declaration-order ints,
 /// ADR-0037/0041) — the sync writes as the fixed external system principal.
 const EXTERNAL_USER_TYPE: i32 = 6;
+
+/// The WORKER-channel journal entry for one command a staged row caused (#15). `message_id` is
+/// deterministic over (command type, SIRET, the row's `last_seen_at` as READ) — a re-drain of the
+/// same staged version replays the same id and dedupes; a refreshed row (bumped `last_seen_at`) is a
+/// new send. `cause_id` names the mirror row, closing the staging → journal → events chain.
+fn journal_entry(
+    command_type: &str,
+    siret: &str,
+    last_seen_at: DateTime<Utc>,
+    correlation_id: uuid::Uuid,
+    payload: serde_json::Value,
+) -> CommandJournalEntry {
+    let seed = format!("command:{command_type}:{siret}:{}", last_seen_at.to_rfc3339());
+    CommandJournalEntry {
+        message_id: sirene_uuid(&seed),
+        correlation_id,
+        cause_id: Some(sirene_uuid(&format!("row:{siret}"))),
+        session_id: None,
+        trace_id: None,
+        user_id: Some(sirene_system_user_id()),
+        user_type: EXTERNAL_USER_TYPE,
+        channel: CommandChannel::WORKER,
+        command_type: command_type.to_string(),
+        payload_hash: payload_hash(&payload),
+        payload,
+    }
+}
+
+/// Envelope → `Actor` (ADR-0041): events appended by this journaled send carry
+/// `cause_id = message_id`, exactly like the GraphQL dispatch.
+fn send_actor(entry: &CommandJournalEntry) -> Actor {
+    Actor {
+        user_id: sirene_system_user_id(),
+        user_type: EXTERNAL_USER_TYPE,
+        correlation_id: entry.correlation_id,
+        cause_id: Some(entry.message_id),
+    }
+}
+
+fn serialize_command<T: serde::Serialize>(command_type: &str, cmd: &T) -> Result<serde_json::Value, DomainError> {
+    serde_json::to_value(cmd)
+        .map_err(|e| DomainError::Repository(format!("serialize {command_type}: {e}")))
+}
 
 /// What one drain pass did — logged by the loop and by the ping-triggered run.
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -129,14 +184,11 @@ impl SireneSyncWorker {
         // Backs register_restaurant's SlugAlreadyTaken check; a re-synced SIRET matches its own row
         // (same deterministic id) and stays an idempotent no-op.
         let restaurants = PgRestaurantRepository::new(self.pool.clone());
-        // Fixed system principal (ADR-0041); fresh correlation id per pass so all events of one drain
-        // are traceable together.
-        let actor = Actor {
-            user_id: sirene_system_user_id(),
-            user_type: EXTERNAL_USER_TYPE,
-            correlation_id: uuid::Uuid::new_v4(),
-            cause_id: None,
-        };
+        // Every command send of this pass converges on command_journal (channel WORKER, #15).
+        let journal = PgCommandJournal::new(self.pool.clone());
+        // Fresh correlation id per pass so all journal rows + events of one drain are traceable
+        // together; each send derives its own message_id/cause_id ([`journal_entry`]).
+        let correlation_id = uuid::Uuid::new_v4();
 
         // 1) Pending rows, keyset-paginated by SIRET: a row left pending after a write failure is
         //    behind the cursor, so one pass always terminates (it is retried on the NEXT pass).
@@ -161,25 +213,26 @@ impl SireneSyncWorker {
                 let etat: String = row.try_get("etat").map_err(db_err)?;
                 let last_seen_at: DateTime<Utc> = row.try_get("last_seen_at").map_err(db_err)?;
                 after = siret.clone();
-                self.process_row(&store, &restaurants, &actor, &siret, payload, &etat, last_seen_at, &mut summary)
+                self.process_row(&store, &restaurants, &journal, correlation_id, &siret, payload, &etat, last_seen_at, &mut summary)
                     .await?;
             }
         }
 
         // 2) Deletion reconciliation by absence (debounced, freshness-guarded, partner-gated).
-        self.reconcile_absent(&store, &restaurants, &actor, &mut summary).await?;
+        self.reconcile_absent(&store, &restaurants, &journal, correlation_id, &mut summary).await?;
 
         Ok(summary)
     }
 
-    /// Translate one pending staging row. Only mark-processed/SELECT failures propagate; ACL and
-    /// write-path failures are counted (`skipped`/`failed`) so the pass keeps going.
+    /// Translate one pending staging row. Only mark-processed/SELECT/journal failures propagate; ACL
+    /// and write-path failures are counted (`skipped`/`failed`) so the pass keeps going.
     #[allow(clippy::too_many_arguments)]
     async fn process_row(
         &self,
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
-        actor: &Actor,
+        journal: &PgCommandJournal,
+        correlation_id: uuid::Uuid,
         siret: &str,
         payload: serde_json::Value,
         etat: &str,
@@ -204,7 +257,7 @@ impl SireneSyncWorker {
         let explicitly_closed = etat == "F" || matches!(etablissement.etat(), Some("F") | Some("C"));
         if explicitly_closed {
             match self
-                .close_if_prospect(store, restaurants, actor, siret, "SIRENE: establishment administratively closed (etat=F)", summary)
+                .close_if_prospect(store, restaurants, journal, correlation_id, siret, last_seen_at, "SIRENE: establishment administratively closed (etat=F)", summary)
                 .await
             {
                 Ok(()) => return self.mark_processed(siret, last_seen_at).await,
@@ -227,12 +280,23 @@ impl SireneSyncWorker {
                 if let Some(existing) = restaurants.by_external_identifier("siret", siret).await? {
                     cmd.restaurant_id = existing.restaurant_id;
                 }
-                match register_restaurant(store, restaurants, cmd, actor).await {
-                    Ok(()) => {
+                let payload = serialize_command("RegisterRestaurant", &cmd)?;
+                let entry =
+                    journal_entry("RegisterRestaurant", siret, last_seen_at, correlation_id, payload);
+                let actor = send_actor(&entry);
+                let outcome = dispatch_journaled(journal, entry, || async {
+                    register_restaurant(store, restaurants, cmd, &actor).await
+                })
+                .await?;
+                match outcome {
+                    // A journal dedup of a SUCCEEDED send = this exact staged version already
+                    // registered (e.g. mark_processed failed last pass) — same acknowledgement.
+                    JournaledOutcome::Executed(Ok(()))
+                    | JournaledOutcome::Deduplicated(CommandJournalStatus::SUCCEEDED) => {
                         summary.registered += 1;
                         self.mark_processed(siret, last_seen_at).await
                     }
-                    Err(e @ DomainError::Rejected { .. }) => {
+                    JournaledOutcome::Executed(Err(e @ DomainError::Rejected { .. })) => {
                         // A catalogued invariant rejection is DETERMINISTIC — replaying the same
                         // staged row can only be rejected again, so retrying forever is pure churn
                         // (the 605-row SlugAlreadyTaken log storm). Mark processed; the next
@@ -241,9 +305,33 @@ impl SireneSyncWorker {
                         eprintln!("sirene sync worker: register rejected for siret {siret} (permanent, not retried): {e}");
                         self.mark_processed(siret, last_seen_at).await
                     }
-                    Err(e) => {
+                    JournaledOutcome::Deduplicated(CommandJournalStatus::REJECTED)
+                    | JournaledOutcome::Deduplicated(CommandJournalStatus::RECEIVED) => {
+                        // REJECTED replay = same permanent skip; RECEIVED = a crashed in-flight send
+                        // (the stale sweep will flip it FAILED, making the next pass a retry) —
+                        // either way this staged version needs no re-dispatch now.
+                        summary.skipped += 1;
+                        self.mark_processed(siret, last_seen_at).await
+                    }
+                    JournaledOutcome::PayloadConflict { existing_status } => {
+                        // Same (SIRET, last_seen_at) with a different payload: the staged payload
+                        // changed without a last_seen_at bump — an ingestion contract violation.
+                        summary.skipped += 1;
+                        eprintln!(
+                            "sirene sync worker: register payload conflict for siret {siret} \
+                             (journaled {existing_status:?}, same staged version): not re-sent"
+                        );
+                        self.mark_processed(siret, last_seen_at).await
+                    }
+                    JournaledOutcome::Executed(Err(e)) => {
                         summary.failed += 1; // infra failure — left pending → retried next pass
                         eprintln!("sirene sync worker: register failed for siret {siret}: {e}");
+                        Ok(())
+                    }
+                    // FAILED duplicates are re-executed inside dispatch_journaled, never surfaced.
+                    JournaledOutcome::Deduplicated(status) => {
+                        summary.failed += 1;
+                        eprintln!("sirene sync worker: unexpected journal dedup {status:?} for siret {siret}");
                         Ok(())
                     }
                 }
@@ -278,7 +366,8 @@ impl SireneSyncWorker {
         &self,
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
-        actor: &Actor,
+        journal: &PgCommandJournal,
+        correlation_id: uuid::Uuid,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
         let latest: Option<DateTime<Utc>> =
@@ -294,8 +383,10 @@ impl SireneSyncWorker {
             return Ok(());
         }
         let cutoff = latest - chrono::Duration::days(ABSENCE_GRACE_DAYS);
-        let absent: Vec<String> = sqlx::query_scalar(
-            "SELECT siret FROM external_sirene_restaurants \
+        // last_seen_at rides along as the journal-idempotency version of the absence signal: the
+        // same stale row re-scanned across passes replays the same message_id.
+        let absent: Vec<(String, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT siret, last_seen_at FROM external_sirene_restaurants \
              WHERE etat <> 'F' AND last_seen_at < $1 ORDER BY siret",
         )
         .bind(cutoff)
@@ -303,13 +394,15 @@ impl SireneSyncWorker {
         .await
         .map_err(db_err)?;
 
-        for siret in absent {
+        for (siret, last_seen_at) in absent {
             if let Err(e) = self
                 .close_if_prospect(
                     store,
                     restaurants,
-                    actor,
+                    journal,
+                    correlation_id,
                     &siret,
+                    last_seen_at,
                     "SIRENE: establishment disappeared from the active registry (detect-by-absence)",
                     summary,
                 )
@@ -323,14 +416,18 @@ impl SireneSyncWorker {
     }
 
     /// The gated close (ADR-0045 deletion policy): rehydrate the aggregate; nothing registered or
-    /// already INACTIVE ⇒ no-op; NON_PARTNER prospect ⇒ `MarkRestaurantClosed` through the ordinary
-    /// handler; PASSIVE/ACTIVE partner ⇒ never auto-close — flag for manual review.
+    /// already INACTIVE ⇒ no-op; NON_PARTNER prospect ⇒ `MarkRestaurantClosed` through the journaled
+    /// WORKER dispatch + the ordinary handler; PASSIVE/ACTIVE partner ⇒ never auto-close — flag for
+    /// manual review.
+    #[allow(clippy::too_many_arguments)]
     async fn close_if_prospect(
         &self,
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
-        actor: &Actor,
+        journal: &PgCommandJournal,
+        correlation_id: uuid::Uuid,
         siret: &str,
+        last_seen_at: DateTime<Utc>,
         reason: &str,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
@@ -351,14 +448,41 @@ impl SireneSyncWorker {
         }
         match state.listing_status {
             RestaurantListingStatus::NON_PARTNER => {
-                mark_restaurant_closed(
-                    store,
-                    MarkRestaurantClosed { restaurant_id, reason: Some(reason.to_string()) },
-                    actor,
-                )
+                let cmd = MarkRestaurantClosed { restaurant_id, reason: Some(reason.to_string()) };
+                let payload = serialize_command("MarkRestaurantClosed", &cmd)?;
+                let entry = journal_entry(
+                    "MarkRestaurantClosed",
+                    siret,
+                    last_seen_at,
+                    correlation_id,
+                    payload,
+                );
+                let actor = send_actor(&entry);
+                let outcome = dispatch_journaled(journal, entry, || async {
+                    mark_restaurant_closed(store, cmd, &actor).await
+                })
                 .await?;
-                summary.closed += 1;
-                println!("sirene sync worker: closed prospect {} (siret {siret})", state.display_name.0);
+                match outcome {
+                    JournaledOutcome::Executed(Ok(())) => {
+                        summary.closed += 1;
+                        println!("sirene sync worker: closed prospect {} (siret {siret})", state.display_name.0);
+                    }
+                    JournaledOutcome::Executed(Err(e)) => return Err(e),
+                    // This exact closure signal (SIRET + staged version) was already consumed —
+                    // e.g. closed, then manually reactivated: a spent signal never re-closes.
+                    JournaledOutcome::Deduplicated(status) => {
+                        eprintln!(
+                            "sirene sync worker: close signal for siret {siret} already journaled \
+                             ({status:?}) — not re-sent"
+                        );
+                    }
+                    JournaledOutcome::PayloadConflict { existing_status } => {
+                        eprintln!(
+                            "sirene sync worker: close payload conflict for siret {siret} \
+                             (journaled {existing_status:?}, same staged version): not re-sent"
+                        );
+                    }
+                }
             }
             RestaurantListingStatus::PASSIVE_PARTNER | RestaurantListingStatus::ACTIVE_PARTNER => {
                 // A live partner is NEVER auto-closed on a registry signal (bad SIRENE datum, SIRET

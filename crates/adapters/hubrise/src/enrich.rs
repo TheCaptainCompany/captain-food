@@ -3,10 +3,19 @@
 //! seam" the ingress ACL (`acl.rs`) and the outbound client (`api.rs`) were built for:
 //!
 //! ```text
-//! POST /adapters/hubrise/webhooks──(verified, needs_pull)──▶ api pull ──▶ THIS ACL (map) ──▶ domain write
-//!   catalog callback   → get_catalog(catalogId)  → map_catalog  → ImportCatalog handler
-//!   inventory callback → get_inventory(locationId)→ map_inventory→ update_offer_stock handler (per sku)
+//! POST /adapters/hubrise/webhooks──(verified, needs_pull)──▶ api pull ──▶ THIS ACL (map) ──▶ journal ──▶ domain write
+//!   catalog callback   → get_catalog(catalogId)  → map_catalog  → command_journal → ImportCatalog handler
+//!   inventory callback → get_inventory(locationId)→ map_inventory→ command_journal → update_offer_stock handler (per sku)
 //! ```
+//!
+//! # Journaled sends (ADR-20260720-015300, #15)
+//!
+//! Every command this enricher issues goes through the WORKER-channel journaling dispatch
+//! ([`application::dispatch::dispatch_journaled`]), never straight to a handler: `message_id` =
+//! UUIDv5 of (callback id, command type[, offer id]) so a HubRise redelivery replays the SAME id and
+//! dedupes on `command_journal` instead of double-applying; `cause_id` = UUIDv5(callback id) — the
+//! mirrored callback's identity — so the chain `external_hubrise_callbacks → command_journal →
+//! domain_events` is fully traceable end to end.
 //!
 //! # Why the two directions differ (CLAUDE.md "Commands vs inbound events")
 //!
@@ -46,12 +55,15 @@
 use std::sync::Arc;
 
 use application::commands::{import_catalog, rejection_code, update_offer_stock};
+use application::dispatch::{dispatch_journaled, JournaledOutcome};
+use application::journal::{payload_hash, CommandJournal, CommandJournalEntry};
 use application::ports::{Actor, EventStore};
 use domain::generated::commands::{ImportCatalog, UpdateOfferStock};
 use domain::shared::errors::DomainError;
 use domain::generated::entities::{CatalogCategory, Money, Offer, OptionList, Product, ProductItemOption, TaxRate};
 use domain::generated::scalars::{
-    CatalogCategoryName, CatalogId, CatalogItemAvailability, CurrencyCode, ExternalReference, MoneyCents,
+    CatalogCategoryName, CatalogId, CatalogItemAvailability, CommandChannel, CommandJournalStatus,
+    CurrencyCode, ExternalReference, MoneyCents,
     OfferId, OfferName, OptionId, OptionListId, OptionListName, OptionName, ProductCategoryId,
     ProductDescription, ProductId, ProductName, Quantity, RestaurantId, Tag, TaxRatePercent,
 };
@@ -502,39 +514,72 @@ pub fn hubrise_system_user_id() -> uuid::Uuid {
     uuid::Uuid::new_v5(&hubrise_namespace(), b"system:hubrise-webhook")
 }
 
-/// Records HubRise-driven catalog/inventory writes through the ordinary command handlers. Generic over
-/// the [`HubRisePuller`] so the dispatch (import, per-SKU stock, `OfferNotFound` skip) is unit-testable in
-/// memory; `dyn EventStore` keeps it off the concrete Postgres adapter.
+/// Records HubRise-driven catalog/inventory writes through the WORKER-channel journaling dispatch and
+/// the ordinary command handlers. Generic over the [`HubRisePuller`] so the dispatch (import, per-SKU
+/// stock, `OfferNotFound` skip, journal dedup) is unit-testable in memory; `dyn EventStore` /
+/// `dyn CommandJournal` keep it off the concrete Postgres adapters.
 pub struct HubRiseEnricher<P: HubRisePuller> {
     store: Arc<dyn EventStore>,
+    journal: Arc<dyn CommandJournal>,
     puller: P,
 }
 
 impl<P: HubRisePuller> HubRiseEnricher<P> {
-    pub fn new(store: Arc<dyn EventStore>, puller: P) -> Self {
-        Self { store, puller }
+    pub fn new(store: Arc<dyn EventStore>, journal: Arc<dyn CommandJournal>, puller: P) -> Self {
+        Self { store, journal, puller }
     }
 
-    /// The envelope actor for a callback — the fixed HubRise system principal, correlated by callback id.
-    fn actor(&self, callback_id: &str) -> Actor {
-        Actor {
-            user_id: hubrise_system_user_id(),
+    /// The WORKER-channel journal entry for one command a callback caused (#15): `message_id` =
+    /// UUIDv5(callback id, command type[, discriminator]) — deterministic, so a HubRise redelivery
+    /// replays the same id and dedupes; the per-SKU discriminator keeps one inventory callback's many
+    /// `UpdateOfferStock` sends distinct. `cause_id` = `correlation_id` = UUIDv5(callback id), the
+    /// identity `external_hubrise_callbacks` mirrors — closing the mirror → journal → events chain.
+    fn journal_entry(
+        callback_id: &str,
+        command_type: &str,
+        discriminator: Option<&str>,
+        payload: serde_json::Value,
+    ) -> CommandJournalEntry {
+        let seed = match discriminator {
+            Some(d) => format!("{callback_id}:{command_type}:{d}"),
+            None => format!("{callback_id}:{command_type}"),
+        };
+        let callback_uuid = derive("callback", callback_id);
+        CommandJournalEntry {
+            message_id: derive("command", &seed),
+            correlation_id: callback_uuid,
+            cause_id: Some(callback_uuid),
+            session_id: None,
+            trace_id: None,
+            user_id: Some(hubrise_system_user_id()),
             user_type: EXTERNAL_USER_TYPE,
-            correlation_id: derive("callback", callback_id),
-            cause_id: None,
+            channel: CommandChannel::WORKER,
+            command_type: command_type.to_string(),
+            payload_hash: payload_hash(&payload),
+            payload,
         }
     }
 
-    /// Enrich one verified callback. Only `Err(DomainError)` (event store unreachable) should make the
-    /// endpoint answer 5xx; every other outcome is definitive and ACKed.
+    /// Envelope → `Actor` (ADR-0041): events appended by this journaled send carry
+    /// `cause_id = message_id`, exactly like the GraphQL dispatch.
+    fn actor_for(entry: &CommandJournalEntry) -> Actor {
+        Actor {
+            user_id: hubrise_system_user_id(),
+            user_type: EXTERNAL_USER_TYPE,
+            correlation_id: entry.correlation_id,
+            cause_id: Some(entry.message_id),
+        }
+    }
+
+    /// Enrich one verified callback. Only `Err(DomainError)` (event store / journal unreachable)
+    /// should make the endpoint answer 5xx; every other outcome is definitive and ACKed.
     pub async fn enrich(
         &self,
         callback: &HubRiseCallback,
     ) -> Result<EnrichOutcome, DomainError> {
-        let actor = self.actor(&callback.id);
         match callback.resource_type.as_str() {
-            "catalog" => self.enrich_catalog(callback, &actor).await,
-            "inventory" => self.enrich_inventory(callback, &actor).await,
+            "catalog" => self.enrich_catalog(callback).await,
+            "inventory" => self.enrich_inventory(callback).await,
             other => Ok(EnrichOutcome::Ignored { resource_type: other.to_string() }),
         }
     }
@@ -542,7 +587,6 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
     async fn enrich_catalog(
         &self,
         callback: &HubRiseCallback,
-        actor: &Actor,
     ) -> Result<EnrichOutcome, DomainError> {
         let Some(catalog_id) = callback.catalog_id.as_deref() else {
             return Ok(EnrichOutcome::MapFailed {
@@ -562,21 +606,45 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
             Ok(c) => c,
             Err(e) => return Ok(EnrichOutcome::MapFailed { reason: e.to_string() }),
         };
+        let payload = serde_json::to_value(&cmd)
+            .map_err(|e| DomainError::Repository(format!("serialize ImportCatalog: {e}")))?;
+        let entry = Self::journal_entry(&callback.id, "ImportCatalog", None, payload);
+        let actor = Self::actor_for(&entry);
         let derived = cmd.catalog_id;
-        match import_catalog(self.store.as_ref(), cmd, actor).await {
-            Ok(()) => Ok(EnrichOutcome::CatalogImported { catalog_id: derived }),
+        let store = self.store.clone();
+        let outcome = dispatch_journaled(self.journal.as_ref(), entry, move || async move {
+            import_catalog(store.as_ref(), cmd, &actor).await
+        })
+        .await?;
+        match outcome {
+            JournaledOutcome::Executed(Ok(())) => {
+                Ok(EnrichOutcome::CatalogImported { catalog_id: derived })
+            }
             // A rejection (CatalogNotFound / MissingRef) is definitive — retrying won't help.
-            Err(e) if rejection_code(&e).is_some() => {
+            JournaledOutcome::Executed(Err(e)) if rejection_code(&e).is_some() => {
                 Ok(EnrichOutcome::Skipped { reason: e.to_string() })
             }
-            Err(e) => Err(e),
+            JournaledOutcome::Executed(Err(e)) => Err(e),
+            // Redelivery of an already-imported callback: same acknowledgement, no double-apply.
+            JournaledOutcome::Deduplicated(CommandJournalStatus::SUCCEEDED) => {
+                Ok(EnrichOutcome::CatalogImported { catalog_id: derived })
+            }
+            JournaledOutcome::Deduplicated(status) => Ok(EnrichOutcome::Skipped {
+                reason: format!("redelivered callback deduplicated on the journal ({status:?})"),
+            }),
+            // The re-pull returned different content under a redelivered callback id: never
+            // re-dispatched — the changed catalog arrives under its own fresh callback.
+            JournaledOutcome::PayloadConflict { existing_status } => Ok(EnrichOutcome::Skipped {
+                reason: format!(
+                    "redelivered callback re-pulled a DIFFERENT catalog (journaled {existing_status:?}): not re-imported"
+                ),
+            }),
         }
     }
 
     async fn enrich_inventory(
         &self,
         callback: &HubRiseCallback,
-        actor: &Actor,
     ) -> Result<EnrichOutcome, DomainError> {
         let Some(location_id) = callback.location_id.as_deref() else {
             return Ok(EnrichOutcome::MapFailed {
@@ -600,12 +668,26 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
         };
         let (mut applied, mut skipped) = (0usize, 0usize);
         for cmd in updates {
-            match update_offer_stock(self.store.as_ref(), cmd, actor).await {
-                Ok(()) => applied += 1,
+            let payload = serde_json::to_value(&cmd)
+                .map_err(|e| DomainError::Repository(format!("serialize UpdateOfferStock: {e}")))?;
+            let offer = cmd.offer_id.0.to_string();
+            let entry =
+                Self::journal_entry(&callback.id, "UpdateOfferStock", Some(&offer), payload);
+            let actor = Self::actor_for(&entry);
+            let store = self.store.clone();
+            let outcome = dispatch_journaled(self.journal.as_ref(), entry, move || async move {
+                update_offer_stock(store.as_ref(), cmd, &actor).await
+            })
+            .await?;
+            match outcome {
+                JournaledOutcome::Executed(Ok(()))
+                | JournaledOutcome::Deduplicated(CommandJournalStatus::SUCCEEDED) => applied += 1,
                 // `OfferNotFound` = a SKU we haven't imported (or a different catalog): skip the fact.
-                Err(e) if rejection_code(&e) == Some("OfferNotFound") => skipped += 1,
-                Err(e) if rejection_code(&e).is_some() => skipped += 1,
-                Err(e) => return Err(e),
+                JournaledOutcome::Executed(Err(e)) if rejection_code(&e).is_some() => skipped += 1,
+                JournaledOutcome::Executed(Err(e)) => return Err(e),
+                // Journal dedup/conflict on a redelivered callback: skipped, never double-applied.
+                JournaledOutcome::Deduplicated(_)
+                | JournaledOutcome::PayloadConflict { .. } => skipped += 1,
             }
         }
         Ok(EnrichOutcome::InventoryApplied { applied, skipped })
@@ -639,9 +721,18 @@ impl<P: HubRisePuller> Enricher for HubRiseEnricher<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use application::journal::mem::MemCommandJournal;
     use application::ports::version_conflict;
     use domain::generated::events::{CatalogCreated, DomainEvent};
     use domain::generated::scalars::CatalogName;
+
+    fn enricher_with(
+        store: Arc<InMemoryEventStore>,
+        puller: FakePuller,
+    ) -> (HubRiseEnricher<FakePuller>, Arc<MemCommandJournal>) {
+        let journal = Arc::new(MemCommandJournal::default());
+        (HubRiseEnricher::new(store, journal.clone(), puller), journal)
+    }
 
     // ----- boundary value parsing -----
 
@@ -845,7 +936,7 @@ mod tests {
     async fn catalog_then_inventory_flows_end_to_end() {
         let store = Arc::new(InMemoryEventStore::default());
         seed_catalog(&store).await;
-        let enricher = HubRiseEnricher::new(
+        let (enricher, journal) = enricher_with(
             store.clone(),
             FakePuller {
                 catalog: sample_catalog_json(),
@@ -853,13 +944,32 @@ mod tests {
             },
         );
 
-        // 1) Catalog callback → ImportCatalog → CatalogImported appended.
+        // 1) Catalog callback → journaled ImportCatalog → CatalogImported appended.
         let out = enricher.enrich(&callback("catalog")).await.unwrap();
         assert_eq!(out, EnrichOutcome::CatalogImported { catalog_id: derive_catalog_id("cat_1") });
+
+        // The send is journaled on the WORKER channel, keyed by (callback id, command type), caused
+        // by the mirrored callback's identity (#15).
+        let message_id = derive("command", "cb_1:ImportCatalog");
+        let row = journal.by_message(message_id).await.unwrap().expect("journaled");
+        assert_eq!(row.status, CommandJournalStatus::SUCCEEDED);
+        assert_eq!(row.entry.channel, CommandChannel::WORKER);
+        assert_eq!(row.entry.command_type, "ImportCatalog");
+        assert_eq!(row.entry.cause_id, Some(derive("callback", "cb_1")));
+        assert_eq!(row.entry.correlation_id, derive("callback", "cb_1"));
 
         // 2) Inventory callback → the imported offer's stock is updated (join by sku_ref succeeds).
         let out = enricher.enrich(&callback("inventory")).await.unwrap();
         assert_eq!(out, EnrichOutcome::InventoryApplied { applied: 1, skipped: 0 });
+
+        // Each per-SKU send has its own journal row, discriminated by the derived offer id.
+        let stock_message = derive(
+            "command",
+            &format!("cb_1:UpdateOfferStock:{}", derive_offer_id("SKU-CHEESE").0),
+        );
+        let row = journal.by_message(stock_message).await.unwrap().expect("journaled");
+        assert_eq!(row.status, CommandJournalStatus::SUCCEEDED);
+        assert_eq!(row.entry.command_type, "UpdateOfferStock");
 
         let stream = format!("Catalog-{}", derive_catalog_id("cat_1").0);
         let (events, _) = store.load(&stream).await.unwrap();
@@ -879,7 +989,7 @@ mod tests {
     async fn inventory_for_unknown_sku_is_skipped_not_rejected() {
         let store = Arc::new(InMemoryEventStore::default());
         seed_catalog(&store).await; // catalog exists but nothing imported → no offers.
-        let enricher = HubRiseEnricher::new(
+        let (enricher, journal) = enricher_with(
             store.clone(),
             FakePuller {
                 catalog: serde_json::json!({}),
@@ -888,28 +998,69 @@ mod tests {
         );
         let out = enricher.enrich(&callback("inventory")).await.unwrap();
         assert_eq!(out, EnrichOutcome::InventoryApplied { applied: 0, skipped: 1 });
+
+        // The rejected send still leaves a journal trace (REJECTED) — rejections are visible now.
+        let stock_message = derive(
+            "command",
+            &format!("cb_1:UpdateOfferStock:{}", derive_offer_id("SKU-UNKNOWN").0),
+        );
+        let row = journal.by_message(stock_message).await.unwrap().expect("journaled");
+        assert_eq!(row.status, CommandJournalStatus::REJECTED);
+        assert_eq!(row.error.unwrap()["code"], "OfferNotFound");
     }
 
     #[tokio::test]
     async fn catalog_import_before_connect_is_skipped() {
         // No CatalogCreated seeded → ImportCatalog rejects CatalogNotFound → definitive skip, not 5xx.
         let store = Arc::new(InMemoryEventStore::default());
-        let enricher = HubRiseEnricher::new(
+        let (enricher, journal) = enricher_with(
             store.clone(),
             FakePuller { catalog: sample_catalog_json(), inventory: serde_json::json!([]) },
         );
         let out = enricher.enrich(&callback("catalog")).await.unwrap();
         assert!(matches!(out, EnrichOutcome::Skipped { reason } if reason.contains("CatalogNotFound")));
+        let row = journal
+            .by_message(derive("command", "cb_1:ImportCatalog"))
+            .await
+            .unwrap()
+            .expect("journaled");
+        assert_eq!(row.status, CommandJournalStatus::REJECTED);
     }
 
     #[tokio::test]
     async fn unenriched_resource_type_is_ignored() {
         let store = Arc::new(InMemoryEventStore::default());
-        let enricher = HubRiseEnricher::new(
+        let (enricher, _journal) = enricher_with(
             store.clone(),
             FakePuller { catalog: serde_json::json!({}), inventory: serde_json::json!([]) },
         );
         let out = enricher.enrich(&callback("order")).await.unwrap();
         assert_eq!(out, EnrichOutcome::Ignored { resource_type: "order".into() });
+    }
+
+    #[tokio::test]
+    async fn redelivered_callback_dedupes_on_the_journal_no_double_apply() {
+        let store = Arc::new(InMemoryEventStore::default());
+        seed_catalog(&store).await;
+        let (enricher, _journal) = enricher_with(
+            store.clone(),
+            FakePuller {
+                catalog: sample_catalog_json(),
+                inventory: serde_json::json!([{ "sku_ref": "SKU-CHEESE", "stock": 7 }]),
+            },
+        );
+        enricher.enrich(&callback("catalog")).await.unwrap();
+        enricher.enrich(&callback("inventory")).await.unwrap();
+        let stream = format!("Catalog-{}", derive_catalog_id("cat_1").0);
+        let (_, version_before) = store.load(&stream).await.unwrap();
+
+        // HubRise redelivers BOTH callbacks (same callback id, same pulled content): the enricher
+        // still acknowledges them, but the journal dedup means NOTHING new is appended.
+        let out = enricher.enrich(&callback("catalog")).await.unwrap();
+        assert_eq!(out, EnrichOutcome::CatalogImported { catalog_id: derive_catalog_id("cat_1") });
+        let out = enricher.enrich(&callback("inventory")).await.unwrap();
+        assert_eq!(out, EnrichOutcome::InventoryApplied { applied: 1, skipped: 0 });
+        let (_, version_after) = store.load(&stream).await.unwrap();
+        assert_eq!(version_after, version_before, "redelivery must not double-apply");
     }
 }
