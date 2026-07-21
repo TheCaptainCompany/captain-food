@@ -46,9 +46,9 @@ Within a tier, order stays dependency-consistent (an issue never ranks above one
   Informational — it explains the Priority placement, it does not sort.
 - **Impact** = **the size of the change on the code** (blast radius) — the T-shirt formerly known
   as "size" (ADR-20260720-143000 estimation table, `XXS`–`XXL`). It appears twice, same value in
-  both places: the **`impact/*` repo label** (visible on issue lists/cards) and the
-  project-scoped **Impact** field on the board (renamed from the template's "Size"). The former
-  `size/*` labels are **renamed** to `impact/*`, not re-graded.
+  both places: the **org Impact field** (`XS`–`XL`; XXS/XXL clamp to XS/XL until those options
+  exist) and the **`impact/*` repo label** (full `XXS`–`XXL` scale, visible on issue lists/cards).
+  The former `size/*` labels are **renamed** to `impact/*`, not re-graded.
 - **Effort** (org field, `Low`/`Medium`/`High`) = delivery cost, the coarse projection of the
   Impact T-shirt (XXS–S → `Low`, M → `Medium`, L and up → `High`). Impact/Effort are displayed
   for planning but **never drive the order** — value does.
@@ -62,6 +62,6 @@ Within a tier, order stays dependency-consistent (an issue never ranks above one
 
 A new issue gets, at triage time: the standard pre-task sections (ADR-20260720-143000), a **Type**
 (`Foundation`/`Feature`/`Bug`/`Task`), an **`impact/*` label** (change size, from the Estimation
-section), then on the project **Priority + Value Size + Effort** (and the project's Impact field,
-set in the board UI), using the definitions above. The product owner adjusts its row position in
-the project if the default bucket placement isn't enough.
+section), and the org fields **Priority + Value Size + Impact + Effort**, using the definitions
+above. The product owner adjusts its row position in the project if the default bucket placement
+isn't enough.
