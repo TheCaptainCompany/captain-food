@@ -9,6 +9,11 @@ changing anything (see `CLAUDE.md` for the index).
   `messages.fr` in `errors.yaml`.
 - Reference types with `$ref`, never bare name strings (e.g. `{ $ref: 'scalars.yaml#/OrderId' }`).
   One name = one dedicated scalar; no ambiguous reuse.
+- Every `$ref` site is **kind-checked** (§1b, ADR-20260722-152201): resolving is not enough, the target
+  must be of a kind the site declares in `REF_CONTRACT` (`tools/codegen-rs/src/main.rs`) — a `state_table`
+  must be a process-manager state table, a screen resolver a query, an actor `message` a command or event.
+  Adding a **new ref-carrying field** to any spec file therefore also needs a `REF_CONTRACT` line: the
+  validator is fail-closed and reports `ref-site-undeclared` (with the suggested line) until you add it.
 - Event/command payloads are **business only** — never the technical envelope (`eventId`,
   `aggregateType`, `aggregateId`, `occurredAt`, `metadata`); infra adds that.
 - `*Updated` events/commands carry the **full entity** (replace semantics).

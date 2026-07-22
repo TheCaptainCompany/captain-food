@@ -392,6 +392,490 @@ fn map_keys(v: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+// ─── Ref-KIND contract (§1b) ────────────────────────────────────────────────────────────────────
+// Resolving is not enough: a `$ref` must point at the right KIND of thing. `state_table` must be a
+// process-manager state table — not merely "some table under database/tables/"; a screen resolver must
+// be a query, not a mutation; an actor `emits` must be an event, not a command. §1b makes that a
+// declared, exhaustive contract instead of the ad-hoc per-site checks scattered through §2–§11.
+//
+// It is FAIL-CLOSED: a `$ref` site not covered by REF_CONTRACT is an error, so a new ref-carrying field
+// cannot be added to the DSL without declaring what it may point at.
+
+/// What a `$ref` target IS — finer than the file it lives in (a table file holds several kinds).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    Command,
+    /// A `commands.yaml` definition NO actor receives: a shared payload sub-object (e.g. `CartLine`),
+    /// not a business intention. Legal inside `properties`, never as an actor's message.
+    PayloadObject,
+    Event,
+    /// A single property of a command/event/entity — `<file>#/<Def>/properties/<p>`.
+    MessageProperty,
+    Error,
+    Rule,
+    Scalar,
+    /// A scalar with an `enum` member list (a state/status type).
+    EnumScalar,
+    Entity,
+    /// An `actors.yaml` event-sourced aggregate.
+    Aggregate,
+    /// A `processmanager.yaml` state-table orchestrator.
+    ProcessManager,
+    Service,
+    ServiceOperation,
+    Query,
+    Mutation,
+    Subscription,
+    ApiType,
+    ApiInput,
+    Test,
+    /// A `tests.yaml#/fixtures/<f>` expected-outcome fixture.
+    Fixture,
+    /// A `translations.yaml` / `<surface>.translations.yaml` i18n key.
+    TranslationKey,
+    /// A generated fold VIEW over `domain_events` (`database/projection_views.yaml`).
+    ProjectionView,
+    /// A MATERIALIZED read-model table fed by an app projector (`tables/projection_tables.yaml`).
+    ProjectionTable,
+    /// A process manager's private state table (`tables/process_managers.yaml`).
+    PmStateTable,
+    /// A seed/config table configured by the repo seed script (`tables/referential.yaml`).
+    ReferentialTable,
+    /// A write-path journal — `command_journal` / `inbound_events` (`tables/journals.yaml`).
+    JournalTable,
+    /// Adapter-owned raw staging (`tables/integration_staging.yaml`).
+    StagingTable,
+    /// Integration connection storage (`tables/integration_connections.yaml`).
+    ConnectionTable,
+    /// `domain_events` / `domain_stream` (`tables/eventstore.yaml`).
+    EventStoreTable,
+    /// A column of any of the table kinds above.
+    TableColumn,
+    Screen,
+    Persona,
+    /// An `observability.yaml` workflow contract.
+    ObservabilityWorkflow,
+}
+
+impl Kind {
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Command => "command",
+            Kind::PayloadObject => "payload object",
+            Kind::Event => "event",
+            Kind::MessageProperty => "message property",
+            Kind::Error => "error",
+            Kind::Rule => "rule",
+            Kind::Scalar => "scalar",
+            Kind::EnumScalar => "enum scalar",
+            Kind::Entity => "entity",
+            Kind::Aggregate => "aggregate",
+            Kind::ProcessManager => "process manager",
+            Kind::Service => "service",
+            Kind::ServiceOperation => "service operation",
+            Kind::Query => "query",
+            Kind::Mutation => "mutation",
+            Kind::Subscription => "subscription",
+            Kind::ApiType => "api output type",
+            Kind::ApiInput => "api input type",
+            Kind::Test => "behaviour test",
+            Kind::Fixture => "test fixture",
+            Kind::TranslationKey => "translation key",
+            Kind::ProjectionView => "projection view",
+            Kind::ProjectionTable => "projection table",
+            Kind::PmStateTable => "process-manager state table",
+            Kind::ReferentialTable => "referential table",
+            Kind::JournalTable => "journal table",
+            Kind::StagingTable => "staging table",
+            Kind::ConnectionTable => "connection table",
+            Kind::EventStoreTable => "event-store table",
+            Kind::TableColumn => "table column",
+            Kind::Screen => "screen",
+            Kind::Persona => "persona",
+            Kind::ObservabilityWorkflow => "observability workflow",
+        }
+    }
+}
+
+fn kind_list(kinds: &[Kind]) -> String {
+    kinds.iter().map(|k| k.name()).collect::<Vec<_>>().join(" or ")
+}
+
+/// What KIND the target of a resolved `$ref` is: `(file, pointer segments, resolved node)` → `Kind`.
+/// `None` = the pointer lands somewhere with no declared kind (e.g. mid-tree) — §1b reports it, which
+/// keeps the classifier honest as the DSL grows.
+fn classify(file: &str, path: &[String], node: &Value, handled: &BTreeSet<String>) -> Option<Kind> {
+    let seg = |i: usize| path.get(i).map(|s| s.as_str());
+    let top = path.len() == 1;
+    // A table column: `<table>/columns/<col>` in any database/tables/*.yaml file.
+    let table_column = path.len() == 3 && seg(1) == Some("columns");
+    let table_kind = |k: Kind| -> Option<Kind> {
+        if top {
+            Some(k)
+        } else if table_column {
+            Some(Kind::TableColumn)
+        } else {
+            None
+        }
+    };
+    match file {
+        "commands.yaml" | "events.yaml" | "entities.yaml" => {
+            let base = match file {
+                // A commands.yaml entry is a COMMAND when an actor receives it; otherwise it is a
+                // shared payload sub-object (mirrors §3's value-object derivation). A genuinely
+                // unhandled command is reported by §3's `command-unhandled`.
+                "commands.yaml" => match path.first() {
+                    Some(n) if handled.contains(n.as_str()) => Kind::Command,
+                    _ => Kind::PayloadObject,
+                },
+                "events.yaml" => Kind::Event,
+                _ => Kind::Entity,
+            };
+            if top {
+                Some(base)
+            } else if path.len() == 3 && seg(1) == Some("properties") {
+                Some(Kind::MessageProperty)
+            } else {
+                None
+            }
+        }
+        "errors.yaml" => top.then_some(Kind::Error),
+        "rules.yaml" => top.then_some(Kind::Rule),
+        "scalars.yaml" => top.then(|| {
+            if node.get("enum").is_some() { Kind::EnumScalar } else { Kind::Scalar }
+        }),
+        "actors.yaml" => top.then_some(Kind::Aggregate),
+        "processmanager.yaml" => top.then_some(Kind::ProcessManager),
+        "services.yaml" => {
+            if top {
+                Some(Kind::Service)
+            } else if path.len() == 3 && seg(1) == Some("operations") {
+                Some(Kind::ServiceOperation)
+            } else {
+                None
+            }
+        }
+        "api.yaml" => match (seg(0), path.len()) {
+            (Some("queries"), 2) => Some(Kind::Query),
+            (Some("mutations"), 2) => Some(Kind::Mutation),
+            (Some("subscriptions"), 2) => Some(Kind::Subscription),
+            (Some("types"), 2) => Some(Kind::ApiType),
+            (Some("inputs"), 2) => Some(Kind::ApiInput),
+            _ => None,
+        },
+        "stories.yaml" => top.then_some(Kind::Persona),
+        "tests.yaml" => match (seg(0), path.len()) {
+            (Some("fixtures"), 2) => Some(Kind::Fixture),
+            (Some("tests"), 2) => Some(Kind::Test),
+            _ => None,
+        },
+        "observability.yaml" => top.then_some(Kind::ObservabilityWorkflow),
+        "database/projection_views.yaml" => {
+            if top {
+                Some(Kind::ProjectionView)
+            } else if table_column {
+                Some(Kind::TableColumn)
+            } else {
+                None
+            }
+        }
+        "database/tables/projection_tables.yaml" => table_kind(Kind::ProjectionTable),
+        "database/tables/process_managers.yaml" => table_kind(Kind::PmStateTable),
+        "database/tables/referential.yaml" => table_kind(Kind::ReferentialTable),
+        "database/tables/journals.yaml" => table_kind(Kind::JournalTable),
+        "database/tables/integration_staging.yaml" => table_kind(Kind::StagingTable),
+        "database/tables/integration_connections.yaml" => table_kind(Kind::ConnectionTable),
+        "database/tables/eventstore.yaml" => table_kind(Kind::EventStoreTable),
+        f if f.ends_with(".translations.yaml") || f == "translations.yaml" => {
+            top.then_some(Kind::TranslationKey)
+        }
+        f if f.starts_with("screens/") => match (seg(0), path.len()) {
+            (Some("screens"), 2) => Some(Kind::Screen),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Glob over a `$ref` LOCATION: `*` matches any run of characters except `.` (so it stands for one
+/// definition name / list index / map key), `**` matches anything including `.`.
+fn glob_match(pat: &[u8], s: &[u8]) -> bool {
+    if pat.starts_with(b"**") {
+        let rest = &pat[2..];
+        if rest.is_empty() {
+            return true;
+        }
+        return (0..=s.len()).any(|i| glob_match(rest, &s[i..]));
+    }
+    match (pat.first(), s.first()) {
+        (None, None) => true,
+        (None, _) => false,
+        (Some(b'*'), _) => {
+            let rest = &pat[1..];
+            let mut i = 0usize;
+            loop {
+                if glob_match(rest, &s[i..]) {
+                    return true;
+                }
+                if i >= s.len() || s[i] == b'.' {
+                    return false;
+                }
+                i += 1;
+            }
+        }
+        (Some(pc), Some(sc)) if pc == sc => glob_match(&pat[1..], &s[1..]),
+        _ => false,
+    }
+}
+
+fn glob(pat: &str, s: &str) -> bool {
+    glob_match(pat.as_bytes(), s.as_bytes())
+}
+
+/// The contract: `(source-file glob, ref-site location glob, allowed target kinds)`.
+/// The location is the `$ref`'s path INSIDE its file (the leading `<file>.` is stripped), with list
+/// indices as `[n]`. Order matters only for readability — every entry is tried, and a site with no
+/// entry is an error (`ref-site-undeclared`).
+#[rustfmt::skip]
+const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
+    // Payload shapes: a property/context/arg is a scalar, a value object, or (in api.yaml) a declared type.
+    ("commands.yaml",  "*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::PayloadObject]),
+    ("events.yaml",    "*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::PayloadObject]),
+    ("entities.yaml",  "*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
+    ("errors.yaml",    "*.context.**",     &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
+
+    // Actors (aggregates): the inbox and the lifecycle state machine.
+    ("actors.yaml", "*.receives[*].message",            &[Kind::Command, Kind::Event]),
+    ("actors.yaml", "*.receives[*].emits[*]",           &[Kind::Event]),
+    ("actors.yaml", "*.receives[*].throws[*]",          &[Kind::Error]),
+    ("actors.yaml", "*.lifecycle.status",               &[Kind::EnumScalar]),
+    ("actors.yaml", "*.lifecycle.initial[*].event",     &[Kind::Event]),
+    ("actors.yaml", "*.lifecycle.transitions[*].event", &[Kind::Event]),
+
+    // Process managers: state-table orchestrators (ADR-20260719-…). The state table is a PM state
+    // table — not any table; reads hit read models; deliver/send target aggregates.
+    ("processmanager.yaml", "*.state_table",                            &[Kind::PmStateTable]),
+    ("processmanager.yaml", "*.ports.*",                                &[Kind::Service]),
+    ("processmanager.yaml", "*.receives[*].message",                    &[Kind::Command, Kind::Event]),
+    ("processmanager.yaml", "*.receives[*].steps[*].read.model",        &[Kind::ProjectionTable, Kind::ProjectionView]),
+    ("processmanager.yaml", "*.receives[*].steps[*].read.where.*.from", &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].guard.throws",      &[Kind::Error]),
+    ("processmanager.yaml", "*.receives[*].steps[*].deliver.event",     &[Kind::Event]),
+    ("processmanager.yaml", "*.receives[*].steps[*].deliver.to",        &[Kind::Aggregate]),
+    ("processmanager.yaml", "*.receives[*].steps[*].deliver.with.*.from", &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].send.command",      &[Kind::Command]),
+    ("processmanager.yaml", "*.receives[*].steps[*].send.to",           &[Kind::Aggregate]),
+    ("processmanager.yaml", "*.receives[*].steps[*].send.with.*.from",  &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].state.by.*.from",   &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].state.expect.*.from", &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].state.set.*.from",  &[Kind::MessageProperty]),
+
+    // Service catalog (outbound ports). An input may be a domain EVENT: an outbound call sometimes
+    // hands the adapter the FACT verbatim (`delivery.offer_job` takes the DeliveryRequested birth
+    // fact that carries pickup/dropoff) rather than a parallel entity that would drift from it.
+    ("services.yaml", "*.operations.*.input.*",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::Event]),
+    ("services.yaml", "*.operations.*.output.*", &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
+    ("services.yaml", "*.operations.*.errors[*]", &[Kind::Error]),
+
+    // GraphQL surface. A mutation dispatches a COMMAND; a type binds to a READ MODEL (never to
+    // domain_events, never to a journal/staging table).
+    ("api.yaml", "types.*.properties.**",   &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::ApiType]),
+    ("api.yaml", "types.*.reads[*]",        &[Kind::ProjectionView, Kind::ProjectionTable, Kind::ReferentialTable]),
+    ("api.yaml", "inputs.*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::ApiInput]),
+    ("api.yaml", "queries.*.args.*",        &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),
+    ("api.yaml", "queries.*.returns",       &[Kind::ApiType]),
+    ("api.yaml", "mutations.*.command",     &[Kind::Command]),
+    ("api.yaml", "mutations.*.args.*",      &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),
+    ("api.yaml", "mutations.*.returns",     &[Kind::ApiType]),
+    ("api.yaml", "subscriptions.*.args.*",  &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),
+    ("api.yaml", "subscriptions.*.returns", &[Kind::ApiType]),
+
+    // Story map: every step is an API operation the persona performs.
+    ("stories.yaml", "*.activities.*.steps.*", &[Kind::Query, Kind::Mutation, Kind::Subscription]),
+
+    // Behaviour tests (ADR-0032).
+    ("tests.yaml", "fixtures.*.type",   &[Kind::Event]),
+    ("tests.yaml", "tests.*.rules[*]",  &[Kind::Rule]),
+    ("tests.yaml", "tests.*.actor",     &[Kind::Aggregate, Kind::ProcessManager]),
+    ("tests.yaml", "tests.*.when.type", &[Kind::Command, Kind::Event]),
+    ("tests.yaml", "tests.*.given[*]",  &[Kind::Fixture]),
+    ("tests.yaml", "tests.*.then[*]",   &[Kind::Fixture]),
+    ("tests.yaml", "tests.*.thrown[*]", &[Kind::Error]),
+
+    // Observability contracts bind to the domain they diagnose.
+    ("observability.yaml", "*.workflow.saga",           &[Kind::ProcessManager]),
+    ("observability.yaml", "*.workflow.aggregate",      &[Kind::Aggregate]),
+    ("observability.yaml", "*.workflow.command",        &[Kind::Command]),
+    ("observability.yaml", "*.workflow.emits[*]",       &[Kind::Event]),
+    ("observability.yaml", "*.workflow.inbound[*]",     &[Kind::Event]),
+    ("observability.yaml", "*.run_identity[*].businessKey", &[Kind::Scalar, Kind::EnumScalar]),
+
+    // Read models. `from` is event LINEAGE (a whole event for occurrence columns, a property
+    // otherwise); `fk` is the read-navigation graph, so it must name a COLUMN.
+    ("database/projection_views.yaml", "nonProjectedEvents[*]", &[Kind::Event]),
+    ("database/projection_views.yaml", "*.tombstone",           &[Kind::Event]),
+    ("database/projection_views.yaml", "*.fedBy[*]",            &[Kind::Event]),
+    ("database/projection_views.yaml", "*.columns.*.type",      &[Kind::Scalar, Kind::EnumScalar]),
+    ("database/projection_views.yaml", "*.columns.*.from[*]",   &[Kind::Event, Kind::MessageProperty]),
+    ("database/projection_views.yaml", "*.columns.*.fk",        &[Kind::TableColumn]),
+
+    // Real tables (globbed): every column types to a domain scalar; FKs name a column.
+    ("database/tables/*.yaml", "*.tombstone",         &[Kind::Event]),
+    ("database/tables/*.yaml", "*.fedBy[*]",          &[Kind::Event]),
+    ("database/tables/*.yaml", "*.columns.*.type",    &[Kind::Scalar, Kind::EnumScalar]),
+    ("database/tables/*.yaml", "*.columns.*.from[*]", &[Kind::Event, Kind::MessageProperty]),
+    ("database/tables/*.yaml", "*.columns.*.fk",      &[Kind::TableColumn]),
+
+    // SDUI screens (ADR-0033/0037): reads are queries, writes are mutations, live updates are
+    // subscriptions — and EVERY other ref in the (free-form, deeply nested) UI tree is an i18n key,
+    // which is what `screen-ref-out-of-scope` already asserts. Order matters: first match wins.
+    ("screens/*.yaml", "resolvers.**",     &[Kind::Query]),
+    ("screens/*.yaml", "actions.**",       &[Kind::Mutation]),
+    ("screens/*.yaml", "**.subscription",  &[Kind::Subscription]),
+    ("screens/*.yaml", "**",               &[Kind::TranslationKey]),
+
+    // C4 model (source DSL, not generated): containers/components bind to the actors they realize.
+    ("architecture/c4-l2.yaml", "boundedContexts.*.aggregates[*]",      &[Kind::Aggregate]),
+    ("architecture/c4-l2.yaml", "containers.*.realizes[*]",             &[Kind::Aggregate, Kind::ProcessManager]),
+    ("architecture/c4-l2.yaml", "boundedContexts.*.processManagers[*]", &[Kind::ProcessManager]),
+    ("architecture/c4-l3.yaml", "components.*.handles[*]", &[Kind::Aggregate, Kind::ProcessManager]),
+    ("architecture/c4-l3.yaml", "components.*.updates[*]", &[Kind::ProjectionView, Kind::ProjectionTable]),
+];
+
+/// The DSL's own FIELD names — every other segment of a `$ref` location is a definition/instance name
+/// (a command, a screen, a column, a persona…). Used only to turn an undeclared site into a suggested
+/// contract pattern: field names stay literal, name positions become `*`.
+const STRUCTURAL_SEGMENTS: &[&str] = &[
+    "actions", "activities", "actor", "args", "by", "call", "columns", "command", "content", "context",
+    "deliver", "emits", "expect", "fixtures", "from", "from_hook", "given", "guard", "inputs",
+    "lifecycle", "message", "messages", "model", "mutations", "operations", "params", "ports",
+    "properties", "queries", "read", "reads", "receives", "resolvers", "returns", "rules", "screens",
+    "send", "set", "state", "state_table", "status", "steps", "subscriptions", "tests", "then",
+    "throws", "thrown", "to", "transitions", "type", "types", "when", "where", "with", "workflows",
+];
+
+/// Turn a concrete `$ref` site into the contract pattern that would cover it: list indices → `[*]`,
+/// definition/instance names → `*`, DSL field names kept literal.
+fn normalize_site(site: &str) -> String {
+    site.split('.')
+        .map(|part| {
+            // Split a segment into its name and any trailing `[index]` suffixes.
+            let (name, idx) = match part.find('[') {
+                Some(i) => (&part[..i], &part[i..]),
+                None => (part, ""),
+            };
+            let name = if STRUCTURAL_SEGMENTS.contains(&name) { name } else { "*" };
+            let mut idx_out = String::new();
+            let mut depth = 0;
+            for ch in idx.chars() {
+                match ch {
+                    '[' => {
+                        depth += 1;
+                        idx_out.push_str("[*");
+                    }
+                    ']' => {
+                        depth -= 1;
+                        idx_out.push(']');
+                    }
+                    _ if depth > 0 => {}
+                    c => idx_out.push(c),
+                }
+            }
+            format!("{}{}", name, idx_out)
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// §1b — every `$ref` site must be declared, and its target must be of an allowed kind.
+fn validate_ref_kinds(model: &Model, issues: &mut Vec<Issue>) {
+    // Which commands.yaml entries are real COMMANDS (received by an actor or a process manager) —
+    // the rest are shared payload sub-objects. See `Kind::PayloadObject`.
+    let mut handled: BTreeSet<String> = BTreeSet::new();
+    for f in ["actors.yaml", "processmanager.yaml"] {
+        let mut refs = Vec::new();
+        if let Some(v) = model.defs.get(f) {
+            collect_refs(v, f, &mut refs);
+        }
+        for (loc, r) in refs {
+            let site = loc.strip_prefix(f).and_then(|s| s.strip_prefix('.')).unwrap_or(&loc);
+            if glob("*.receives[*].message", site) && ref_target_file(&r, f).as_deref() == Some("commands.yaml") {
+                if let Some(n) = ref_name(&r) {
+                    handled.insert(n);
+                }
+            }
+        }
+    }
+    // Undeclared sites are reported once per NORMALIZED pattern (definition name and list indices
+    // wildcarded), so the message doubles as the contract line to add.
+    let mut undeclared: BTreeMap<String, (String, String, usize)> = BTreeMap::new();
+    for (f, v) in &model.defs {
+        let file = f.as_str();
+        let mut refs = Vec::new();
+        collect_refs(v, file, &mut refs);
+        for (loc, r) in refs {
+            let site = loc.strip_prefix(file).and_then(|s| s.strip_prefix('.')).unwrap_or(&loc);
+            let allowed: Option<&[Kind]> = REF_CONTRACT
+                .iter()
+                .find(|(fg, lg, _)| glob(fg, file) && glob(lg, site))
+                .map(|(_, _, k)| *k);
+            let allowed = match allowed {
+                Some(k) => k,
+                None => {
+                    let e = undeclared
+                        .entry(format!("{}|{}", file, normalize_site(site)))
+                        .or_insert((loc.clone(), site.to_string(), 0));
+                    e.2 += 1;
+                    continue;
+                }
+            };
+            // Kind check (dangling/malformed refs are §1's job — skip what does not resolve).
+            let pr = match parse_ref(&r) {
+                Some(p) => p,
+                None => continue,
+            };
+            let target_file = if pr.file.is_empty() { file.to_string() } else { pr.file.clone() };
+            let node = match resolve_ref(model, &r, file) {
+                Some(n) => n,
+                None => continue,
+            };
+            match classify(&target_file, &pr.path, node, &handled) {
+                Some(k) if allowed.contains(&k) => {}
+                Some(k) => {
+                    // A commands.yaml entry only counts as a COMMAND once an actor receives it —
+                    // spell that out rather than leaving "is a payload object" to be decoded.
+                    let hint = if k == Kind::PayloadObject && allowed.contains(&Kind::Command) {
+                        " (no actor or process manager receives it — wire it into an inbox, or move it to entities.yaml if it is a payload shape)"
+                    } else {
+                        ""
+                    };
+                    issues.push(err(
+                        "ref-kind",
+                        loc.clone(),
+                        format!("$ref '{}' is a {}; this site requires a {}{}.", r, k.name(), kind_list(allowed), hint),
+                    ))
+                }
+                None => issues.push(err(
+                    "ref-kind-unknown",
+                    loc.clone(),
+                    format!("$ref '{}' does not name a classifiable definition (expected a {}).", r, kind_list(allowed)),
+                )),
+            }
+        }
+    }
+    for (key, (example, example_site, count)) in undeclared {
+        let (file, norm) = key.split_once('|').unwrap_or(("?", "?"));
+        issues.push(err(
+            "ref-site-undeclared",
+            example,
+            format!(
+                "no ref-kind contract for the $ref site '{}' ({} occurrence(s)) — declare what it may point at, e.g. (\"{}\", \"{}\", &[…]) in REF_CONTRACT.",
+                example_site, count, file, norm
+            ),
+        ));
+    }
+}
+
 /// The full validator — a faithful port of validate.ts §1–§11. Returns issues + coverage.
 fn validate(model: &Model) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
@@ -414,6 +898,9 @@ fn validate(model: &Model) -> Report {
             }
         }
     }
+
+    // --- 1b. Ref-KIND contract: a resolving $ref must also point at the right KIND of thing -------
+    validate_ref_kinds(model, &mut issues);
 
     let actors = parse_actors(model);
     let api = parse_api(model);
@@ -12016,7 +12503,10 @@ fn main() {
         coverage.screens, coverage.screen_bindings, coverage.screen_gaps, coverage.translations
     );
     eprintln!("• validated against specs:");
-    eprintln!("    - {} $refs resolve (scalars/entities/events/commands/errors/views/api)", coverage.refs);
+    eprintln!(
+        "    - {} $refs resolve AND point at the kind their site declares (REF_CONTRACT, §1b)",
+        coverage.refs
+    );
     eprintln!("    - actor wiring: messages→commands/events, emits→events, throws→errors");
     eprintln!("    - lifecycles: {} aggregate state machines, {} transitions (lc-*: states∈enum, events emitted, deterministic, terminal closed, reachable)", coverage.lifecycles, coverage.lifecycle_transitions);
     eprintln!("    - api↔model: {} command links→commands, {} reads→views, roles→UserType", coverage.mutation_links, coverage.reads_links);
@@ -12341,6 +12831,110 @@ mod tests {
     #[test]
     fn parse_ref_rejects_non_pointer() {
         assert!(parse_ref("api.yaml").is_none());
+    }
+
+    // ─── §1b ref-kind contract ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn glob_star_stops_at_a_dot_but_doublestar_does_not() {
+        assert!(glob("*.receives[*].message", "Cart.receives[3].message"));
+        assert!(!glob("*.message", "Cart.receives[3].message"));
+        assert!(glob("*.properties.**", "AddCartLine.properties.line.items"));
+        assert!(glob("screens/*.yaml", "screens/captain_frontoffice.yaml"));
+        assert!(glob("**.subscription", "screens[3].subscription"));
+        assert!(!glob("resolvers.**", "actions.checkout.mutation"));
+    }
+
+    #[test]
+    fn normalize_site_wildcards_names_and_indices_but_keeps_field_names() {
+        assert_eq!(normalize_site("Cart.receives[12].message"), "*.receives[*].message");
+        assert_eq!(
+            normalize_site("PlaceOrderProcess.receives[0].steps[3].read.where.cart_id.from"),
+            "*.receives[*].steps[*].read.where.*.from"
+        );
+        assert_eq!(normalize_site("types.Cart.properties.status"), "types.*.properties.status");
+    }
+
+    /// The model behind the kind checks below: two tables of DIFFERENT kinds that a naive
+    /// "starts_with database/tables/" test cannot tell apart, plus a command and a payload object.
+    fn kind_fixture() -> Model {
+        let mut defs = BTreeMap::new();
+        let y = |s: &str| serde_yaml::from_str::<Value>(s).expect("valid yaml");
+        defs.insert(
+            "database/tables/process_managers.yaml".into(),
+            y("payment_process_manager:\n  columns:\n    cart_id: { type: text }\n"),
+        );
+        defs.insert("database/tables/referential.yaml".into(), y("ref_currency:\n  columns:\n    code: { type: text }\n"));
+        defs.insert("commands.yaml".into(), y("PlaceOrder:\n  type: object\nCartLine:\n  type: object\n"));
+        defs.insert("scalars.yaml".into(), y("OrderId:\n  type: string\nOrderStatus:\n  enum: [NEW, PAID]\n"));
+        Model { defs }
+    }
+
+    #[test]
+    fn classify_separates_kinds_that_share_a_file_or_a_directory() {
+        let m = kind_fixture();
+        let handled: BTreeSet<String> = ["PlaceOrder".to_string()].into_iter().collect();
+        let k = |r: &str| {
+            let p = parse_ref(r).expect("parses");
+            classify(&p.file, &p.path, resolve_ref(&m, r, "x.yaml").expect("resolves"), &handled)
+        };
+        // Same directory, different kinds.
+        assert_eq!(k("database/tables/process_managers.yaml#/payment_process_manager"), Some(Kind::PmStateTable));
+        assert_eq!(k("database/tables/referential.yaml#/ref_currency"), Some(Kind::ReferentialTable));
+        assert_eq!(k("database/tables/process_managers.yaml#/payment_process_manager/columns/cart_id"), Some(Kind::TableColumn));
+        // Same file, different kinds: a handled command vs a shared payload sub-object.
+        assert_eq!(k("commands.yaml#/PlaceOrder"), Some(Kind::Command));
+        assert_eq!(k("commands.yaml#/CartLine"), Some(Kind::PayloadObject));
+        // A scalar with an `enum` is an enum scalar (what a lifecycle `status` requires).
+        assert_eq!(k("scalars.yaml#/OrderId"), Some(Kind::Scalar));
+        assert_eq!(k("scalars.yaml#/OrderStatus"), Some(Kind::EnumScalar));
+    }
+
+    #[test]
+    fn ref_kind_rejects_a_state_table_that_is_not_a_state_table() {
+        let mut m = kind_fixture();
+        m.defs.insert(
+            "processmanager.yaml".into(),
+            serde_yaml::from_str(
+                "RefundProcess:\n  state_table: { $ref: 'database/tables/referential.yaml#/ref_currency' }\n",
+            )
+            .expect("valid yaml"),
+        );
+        let mut issues = Vec::new();
+        validate_ref_kinds(&m, &mut issues);
+        let hit = issues.iter().find(|i| i.rule == "ref-kind").expect("kind violation reported");
+        assert!(hit.message.contains("referential table"), "{}", hit.message);
+        assert!(hit.message.contains("process-manager state table"), "{}", hit.message);
+    }
+
+    #[test]
+    fn ref_kind_accepts_the_right_state_table() {
+        let mut m = kind_fixture();
+        m.defs.insert(
+            "processmanager.yaml".into(),
+            serde_yaml::from_str(
+                "RefundProcess:\n  state_table: { $ref: 'database/tables/process_managers.yaml#/payment_process_manager' }\n",
+            )
+            .expect("valid yaml"),
+        );
+        let mut issues = Vec::new();
+        validate_ref_kinds(&m, &mut issues);
+        assert!(issues.is_empty(), "expected no issues, got {:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn ref_site_undeclared_is_fail_closed() {
+        let mut m = kind_fixture();
+        // A brand-new ref-carrying field nobody declared a contract for.
+        m.defs.insert(
+            "processmanager.yaml".into(),
+            serde_yaml::from_str("RefundProcess:\n  brand_new_field: { $ref: 'commands.yaml#/PlaceOrder' }\n")
+                .expect("valid yaml"),
+        );
+        let mut issues = Vec::new();
+        validate_ref_kinds(&m, &mut issues);
+        let hit = issues.iter().find(|i| i.rule == "ref-site-undeclared").expect("undeclared site reported");
+        assert!(hit.message.contains("'RefundProcess.brand_new_field'"), "{}", hit.message);
     }
 
     #[test]

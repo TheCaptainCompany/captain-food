@@ -3,6 +3,17 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-22 (16:00 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-22 — Ref-KIND contract (ADR-20260722-152201).** The validator's §1 proved only that a
+> `$ref` *resolves*; what it resolved to was checked ad hoc per site. New **§1b** classifies every ref
+> target by KIND — finer than its file (PM state table vs projection/referential/journal/staging table;
+> enum vs plain scalar; query vs mutation vs subscription; aggregate vs process manager; a `commands.yaml`
+> entry is a *command* only if an actor receives it, else a shared *payload object*) — and matches it
+> against `REF_CONTRACT`, one declared table of `(file glob, ref-site glob, allowed kinds)`. **Fail-closed**:
+> a ref site with no contract entry is an error (`ref-site-undeclared`), so a new ref-carrying DSL field
+> cannot land undeclared. Caught the live case: `state_table` accepted any `database/tables/*` table.
+> Two widenings recorded in the ADR (service op input may be an event; the screens UI tree is i18n keys).
+> `make validate` 0 errors / 26 known warnings, no generated drift, 21 codegen tests green.
+
 > 🚧 **2026-07-22 — #75: marketplace content-split (ADR-20260722-160000, realizes ADR-20260722-091500/-101500).**
 > Extracted the Captain **marketplace** front office out of the storefront: new
 > `specs/screens/captain_frontoffice.yaml` (+ sidecar) holds `home`/`search` discovery + `partner_landing`
