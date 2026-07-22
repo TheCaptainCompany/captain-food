@@ -207,11 +207,48 @@ This PR builds the **left box** of §1’s diagram, minus the live data edges:
   `customer_screens.yaml#/component_registry`) emitted by the codegen into
   `crates/web/src/generated/registry.rs`. The renderer **dispatches on this enum**, so a screen can never
   name a component outside the spec.
-- **renderer skeleton** — renders **one static screen** through that registry (SSR + hydration wiring is
-  the in-progress part of this split).
+- **renderer skeleton** — renders **one static screen** through that registry: `render_home_html` produces
+  it server-side (`ssr`), and the `hydrate()` wasm entry attaches to the `data-hydrate` root.
 
 Deferred to later splits: live `resolvers`/`actions` + session/cookie layer (#12) + the two-step mutation
 layer (#17) → split 2; checkout (Stripe) + order tracking subscriptions → split 3.
+
+---
+
+## 7. Prior art — a proven technique, and where the markup lives
+
+SDUI is not novel; it is a proven pattern at scale. Publicly documented adopters include **Meta**
+(Instagram), **Airbnb** (their server-driven “Ghost”/GP systems), **Netflix**, **Lyft**, **Reddit** and
+**Tinder** — all use it to ship UI changes and experiments **without app-store releases** and to drive one
+screen definition across web + iOS + Android. It is common in mobility/travel marketplaces for the same
+reason (one product surface, many native + web clients).
+
+**How Captain.Food differs — _spec-driven_ SDUI.** Classic SDUI ships UI as **runtime JSON**: the client
+trusts whatever screen the server sends, so a screen can reference a component the client lacks or data the
+API doesn’t serve — caught only at runtime. Ours is stricter:
+
+- screens live in a **build-time DSL** (`customer_screens.yaml`), not ad-hoc server JSON,
+- the component allowlist + every resolver/action binding are **validator-proven against the GraphQL API**
+  (“the API answers the UI”) before anything ships,
+- the client component **registry is generated** from that spec (`ComponentKind`),
+
+so a screen can only ever name components the client has and data the API serves. We keep SDUI’s payoff
+(screens as data, one spec across platforms) while removing its main failure mode.
+
+**Where the HTML/markup lives.** There are **no HTML template files** and **no string-templating engine**
+(no Tera/Handlebars). Markup is written in **Rust with Leptos `view!`** and compiled — WASM on the client,
+SSR on the server. Three distinct layers:
+
+| Layer | Where it lives | Generated or hand-written |
+|---|---|---|
+| Which components exist (allowlist) | `component_registry` → `crates/web/src/generated/registry.rs` | **generated** from the spec |
+| Each component’s markup (`restaurant_card`, `cta_banner`, …) | a Leptos `view!` component per `ComponentKind` in `crates/web` | **hand-written Rust**, compiled |
+| Screen composition (order, props, text) | `customer_screens.yaml` + `design_tokens` | **data** (spec-driven; later runtime-editable via Supabase `screen_specs`) |
+
+The generated registry **dispatches** a spec `type` to its Rust component — the component *is* the markup.
+Design tokens (colors, spacing, radius) come from the spec and feed CSS. This is exactly why the markup is
+type-checked Rust rather than free-form HTML: the compiler + the validator together guarantee every screen
+the spec can express is one the client can actually render and the API can actually feed.
 
 ---
 
