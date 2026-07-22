@@ -3,6 +3,27 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-21 (17:54 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-22 — #62: delivery-delay satisfaction survey + post-delivery tip/reward prompt
+> (ADR-20260722-101500 — realizes the #60 deferral).** After a delivered DELIVERY order the customer is
+> asked one timeliness question (*was the delivery on time?*) and, at the same moment, prompted to tip
+> the courier — the Uber Eats / Deliveroo pattern. Tipping already existed (`TipOrder`/`OrderTipped`,
+> ADR-012), so the tip is **reused** (recipient RIDER, or RESTAURANT for self-dispatch); the new work is
+> the survey signal + the restaurant-facing insight. New: scalar `DeliveryTimeliness`
+> `{ON_TIME, ACCEPTABLE_DELAY, TOO_LATE}` + `DeliveryDissatisfactionReason`; command
+> `RecordDeliverySatisfaction` → event `DeliverySatisfactionRecorded` on the Order aggregate (guards mirror
+> `RateOrder`: DELIVERED-only, record-once via `DeliverySatisfactionAlreadyRecorded`); the verdict folds
+> into `OrderTracking` (`Order.deliveryTimeliness`, null until answered → hides the prompt) **and** the new
+> single-event fold view `View_DeliverySatisfaction` behind the `restaurantDeliverySatisfaction` query
+> (RESTAURANT/RESTAURANT_ACCOUNT/ADMIN — the self-dispatch-vs-Captain signal). Completeness (ADR-0032): 2
+> rules, 3 behaviour tests, a customer + a restaurant story step, translations, the enriched post-delivery
+> `rating_sheet` (timeliness chips + `tip_amount_selector`). Migration `20260722000000`
+> (`ref_delivery_timeliness` + `ordertracking.delivery_timeliness` + the view; `REQUIRED_SCHEMA_VERSION`
+> bumped). Codegen: the Order `From<OrderTrackingRow>` template gained the field. `make validate` 0 errors,
+> workspace green (222 application tests + full suite). **One follow-up** (codebase convention): the
+> `restaurantDeliverySatisfaction` **read resolver** is a `not implemented` stub until a
+> `PgDeliverySatisfactionRepository` + composition wiring lands — the write path, both projections and the
+> fold view are complete.
+
 > ✅ **2026-07-21 — Deployment build model changed & LIVE: CI builds the image, Render only pulls it
 > (ADR-20260721-175411, amends ADR-0042).** Render meters build-pipeline minutes at a $0 cap, so
 > compiling the Rust workspace on Render (`runtime: docker`) repeatedly failed deploys under the

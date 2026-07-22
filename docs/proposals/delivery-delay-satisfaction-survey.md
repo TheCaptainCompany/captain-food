@@ -1,7 +1,8 @@
 # Design Proposal — Delivery-delay satisfaction check + post-delivery tip/reward prompt (#62)
 
-> **Status:** Proposed — plan-mode proposal (DSL + read model + SDUI). **No `specs/**` or code changed
-> yet.** On approval it becomes an ADR that lands with the implementation.
+> **Status:** ✅ Approved & implemented (2026-07-22) — landed with **ADR-20260722-101500**. The recorded
+> decision is the ADR; this proposal is kept as the design narrative. One follow-up remains: the
+> `restaurantDeliverySatisfaction` read resolver (stubbed until its read repo lands — see the ADR).
 >
 > **Depends on:** **#60** (delivery dispatch strategy foundation, ✅ ADR-20260721-161939) — it emits the
 > terminal delivery signals (`delivered` / `late` facts across both Captain- and restaurant-dispatch)

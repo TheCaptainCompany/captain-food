@@ -132,6 +132,7 @@ types:
       restaurantStars: { $ref: 'scalars.yaml#/StarRating', nullable: true }   # null until rated
       ratingComment: { $ref: 'scalars.yaml#/RatingComment', nullable: true }
       riderThumb: { $ref: 'scalars.yaml#/ThumbRating', nullable: true }
+      deliveryTimeliness: { $ref: 'scalars.yaml#/DeliveryTimeliness', nullable: true }   # #62 delay-survey answer; null until answered (hides the prompt once set)
       riderTip: { $ref: 'entities.yaml#/Money', nullable: true }        # Σ tips to the rider (any tipper)
       restaurantTip: { $ref: 'entities.yaml#/Money', nullable: true }   # Σ tips to the restaurant
       captainTip: { $ref: 'entities.yaml#/Money', nullable: true }      # Σ tips to Captain
@@ -275,6 +276,18 @@ types:
       requestedAt: { type: string, format: date-time }
       pickedUpAt: { type: string, format: date-time, nullable: true }
       deliveredAt: { type: string, format: date-time, nullable: true }
+  DeliverySatisfaction:
+    description: >
+      One customer's delivery-delay satisfaction answer for an order (#62): the timeliness verdict and
+      optional reason. Serves the restaurant's timeliness insight (self-dispatch-vs-Captain signal).
+    reads: [{ $ref: 'database/projection_views.yaml#/View_DeliverySatisfaction' }]
+    properties:
+      orderId: { $ref: 'scalars.yaml#/OrderId' }
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      timeliness: { $ref: 'scalars.yaml#/DeliveryTimeliness' }
+      reason: { $ref: 'scalars.yaml#/DeliveryDissatisfactionReason', nullable: true }
+      recordedAt: { type: string, format: date-time }
+
   Refund:
     description: >
       A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin
@@ -494,6 +507,17 @@ queries:
     returns: { $ref: '#/types/DeliveryJob', array: true }
     roles: [RESTAURANT, RESTAURANT_ACCOUNT]
     slice: V0
+  restaurantDeliverySatisfaction:
+    description: >
+      A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the
+      customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced
+      server-side. Optionally filtered to a single timeliness verdict.
+    args:
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId', required: true }
+      timeliness: { $ref: 'scalars.yaml#/DeliveryTimeliness' }
+    returns: { $ref: '#/types/DeliverySatisfaction', array: true }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V1
 
   pendingRefunds:
     description: >
@@ -795,6 +819,10 @@ mutations:
     slice: V1
   rateRestaurant:
     command: { $ref: 'commands.yaml#/RateRestaurant' }
+    roles: [CUSTOMER]
+    slice: V1
+  recordDeliverySatisfaction:
+    command: { $ref: 'commands.yaml#/RecordDeliverySatisfaction' }
     roles: [CUSTOMER]
     slice: V1
   tipOrder:

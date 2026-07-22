@@ -1,4 +1,4 @@
-//! The 37-column `ordertracking` table ↔ [`OrderTrackingRow`] mapping, both directions — shared by the
+//! The 38-column `ordertracking` table ↔ [`OrderTrackingRow`] mapping, both directions — shared by the
 //! read repository (decode) and the projection worker (load current state + upsert the folded row).
 //!
 //! Column conventions (ADR-0037/0040): `status`/`service_type`/`uber_basis`/`rider_thumb`/
@@ -25,7 +25,8 @@ pub(crate) const COLUMNS: &str = "order_id, ref, restaurant_id, customer_id, sta
      restaurant_payout_cents, rider_payout_cents, captain_net_cents, uber_total_cents, \
      uber_restaurant_cents, uber_rider_cents, uber_platform_cents, uber_basis, delivery_address, \
      estimated_ready_at, placed_at, status_changed_at, payment_intent_id, payment_status, restaurant_stars, \
-     rating_comment, rider_thumb, rider_tip_cents, restaurant_tip_cents, captain_tip_cents, rated_at, \
+     rating_comment, rider_thumb, delivery_timeliness, rider_tip_cents, restaurant_tip_cents, \
+     captain_tip_cents, rated_at, \
      delivery_status, courier, estimated_dropoff_at, created_at, updated_at";
 
 /// Normalize a nullable jsonb: a JSON `null` in the column (or in the row) means "no value".
@@ -81,6 +82,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<OrderTrackingRow, DomainError> {
             .map_err(db_err)?
             .map(RatingComment),
         rider_thumb: opt_from_ord(row.try_get("rider_thumb").map_err(db_err)?)?,
+        delivery_timeliness: opt_from_ord(row.try_get("delivery_timeliness").map_err(db_err)?)?,
         rider_tip_cents: opt_cents(row.try_get("rider_tip_cents").map_err(db_err)?),
         restaurant_tip_cents: opt_cents(row.try_get("restaurant_tip_cents").map_err(db_err)?),
         captain_tip_cents: opt_cents(row.try_get("captain_tip_cents").map_err(db_err)?),
@@ -105,7 +107,7 @@ pub async fn upsert(pool: &PgPool, row: &OrderTrackingRow) -> Result<(), DomainE
     let sql = format!(
         "INSERT INTO ordertracking ({COLUMNS}) VALUES \
          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,\
-          $25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38) \
+          $25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39) \
          ON CONFLICT (order_id) DO UPDATE SET \
          ref = EXCLUDED.ref, \
          restaurant_id = EXCLUDED.restaurant_id, \
@@ -135,6 +137,7 @@ pub async fn upsert(pool: &PgPool, row: &OrderTrackingRow) -> Result<(), DomainE
          restaurant_stars = EXCLUDED.restaurant_stars, \
          rating_comment = EXCLUDED.rating_comment, \
          rider_thumb = EXCLUDED.rider_thumb, \
+         delivery_timeliness = EXCLUDED.delivery_timeliness, \
          rider_tip_cents = EXCLUDED.rider_tip_cents, \
          restaurant_tip_cents = EXCLUDED.restaurant_tip_cents, \
          captain_tip_cents = EXCLUDED.captain_tip_cents, \
@@ -175,6 +178,7 @@ pub async fn upsert(pool: &PgPool, row: &OrderTrackingRow) -> Result<(), DomainE
         .bind(row.restaurant_stars.as_ref().map(|v| v.0 as i32))
         .bind(row.rating_comment.as_ref().map(|v| v.0.clone()))
         .bind(opt_to_ord(&row.rider_thumb))
+        .bind(opt_to_ord(&row.delivery_timeliness))
         .bind(row.rider_tip_cents.as_ref().map(|v| v.0))
         .bind(row.restaurant_tip_cents.as_ref().map(|v| v.0))
         .bind(row.captain_tip_cents.as_ref().map(|v| v.0))

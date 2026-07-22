@@ -445,6 +445,7 @@ OrderTracking:
     - { $ref: 'events.yaml#/PaymentRefunded' }
     - { $ref: 'events.yaml#/OrderRated' }
     - { $ref: 'events.yaml#/RestaurantRated' }
+    - { $ref: 'events.yaml#/DeliverySatisfactionRecorded' }
     - { $ref: 'events.yaml#/OrderTipped' }
     - { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
     - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
@@ -455,6 +456,7 @@ OrderTracking:
     - "`payment_status` is folded from the Stripe payment facts."
     - "`delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob."
     - "Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating."
+    - "`delivery_timeliness` is the customer's post-delivery delay verdict (DeliverySatisfactionRecorded; #62); null until answered — the client hides the survey once set. The restaurant-facing aggregate is View_DeliverySatisfaction."
     - "`*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals."
     - "`uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net)."
   indexes:
@@ -591,6 +593,11 @@ OrderTracking:
     rider_thumb:
       from: [{ $ref: 'events.yaml#/OrderRated/properties/riderThumb' }]
       nullable: true
+    delivery_timeliness:
+      type: { $ref: 'scalars.yaml#/DeliveryTimeliness' }
+      from: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded/properties/timeliness' }]
+      nullable: true
+      note: "Customer's post-delivery delay verdict (#62); null until answered."
     rider_tip_cents:
       type: { $ref: 'scalars.yaml#/MoneyCents' }
       from: [{ $ref: 'events.yaml#/OrderTipped/properties/tips' }]
@@ -611,9 +618,10 @@ OrderTracking:
       from:
         - { $ref: 'events.yaml#/OrderRated' }
         - { $ref: 'events.yaml#/RestaurantRated' }
+        - { $ref: 'events.yaml#/DeliverySatisfactionRecorded' }
         - { $ref: 'events.yaml#/OrderTipped' }
       nullable: true
-      note: "Occurrence time of the latest rating/tip event."
+      note: "Occurrence time of the latest rating/tip/survey event."
     delivery_status:
       type: { $ref: 'scalars.yaml#/DeliveryStatus' }
       from:

@@ -591,6 +591,16 @@ pub struct RateRestaurant {
     pub comment: Option<RatingComment>,
 }
 
+/// Customer answers the post-delivery delay-satisfaction survey on a delivered DELIVERY order (#62): was the delivery on time? Optional and recorded once per order (final). Beside the rider/restaurant ratings; the subjective signal the restaurant reads to decide self-dispatch vs Captain routing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordDeliverySatisfaction {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub timeliness: DeliveryTimeliness,
+    pub reason: Option<DeliveryDissatisfactionReason>,
+}
+
 /// Customer tips one or more of the rider / restaurant / Captain on an order (ADR-012). Optional and SEPARATE from the price — Captain keeps 0% (100% passes through). Additive: may be sent at checkout or post-delivery; multiple tips accumulate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

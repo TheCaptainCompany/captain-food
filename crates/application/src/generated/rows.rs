@@ -128,6 +128,7 @@ pub struct OrderTrackingRow {
     pub restaurant_stars: Option<StarRating>,
     pub rating_comment: Option<RatingComment>,
     pub rider_thumb: Option<ThumbRating>,
+    pub delivery_timeliness: Option<DeliveryTimeliness>,
     pub rider_tip_cents: Option<MoneyCents>,
     pub restaurant_tip_cents: Option<MoneyCents>,
     pub captain_tip_cents: Option<MoneyCents>,

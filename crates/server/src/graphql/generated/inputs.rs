@@ -829,6 +829,20 @@ pub struct RateRestaurantInput {
     pub comment: Option<RatingComment>,
 }
 
+/// Customer answers the post-delivery delay-satisfaction survey on a delivered DELIVERY order (#62): was the delivery on time? Optional and recorded once per order (final). Beside the rider/restaurant ratings; the subjective signal the restaurant reads to decide self-dispatch vs Captain routing.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordDeliverySatisfactionInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "timeliness")]
+    pub timeliness: DeliveryTimeliness,
+    #[graphql(name = "reason")]
+    pub reason: Option<DeliveryDissatisfactionReason>,
+}
+
 /// Customer tips one or more of the rider / restaurant / Captain on an order (ADR-012). Optional and SEPARATE from the price — Captain keeps 0% (100% passes through). Additive: may be sent at checkout or post-delivery; multiple tips accumulate.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
@@ -1045,6 +1059,15 @@ pub struct RestaurantDeliveriesQueryInput {
     pub restaurant_id: RestaurantId,
     #[graphql(name = "status")]
     pub status: Option<DeliveryStatus>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantDeliverySatisfactionQueryInput {
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "timeliness")]
+    pub timeliness: Option<DeliveryTimeliness>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

@@ -2654,6 +2654,10 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
+    #[graphql(name = "recordDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn record_delivery_satisfaction(&self, input: RecordDeliverySatisfactionInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        Err(async_graphql::Error::new("not implemented"))
+    }
     #[graphql(name = "tipOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_customer_restaurant_account_restaurant")]
     async fn tip_order(&self, ctx: &async_graphql::Context<'_>, input: TipOrderInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();

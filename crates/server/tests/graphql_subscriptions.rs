@@ -231,6 +231,7 @@ fn order_row(order_id: uuid::Uuid, restaurant_id: uuid::Uuid, status: ds::OrderS
         restaurant_stars: None,
         rating_comment: None,
         rider_thumb: None,
+        delivery_timeliness: None,
         rider_tip_cents: None,
         restaurant_tip_cents: None,
         captain_tip_cents: None,

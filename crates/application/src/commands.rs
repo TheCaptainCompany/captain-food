@@ -74,15 +74,16 @@ use domain::delivery_job::DeliveryJobState;
 use domain::generated::commands::{
     AcceptDelivery, AddCartLine, AssignDeliveryToPartner, BindCartToCustomer, CancelDelivery,
     ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, EscalateDelivery,
-    PlaceOrder, RateOrder, RateRestaurant, RegisterRider, RemoveCartLine, ReportDeliveryIssue,
-    RequestRefund, ResolveDeliveryIssue, TipOrder, UnassignDeliveryFromPartner, UpdateRiderInfo,
+    PlaceOrder, RateOrder, RateRestaurant, RecordDeliverySatisfaction, RegisterRider, RemoveCartLine,
+    ReportDeliveryIssue, RequestRefund, ResolveDeliveryIssue, TipOrder, UnassignDeliveryFromPartner,
+    UpdateRiderInfo,
 };
 use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
     CartBoundToCustomer, CartLineAdded, CartLineQuantityChanged, CartLineRemoved, CartStarted,
     DeliveryAcceptedByRider, DeliveryAssignedToPartner, DeliveryCancelled, DeliveryCompleted,
     DeliveryDeclinedByRider, DeliveryEscalationRequested, DeliveryIssueReported, DeliveryIssueResolved,
-    DeliveryPickedUp,
+    DeliveryPickedUp, DeliverySatisfactionRecorded,
     DeliveryUnassignedFromPartner, OrderRated, OrderTipped, PaymentIntentCreated, RefundRequested,
     RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered,
 };
@@ -970,6 +971,33 @@ pub async fn rate_restaurant(
         customer_id: state.customer_id,
         stars: cmd.stars,
         comment: cmd.comment,
+    });
+    Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RecordDeliverySatisfaction` → emit
+/// `events.yaml#/DeliverySatisfactionRecorded` (#62). Only a DELIVERED order, recorded exactly once
+/// (rules.yaml#/DeliverySatisfactionRecordedOncePerDeliveredOrder).
+pub async fn record_delivery_satisfaction(
+    store: &dyn EventStore,
+    cmd: RecordDeliverySatisfaction,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_order(store, &cmd.order_id, &cmd.restaurant_id).await?;
+    if state.status != OrderStatus::DELIVERED {
+        return Err(invalid_order_status(&cmd.order_id, state.status));
+    }
+    if state.delivery_satisfaction_recorded {
+        return Err(reject(
+            "DeliverySatisfactionAlreadyRecorded",
+            json!({ "orderId": cmd.order_id }),
+        ));
+    }
+    let event = DomainEvent::DeliverySatisfactionRecorded(DeliverySatisfactionRecorded {
+        order_id: cmd.order_id,
+        restaurant_id: cmd.restaurant_id,
+        timeliness: cmd.timeliness,
+        reason: cmd.reason,
     });
     Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
 }

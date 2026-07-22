@@ -287,6 +287,9 @@ fixtures:
   restaurantRated:
     type: { $ref: 'events.yaml#/RestaurantRated' }
     data: { orderId: "order-1", restaurantId: "resto-1", stars: 5, comment: "Excellent!" }
+  deliverySatisfactionRecorded:
+    type: { $ref: 'events.yaml#/DeliverySatisfactionRecorded' }
+    data: { orderId: "order-1", restaurantId: "resto-1", timeliness: "ON_TIME" }
   orderTipped:
     type: { $ref: 'events.yaml#/OrderTipped' }
     data: { orderId: "order-1", restaurantId: "resto-1", tippedBy: "CUSTOMER", tips: [{ recipient: "RIDER", amount: { amountCents: 200, currency: "EUR" } }, { recipient: "RESTAURANT", amount: { amountCents: 100, currency: "EUR" } }, { recipient: "CAPTAIN", amount: { amountCents: 50, currency: "EUR" } }] }
@@ -1742,6 +1745,34 @@ tests:
       data: { orderId: "order-1", restaurantId: "resto-1", stars: 4 }
     thrown:
       - { $ref: 'errors.yaml#/RestaurantAlreadyRated' }
+
+  TestDeliverySatisfactionRecorded:
+    name: "Customer answers the delivery-delay survey (on time) after delivery; the verdict feeds the restaurant insight (#62)"
+    rules:
+      - { $ref: 'rules.yaml#/DeliverySatisfactionRecordedOncePerDeliveredOrder' }
+      - { $ref: 'rules.yaml#/DeliverySatisfactionVisibleToRestaurant' }
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderDelivered' }
+    when:
+      type: { $ref: 'commands.yaml#/RecordDeliverySatisfaction' }
+      data: { orderId: "order-1", restaurantId: "resto-1", timeliness: "ON_TIME" }
+    then:
+      - { $ref: '#/fixtures/deliverySatisfactionRecorded' }
+
+  TestDeliverySatisfactionIsRejected:
+    name: "Rejects the delivery survey on a missing/not-delivered order or answering it twice"
+    rules: [{ $ref: 'rules.yaml#/DeliverySatisfactionRecordedOncePerDeliveredOrder' }]
+    actor: { $ref: 'actors.yaml#/Order' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RecordDeliverySatisfaction' }
+      data: { orderId: "order-missing", restaurantId: "resto-1", timeliness: "TOO_LATE", reason: "Arrived cold, 40 min late" }
+    thrown:
+      - { $ref: 'errors.yaml#/OrderNotFound' }
+      - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      - { $ref: 'errors.yaml#/DeliverySatisfactionAlreadyRecorded' }
 
   TestOrderTipped:
     name: "Customer tips the rider, restaurant and Captain after delivery"

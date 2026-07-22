@@ -337,6 +337,11 @@ fn fx_restaurant_rated() -> DomainEvent {
     DomainEvent::RestaurantRated(evs::RestaurantRated { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, stars: sc::StarRating(5), comment: Some(sc::RatingComment("Excellent!".into())) })
 }
 
+/// tests.yaml#/fixtures/deliverySatisfactionRecorded — events.yaml#/DeliverySatisfactionRecorded
+fn fx_delivery_satisfaction_recorded() -> DomainEvent {
+    DomainEvent::DeliverySatisfactionRecorded(evs::DeliverySatisfactionRecorded { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), timeliness: sc::DeliveryTimeliness::ON_TIME, reason: None })
+}
+
 /// tests.yaml#/fixtures/orderTipped — events.yaml#/OrderTipped
 fn fx_order_tipped() -> DomainEvent {
     DomainEvent::OrderTipped(evs::OrderTipped { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), tipped_by: sc::Tipper::CUSTOMER, customer_id: None, tips: vec![ent::Tip { recipient: sc::TipRecipient::RIDER, amount: ent::Money { amount_cents: sc::MoneyCents(200), currency: sc::CurrencyCode("EUR".into()) } }, ent::Tip { recipient: sc::TipRecipient::RESTAURANT, amount: ent::Money { amount_cents: sc::MoneyCents(100), currency: sc::CurrencyCode("EUR".into()) } }, ent::Tip { recipient: sc::TipRecipient::CAPTAIN, amount: ent::Money { amount_cents: sc::MoneyCents(50), currency: sc::CurrencyCode("EUR".into()) } }] })
@@ -2032,6 +2037,36 @@ async fn test_order_rate_restaurant_twice_is_rejected() {
     let err = result.expect_err("TestOrderRateRestaurantTwiceIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestOrderRateRestaurantTwiceIsRejected", &err, &["RestaurantAlreadyRated"]);
     bed.assert_appended("TestOrderRateRestaurantTwiceIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestDeliverySatisfactionRecorded — "Customer answers the delivery-delay survey (on time) after delivery; the verdict feeds the restaurant insight (#62)"
+/// rules: DeliverySatisfactionRecordedOncePerDeliveredOrder, DeliverySatisfactionVisibleToRestaurant
+#[tokio::test]
+async fn test_delivery_satisfaction_recorded() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed(), fx_order_delivered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RecordDeliverySatisfaction { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), timeliness: sc::DeliveryTimeliness::ON_TIME, reason: None };
+    let result = crate::commands::record_delivery_satisfaction(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliverySatisfactionRecorded: the spec expects acceptance");
+    bed.assert_appended("TestDeliverySatisfactionRecorded", &before, &[
+        (format!("Order-{}", support::uid("order-1")), fx_delivery_satisfaction_recorded()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliverySatisfactionIsRejected — "Rejects the delivery survey on a missing/not-delivered order or answering it twice"
+/// rules: DeliverySatisfactionRecordedOncePerDeliveredOrder
+#[tokio::test]
+async fn test_delivery_satisfaction_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RecordDeliverySatisfaction { order_id: sc::OrderId(support::uid("order-missing")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), timeliness: sc::DeliveryTimeliness::TOO_LATE, reason: Some(sc::DeliveryDissatisfactionReason("Arrived cold, 40 min late".into())) };
+    let result = crate::commands::record_delivery_satisfaction(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDeliverySatisfactionIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDeliverySatisfactionIsRejected", &err, &["OrderNotFound", "InvalidOrderStatus", "DeliverySatisfactionAlreadyRecorded"]);
+    bed.assert_appended("TestDeliverySatisfactionIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestOrderTipped — "Customer tips the rider, restaurant and Captain after delivery"

@@ -92,7 +92,7 @@ pub fn wire() -> HealthDto {
 /// writes `command_journal` at acceptance, so the app cannot serve writes without it.
 /// `20260721150000` = the Uber Direct webhook mirror (external_uber_direct_events, #57): the adapter's
 /// inbound ingestor stages verified facts into it, so the app must not serve without the table.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260721150000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260722000000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see

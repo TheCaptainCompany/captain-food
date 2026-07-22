@@ -452,6 +452,12 @@ Order:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
         - { $ref: 'errors.yaml#/RestaurantAlreadyRated' }
+    - message: { $ref: 'commands.yaml#/RecordDeliverySatisfaction' }
+      emits: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }   # only a DELIVERED order can be surveyed
+        - { $ref: 'errors.yaml#/DeliverySatisfactionAlreadyRecorded' }
     - message: { $ref: 'commands.yaml#/TipOrder' }
       emits: [{ $ref: 'events.yaml#/OrderTipped' }]
       throws:

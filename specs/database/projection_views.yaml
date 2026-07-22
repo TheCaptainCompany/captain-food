@@ -202,6 +202,39 @@ View_DeliveryJob:
       from: [{ $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/reason' }]
       nullable: true
       note: "Reason of the latest partner decline (the job stays PENDING and is re-offered, up to the 3-offer cap — ADR-20260720-004556); null if never rejected."
+# Delivery-delay satisfaction (#62) — one row per SURVEYED order, folding the customer's timeliness
+# verdict (DeliverySatisfactionRecorded on the Order stream). Feeds the restaurant-facing timeliness
+# insight (restaurantDeliverySatisfaction): the subjective signal behind "is self-dispatch still worth
+# it?" A row exists only once the customer answers; restaurant_id/timeliness come straight off the fact.
+View_DeliverySatisfaction:
+  aggregate: Order
+  slice: V1
+  fedBy:
+    - { $ref: 'events.yaml#/DeliverySatisfactionRecorded' }
+  rules:
+    - "One row per order, present only once the customer has answered the survey (DeliverySatisfactionRecorded); record-once, so the fold never sees a second answer."
+    - "`timeliness` is the customer's verdict (ON_TIME / ACCEPTABLE_DELAY / TOO_LATE); the restaurant reads it, filtered by restaurant_id, to weigh self-dispatch vs Captain routing."
+  indexes:
+    - [restaurant_id, timeliness]   # the restaurant's timeliness breakdown
+  columns:
+    order_id:
+      from: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded/properties/orderId' }]
+      pk: true
+    restaurant_id:
+      from: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded/properties/restaurantId' }]
+      index: true
+    timeliness:
+      type: { $ref: 'scalars.yaml#/DeliveryTimeliness' }
+      from: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded/properties/timeliness' }]
+    reason:
+      type: { $ref: 'scalars.yaml#/DeliveryDissatisfactionReason' }
+      from: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded/properties/reason' }]
+      nullable: true
+    recorded_at:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/DeliverySatisfactionRecorded' }]
+      note: "DeliverySatisfactionRecorded occurrence time."
+
 # Refund queue (RefundProcess) — the pendingRefunds read model. One row per refund opened on a captured
 # payment (RefundOpened, delivered by RefundProcess to the Payment aggregate), folded with the decision
 # and settlement facts recorded on the same Payment stream. The full lifecycle stays in the view

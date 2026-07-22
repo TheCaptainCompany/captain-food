@@ -35,6 +35,9 @@ pub struct OrderState {
     pub delivery_rated: bool,
     /// Whether the restaurant was already rated for this order — `RestaurantAlreadyRated` (rate-once).
     pub restaurant_rated: bool,
+    /// Whether the delivery-delay satisfaction survey was already answered (#62) —
+    /// `DeliverySatisfactionAlreadyRecorded` (record-once).
+    pub delivery_satisfaction_recorded: bool,
 }
 
 impl OrderState {
@@ -66,6 +69,7 @@ fn apply(state: Option<OrderState>, event: &DomainEvent) -> Option<OrderState> {
                 customer_id: e.customer_id,
                 delivery_rated: false,
                 restaurant_rated: false,
+                delivery_satisfaction_recorded: false,
             });
         }
     }
@@ -78,6 +82,7 @@ fn apply(state: Option<OrderState>, event: &DomainEvent) -> Option<OrderState> {
     match event {
         DomainEvent::OrderRated(_) => s.delivery_rated = true,
         DomainEvent::RestaurantRated(_) => s.restaurant_rated = true,
+        DomainEvent::DeliverySatisfactionRecorded(_) => s.delivery_satisfaction_recorded = true,
         _ => {}
     }
     Some(s)

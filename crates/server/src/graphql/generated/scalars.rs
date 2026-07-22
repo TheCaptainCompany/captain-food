@@ -987,6 +987,50 @@ impl From<RatingComment> for ds::RatingComment {
     }
 }
 
+/// The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the restaurant's self-dispatch-vs-Captain decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum DeliveryTimeliness {
+    #[graphql(name = "ON_TIME")]
+    ON_TIME,
+    #[graphql(name = "ACCEPTABLE_DELAY")]
+    ACCEPTABLE_DELAY,
+    #[graphql(name = "TOO_LATE")]
+    TOO_LATE,
+}
+impl From<ds::DeliveryTimeliness> for DeliveryTimeliness {
+    fn from(v: ds::DeliveryTimeliness) -> Self {
+        match v {
+            ds::DeliveryTimeliness::ON_TIME => Self::ON_TIME,
+            ds::DeliveryTimeliness::ACCEPTABLE_DELAY => Self::ACCEPTABLE_DELAY,
+            ds::DeliveryTimeliness::TOO_LATE => Self::TOO_LATE,
+        }
+    }
+}
+impl From<DeliveryTimeliness> for ds::DeliveryTimeliness {
+    fn from(v: DeliveryTimeliness) -> Self {
+        match v {
+            DeliveryTimeliness::ON_TIME => Self::ON_TIME,
+            DeliveryTimeliness::ACCEPTABLE_DELAY => Self::ACCEPTABLE_DELAY,
+            DeliveryTimeliness::TOO_LATE => Self::TOO_LATE,
+        }
+    }
+}
+
+/// Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryDissatisfactionReason(pub String);
+async_graphql::scalar!(DeliveryDissatisfactionReason, "DeliveryDissatisfactionReason", "Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62).");
+impl From<ds::DeliveryDissatisfactionReason> for DeliveryDissatisfactionReason {
+    fn from(v: ds::DeliveryDissatisfactionReason) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DeliveryDissatisfactionReason> for ds::DeliveryDissatisfactionReason {
+    fn from(v: DeliveryDissatisfactionReason) -> Self {
+        Self(v.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum Weekday {
     #[graphql(name = "MONDAY")]

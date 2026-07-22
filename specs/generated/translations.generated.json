@@ -511,6 +511,26 @@
     "en": "Add a comment (optional)",
     "fr": "Ajouter un commentaire (facultatif)"
   },
+  "rating.delivery.acceptable": {
+    "en": "A bit late, but OK",
+    "fr": "Un peu en retard, mais ça va"
+  },
+  "rating.delivery.on_time": {
+    "en": "On time",
+    "fr": "À l'heure"
+  },
+  "rating.delivery.reason_ph": {
+    "en": "What went wrong? (optional)",
+    "fr": "Qu'est-ce qui n'a pas été ? (facultatif)"
+  },
+  "rating.delivery.too_late": {
+    "en": "Too late",
+    "fr": "Trop en retard"
+  },
+  "rating.delivery_question": {
+    "en": "Was the delivery on time?",
+    "fr": "La livraison était-elle à l'heure ?"
+  },
   "rating.food_question": {
     "en": "How was the food?",
     "fr": "Comment était le repas ?"
@@ -594,5 +614,21 @@
   "search.restaurants": {
     "en": "Restaurants",
     "fr": "Restaurants"
+  },
+  "tip.custom": {
+    "en": "Other amount",
+    "fr": "Autre montant"
+  },
+  "tip.subtitle": {
+    "en": "100% goes to the person who delivered your order.",
+    "fr": "100 % revient à la personne qui a livré votre commande."
+  },
+  "tip.thanks": {
+    "en": "Thanks — your tip is on its way!",
+    "fr": "Merci — votre pourboire est en route !"
+  },
+  "tip.title": {
+    "en": "Tip your courier",
+    "fr": "Pourboire pour votre livreur"
   }
 }
