@@ -1568,6 +1568,44 @@ fn validate(model: &Model) -> Report {
                     }
                 }
             }
+            // --- Translation-ref scope (ADR-20260722-101500): the API refs live in `resolvers`/`actions`
+            // (validated above); EVERY OTHER `$ref` in a screen is a content/text slot and MUST be a
+            // translation ref that resolves to a real entry (a key carrying `messages`). This catches
+            // dangling/renamed keys AND text slots pointing at the wrong file/scope (e.g. an api.yaml or
+            // scalar ref where a string is expected).
+            if let Some(map) = cs.and_then(|v| v.as_mapping()) {
+                let mut refs: Vec<(String, String)> = Vec::new();
+                for (k, v) in map {
+                    match k.as_str() {
+                        Some("resolvers") | Some("actions") => {} // API bindings — validated above.
+                        Some(key) => collect_refs(v, &format!("{}.{}", sfkey, key), &mut refs),
+                        None => {}
+                    }
+                }
+                for (loc, rf) in &refs {
+                    // A screen-level realtime binding (`subscription: { $ref: api.yaml#/subscriptions/… }`)
+                    // is an API ref, not content — skip it (validated as an operation elsewhere).
+                    if loc.ends_with(".subscription") {
+                        continue;
+                    }
+                    match ref_target_file(rf, sfkey).as_deref() {
+                        Some(f) if f == "translations.yaml" || f.ends_with(".translations.yaml") => {
+                            if resolve_ref(model, rf, sfkey).and_then(|n| n.get("messages")).is_none() {
+                                issues.push(err(
+                                    "screen-translation-ref-unresolved",
+                                    loc.clone(),
+                                    format!("translation $ref '{}' does not resolve to a translation entry (a key with `messages`).", rf),
+                                ));
+                            }
+                        }
+                        other => issues.push(err(
+                            "screen-ref-out-of-scope",
+                            loc.clone(),
+                            format!("content $ref '{}' in a screen must be a translations key; it targets '{}'.", rf, other.unwrap_or("<local/unknown>")),
+                        )),
+                    }
+                }
+            }
         }
     }
 

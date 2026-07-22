@@ -33,7 +33,13 @@ Naming note (from the discussion): the spec folder stays **`specs/screens/`** �
    **merge** `translations.yaml` + every sidecar via a shared `translation_entries()` helper. The
    generated bundle stays a **single flat catalog** (`{ "<key>": { en, fr } }`), so `leptos_i18n` is
    unaffected.
-5. **`errors.yaml` unchanged** — backend anticipated-error messages.
+5. **Screen ref scope is now validated** — every `$ref` in a screen that is NOT an API binding
+   (top-level `resolvers`/`actions`, or a screen's realtime `subscription`) is a content/text slot and
+   MUST be a translation ref that resolves to a real entry (a key carrying `messages`). Two new rules:
+   `screen-translation-ref-unresolved` (dangling/renamed key) and `screen-ref-out-of-scope` (a text slot
+   pointing at the wrong file/scope, e.g. an api.yaml or scalar ref). This closes the previously
+   unchecked gap where a screen could reference a non-existent or mis-scoped string.
+6. **`errors.yaml` unchanged** — backend anticipated-error messages.
 
 ## Consequences
 
