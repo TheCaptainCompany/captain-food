@@ -1,7 +1,17 @@
 # ==============================================================================
-# Captain.Food — Web Customer App UI Specification (Spec-Driven Server-Driven UI)
+# Captain.Food — Restaurant Front-Office UI Specification (Spec-Driven Server-Driven UI)
 # ------------------------------------------------------------------------------
-# THE source of truth for the customer frontend (ADR-0033). Two layers:
+# The RESTAURANT FRONT OFFICE: a single restaurant's customer-facing storefront (catalog → cart →
+# checkout → order tracking), served per-tenant at {slug}.captain.food (audience roles PUBLIC + CUSTOMER).
+# The sibling CAPTAIN FRONT OFFICE (`captain_frontoffice.yaml`, to be created) is the cross-restaurant
+# MARKETPLACE, served at live.captain.food (then the bare captain.food). NOTE: the marketplace discovery
+# screens (home, search, categories) currently live in THIS file and are earmarked to move to
+# `captain_frontoffice.yaml` (content-split follow-up in the SDUI screens-taxonomy ADR). The restaurant
+# back office (staff dashboard) is `restaurant_backoffice.yaml`, with `rider.yaml` and `system.yaml` to
+# follow (one file per audience; ADR-0037 as refined by the SDUI screens-taxonomy ADR). Filenames carry
+# no `_screens` suffix — the `screens/` folder conveys it.
+#
+# THE source of truth for the restaurant front office (ADR-0033). Two layers:
 #   • Layout layer  — screens/components/props (this file; runtime-editable via Supabase screen_specs).
 #   • Data layer    — `resolvers` (reads) + `actions` (writes): a spec-declared ALLOWLIST, each $ref-bound
 #                     to an api.yaml query/mutation so the codegen PROVES the GraphQL API answers the UI.

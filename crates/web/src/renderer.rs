@@ -1,7 +1,7 @@
 //! The SDUI renderer (split 1/4 of #21).
 //!
 //! Every renderable node is keyed by a GENERATED [`ComponentKind`] (the spec allowlist), so a screen
-//! can only reference components declared in `customer_screens.yaml#/component_registry`. This first
+//! can only reference components declared in `restaurant_frontoffice.yaml#/component_registry`. This first
 //! slice renders ONE static screen. It compiles two ways from the SAME view tree:
 //!   * `ssr` (default, native)  — [`render_home_html`] produces the initial HTML on the server;
 //!   * `hydrate` (wasm32)       — [`hydrate`] attaches the client to that server-rendered DOM.

@@ -3,7 +3,9 @@
 ## Status
 
 Accepted (CTPO, 2026-07-03). Builds on ADR-0034/0035 (Rust codegen, crate layout) and ADR-0005 (read
-models). Realized incrementally.
+models). Realized incrementally. **Refined by ADR-20260722-091500** — SDUI screens are named by
+**audience** without the `_screens` suffix (`restaurant_frontoffice.yaml` etc.), and §4's "no ADMIN
+screen set" is relaxed to allow a future `system` screen set.
 
 ## Context
 

@@ -1,12 +1,24 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-22 (08:30 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-22 (09:15 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 🚧 **2026-07-22 — #71: SDUI screens taxonomy by audience (ADR-20260722-091500, refines ADR-0037).**
+> Renamed `specs/screens/customer_screens.yaml` → **`restaurant_frontoffice.yaml`** (the customer-facing
+> storefront at `{slug}.captain.food`, roles PUBLIC+CUSTOMER); files now named by **audience with no
+> `_screens` suffix** (folder conveys it). Two customer front offices split by host: the **Captain
+> marketplace** `captain_frontoffice.yaml` (cross-restaurant discovery @ `live.captain.food` → bare
+> `captain.food`, to be created — the `home`/`search` screens currently in `restaurant_frontoffice.yaml`
+> move there in a content-split follow-up) and the per-restaurant `restaurant_frontoffice.yaml`. Then
+> `restaurant_backoffice.yaml`/`rider.yaml`/`system.yaml` to follow. Codegen `SPEC_FILES` + doc/translation/registry emitters + generated docs and the
+> `crates/web` registry header updated (validator already generic over `screens/*.yaml`; no drift). ADR
+> relaxes ADR-0037 §4 to allow a future `system` screen set (impersonation still the "view as" path). No
+> API/behaviour change. `make rust` + `cargo build --workspace` green.
 
 > 🚧 **2026-07-21 — #21 frontend renderer STARTED, split 1/4 (#68, PR #69).** The Leptos/WASM SDUI
 > renderer (remaining-work item 5) is being built in the 4 sub-issues of #21 (ADR-20260720-143000).
 > **Split 1** stands up the runtime client seam: (1) a new codegen emitter (`emit_web_registry`) turns
-> `specs/screens/customer_screens.yaml#/component_registry` into `crates/web/src/generated/registry.rs`
+> `specs/screens/restaurant_frontoffice.yaml#/component_registry` into `crates/web/src/generated/registry.rs`
 > — a `ComponentKind` allowlist enum (`as_str`/`from_type`/`group`/`ALL`) the renderer dispatches on, so
 > the screens DSL stays the source of truth (codegen roadmap item 6); (2) `crates/web` now depends on
 > **Leptos 0.8** with an `ssr` (default, native) / `hydrate` (wasm32) feature split — the `renderer`

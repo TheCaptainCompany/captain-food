@@ -1,7 +1,7 @@
 //! Captain.Food shared types (ADR-0035).
 //!
 //! serde DTOs shared across crates and — once UniFFI is wired — exported to the mobile shells. The SDUI
-//! node/component/action types (`sdui_types`) will be GENERATED here from `customer_screens.yaml`.
+//! node/component/action types (`sdui_types`) will be GENERATED here from `restaurant_frontoffice.yaml`.
 
 use serde::{Deserialize, Serialize};
 

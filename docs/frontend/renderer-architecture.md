@@ -6,7 +6,7 @@
 >
 > Sources of truth: ADR-0033 (SDUI), ADR-0034 (full-stack Rust), ADR-0035 (clean-architecture crates),
 > ADR-0006 (role-as-path GraphQL), ADR-20260720-015500 (acceptance-first mutations),
-> `specs/architecture/c4-l2.yaml`, `specs/api.yaml`, `specs/screens/customer_screens.yaml`.
+> `specs/architecture/c4-l2.yaml`, `specs/api.yaml`, `specs/screens/restaurant_frontoffice.yaml`.
 
 ## TL;DR
 
@@ -56,7 +56,7 @@ flowchart TD
 ```
 
 **Read this as:** the frontend’s SDUI `resolvers`/`actions` are a spec-declared **allowlist**
-(`customer_screens.yaml`) bound by `$ref` to real `api.yaml` queries/mutations — the codegen **proves the
+(`restaurant_frontoffice.yaml`) bound by `$ref` to real `api.yaml` queries/mutations — the codegen **proves the
 API answers the UI**. The BFF answers queries from `View_*` read models (**never** raw `domain_events`),
 and turns mutations into commands that append events. A projector folds those events back into the
 `View_*` models. That last arrow — **events → projector → `View_*`** — is the sense in which the
@@ -106,8 +106,9 @@ sequenceDiagram
 
 1. **First paint / mobile Lighthouse over 90** — the user sees a real menu, not a spinner waiting on a
    WASM download.
-2. **SEO & link previews** — public discovery and per-restaurant pages are multi-tenant
-   (`{slug}.captain.food`); crawlers and share-cards need real HTML.
+2. **SEO & link previews** — both customer front offices need real HTML for crawlers/share-cards: the
+   **Captain marketplace** (`captain_frontoffice.yaml`) at `live.captain.food` → the bare `captain.food`,
+   and per-restaurant storefronts (`restaurant_frontoffice.yaml`) at the multi-tenant `{slug}.captain.food`.
 3. **Resilience** — the page is meaningful before (or without) the WASM app booting.
 
 SSR is a **first-load boundary** concern. After hydration the app is a normal reactive client.
@@ -204,7 +205,7 @@ frontend contract is identical.
 This PR builds the **left box** of §1’s diagram, minus the live data edges:
 
 - **generated component registry** — `ComponentKind` (the allowlist of component `type` keys from
-  `customer_screens.yaml#/component_registry`) emitted by the codegen into
+  `restaurant_frontoffice.yaml#/component_registry`) emitted by the codegen into
   `crates/web/src/generated/registry.rs`. The renderer **dispatches on this enum**, so a screen can never
   name a component outside the spec.
 - **renderer skeleton** — renders **one static screen** through that registry: `render_home_html` produces
@@ -227,7 +228,7 @@ reason (one product surface, many native + web clients).
 trusts whatever screen the server sends, so a screen can reference a component the client lacks or data the
 API doesn’t serve — caught only at runtime. Ours is stricter:
 
-- screens live in a **build-time DSL** (`customer_screens.yaml`), not ad-hoc server JSON,
+- screens live in a **build-time DSL** (`restaurant_frontoffice.yaml`), not ad-hoc server JSON,
 - the component allowlist + every resolver/action binding are **validator-proven against the GraphQL API**
   (“the API answers the UI”) before anything ships,
 - the client component **registry is generated** from that spec (`ComponentKind`),
@@ -243,7 +244,7 @@ SSR on the server. Three distinct layers:
 |---|---|---|
 | Which components exist (allowlist) | `component_registry` → `crates/web/src/generated/registry.rs` | **generated** from the spec |
 | Each component’s markup (`restaurant_card`, `cta_banner`, …) | a Leptos `view!` component per `ComponentKind` in `crates/web` | **hand-written Rust**, compiled |
-| Screen composition (order, props, text) | `customer_screens.yaml` + `design_tokens` | **data** (spec-driven; later runtime-editable via Supabase `screen_specs`) |
+| Screen composition (order, props, text) | `restaurant_frontoffice.yaml` + `design_tokens` | **data** (spec-driven; later runtime-editable via Supabase `screen_specs`) |
 
 The generated registry **dispatches** a spec `type` to its Rust component — the component *is* the markup.
 Design tokens (colors, spacing, radius) come from the spec and feed CSS. This is exactly why the markup is
@@ -254,7 +255,7 @@ the spec can express is one the client can actually render and the API can actua
 
 ## Glossary
 
-- **SDUI** — Server-Driven UI: screens are data (`customer_screens.yaml`), rendered by a generic
+- **SDUI** — Server-Driven UI: screens are data (`restaurant_frontoffice.yaml`), rendered by a generic
   registry-driven renderer (ADR-0033).
 - **BFF** — Backend-for-Frontend: the single `api` GraphQL, filtered per role by path (ADR-0006).
 - **`View_*`** — event-fed read models; queries read here, never `domain_events`.

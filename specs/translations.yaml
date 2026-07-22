@@ -1,7 +1,7 @@
 version: 1
 description: >
   Captain.Food UI translation catalog (ADR-0033) — the non-error counterpart of errors.yaml. Every
-  user-visible string in the SDUI screens (customer_screens.yaml) is a KEY here, referenced by
+  user-visible string in the SDUI screens (screens/*.yaml, e.g. restaurant_frontoffice.yaml) is a KEY here, referenced by
   `$ref: 'translations.yaml#/<key>'`, never hardcoded. Generated to a single translations.generated.json
   ({ "<key>": { en, fr } }).
 

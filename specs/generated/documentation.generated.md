@@ -12,7 +12,7 @@ that belong to no single context. Stories and Architecture span all contexts.
 **Roles**: 🌐 PUBLIC · 🙋 CUSTOMER · 🏪 RESTAURANT_ACCOUNT · 🍽️ RESTAURANT · 🛵 RIDER · 🛠️ ADMIN · 🔌 EXTERNAL
 **Markers**: ✅ required · ⬜ optional · 🛶 V0 · 🔭 V1 · 🔒 internal · ⚠️ design hole
 
-**Contents** — [🎬 Stories](#sec-stories) · [🔲 restaurant](#sec-ctx-restaurant) · [🔲 catalog](#sec-ctx-catalog) · [🔲 order](#sec-ctx-order) · [🔲 customer](#sec-ctx-customer) · [🔲 delivery](#sec-ctx-delivery) · [🔲 cross-cutting](#sec-ctx-cross-cutting) · [📱 Customer screens](#sec-screens) · [🌐 Translations](#sec-translations) · [🏛️ Architecture](#sec-architecture)
+**Contents** — [🎬 Stories](#sec-stories) · [🔲 restaurant](#sec-ctx-restaurant) · [🔲 catalog](#sec-ctx-catalog) · [🔲 order](#sec-ctx-order) · [🔲 customer](#sec-ctx-customer) · [🔲 delivery](#sec-ctx-delivery) · [🔲 cross-cutting](#sec-ctx-cross-cutting) · [📱 Screens](#sec-screens) · [🌐 Translations](#sec-translations) · [🏛️ Architecture](#sec-architecture)
 
 <a id="sec-stories"></a>
 ## 🎬 Stories
@@ -8163,9 +8163,9 @@ _criticality: **high**_
 - **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 1%
 
 <a id="sec-screens"></a>
-## 📱 Customer screens (SDUI)
+## 📱 Restaurant front-office screens (SDUI)
 
-Server-Driven UI screens (`specs/customer_screens.yaml`, ADR-0033). Each screen's **reads** (resolvers →
+Server-Driven UI screens (`specs/screens/restaurant_frontoffice.yaml`, ADR-0033). Each screen's **reads** (resolvers →
 queries) and **writes** (actions → mutations) are `$ref`-bound to the GraphQL API and validated, so the
 mockups below are the **proof the API answers the UI**. ⚠️ gaps mark UI needs the API does not serve yet.
 Screens marked 🚫 are intentionally not SDUI-rendered (Stripe/subscription/auth integrity).
