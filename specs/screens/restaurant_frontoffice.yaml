@@ -2,14 +2,15 @@
 # Captain.Food — Restaurant Front-Office UI Specification (Spec-Driven Server-Driven UI)
 # ------------------------------------------------------------------------------
 # The RESTAURANT FRONT OFFICE: a single restaurant's customer-facing storefront (catalog → cart →
-# checkout → order tracking), served per-tenant at {slug}.captain.food (audience roles PUBLIC + CUSTOMER).
-# The sibling CAPTAIN FRONT OFFICE (`captain_frontoffice.yaml`, to be created) is the cross-restaurant
-# MARKETPLACE, served at live.captain.food (then the bare captain.food). NOTE: the marketplace discovery
-# screens (home, search, categories) currently live in THIS file and are earmarked to move to
-# `captain_frontoffice.yaml` (content-split follow-up in the SDUI screens-taxonomy ADR). The restaurant
-# back office (staff dashboard) is `restaurant_backoffice.yaml`, with `rider.yaml` and `system.yaml` to
-# follow (one file per audience; ADR-0037 as refined by the SDUI screens-taxonomy ADR). Filenames carry
-# no `_screens` suffix — the `screens/` folder conveys it.
+# checkout → order tracking) plus the customer account/order-history screens, served per-tenant at
+# {slug}.captain.food (audience roles PUBLIC + CUSTOMER). The sibling CAPTAIN FRONT OFFICE
+# (`captain_frontoffice.yaml`) is the cross-restaurant MARKETPLACE (home/search discovery + partner
+# marketing), served at live.captain.food (then the bare captain.food). The marketplace discovery screens
+# were split out of THIS file into `captain_frontoffice.yaml` (ADR-20260722-091500 / -101500); the
+# customer account/order screens stay here (reachable cross-host via routing). The restaurant back office
+# (staff dashboard) is `restaurant_backoffice.yaml`, with `rider.yaml` and `system.yaml` to follow (one
+# file per audience; ADR-0037 as refined by the SDUI screens-taxonomy ADR). Filenames carry no
+# `_screens` suffix — the `screens/` folder conveys it.
 #
 # THE source of truth for the restaurant front office (ADR-0033). Two layers:
 #   • Layout layer  — screens/components/props (this file; runtime-editable via Supabase screen_specs).
@@ -115,8 +116,11 @@ actions:
 
 # ──────────────────────────────────────────────────────────────────────────────
 # COMPONENT REGISTRY — the allowlist of component `type` keys a screen may use. Do NOT invent
-# components outside this list (SDUI rule). Enforcing the registry in generated runtime code
-# (registry.ts / types/screens.ts) is a DEFERRED contract (ADR-0033).
+# components outside this list (SDUI rule). This is the RENDERER-level SHARED allowlist for BOTH customer
+# front offices (restaurant + captain marketplace) — one renderer, one `ComponentKind` dispatch surface —
+# so it also carries the marketplace `discovery`/`content` components used by `captain_frontoffice.yaml`.
+# It is the single source the codegen emits `crates/web/src/generated/registry.rs` from. Enforcing the
+# registry in generated runtime code (registry.rs / types) is a DEFERRED contract (ADR-0033).
 # ──────────────────────────────────────────────────────────────────────────────
 component_registry:
   layout: [screen, section, row, column, spacer, divider, horizontal_scroll, sticky_bottom_bar, conditional_section, tab_bar]
@@ -251,87 +255,7 @@ bottom_sheets:
 # ──────────────────────────────────────────────────────────────────────────────
 screens:
 
-  # SCREEN 1 — Home / Discovery
-  - id: home
-    roles: [PUBLIC, CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
-    route: "/"
-    title: { $ref: 'translations.yaml#/common.nav.home' }
-    sdui: true
-    data_requirements: [promotions.active, categories.all, restaurants.featured, restaurants.all]
-    gaps:
-      - "`promotions.active` (promo banners) has no backing query — deals deferred."
-    components:
-      - { component: topbar }
-      - { type: hero_search_bar, id: hero_search, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/home.search_placeholder' }, action: { type: navigate, route: "/search" } }
-      - { type: horizontal_scroll, id: promo_banners, items: "{{ promotions }}", item_type: promo_card }
-      - { type: section, id: categories_row, title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.craving' }, content: [{ type: horizontal_scroll, items: "{{ categories }}", item_type: category_pill, item_action: { type: filter, key: category, value: "{{ item.id }}" } }] }
-      - type: section
-        id: featured_restaurants
-        title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.featured' }
-        subtitle: "{{ delivery_city }}"
-        header_action: { label: { $ref: 'translations.yaml#/common.action.see_all' }, route: "/search" }
-        content: [{ type: restaurant_card_grid, columns: { mobile: 1, tablet: 2, desktop: 3 }, items: "{{ featured_restaurants }}", item_type: restaurant_card }]
-      - type: section
-        id: all_restaurants
-        title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.all_restaurants' }
-        content:
-          - type: filter_bar
-            filters:
-              - id: sort
-                label: { $ref: 'translations.yaml#/common.filter.sort' }
-                type: dropdown
-                options:
-                  - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.sort.recommended' }, value: recommended }
-                  - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.sort.delivery_time' }, value: delivery_time_asc }
-                  - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.sort.rating' }, value: rating_desc }
-                  - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.sort.price' }, value: price_asc }
-              - { id: category, label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.filter.category' }, type: multi_select_chips, options: "{{ categories }}" }
-              - id: delivery_mode
-                label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.filter.delivery_mode' }
-                type: toggle_chips
-                options:
-                  - { label: { $ref: 'translations.yaml#/common.mode.delivery' }, value: delivery }
-                  - { label: { $ref: 'translations.yaml#/common.mode.pickup' }, value: pickup }
-          - type: restaurant_card_list
-            items: "{{ all_restaurants }}"
-            item_type: restaurant_card
-            empty_state: { icon: search_off, title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.empty.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/home.empty.body' } }
-      - type: cta_banner
-        id: footer_cta
-        title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.partner_cta.title' }
-        body: { $ref: 'restaurant_frontoffice.translations.yaml#/home.partner_cta.body' }
-        button_label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.partner_cta.button' }
-        button_action: { type: navigate, route: "/partner" }
-      - { component: cart_fab }
-      - { component: bottom_nav }
-
-  # SCREEN 2 — Search
-  - id: search
-    roles: [PUBLIC, CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
-    route: "/search"
-    title: { $ref: 'translations.yaml#/common.nav.search' }
-    sdui: true
-    data_requirements: [restaurants.search, categories.all, dishes.search]
-    gaps:
-      - "`dishes.search` (the \"Dishes\" results) has no backing query — only restaurant search exists."
-    components:
-      - { component: topbar }
-      - { type: search_bar_active, id: search_input, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/search.placeholder' }, autofocus: true, back_button: true, on_change: { type: search_query, query: "{{ search_input.value }}" } }
-      - type: conditional_section
-        condition: search_input.value == ""
-        if_true:
-          - { type: section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.recent' }, visible_when: recent_searches.length > 0, content: [{ type: list, items: "{{ recent_searches }}", item_action: { type: set_search, query: "{{ item }}" } }] }
-          - { type: section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.popular' }, content: [{ type: category_grid, columns: 4, items: "{{ popular_categories }}", item_type: category_tile }] }
-        if_false:
-          - type: search_results
-            query: "{{ search_input.value }}"
-            sections:
-              - { id: restaurant_results, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.restaurants' }, items: "{{ results.restaurants }}", item_type: restaurant_card }
-              - { id: dish_results, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.dishes' }, items: "{{ results.dishes }}", item_type: dish_row }
-            empty_state: { icon: search_off, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.empty.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/search.empty.body' } }
-      - { component: bottom_nav }
-
-  # SCREEN 3 — Restaurant page
+  # SCREEN 1 — Restaurant page
   - id: restaurant
     roles: [PUBLIC, CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/r/:slug"
@@ -371,7 +295,7 @@ screens:
       - { component: cart_fab }
       - { component: bottom_nav }
 
-  # SCREEN 4 — Cart
+  # SCREEN 2 — Cart
   - id: cart
     roles: [PUBLIC, CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/cart"
@@ -418,7 +342,7 @@ screens:
             disabled_when: "!cart.minimumOrderMet || cart.lines.length == 0"
             action: { type: conditional, if_authenticated: { type: navigate, route: "/checkout" }, if_guest: { type: open_bottom_sheet, sheet_id: auth_sheet, on_success: { type: navigate, route: "/checkout" } } }
 
-  # SCREEN 5 — Checkout (NOT SDUI — Stripe Elements + payment security)
+  # SCREEN 3 — Checkout (NOT SDUI — Stripe Elements + payment security)
   - id: checkout
     roles: [CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/checkout"
@@ -464,7 +388,7 @@ screens:
               on_success: { type: navigate, route: "/orders/{{ variables.orderId }}/confirmation" }
               on_error: { type: show_toast, variant: error }
 
-  # SCREEN 6 — Order confirmation & tracking (NOT SDUI — realtime subscription + state machine)
+  # SCREEN 4 — Order confirmation & tracking (NOT SDUI — realtime subscription + state machine)
   - id: order_tracking
     roles: [CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/orders/:orderId/confirmation"
@@ -501,7 +425,7 @@ screens:
           - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED']", action: { type: reorder, cart_lines: "{{ order.lines }}" } }
           - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.help' }, variant: ghost, icon: life_buoy, action: { type: navigate, route: "/help/orders/{{ order.id }}" } }
 
-  # SCREEN 7 — Order history
+  # SCREEN 5 — Order history
   - id: order_history
     roles: [CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/orders"
@@ -524,7 +448,7 @@ screens:
         empty_state: { icon: receipt, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.body' }, action: { label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.cta' }, route: "/" } }
       - { component: bottom_nav }
 
-  # SCREEN 8 — Account
+  # SCREEN 6 — Account
   - id: account
     roles: [CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/account"
@@ -563,23 +487,6 @@ screens:
           - { icon: file_text, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.legal' }, route: "/legal" }
       - { type: sign_out_button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.sign_out' }, variant: ghost, color: error, action: { type: sign_out, redirect: "/" } }
       - { component: bottom_nav }
-
-  # SCREEN 9 — Partner landing (marketing; external onboarding)
-  - id: partner_landing
-    roles: [PUBLIC]   # which UserTypes may see this screen (ADR-0037)
-    route: "/partner"
-    title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.header' }
-    sdui: true
-    data_requirements: []
-    components:
-      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.header' } }
-      - { type: hero_section, image: "/assets/partner-hero.jpg", title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.hero_title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.hero_body' } }
-      - type: value_props
-        items:
-          - { icon: trending_up, title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.orders.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.orders.body' } }
-          - { icon: euro, title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.margins.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.margins.body' } }
-          - { icon: smartphone, title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.control.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.control.body' } }
-      - { type: cta_section, button_label: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.apply' }, button_action: { type: navigate, route: "https://restos.captain.food/onboarding", target: blank } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PERFORMANCE & ACCESSIBILITY (contracts)
