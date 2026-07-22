@@ -67,3 +67,6 @@ Two things surfaced as the frontend work began (#21):
   bound to `live.captain.food`/`captain.food`, leaving the single-restaurant journey (catalog, cart,
   checkout, tracking) in `restaurant_frontoffice.yaml`. Customer-account screens (`orders`, `account`)
   reachable from both hosts are placed during that split. Tracked separately; not part of this rename.
+  **→ Done by ADR-20260722-160000 (#75)**: `captain_frontoffice.yaml` created with `home`/`search`/
+  `partner_landing`; account/order screens kept in the storefront; doc emitters generalized over all
+  `screens/*.yaml`.

@@ -8163,12 +8163,15 @@ _criticality: **high**_
 - **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 1%
 
 <a id="sec-screens"></a>
-## 📱 Restaurant front-office screens (SDUI)
+## 📱 Front-office screens (SDUI)
 
-Server-Driven UI screens (`specs/screens/restaurant_frontoffice.yaml`, ADR-0033). Each screen's **reads** (resolvers →
+Server-Driven UI screens (`specs/screens/*.yaml`, one file per audience, ADR-0033/ADR-20260722-091500).
+Each screen's **reads** (resolvers →
 queries) and **writes** (actions → mutations) are `$ref`-bound to the GraphQL API and validated, so the
 mockups below are the **proof the API answers the UI**. ⚠️ gaps mark UI needs the API does not serve yet.
 Screens marked 🚫 are intentionally not SDUI-rendered (Stripe/subscription/auth integrity).
+
+_Surface_ **`captain_frontoffice.yaml`**
 
 <a id="screen-home"></a>
 ### 📱 `home` · `/` · 📱 SDUI
@@ -8221,6 +8224,24 @@ Screens marked 🚫 are intentionally not SDUI-rendered (Stripe/subscription/aut
 
 **Gaps**
 - ⚠️ `dishes.search` (the "Dishes" results) has no backing query — only restaurant search exists.
+
+<a id="screen-partner_landing"></a>
+### 📱 `partner_landing` · `/partner` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Partner with us                          │
+├──────────────────────────────────────────┤
+│ back_button_header — Partner with us     │
+│ hero_section — Grow your restaurant wit… │
+│ value_props                              │
+│ cta_section                              │
+└──────────────────────────────────────────┘
+```
+
+
+
+_Surface_ **`restaurant_frontoffice.yaml`**
 
 <a id="screen-restaurant"></a>
 ### 📱 `restaurant` · `/r/:slug` · 📱 SDUI
@@ -8374,22 +8395,6 @@ Screens marked 🚫 are intentionally not SDUI-rendered (Stripe/subscription/aut
 **Gaps**
 - ⚠️ `rewards.balance` (Captain Coins), referral and passkeys/notifications management are not modelled (deferred domains).
 
-<a id="screen-partner_landing"></a>
-### 📱 `partner_landing` · `/partner` · 📱 SDUI
-
-```
-┌──────────────────────────────────────────┐
-│ Partner with us                          │
-├──────────────────────────────────────────┤
-│ back_button_header — Partner with us     │
-│ hero_section — Grow your restaurant wit… │
-│ value_props                              │
-│ cta_section                              │
-└──────────────────────────────────────────┘
-```
-
-
-
 <a id="sec-translations"></a>
 ## 🌐 Translations
 
@@ -8398,6 +8403,38 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 
 | Key | Params | 🇬🇧 en | 🇫🇷 fr |
 | --- | --- | --- | --- |
+| <a id="translation-home-search_placeholder"></a>`home.search_placeholder` | — | Search restaurants or dishes… | Rechercher un restaurant ou un plat… |
+| <a id="translation-home-craving"></a>`home.craving` | — | What are you craving? | Une envie particulière ? |
+| <a id="translation-home-featured"></a>`home.featured` | — | Featured near you | En vedette près de chez vous |
+| <a id="translation-home-all_restaurants"></a>`home.all_restaurants` | — | All restaurants | Tous les restaurants |
+| <a id="translation-home-sort-recommended"></a>`home.sort.recommended` | — | Recommended | Recommandés |
+| <a id="translation-home-sort-delivery_time"></a>`home.sort.delivery_time` | — | Fastest delivery | Livraison la plus rapide |
+| <a id="translation-home-sort-rating"></a>`home.sort.rating` | — | Top rated | Les mieux notés |
+| <a id="translation-home-sort-price"></a>`home.sort.price` | — | Price: low to high | Prix : croissant |
+| <a id="translation-home-filter-category"></a>`home.filter.category` | — | Category | Catégorie |
+| <a id="translation-home-filter-delivery_mode"></a>`home.filter.delivery_mode` | — | Delivery / Pickup | Livraison / À emporter |
+| <a id="translation-home-empty-title"></a>`home.empty.title` | — | No restaurants match | Aucun restaurant correspondant |
+| <a id="translation-home-empty-body"></a>`home.empty.body` | — | Try adjusting your filters. | Essayez d'ajuster vos filtres. |
+| <a id="translation-home-partner_cta-title"></a>`home.partner_cta.title` | — | Are you a restaurant? | Vous êtes un restaurant ? |
+| <a id="translation-home-partner_cta-body"></a>`home.partner_cta.body` | — | Join Captain.Food and grow your sales. | Rejoignez Captain.Food et augmentez vos ventes. |
+| <a id="translation-home-partner_cta-button"></a>`home.partner_cta.button` | — | Become a partner | Devenir partenaire |
+| <a id="translation-search-placeholder"></a>`search.placeholder` | — | Restaurants, dishes, cuisines… | Restaurants, plats, cuisines… |
+| <a id="translation-search-recent"></a>`search.recent` | — | Recent searches | Recherches récentes |
+| <a id="translation-search-popular"></a>`search.popular` | — | Popular categories | Catégories populaires |
+| <a id="translation-search-restaurants"></a>`search.restaurants` | — | Restaurants | Restaurants |
+| <a id="translation-search-dishes"></a>`search.dishes` | — | Dishes | Plats |
+| <a id="translation-search-empty-title"></a>`search.empty.title` | `query` | No results for "{query}" | Aucun résultat pour « {query} » |
+| <a id="translation-search-empty-body"></a>`search.empty.body` | — | Try a different dish or restaurant name. | Essayez un autre plat ou nom de restaurant. |
+| <a id="translation-partner-header"></a>`partner.header` | — | Partner with us | Devenez partenaire |
+| <a id="translation-partner-hero_title"></a>`partner.hero_title` | — | Grow your restaurant with Captain.Food | Développez votre restaurant avec Captain.Food |
+| <a id="translation-partner-hero_body"></a>`partner.hero_body` | — | Join Tours' leading food platform. No commission model — flat subscription. | Rejoignez la première plateforme food de Tours. Sans commission — abonnement forfaitaire. |
+| <a id="translation-partner-prop-orders-title"></a>`partner.prop.orders.title` | — | Increase orders | Augmentez vos commandes |
+| <a id="translation-partner-prop-orders-body"></a>`partner.prop.orders.body` | — | Reach thousands of new customers in your city. | Touchez des milliers de nouveaux clients dans votre ville. |
+| <a id="translation-partner-prop-margins-title"></a>`partner.prop.margins.title` | — | Keep your margins | Préservez vos marges |
+| <a id="translation-partner-prop-margins-body"></a>`partner.prop.margins.body` | — | Flat monthly fee. No per-order commission. | Forfait mensuel fixe. Aucune commission par commande. |
+| <a id="translation-partner-prop-control-title"></a>`partner.prop.control.title` | — | Full control | Contrôle total |
+| <a id="translation-partner-prop-control-body"></a>`partner.prop.control.body` | — | Manage your menu, hours, and catalog in real-time. | Gérez votre menu, vos horaires et votre catalogue en temps réel. |
+| <a id="translation-partner-apply"></a>`partner.apply` | — | Apply to join | Postuler |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |
@@ -8426,28 +8463,6 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rating-tag-packaging"></a>`rating.tag.packaging` | — | Great packaging | Bon emballage |
 | <a id="translation-rating-comment_placeholder"></a>`rating.comment_placeholder` | — | Add a comment (optional) | Ajouter un commentaire (facultatif) |
 | <a id="translation-rating-thanks"></a>`rating.thanks` | — | Thanks for your feedback! | Merci pour votre retour ! |
-| <a id="translation-home-search_placeholder"></a>`home.search_placeholder` | — | Search restaurants or dishes… | Rechercher un restaurant ou un plat… |
-| <a id="translation-home-craving"></a>`home.craving` | — | What are you craving? | Une envie particulière ? |
-| <a id="translation-home-featured"></a>`home.featured` | — | Featured near you | En vedette près de chez vous |
-| <a id="translation-home-all_restaurants"></a>`home.all_restaurants` | — | All restaurants | Tous les restaurants |
-| <a id="translation-home-sort-recommended"></a>`home.sort.recommended` | — | Recommended | Recommandés |
-| <a id="translation-home-sort-delivery_time"></a>`home.sort.delivery_time` | — | Fastest delivery | Livraison la plus rapide |
-| <a id="translation-home-sort-rating"></a>`home.sort.rating` | — | Top rated | Les mieux notés |
-| <a id="translation-home-sort-price"></a>`home.sort.price` | — | Price: low to high | Prix : croissant |
-| <a id="translation-home-filter-category"></a>`home.filter.category` | — | Category | Catégorie |
-| <a id="translation-home-filter-delivery_mode"></a>`home.filter.delivery_mode` | — | Delivery / Pickup | Livraison / À emporter |
-| <a id="translation-home-empty-title"></a>`home.empty.title` | — | No restaurants match | Aucun restaurant correspondant |
-| <a id="translation-home-empty-body"></a>`home.empty.body` | — | Try adjusting your filters. | Essayez d'ajuster vos filtres. |
-| <a id="translation-home-partner_cta-title"></a>`home.partner_cta.title` | — | Are you a restaurant? | Vous êtes un restaurant ? |
-| <a id="translation-home-partner_cta-body"></a>`home.partner_cta.body` | — | Join Captain.Food and grow your sales. | Rejoignez Captain.Food et augmentez vos ventes. |
-| <a id="translation-home-partner_cta-button"></a>`home.partner_cta.button` | — | Become a partner | Devenir partenaire |
-| <a id="translation-search-placeholder"></a>`search.placeholder` | — | Restaurants, dishes, cuisines… | Restaurants, plats, cuisines… |
-| <a id="translation-search-recent"></a>`search.recent` | — | Recent searches | Recherches récentes |
-| <a id="translation-search-popular"></a>`search.popular` | — | Popular categories | Catégories populaires |
-| <a id="translation-search-restaurants"></a>`search.restaurants` | — | Restaurants | Restaurants |
-| <a id="translation-search-dishes"></a>`search.dishes` | — | Dishes | Plats |
-| <a id="translation-search-empty-title"></a>`search.empty.title` | `query` | No results for "{query}" | Aucun résultat pour « {query} » |
-| <a id="translation-search-empty-body"></a>`search.empty.body` | — | Try a different dish or restaurant name. | Essayez un autre plat ou nom de restaurant. |
 | <a id="translation-restaurant-open"></a>`restaurant.open` | — | Open | Ouvert |
 | <a id="translation-restaurant-closed"></a>`restaurant.closed` | — | Closed | Fermé |
 | <a id="translation-restaurant-opens_at"></a>`restaurant.opens_at` | `time` | Opens at {time} | Ouvre à {time} |
@@ -8524,16 +8539,6 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-account-legal"></a>`account.legal` | — | Terms & Privacy | Conditions et confidentialité |
 | <a id="translation-account-sign_out"></a>`account.sign_out` | — | Sign out | Se déconnecter |
 | <a id="translation-account-coins_badge"></a>`account.coins_badge` | `points` | {points} pts | {points} pts |
-| <a id="translation-partner-header"></a>`partner.header` | — | Partner with us | Devenez partenaire |
-| <a id="translation-partner-hero_title"></a>`partner.hero_title` | — | Grow your restaurant with Captain.Food | Développez votre restaurant avec Captain.Food |
-| <a id="translation-partner-hero_body"></a>`partner.hero_body` | — | Join Tours' leading food platform. No commission model — flat subscription. | Rejoignez la première plateforme food de Tours. Sans commission — abonnement forfaitaire. |
-| <a id="translation-partner-prop-orders-title"></a>`partner.prop.orders.title` | — | Increase orders | Augmentez vos commandes |
-| <a id="translation-partner-prop-orders-body"></a>`partner.prop.orders.body` | — | Reach thousands of new customers in your city. | Touchez des milliers de nouveaux clients dans votre ville. |
-| <a id="translation-partner-prop-margins-title"></a>`partner.prop.margins.title` | — | Keep your margins | Préservez vos marges |
-| <a id="translation-partner-prop-margins-body"></a>`partner.prop.margins.body` | — | Flat monthly fee. No per-order commission. | Forfait mensuel fixe. Aucune commission par commande. |
-| <a id="translation-partner-prop-control-title"></a>`partner.prop.control.title` | — | Full control | Contrôle total |
-| <a id="translation-partner-prop-control-body"></a>`partner.prop.control.body` | — | Manage your menu, hours, and catalog in real-time. | Gérez votre menu, vos horaires et votre catalogue en temps réel. |
-| <a id="translation-partner-apply"></a>`partner.apply` | — | Apply to join | Postuler |
 | <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
 | <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
 | <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |

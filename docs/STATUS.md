@@ -1,7 +1,23 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-22 (10:15 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-22 (16:00 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 🚧 **2026-07-22 — #75: marketplace content-split (ADR-20260722-160000, realizes ADR-20260722-091500/-101500).**
+> Extracted the Captain **marketplace** front office out of the storefront: new
+> `specs/screens/captain_frontoffice.yaml` (+ sidecar) holds `home`/`search` discovery + `partner_landing`
+> marketing (`live.captain.food` → bare `captain.food`); their strings (`home.*`/`search.*`/`partner.*`)
+> moved to `captain_frontoffice.translations.yaml`. `restaurant_frontoffice.yaml` keeps the single-restaurant
+> journey (catalog → cart → checkout → tracking) **plus** the customer account/order screens (decision:
+> account/orders stay in the storefront, reachable cross-host via routing — not duplicated). Shared chrome
+> (top bar / nav / cart FAB / location+auth sheets) is duplicated per surface; its `location.*`/`auth.*`
+> strings stay in the storefront sidecar and the marketplace cross-refs them (keys globally unique). Codegen:
+> the loader now **auto-discovers `screens/*.yaml`** and the **doc emitters (md + html) iterate all surfaces**
+> (one block per surface); the SDUI **component registry stays a single shared renderer allowlist** in
+> `restaurant_frontoffice.yaml`, so `crates/web/src/generated/registry.rs` is **byte-identical**.
+> `translations.generated.json` **byte-identical** (keys re-homed). `make rust` + `cargo build --workspace`
+> green (0 errors, no drift). Deferred: the marketplace's own account surface, a per-surface component
+> registry, and promoting shared chrome strings to `common.*`.
 
 > 🚧 **2026-07-22 — #73: per-surface translation sidecars (ADR-20260722-101500, refines ADR-0033).**
 > Shared strings (`common.*` + future backend text) stay in `specs/translations.yaml`; surface-specific

@@ -1,0 +1,51 @@
+version: 1
+description: >
+  Captain Front-Office (marketplace) UI strings (ADR-0033; sidecar convention ADR-20260722-101500) — the
+  surface-specific translation catalog for `captain_frontoffice.yaml` (cross-restaurant discovery + search
+  + partner marketing @ live.captain.food → captain.food). Extracted from
+  `restaurant_frontoffice.translations.yaml` by the marketplace content-split (ADR-20260722-091500). SHARED
+  strings (common.*) live in `translations.yaml`; the shared customer chrome (location picker + auth/OTP
+  sheets) keeps its location.*/auth.* keys in `restaurant_frontoffice.translations.yaml`. The codegen merges
+  every file into a single `translations.generated.json`; keys are globally namespaced and unique across all
+  files. Same convention as translations.yaml (dotted key · optional params · en+fr messages with matching
+  {param} tokens).
+
+# ── home (marketplace discovery) ───────────────────────────────────────────────
+home.search_placeholder: { messages: { en: "Search restaurants or dishes…", fr: "Rechercher un restaurant ou un plat…" } }
+home.craving:            { messages: { en: "What are you craving?", fr: "Une envie particulière ?" } }
+home.featured:           { messages: { en: "Featured near you", fr: "En vedette près de chez vous" } }
+home.all_restaurants:    { messages: { en: "All restaurants", fr: "Tous les restaurants" } }
+home.sort.recommended:   { messages: { en: "Recommended", fr: "Recommandés" } }
+home.sort.delivery_time: { messages: { en: "Fastest delivery", fr: "Livraison la plus rapide" } }
+home.sort.rating:        { messages: { en: "Top rated", fr: "Les mieux notés" } }
+home.sort.price:         { messages: { en: "Price: low to high", fr: "Prix : croissant" } }
+home.filter.category:    { messages: { en: "Category", fr: "Catégorie" } }
+home.filter.delivery_mode: { messages: { en: "Delivery / Pickup", fr: "Livraison / À emporter" } }
+home.empty.title:        { messages: { en: "No restaurants match", fr: "Aucun restaurant correspondant" } }
+home.empty.body:         { messages: { en: "Try adjusting your filters.", fr: "Essayez d'ajuster vos filtres." } }
+home.partner_cta.title:  { messages: { en: "Are you a restaurant?", fr: "Vous êtes un restaurant ?" } }
+home.partner_cta.body:   { messages: { en: "Join Captain.Food and grow your sales.", fr: "Rejoignez Captain.Food et augmentez vos ventes." } }
+home.partner_cta.button: { messages: { en: "Become a partner", fr: "Devenir partenaire" } }
+
+# ── search ───────────────────────────────────────────────────────────────────
+search.placeholder:  { messages: { en: "Restaurants, dishes, cuisines…", fr: "Restaurants, plats, cuisines…" } }
+search.recent:       { messages: { en: "Recent searches", fr: "Recherches récentes" } }
+search.popular:      { messages: { en: "Popular categories", fr: "Catégories populaires" } }
+search.restaurants:  { messages: { en: "Restaurants", fr: "Restaurants" } }
+search.dishes:       { messages: { en: "Dishes", fr: "Plats" } }
+search.empty.title:
+  params: { query: "the search query" }
+  messages: { en: "No results for \"{query}\"", fr: "Aucun résultat pour « {query} »" }
+search.empty.body:   { messages: { en: "Try a different dish or restaurant name.", fr: "Essayez un autre plat ou nom de restaurant." } }
+
+# ── partner landing ──────────────────────────────────────────────────────────
+partner.header:     { messages: { en: "Partner with us", fr: "Devenez partenaire" } }
+partner.hero_title: { messages: { en: "Grow your restaurant with Captain.Food", fr: "Développez votre restaurant avec Captain.Food" } }
+partner.hero_body:  { messages: { en: "Join Tours' leading food platform. No commission model — flat subscription.", fr: "Rejoignez la première plateforme food de Tours. Sans commission — abonnement forfaitaire." } }
+partner.prop.orders.title:  { messages: { en: "Increase orders", fr: "Augmentez vos commandes" } }
+partner.prop.orders.body:   { messages: { en: "Reach thousands of new customers in your city.", fr: "Touchez des milliers de nouveaux clients dans votre ville." } }
+partner.prop.margins.title: { messages: { en: "Keep your margins", fr: "Préservez vos marges" } }
+partner.prop.margins.body:  { messages: { en: "Flat monthly fee. No per-order commission.", fr: "Forfait mensuel fixe. Aucune commission par commande." } }
+partner.prop.control.title: { messages: { en: "Full control", fr: "Contrôle total" } }
+partner.prop.control.body:  { messages: { en: "Manage your menu, hours, and catalog in real-time.", fr: "Gérez votre menu, vos horaires et votre catalogue en temps réel." } }
+partner.apply:      { messages: { en: "Apply to join", fr: "Postuler" } }

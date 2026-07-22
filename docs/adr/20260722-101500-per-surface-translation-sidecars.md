@@ -50,3 +50,4 @@ Naming note (from the discussion): the spec folder stays **`specs/screens/`** â€
 - **Follow-ups** (out of scope here): per-surface `leptos_i18n` namespaces + lazy-load; moving the
   marketplace strings (`home.*`, `search.*`, `partner.*`) from `restaurant_frontoffice.translations.yaml`
   into `captain_frontoffice.translations.yaml` alongside the marketplace content-split (ADR-20260722-091500).
+  **â†’ The string move is done by ADR-20260722-160000 (#75).**

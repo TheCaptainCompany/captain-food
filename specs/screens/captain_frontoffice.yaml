@@ -1,0 +1,284 @@
+# ==============================================================================
+# Captain.Food — Captain Front-Office UI Specification (Spec-Driven Server-Driven UI)
+# ------------------------------------------------------------------------------
+# The CAPTAIN FRONT OFFICE: the cross-restaurant MARKETPLACE (discovery + search + partner marketing),
+# served at live.captain.food (then the bare captain.food) — audience roles PUBLIC + CUSTOMER. Extracted
+# from `restaurant_frontoffice.yaml` by the marketplace content-split (ADR-20260722-091500 / -101500):
+# this file holds the discovery screens (home, search) + the partner marketing landing; the single-
+# restaurant journey (catalog → cart → checkout → order tracking) and the customer-account/order screens
+# stay in `restaurant_frontoffice.yaml` (the per-tenant storefront at {slug}.captain.food). Host binding
+# lives in the server tenant middleware (C4 `middleware/tenant`), not the DSL. Filenames carry no
+# `_screens` suffix — the `screens/` folder conveys it.
+#
+# THE source of truth for the Captain marketplace front office (ADR-0033). Two layers:
+#   • Layout layer  — screens/components/props (this file; runtime-editable via Supabase screen_specs).
+#   • Data layer    — `resolvers` (reads) + `actions` (writes): a spec-declared ALLOWLIST, each $ref-bound
+#                     to an api.yaml query/mutation so the codegen PROVES the GraphQL API answers the UI.
+# Every user-visible string is a `$ref` into a translations file (no hardcoded text): marketplace strings
+# (home.*/search.*/partner.*) live in the co-located sidecar `captain_frontoffice.translations.yaml`;
+# shared strings (common.*) in `translations.yaml`; the shared customer chrome (location picker + auth/OTP
+# sheets) reuses the storefront's location.*/auth.* keys from `restaurant_frontoffice.translations.yaml`
+# (keys are globally unique — ADR-20260722-101500).
+# NOTE: the SDUI component allowlist (`component_registry`) is the RENDERER-level shared surface and is
+# declared once, in `restaurant_frontoffice.yaml`; this file uses components from that shared allowlist.
+# Stack (ADR-0034): Leptos (Rust → WASM) renders the SDUI tree via a GENERATED Leptos component registry;
+# Axum + async-graphql BFF; Crux shared core; leptos_i18n consumes translations.generated.json. The runtime
+# is a DEFERRED contract until the `crates/` workspace exists — see ADR-0033 + ADR-0034.
+# ==============================================================================
+
+version: 1
+spec_version: "1.0.0"
+app_id: captain.food
+app_name: "Captain.Food"
+base_url: "https://live.captain.food"
+default_locale: en
+supported_locales: [en, fr]
+app_types: [web, ios, android]   # customer app target platforms (ADR-0037); `windows` is restaurant-only
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DESIGN TOKENS (shared brand tokens — identical to the restaurant front office)
+# ──────────────────────────────────────────────────────────────────────────────
+design_tokens:
+  colors:
+    primary: "#F97316"
+    primary_dark: "#EA6C0A"
+    surface: "#FFFFFF"
+    surface_muted: "#F9FAFB"
+    border: "#E5E7EB"
+    text_primary: "#111827"
+    text_secondary: "#6B7280"
+    success: "#22C55E"
+    warning: "#F59E0B"
+    error: "#EF4444"
+    overlay: "rgba(0,0,0,0.5)"
+  typography:
+    font_family: "Inter, system-ui, sans-serif"
+    scale: { xs: "0.75rem", sm: "0.875rem", base: "1rem", lg: "1.125rem", xl: "1.25rem", "2xl": "1.5rem", "3xl": "1.875rem" }
+  spacing: { page_padding_mobile: "1rem", page_padding_desktop: "1.5rem", card_gap: "0.75rem", section_gap: "2rem" }
+  radius: { sm: "0.375rem", md: "0.75rem", lg: "1rem", full: "9999px" }
+  shadows: { card: "0 1px 3px rgba(0,0,0,0.1)", modal: "0 20px 60px rgba(0,0,0,0.15)", sticky: "0 2px 8px rgba(0,0,0,0.08)" }
+  breakpoints: { mobile: "0px", tablet: "768px", desktop: "1024px", wide: "1280px" }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATA LAYER — RESOLVERS (reads). The SDUI allowlist: nothing outside this list can be
+# hydrated from a spec. Each resolver is $ref-bound to an api.yaml query, or declares a `gap`
+# (a UI data need the API does not serve yet — surfaced, never silently invented).
+# ──────────────────────────────────────────────────────────────────────────────
+resolvers:
+  restaurants.featured: { query: { $ref: 'api.yaml#/queries/restaurants' }, args: { listKey: RECOMMENDED } }
+  restaurants.all:      { query: { $ref: 'api.yaml#/queries/restaurants' } }
+  restaurants.search:   { query: { $ref: 'api.yaml#/queries/restaurants' } }
+  categories.all:       { query: { $ref: 'api.yaml#/queries/categories' } }
+  # ── GAPS — UI data needs with no backing API query yet ──
+  promotions.active: { gap: "No promotions/deals query — HubRise deals not modelled in V0 (home promo banners)." }
+  dishes.search:     { gap: "No dish/product search query — only restaurant search (queries/restaurants) exists." }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATA LAYER — ACTIONS (writes + client behaviours). Registered action-type allowlist; anything
+# else is ignored at runtime. Mutation-bearing actions are $ref-bound to an api.yaml mutation.
+# The marketplace subset: navigation/discovery + sign-in chrome (location picker + phone-OTP).
+# ──────────────────────────────────────────────────────────────────────────────
+actions:
+  navigate: { kind: client }
+  open_bottom_sheet: { kind: client }
+  close_sheet: { kind: client }
+  conditional: { kind: client }
+  set_delivery_address: { kind: client, note: "Updates delivery context; persisted via setCustomerAddress." }
+  use_geolocation: { kind: client }
+  send_otp:   { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/requestPhoneVerification' } }
+  verify_otp: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/verifyPhone' } }
+  resend_otp: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/requestPhoneVerification' } }
+  # ── GAPS — UI actions with no backing API mutation yet ──
+  authenticate_passkey: { kind: gap, gap: "WebAuthn passkey auth is Supabase-side, not a domain command." }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GLOBAL CHROME (shared customer chrome — mirrors the restaurant front office)
+# ──────────────────────────────────────────────────────────────────────────────
+global_components:
+  topbar:
+    id: topbar
+    type: sticky_header
+    slots:
+      left: [{ type: logo, asset: "/assets/logo.svg", link: "/" }]
+      center: [{ type: location_pill, icon: map_pin, label: "{{ current_city }}", action: { type: open_bottom_sheet, sheet_id: location_picker } }]
+      right:
+        - { type: icon_button, icon: search, action: { type: navigate, route: "/search" } }
+        - type: avatar_button
+          action: { type: conditional, if_authenticated: { type: navigate, route: "/account" }, if_guest: { type: open_bottom_sheet, sheet_id: auth_sheet } }
+  bottom_nav:
+    id: bottom_nav
+    type: bottom_navigation
+    visible_on: [mobile]
+    items:
+      - { id: home,   label: { $ref: 'translations.yaml#/common.nav.home' },    icon: home,    route: "/" }
+      - { id: search, label: { $ref: 'translations.yaml#/common.nav.search' },  icon: search,  route: "/search" }
+      - { id: orders, label: { $ref: 'translations.yaml#/common.nav.orders' },  icon: receipt, route: "/orders", requires_auth: true }
+      - { id: account,label: { $ref: 'translations.yaml#/common.nav.account' }, icon: user,    route: "/account" }
+  cart_fab:
+    id: cart_fab
+    type: floating_action_button
+    visible_when: cart_item_count > 0
+    label: { $ref: 'translations.yaml#/common.cart.view' }
+    badge: "{{ cart_item_count }}"
+    action: { type: navigate, route: "/cart" }
+  toast: { id: toast, type: toast_notification, position: top_center, variants: [success, error, warning, info] }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# BOTTOM SHEETS & MODALS (shared sign-in / location chrome — strings reuse the storefront's
+# location.*/auth.* keys, which stay in restaurant_frontoffice.translations.yaml; globally unique)
+# ──────────────────────────────────────────────────────────────────────────────
+bottom_sheets:
+  location_picker:
+    id: location_picker
+    type: bottom_sheet
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/location.title' }
+    sections:
+      - { type: search_input, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/location.search_placeholder' }, autofocus: true }
+      - { type: list, id: recent_addresses, title: { $ref: 'restaurant_frontoffice.translations.yaml#/location.recent' }, items: "{{ customer.recent_addresses }}", item_action: { type: set_delivery_address, address: "{{ item }}" } }
+      - { type: list, id: saved_addresses, title: { $ref: 'restaurant_frontoffice.translations.yaml#/location.saved' }, items: "{{ customer.saved_addresses }}", item_action: { type: set_delivery_address, address: "{{ item }}" } }
+      - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/location.use_current' }, variant: ghost, icon: crosshair, action: { type: use_geolocation } }
+
+  auth_sheet:
+    id: auth_sheet
+    type: bottom_sheet
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.title' }
+    sections:
+      - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.body' } }
+      - { type: phone_field, id: phone_field, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.phone_label' }, country_picker: true, autofocus: true }
+      - { type: button, id: send_otp_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.continue' }, variant: primary, full_width: true, action: { type: send_otp, phone: "{{ phone_field.value }}" } }
+      - { type: divider, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.or' } }
+      - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.passkey' }, variant: outline, icon: fingerprint, visible_when: passkey_available, action: { type: authenticate_passkey } }
+
+  otp_sheet:
+    id: otp_sheet
+    type: bottom_sheet
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.otp_title' }
+    drag_to_close: false
+    sections:
+      - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.otp_body' } }   # params: { phone }
+      - { type: otp_input, id: otp_field, length: 6, autofocus: true, on_complete: { type: verify_otp, code: "{{ otp_field.value }}" } }
+      - { type: inline_error, visible_when: otp_error, message: "{{ otp_error_message }}" }
+      - { type: text_button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.resend' }, visible_when: resend_available, action: { type: resend_otp } }
+      - { type: countdown, visible_when: "!resend_available", label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.resend_in' } }   # params: { seconds }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SCREENS
+# ──────────────────────────────────────────────────────────────────────────────
+screens:
+
+  # SCREEN 1 — Home / Discovery (cross-restaurant marketplace)
+  - id: home
+    roles: [PUBLIC, CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
+    route: "/"
+    title: { $ref: 'translations.yaml#/common.nav.home' }
+    sdui: true
+    data_requirements: [promotions.active, categories.all, restaurants.featured, restaurants.all]
+    gaps:
+      - "`promotions.active` (promo banners) has no backing query — deals deferred."
+    components:
+      - { component: topbar }
+      - { type: hero_search_bar, id: hero_search, placeholder: { $ref: 'captain_frontoffice.translations.yaml#/home.search_placeholder' }, action: { type: navigate, route: "/search" } }
+      - { type: horizontal_scroll, id: promo_banners, items: "{{ promotions }}", item_type: promo_card }
+      - { type: section, id: categories_row, title: { $ref: 'captain_frontoffice.translations.yaml#/home.craving' }, content: [{ type: horizontal_scroll, items: "{{ categories }}", item_type: category_pill, item_action: { type: filter, key: category, value: "{{ item.id }}" } }] }
+      - type: section
+        id: featured_restaurants
+        title: { $ref: 'captain_frontoffice.translations.yaml#/home.featured' }
+        subtitle: "{{ delivery_city }}"
+        header_action: { label: { $ref: 'translations.yaml#/common.action.see_all' }, route: "/search" }
+        content: [{ type: restaurant_card_grid, columns: { mobile: 1, tablet: 2, desktop: 3 }, items: "{{ featured_restaurants }}", item_type: restaurant_card }]
+      - type: section
+        id: all_restaurants
+        title: { $ref: 'captain_frontoffice.translations.yaml#/home.all_restaurants' }
+        content:
+          - type: filter_bar
+            filters:
+              - id: sort
+                label: { $ref: 'translations.yaml#/common.filter.sort' }
+                type: dropdown
+                options:
+                  - { label: { $ref: 'captain_frontoffice.translations.yaml#/home.sort.recommended' }, value: recommended }
+                  - { label: { $ref: 'captain_frontoffice.translations.yaml#/home.sort.delivery_time' }, value: delivery_time_asc }
+                  - { label: { $ref: 'captain_frontoffice.translations.yaml#/home.sort.rating' }, value: rating_desc }
+                  - { label: { $ref: 'captain_frontoffice.translations.yaml#/home.sort.price' }, value: price_asc }
+              - { id: category, label: { $ref: 'captain_frontoffice.translations.yaml#/home.filter.category' }, type: multi_select_chips, options: "{{ categories }}" }
+              - id: delivery_mode
+                label: { $ref: 'captain_frontoffice.translations.yaml#/home.filter.delivery_mode' }
+                type: toggle_chips
+                options:
+                  - { label: { $ref: 'translations.yaml#/common.mode.delivery' }, value: delivery }
+                  - { label: { $ref: 'translations.yaml#/common.mode.pickup' }, value: pickup }
+          - type: restaurant_card_list
+            items: "{{ all_restaurants }}"
+            item_type: restaurant_card
+            empty_state: { icon: search_off, title: { $ref: 'captain_frontoffice.translations.yaml#/home.empty.title' }, body: { $ref: 'captain_frontoffice.translations.yaml#/home.empty.body' } }
+      - type: cta_banner
+        id: footer_cta
+        title: { $ref: 'captain_frontoffice.translations.yaml#/home.partner_cta.title' }
+        body: { $ref: 'captain_frontoffice.translations.yaml#/home.partner_cta.body' }
+        button_label: { $ref: 'captain_frontoffice.translations.yaml#/home.partner_cta.button' }
+        button_action: { type: navigate, route: "/partner" }
+      - { component: cart_fab }
+      - { component: bottom_nav }
+
+  # SCREEN 2 — Search (cross-restaurant marketplace)
+  - id: search
+    roles: [PUBLIC, CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
+    route: "/search"
+    title: { $ref: 'translations.yaml#/common.nav.search' }
+    sdui: true
+    data_requirements: [restaurants.search, categories.all, dishes.search]
+    gaps:
+      - "`dishes.search` (the \"Dishes\" results) has no backing query — only restaurant search exists."
+    components:
+      - { component: topbar }
+      - { type: search_bar_active, id: search_input, placeholder: { $ref: 'captain_frontoffice.translations.yaml#/search.placeholder' }, autofocus: true, back_button: true, on_change: { type: search_query, query: "{{ search_input.value }}" } }
+      - type: conditional_section
+        condition: search_input.value == ""
+        if_true:
+          - { type: section, title: { $ref: 'captain_frontoffice.translations.yaml#/search.recent' }, visible_when: recent_searches.length > 0, content: [{ type: list, items: "{{ recent_searches }}", item_action: { type: set_search, query: "{{ item }}" } }] }
+          - { type: section, title: { $ref: 'captain_frontoffice.translations.yaml#/search.popular' }, content: [{ type: category_grid, columns: 4, items: "{{ popular_categories }}", item_type: category_tile }] }
+        if_false:
+          - type: search_results
+            query: "{{ search_input.value }}"
+            sections:
+              - { id: restaurant_results, title: { $ref: 'captain_frontoffice.translations.yaml#/search.restaurants' }, items: "{{ results.restaurants }}", item_type: restaurant_card }
+              - { id: dish_results, title: { $ref: 'captain_frontoffice.translations.yaml#/search.dishes' }, items: "{{ results.dishes }}", item_type: dish_row }
+            empty_state: { icon: search_off, title: { $ref: 'captain_frontoffice.translations.yaml#/search.empty.title' }, body: { $ref: 'captain_frontoffice.translations.yaml#/search.empty.body' } }
+      - { component: bottom_nav }
+
+  # SCREEN 3 — Partner landing (marketplace marketing; external onboarding)
+  - id: partner_landing
+    roles: [PUBLIC]   # which UserTypes may see this screen (ADR-0037)
+    route: "/partner"
+    title: { $ref: 'captain_frontoffice.translations.yaml#/partner.header' }
+    sdui: true
+    data_requirements: []
+    components:
+      - { type: back_button_header, title: { $ref: 'captain_frontoffice.translations.yaml#/partner.header' } }
+      - { type: hero_section, image: "/assets/partner-hero.jpg", title: { $ref: 'captain_frontoffice.translations.yaml#/partner.hero_title' }, body: { $ref: 'captain_frontoffice.translations.yaml#/partner.hero_body' } }
+      - type: value_props
+        items:
+          - { icon: trending_up, title: { $ref: 'captain_frontoffice.translations.yaml#/partner.prop.orders.title' }, body: { $ref: 'captain_frontoffice.translations.yaml#/partner.prop.orders.body' } }
+          - { icon: euro, title: { $ref: 'captain_frontoffice.translations.yaml#/partner.prop.margins.title' }, body: { $ref: 'captain_frontoffice.translations.yaml#/partner.prop.margins.body' } }
+          - { icon: smartphone, title: { $ref: 'captain_frontoffice.translations.yaml#/partner.prop.control.title' }, body: { $ref: 'captain_frontoffice.translations.yaml#/partner.prop.control.body' } }
+      - { type: cta_section, button_label: { $ref: 'captain_frontoffice.translations.yaml#/partner.apply' }, button_action: { type: navigate, route: "https://restos.captain.food/onboarding", target: blank } }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PERFORMANCE & ACCESSIBILITY (contracts)
+# ──────────────────────────────────────────────────────────────────────────────
+performance:
+  target_lighthouse_mobile: 90
+  rendering_strategy: SSR_first
+  max_ttfb_ms: 500
+  max_fcp_ms: 1500
+  max_lcp_ms: 2500
+accessibility:
+  wcag_target: "AA"
+  requirements:
+    - "All interactive elements have visible focus rings"
+    - "All images have alt text"
+    - "Color contrast ratio >= 4.5:1 for body text"
+    - "Touch targets >= 44x44px on mobile"
+    - "Form fields have visible labels (not placeholder-only)"
+    - "Modals trap focus and restore on close"
+    - "Live regions for order status updates (aria-live)"

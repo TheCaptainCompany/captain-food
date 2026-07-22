@@ -30,7 +30,6 @@ const SOURCE_FILES: &[&str] = &[
     "rules.yaml",
     "tests.yaml",
     "translations.yaml",
-    "screens/restaurant_frontoffice.yaml",
     "observability.yaml",
     "architecture/c4-l2.yaml",
     "architecture/c4-l3.yaml",
@@ -86,17 +85,19 @@ fn load_model(specs: &PathBuf) -> Result<Model, String> {
             load(format!("database/tables/{}", name), &p)?;
         }
     }
-    // Generic: every `specs/screens/*.translations.yaml` is a per-surface i18n sidecar
-    // (ADR-20260722-101500), keyed BARE (no `screens/` prefix) so screens `$ref` it as
-    // `<surface>.translations.yaml#/<key>` and §11 (which filters `screens/`-prefixed keys) does not
-    // mistake it for a screen spec. Sorted for determinism.
+    // Generic: every `specs/screens/*.yaml` is auto-discovered (ADR-20260722-091500 / -075500), so a
+    // new SDUI audience is picked up by dropping in a file — no codegen edit. Two keyings, both sorted
+    // for determinism:
+    //   • SCREEN SPECS (`<surface>.yaml`, e.g. captain_frontoffice/restaurant_frontoffice) are keyed
+    //     WITH the `screens/` prefix (`screens/<name>`), which §11 iterates as the per-app specs.
+    //   • i18n SIDECARS (`<surface>.translations.yaml`, ADR-20260722-101500) are keyed BARE (no
+    //     `screens/` prefix) so screens `$ref` them as `<surface>.translations.yaml#/<key>` and §11
+    //     (which filters `screens/`-prefixed keys) does not mistake them for a screen spec.
     let sdir = specs.join("screens");
     if let Ok(rd) = fs::read_dir(&sdir) {
         let mut paths: Vec<PathBuf> = rd
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| {
-                p.file_name().and_then(|n| n.to_str()).map(|n| n.ends_with(".translations.yaml")).unwrap_or(false)
-            })
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("yaml"))
             .collect();
         paths.sort();
         for p in paths {
@@ -104,7 +105,11 @@ fn load_model(specs: &PathBuf) -> Result<Model, String> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
-            load(name, &p)?;
+            if name.ends_with(".translations.yaml") {
+                load(name, &p)?; // sidecar — keyed bare
+            } else {
+                load(format!("screens/{}", name), &p)?; // screen spec — keyed with `screens/` prefix
+            }
         }
     }
     Ok(Model { defs })
@@ -136,6 +141,8 @@ fn parse_ref(r: &str) -> Option<ParsedRef> {
 fn is_source_file(f: &str) -> bool {
     SOURCE_FILES.contains(&f)
         || (f.starts_with("database/tables/") && f.ends_with(".yaml"))
+        // Auto-discovered SDUI screen specs (ADR-20260722-091500), keyed `screens/<surface>.yaml`.
+        || (f.starts_with("screens/") && f.ends_with(".yaml"))
         // Per-surface i18n sidecars (ADR-20260722-101500), keyed BARE (`<surface>.translations.yaml`).
         || f.ends_with(".translations.yaml")
 }
@@ -5538,18 +5545,18 @@ fn emit_documentation(model: &Model) -> String {
         ].join("\n")
     };
 
-    // SDUI screens + translations (reuse the C4/HTML approach)
-    let sf = model.defs.get("screens/restaurant_frontoffice.yaml");
-    let resolvers = sf.and_then(|v| v.get("resolvers")).and_then(|v| v.as_mapping());
-    let action_defs = sf.and_then(|v| v.get("actions")).and_then(|v| v.as_mapping());
+    // SDUI screens + translations (reuse the C4/HTML approach). Generic over every screens/*.yaml
+    // surface (ADR-20260722-091500): each surface renders its own screens block under a header, so a new
+    // audience appears in the docs automatically. tr_en/op_cell/boxf/collect_action_types are
+    // surface-independent; resolvers/actions/screens are read per surface inside the loop.
+    let screens_files: Vec<String> = model.defs.keys().filter(|k| k.starts_with("screens/")).cloned().collect();
     // translations merged from translations.yaml + screens/*.translations.yaml (translation_entries)
     let cellf = |s: &str| s.replace('|', "\\|");
-    let tr_en = |rf: &str| -> String { resolve_ref(model, rf, "screens/restaurant_frontoffice.yaml").and_then(|t| t.get("messages")).and_then(|m| m.get("en")).and_then(|x| x.as_str()).map(|s| s.to_string()).unwrap_or_else(|| rf.rsplit('/').next().unwrap_or(rf).to_string()) };
+    let tr_en = |rf: &str| -> String { resolve_ref(model, rf, "translations.yaml").and_then(|t| t.get("messages")).and_then(|m| m.get("en")).and_then(|x| x.as_str()).map(|s| s.to_string()).unwrap_or_else(|| rf.rsplit('/').next().unwrap_or(rf).to_string()) };
     let t_text = |v: &Value| -> String { if let Some(rf) = v.get("$ref").and_then(|x| x.as_str()) { tr_en(rf) } else if let Some(s) = v.as_str() { s.to_string() } else { String::new() } };
     let tr_rows: Vec<Vec<String>> = translation_entries(model).into_iter().map(|(_f, key, t)| { let params = t.get("params").and_then(|x| x.as_mapping()).map(|pm| pm.iter().filter_map(|(pk, _)| pk.as_str().map(|p| format!("`{}`", p))).collect::<Vec<_>>().join(", ")).unwrap_or_default(); let params = if params.is_empty() { "—".to_string() } else { params }; vec![format!("{}`{}`", id_tag(&danchor("translation", &key)), key), params, cellf(t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or("")), cellf(t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or(""))] }).collect();
     let translations_section = md_table(&["Key", "Params", "🇬🇧 en", "🇫🇷 fr"], &tr_rows);
     let op_cell = |rf: Option<&str>, gap: Option<&str>| -> String { if let Some(g) = gap { return format!("⚠️ _gap: {}_", cellf(g)); } match rf { None => "—".to_string(), Some(rf) => { let name = rf.rsplit('/').next().unwrap_or(""); let kind = if rf.contains("/mutations/") { "mutation" } else if rf.contains("/subscriptions/") { "subscription" } else { "query" }; dlink(kind, name) } } };
-    let action_keys: HashSet<String> = action_defs.map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
     fn collect_action_types(node: &Value, keys: &HashSet<String>, acc: &mut Vec<String>) {
         match node {
             Value::Sequence(s) => s.iter().for_each(|n| collect_action_types(n, keys, acc)),
@@ -5561,43 +5568,52 @@ fn emit_documentation(model: &Model) -> String {
         }
     }
     let boxf = |w: usize, s: &str| -> String { let n = s.chars().count(); let inner = if n > w { let t: String = s.chars().take(w - 1).collect(); format!("{}…", t) } else { format!("{}{}", s, " ".repeat(w - n)) }; format!("│ {} │", inner) };
-    let screens_arr = sf.and_then(|v| v.get("screens")).and_then(|x| x.as_sequence()).cloned().unwrap_or_default();
-    let screen_docs: Vec<String> = screens_arr.iter().map(|s| {
-        let id = s.get("id").and_then(|x| x.as_str()).unwrap_or("?");
-        let route = s.get("route").and_then(|x| x.as_str()).unwrap_or("");
-        let title = { let t = s.get("title").map(|v| t_text(v)).unwrap_or_default(); if t.is_empty() { id.to_string() } else { t } };
-        let sdui_badge = if s.get("sdui").and_then(|x| x.as_bool()) == Some(false) { format!("🚫 not SDUI{}", s.get("sdui_reason").and_then(|x| x.as_str()).map(|r| format!(" — {}", r)).unwrap_or_default()) } else { "📱 SDUI".to_string() };
-        let auth = if s.get("requires_auth").and_then(|x| x.as_bool()) == Some(true) { " · 🔒 auth" } else { "" };
-        let mut rows: Vec<Vec<String>> = Vec::new();
-        for rn in s.get("data_requirements").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() {
-            let r = resolvers.and_then(|m| m.get(rn.as_str()));
-            rows.push(vec!["read".to_string(), format!("`{}`", rn), op_cell(r.and_then(|x| x.get("query")).and_then(|q| q.get("$ref")).and_then(|x| x.as_str()), r.and_then(|x| x.get("gap")).and_then(|x| x.as_str()))]);
-        }
-        let mut acts: Vec<String> = Vec::new();
-        if let Some(comps) = s.get("components") { collect_action_types(comps, &action_keys, &mut acts); }
-        for a in s.get("actions_used").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() { if !acts.contains(&a) { acts.push(a); } }
-        for a in &acts {
-            let ad = action_defs.and_then(|m| m.get(a.as_str()));
-            if ad.map(|x| x.get("mutation").is_some() || x.get("gap").is_some()).unwrap_or(false) {
-                rows.push(vec!["write".to_string(), format!("`{}`", a), op_cell(ad.and_then(|x| x.get("mutation")).and_then(|q| q.get("$ref")).and_then(|x| x.as_str()), ad.and_then(|x| x.get("gap")).and_then(|x| x.as_str()))]);
+    let mut surface_blocks: Vec<String> = Vec::new();
+    for sfkey in &screens_files {
+        let sf = model.defs.get(sfkey);
+        let resolvers = sf.and_then(|v| v.get("resolvers")).and_then(|v| v.as_mapping());
+        let action_defs = sf.and_then(|v| v.get("actions")).and_then(|v| v.as_mapping());
+        let action_keys: HashSet<String> = action_defs.map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+        let screens_arr = sf.and_then(|v| v.get("screens")).and_then(|x| x.as_sequence()).cloned().unwrap_or_default();
+        let screen_docs: Vec<String> = screens_arr.iter().map(|s| {
+            let id = s.get("id").and_then(|x| x.as_str()).unwrap_or("?");
+            let route = s.get("route").and_then(|x| x.as_str()).unwrap_or("");
+            let title = { let t = s.get("title").map(|v| t_text(v)).unwrap_or_default(); if t.is_empty() { id.to_string() } else { t } };
+            let sdui_badge = if s.get("sdui").and_then(|x| x.as_bool()) == Some(false) { format!("🚫 not SDUI{}", s.get("sdui_reason").and_then(|x| x.as_str()).map(|r| format!(" — {}", r)).unwrap_or_default()) } else { "📱 SDUI".to_string() };
+            let auth = if s.get("requires_auth").and_then(|x| x.as_bool()) == Some(true) { " · 🔒 auth" } else { "" };
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            for rn in s.get("data_requirements").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() {
+                let r = resolvers.and_then(|m| m.get(rn.as_str()));
+                rows.push(vec!["read".to_string(), format!("`{}`", rn), op_cell(r.and_then(|x| x.get("query")).and_then(|q| q.get("$ref")).and_then(|x| x.as_str()), r.and_then(|x| x.get("gap")).and_then(|x| x.as_str()))]);
             }
-        }
-        let ops_table = md_table(&["Kind", "UI need", "GraphQL operation"], &rows);
-        let mut mock_lines: Vec<String> = Vec::new();
-        if let Some(comps) = s.get("components").and_then(|x| x.as_sequence()) {
-            for c in comps {
-                let t = if let Some(cp) = c.get("component").and_then(|x| x.as_str()) { format!("«{}»", cp) } else { c.get("type").and_then(|x| x.as_str()).unwrap_or("?").to_string() };
-                let lbl = { let l = c.get("title").map(|v| t_text(v)).filter(|s| !s.is_empty()).or_else(|| c.get("label").map(|v| t_text(v)).filter(|s| !s.is_empty())).or_else(|| c.get("placeholder").map(|v| t_text(v)).filter(|s| !s.is_empty())).unwrap_or_default(); l };
-                mock_lines.push(boxf(40, &format!("{}{}", t, if lbl.is_empty() { String::new() } else { format!(" — {}", lbl) })));
+            let mut acts: Vec<String> = Vec::new();
+            if let Some(comps) = s.get("components") { collect_action_types(comps, &action_keys, &mut acts); }
+            for a in s.get("actions_used").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() { if !acts.contains(&a) { acts.push(a); } }
+            for a in &acts {
+                let ad = action_defs.and_then(|m| m.get(a.as_str()));
+                if ad.map(|x| x.get("mutation").is_some() || x.get("gap").is_some()).unwrap_or(false) {
+                    rows.push(vec!["write".to_string(), format!("`{}`", a), op_cell(ad.and_then(|x| x.get("mutation")).and_then(|q| q.get("$ref")).and_then(|x| x.as_str()), ad.and_then(|x| x.get("gap")).and_then(|x| x.as_str()))]);
+                }
             }
-        }
-        let mut mock = vec![format!("┌{}┐", "─".repeat(42)), boxf(40, &title), format!("├{}┤", "─".repeat(42))];
-        mock.extend(mock_lines);
-        mock.push(format!("└{}┘", "─".repeat(42)));
-        let gaps = s.get("gaps").and_then(|x| x.as_sequence()).map(|g| g.iter().filter_map(|x| x.as_str()).map(|g| format!("- ⚠️ {}", g)).collect::<Vec<_>>().join("\n")).unwrap_or_default();
-        format!("{}\n### {} `{}` · `{}` · {}{}\n\n```\n{}\n```\n\n{}{}", id_tag(&danchor("screen", id)), d_emo("screen"), id, route, sdui_badge, auth, mock.join("\n"), ops_table, if gaps.is_empty() { String::new() } else { format!("\n\n**Gaps**\n{}", gaps) })
-    }).collect();
-    let screens_section = screen_docs.join("\n\n");
+            let ops_table = md_table(&["Kind", "UI need", "GraphQL operation"], &rows);
+            let mut mock_lines: Vec<String> = Vec::new();
+            if let Some(comps) = s.get("components").and_then(|x| x.as_sequence()) {
+                for c in comps {
+                    let t = if let Some(cp) = c.get("component").and_then(|x| x.as_str()) { format!("«{}»", cp) } else { c.get("type").and_then(|x| x.as_str()).unwrap_or("?").to_string() };
+                    let lbl = { let l = c.get("title").map(|v| t_text(v)).filter(|s| !s.is_empty()).or_else(|| c.get("label").map(|v| t_text(v)).filter(|s| !s.is_empty())).or_else(|| c.get("placeholder").map(|v| t_text(v)).filter(|s| !s.is_empty())).unwrap_or_default(); l };
+                    mock_lines.push(boxf(40, &format!("{}{}", t, if lbl.is_empty() { String::new() } else { format!(" — {}", lbl) })));
+                }
+            }
+            let mut mock = vec![format!("┌{}┐", "─".repeat(42)), boxf(40, &title), format!("├{}┤", "─".repeat(42))];
+            mock.extend(mock_lines);
+            mock.push(format!("└{}┘", "─".repeat(42)));
+            let gaps = s.get("gaps").and_then(|x| x.as_sequence()).map(|g| g.iter().filter_map(|x| x.as_str()).map(|g| format!("- ⚠️ {}", g)).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+            format!("{}\n### {} `{}` · `{}` · {}{}\n\n```\n{}\n```\n\n{}{}", id_tag(&danchor("screen", id)), d_emo("screen"), id, route, sdui_badge, auth, mock.join("\n"), ops_table, if gaps.is_empty() { String::new() } else { format!("\n\n**Gaps**\n{}", gaps) })
+        }).collect();
+        let surface = sfkey.strip_prefix("screens/").unwrap_or(sfkey);
+        surface_blocks.push(format!("_Surface_ **`{}`**\n\n{}", surface, screen_docs.join("\n\n")));
+    }
+    let screens_section = surface_blocks.join("\n\n");
 
     // Assembly
     let sec = |id: &str, emoji: &str, title: &str| format!("{}\n## {} {}", id_tag(&format!("sec-{}", id)), emoji, title);
@@ -5632,13 +5648,13 @@ fn emit_documentation(model: &Model) -> String {
     let ctx_toc = ctx_blocks.iter().map(|(ctx, _)| format!("[{} {}](#sec-ctx-{})", d_emo("context"), ctx, dslug(ctx))).collect::<Vec<_>>().join(" · ");
 
     format!(
-        "<!-- GENERATED by tools/codegen — do not edit by hand. Source: specs/*.yaml. -->\n# 📖 Captain.Food — Product Documentation (generated)\n\nA single, navigable view of the whole product, built from the specs and organized **top-level by\nbounded context** (🔲). Within each context: its API operations, output types, actors, views, commands,\nevents, entities, scalars, errors, business rules (📐 — what we guarantee), tests (🧪 — how it's verified,\ncross-linked to the rules) and observability contracts. Every item — and every\n**property** 🔹 — is anchored and **cross-linked**; `cross-cutting` holds the shared vocabulary and ops\nthat belong to no single context. Stories and Architecture span all contexts.\n\n**Kinds**: {q} query · {mu} mutation · {su} subscription · {ty} type · {ac} actor · {vi} view · {cm} command · {ev} event · {en} entity · {sc} scalar · {er} error · {pr} property\n**Roles**: 🌐 PUBLIC · 🙋 CUSTOMER · 🏪 RESTAURANT_ACCOUNT · 🍽️ RESTAURANT · 🛵 RIDER · 🛠️ ADMIN · 🔌 EXTERNAL\n**Markers**: ✅ required · ⬜ optional · 🛶 V0 · 🔭 V1 · 🔒 internal · ⚠️ design hole\n\n**Contents** — [🎬 Stories](#sec-stories) · {toc} · [📱 Screens](#sec-screens) · [🌐 Translations](#sec-translations) · [🏛️ Architecture](#sec-architecture)\n\n{s_stories}\n\nHow each persona uses the API. `personaRole` is the persona's GraphQL path-role (UserType).\n\n{stories}\n\n{ctxs}\n\n{s_screens}\n\nServer-Driven UI screens (`specs/screens/restaurant_frontoffice.yaml`, ADR-0033). Each screen's **reads** (resolvers →\nqueries) and **writes** (actions → mutations) are `$ref`-bound to the GraphQL API and validated, so the\nmockups below are the **proof the API answers the UI**. ⚠️ gaps mark UI needs the API does not serve yet.\nScreens marked 🚫 are intentionally not SDUI-rendered (Stripe/subscription/auth integrity).\n\n{screens}\n\n{s_trans}\n\nThe i18n catalog (`specs/translations.yaml`) — every user-visible screen string, referenced by `$ref` and\ngenerated to a single `translations.generated.json`. `{{param}}` tokens are validated against `params`.\n\n{trans}\n\n{s_arch}\n\nC4 views as source-managed DSL (`specs/architecture/c4-l{{2,3}}.yaml`). Bounded contexts bind their\naggregates; components bind the aggregates they handle and the read models they update.\n\n{c4}\n",
+        "<!-- GENERATED by tools/codegen — do not edit by hand. Source: specs/*.yaml. -->\n# 📖 Captain.Food — Product Documentation (generated)\n\nA single, navigable view of the whole product, built from the specs and organized **top-level by\nbounded context** (🔲). Within each context: its API operations, output types, actors, views, commands,\nevents, entities, scalars, errors, business rules (📐 — what we guarantee), tests (🧪 — how it's verified,\ncross-linked to the rules) and observability contracts. Every item — and every\n**property** 🔹 — is anchored and **cross-linked**; `cross-cutting` holds the shared vocabulary and ops\nthat belong to no single context. Stories and Architecture span all contexts.\n\n**Kinds**: {q} query · {mu} mutation · {su} subscription · {ty} type · {ac} actor · {vi} view · {cm} command · {ev} event · {en} entity · {sc} scalar · {er} error · {pr} property\n**Roles**: 🌐 PUBLIC · 🙋 CUSTOMER · 🏪 RESTAURANT_ACCOUNT · 🍽️ RESTAURANT · 🛵 RIDER · 🛠️ ADMIN · 🔌 EXTERNAL\n**Markers**: ✅ required · ⬜ optional · 🛶 V0 · 🔭 V1 · 🔒 internal · ⚠️ design hole\n\n**Contents** — [🎬 Stories](#sec-stories) · {toc} · [📱 Screens](#sec-screens) · [🌐 Translations](#sec-translations) · [🏛️ Architecture](#sec-architecture)\n\n{s_stories}\n\nHow each persona uses the API. `personaRole` is the persona's GraphQL path-role (UserType).\n\n{stories}\n\n{ctxs}\n\n{s_screens}\n\nServer-Driven UI screens (`specs/screens/*.yaml`, one file per audience, ADR-0033/ADR-20260722-091500).\nEach screen's **reads** (resolvers →\nqueries) and **writes** (actions → mutations) are `$ref`-bound to the GraphQL API and validated, so the\nmockups below are the **proof the API answers the UI**. ⚠️ gaps mark UI needs the API does not serve yet.\nScreens marked 🚫 are intentionally not SDUI-rendered (Stripe/subscription/auth integrity).\n\n{screens}\n\n{s_trans}\n\nThe i18n catalog (`specs/translations.yaml`) — every user-visible screen string, referenced by `$ref` and\ngenerated to a single `translations.generated.json`. `{{param}}` tokens are validated against `params`.\n\n{trans}\n\n{s_arch}\n\nC4 views as source-managed DSL (`specs/architecture/c4-l{{2,3}}.yaml`). Bounded contexts bind their\naggregates; components bind the aggregates they handle and the read models they update.\n\n{c4}\n",
         q = d_emo("query"), mu = d_emo("mutation"), su = d_emo("subscription"), ty = d_emo("type"), ac = d_emo("actor"), vi = d_emo("view"), cm = d_emo("command"), ev = d_emo("event"), en = d_emo("entity"), sc = d_emo("scalar"), er = d_emo("error"), pr = d_emo("property"),
         toc = ctx_toc,
         s_stories = sec("stories", "🎬", "Stories"),
         stories = stories_section,
         ctxs = ctx_sections,
-        s_screens = sec("screens", "📱", "Restaurant front-office screens (SDUI)"),
+        s_screens = sec("screens", "📱", "Front-office screens (SDUI)"),
         screens = screens_section,
         s_trans = sec("translations", "🌐", "Translations"),
         trans = translations_section,
@@ -6139,7 +6155,7 @@ fn emit_documentation_html(model: &Model) -> String {
         h_table(&["Component", "Instrumented", "Description", "Binds"], &comp_rows));
 
     // 13. Interactive map data
-    let sf = model.defs.get("screens/restaurant_frontoffice.yaml");
+    let screens_files: Vec<String> = model.defs.keys().filter(|k| k.starts_with("screens/")).cloned().collect();
     let l2m = |k: &str| l2.and_then(|v| v.get(k));
     let contexts_j: Vec<serde_json::Value> = l2m("boundedContexts").and_then(|v| v.as_mapping()).map(|m| m.iter().filter_map(|(k, bc)| k.as_str().map(|id| serde_json::json!({"id": id, "description": bc.get("description").and_then(|x| x.as_str()).unwrap_or(""), "aggregates": ref_names(bc.get("aggregates")), "processManagers": ref_names(bc.get("processManagers"))}))).collect()).unwrap_or_default();
     let containers_j: Vec<serde_json::Value> = l2m("containers").and_then(|v| v.as_mapping()).map(|m| m.iter().filter_map(|(k, c)| k.as_str().map(|id| serde_json::json!({"id": id, "technology": c.get("technology").and_then(|x| x.as_str()).unwrap_or(""), "description": c.get("description").and_then(|x| x.as_str()).unwrap_or(""), "realizes": ref_names(c.get("realizes"))}))).collect()).unwrap_or_default();
@@ -6164,16 +6180,15 @@ fn emit_documentation_html(model: &Model) -> String {
         "🔹 <span class=\"k-prop\">property</span>".to_string(), "<span class=\"k-param\">parameter</span>".to_string(), format!("{} <span class=\"k-scalar\">rule</span>", d_emo("rule")), format!("{} <span class=\"k-op\">test</span>", d_emo("test")), format!("{} <span class=\"k-type\">screen</span>", d_emo("screen")), format!("{} <span class=\"k-scalar\">translation</span>", d_emo("translation")), format!("{} <span class=\"k-event\">observability</span>", d_emo("obs")),
     ].join(" · ");
 
-    // SDUI screens + translations
-    let resolvers = sf.and_then(|v| v.get("resolvers")).and_then(|v| v.as_mapping());
-    let action_defs = sf.and_then(|v| v.get("actions")).and_then(|v| v.as_mapping());
+    // SDUI screens + translations — generic over every screens/*.yaml surface (ADR-20260722-091500):
+    // one screens block per surface under a header. tr_en/t_text/op_link/collect_action_types are
+    // surface-independent; resolvers/actions/screens are read per surface inside the loop.
     // translations merged from translations.yaml + screens/*.translations.yaml (translation_entries)
-    let tr_en = |rf: &str| -> String { resolve_ref(model, rf, "screens/restaurant_frontoffice.yaml").and_then(|t| t.get("messages")).and_then(|m| m.get("en")).and_then(|x| x.as_str()).map(|s| s.to_string()).unwrap_or_else(|| rf.rsplit('/').next().unwrap_or(rf).to_string()) };
+    let tr_en = |rf: &str| -> String { resolve_ref(model, rf, "translations.yaml").and_then(|t| t.get("messages")).and_then(|m| m.get("en")).and_then(|x| x.as_str()).map(|s| s.to_string()).unwrap_or_else(|| rf.rsplit('/').next().unwrap_or(rf).to_string()) };
     let t_text = |v: &Value| -> String { if let Some(rf) = v.get("$ref").and_then(|x| x.as_str()) { tr_en(rf) } else if let Some(s) = v.as_str() { s.to_string() } else { String::new() } };
     let tr_rows: Vec<Vec<String>> = translation_entries(model).into_iter().map(|(_f, key, t)| { let params = t.get("params").and_then(|x| x.as_mapping()).map(|pm| pm.iter().filter_map(|(pk, _)| pk.as_str().map(|p| format!("<span class=\"k-param\">{}</span>", h_esc(p)))).collect::<Vec<_>>().join(", ")).unwrap_or_default(); let params = if params.is_empty() { "<span class=\"muted\">—</span>".to_string() } else { params }; vec![format!("<span id=\"{}\" class=\"k-scalar\">{} {}</span>", danchor("translation", &key), d_emo("translation"), h_esc(&key)), params, format!("🇬🇧 {}", h_esc(t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or(""))), format!("🇫🇷 {}", h_esc(t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or("")))] }).collect();
     let translations_html = h_table(&["Key", "Params", "en", "fr"], &tr_rows);
     let op_link = |rf: Option<&str>, gap: Option<&str>| -> String { if let Some(g) = gap { return format!("<span class=\"opt\">⚠️ {}</span>", h_esc(g)); } match rf { None => "—".to_string(), Some(rf) => { let name = rf.rsplit('/').next().unwrap_or(""); let kind = if rf.contains("/mutations/") { "mutation" } else if rf.contains("/subscriptions/") { "subscription" } else { "query" }; h_link(kind, name) } } };
-    let action_keys: HashSet<String> = action_defs.map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
     fn collect_action_types(node: &Value, keys: &HashSet<String>, acc: &mut Vec<String>) {
         match node {
             Value::Sequence(s) => s.iter().for_each(|n| collect_action_types(n, keys, acc)),
@@ -6181,36 +6196,48 @@ fn emit_documentation_html(model: &Model) -> String {
             _ => {}
         }
     }
-    let screens_arr = sf.and_then(|v| v.get("screens")).and_then(|x| x.as_sequence()).cloned().unwrap_or_default();
-    let screens_html: String = screens_arr.iter().map(|s| {
-        let id = s.get("id").and_then(|x| x.as_str()).unwrap_or("?");
-        let route = s.get("route").and_then(|x| x.as_str()).unwrap_or("");
-        let title = { let t = s.get("title").map(|v| t_text(v)).unwrap_or_default(); if t.is_empty() { id.to_string() } else { t } };
-        let not_sdui = s.get("sdui").and_then(|x| x.as_bool()) == Some(false);
-        let badge = if not_sdui { "<span class=\"badge\">🚫 not SDUI</span>".to_string() } else { "<span class=\"badge\">📱 SDUI</span>".to_string() };
-        let auth = if s.get("requires_auth").and_then(|x| x.as_bool()) == Some(true) { "<span class=\"badge\">🔒 auth</span>" } else { "" };
-        let reason = if not_sdui { s.get("sdui_reason").and_then(|x| x.as_str()).map(|r| format!("<div class=\"desc\">{}</div>", h_esc(r))).unwrap_or_default() } else { String::new() };
-        let mock_rows = s.get("components").and_then(|x| x.as_sequence()).map(|comps| comps.iter().map(|c| { let t = if let Some(cp) = c.get("component").and_then(|x| x.as_str()) { format!("«{}»", cp) } else { c.get("type").and_then(|x| x.as_str()).unwrap_or("?").to_string() }; let lbl = c.get("title").map(|v| t_text(v)).filter(|s| !s.is_empty()).or_else(|| c.get("label").map(|v| t_text(v)).filter(|s| !s.is_empty())).or_else(|| c.get("placeholder").map(|v| t_text(v)).filter(|s| !s.is_empty())).unwrap_or_default(); format!("<div style=\"padding:5px 10px;border-top:1px solid var(--line)\"><span class=\"muted\">{}</span>{}</div>", h_esc(&t), if lbl.is_empty() { String::new() } else { format!(" {}", h_esc(&lbl)) }) }).collect::<Vec<_>>().join("")).unwrap_or_default();
-        let mock = format!("<div style=\"border:1px solid var(--line);border-radius:12px;max-width:340px;overflow:hidden;margin:8px 0\"><div style=\"background:var(--bg3);padding:7px 10px;font-weight:600\">📱 {}<span class=\"muted\"> · {}</span></div>{}</div>", h_esc(&title), h_esc(route), mock_rows);
-        let mut rows: Vec<Vec<String>> = Vec::new();
-        for rn in s.get("data_requirements").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() {
-            let r = resolvers.and_then(|m| m.get(rn.as_str()));
-            rows.push(vec!["<span class=\"muted\">read</span>".to_string(), format!("<span class=\"k-op\">{}</span>", h_esc(&rn)), op_link(r.and_then(|x| x.get("query")).and_then(|q| q.get("$ref")).and_then(|x| x.as_str()), r.and_then(|x| x.get("gap")).and_then(|x| x.as_str()))]);
-        }
-        let mut acts: Vec<String> = Vec::new();
-        if let Some(comps) = s.get("components") { collect_action_types(comps, &action_keys, &mut acts); }
-        for a in s.get("actions_used").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() { if !acts.contains(&a) { acts.push(a); } }
-        for a in &acts {
-            let ad = action_defs.and_then(|m| m.get(a.as_str()));
-            if ad.map(|x| x.get("mutation").is_some() || x.get("gap").is_some()).unwrap_or(false) {
-                rows.push(vec!["<span class=\"muted\">write</span>".to_string(), format!("<span class=\"k-op\">{}</span>", h_esc(a)), op_link(ad.and_then(|x| x.get("mutation")).and_then(|q| q.get("$ref")).and_then(|x| x.as_str()), ad.and_then(|x| x.get("gap")).and_then(|x| x.as_str()))]);
+    let mut all_screens: Vec<Value> = Vec::new();
+    let mut screens_html = String::new();
+    for sfkey in &screens_files {
+        let sf = model.defs.get(sfkey);
+        let resolvers = sf.and_then(|v| v.get("resolvers")).and_then(|v| v.as_mapping());
+        let action_defs = sf.and_then(|v| v.get("actions")).and_then(|v| v.as_mapping());
+        let action_keys: HashSet<String> = action_defs.map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+        let screens_arr = sf.and_then(|v| v.get("screens")).and_then(|x| x.as_sequence()).cloned().unwrap_or_default();
+        let surface = sfkey.strip_prefix("screens/").unwrap_or(sfkey);
+        screens_html.push_str(&format!("<p class=\"muted\">Surface <strong>{}</strong></p>", h_esc(surface)));
+        let block: String = screens_arr.iter().map(|s| {
+            let id = s.get("id").and_then(|x| x.as_str()).unwrap_or("?");
+            let route = s.get("route").and_then(|x| x.as_str()).unwrap_or("");
+            let title = { let t = s.get("title").map(|v| t_text(v)).unwrap_or_default(); if t.is_empty() { id.to_string() } else { t } };
+            let not_sdui = s.get("sdui").and_then(|x| x.as_bool()) == Some(false);
+            let badge = if not_sdui { "<span class=\"badge\">🚫 not SDUI</span>".to_string() } else { "<span class=\"badge\">📱 SDUI</span>".to_string() };
+            let auth = if s.get("requires_auth").and_then(|x| x.as_bool()) == Some(true) { "<span class=\"badge\">🔒 auth</span>" } else { "" };
+            let reason = if not_sdui { s.get("sdui_reason").and_then(|x| x.as_str()).map(|r| format!("<div class=\"desc\">{}</div>", h_esc(r))).unwrap_or_default() } else { String::new() };
+            let mock_rows = s.get("components").and_then(|x| x.as_sequence()).map(|comps| comps.iter().map(|c| { let t = if let Some(cp) = c.get("component").and_then(|x| x.as_str()) { format!("«{}»", cp) } else { c.get("type").and_then(|x| x.as_str()).unwrap_or("?").to_string() }; let lbl = c.get("title").map(|v| t_text(v)).filter(|s| !s.is_empty()).or_else(|| c.get("label").map(|v| t_text(v)).filter(|s| !s.is_empty())).or_else(|| c.get("placeholder").map(|v| t_text(v)).filter(|s| !s.is_empty())).unwrap_or_default(); format!("<div style=\"padding:5px 10px;border-top:1px solid var(--line)\"><span class=\"muted\">{}</span>{}</div>", h_esc(&t), if lbl.is_empty() { String::new() } else { format!(" {}", h_esc(&lbl)) }) }).collect::<Vec<_>>().join("")).unwrap_or_default();
+            let mock = format!("<div style=\"border:1px solid var(--line);border-radius:12px;max-width:340px;overflow:hidden;margin:8px 0\"><div style=\"background:var(--bg3);padding:7px 10px;font-weight:600\">📱 {}<span class=\"muted\"> · {}</span></div>{}</div>", h_esc(&title), h_esc(route), mock_rows);
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            for rn in s.get("data_requirements").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() {
+                let r = resolvers.and_then(|m| m.get(rn.as_str()));
+                rows.push(vec!["<span class=\"muted\">read</span>".to_string(), format!("<span class=\"k-op\">{}</span>", h_esc(&rn)), op_link(r.and_then(|x| x.get("query")).and_then(|q| q.get("$ref")).and_then(|x| x.as_str()), r.and_then(|x| x.get("gap")).and_then(|x| x.as_str()))]);
             }
-        }
-        let ops_table = h_table(&["", "UI need", "GraphQL operation"], &rows);
-        let gaps = s.get("gaps").and_then(|x| x.as_sequence()).map(|g| g.iter().filter_map(|x| x.as_str()).map(|g| format!("<li>⚠️ {}</li>", h_esc(g))).collect::<Vec<_>>().join("")).unwrap_or_default();
-        let body = format!("{}<div style=\"display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start\">{}<div style=\"flex:1;min-width:280px\">{}{}</div></div>", reason, mock, ops_table, if gaps.is_empty() { String::new() } else { format!("<p class=\"muted\">Gaps</p><ul>{}</ul>", gaps) });
-        format!("<details class=\"item\" id=\"{}\" data-crumb=\"{} {}\" open><summary><span class=\"tw\">▸</span><span class=\"muted\">Screen:</span> <span class=\"k-type\">{} {}</span> <span class=\"muted\">{}</span> {}{}<a class=\"perma\" href=\"#{}\">🔗</a></summary>{}</details>", danchor("screen", id), d_emo("screen"), h_esc(id), d_emo("screen"), h_esc(id), h_esc(route), badge, auth, danchor("screen", id), body)
-    }).collect();
+            let mut acts: Vec<String> = Vec::new();
+            if let Some(comps) = s.get("components") { collect_action_types(comps, &action_keys, &mut acts); }
+            for a in s.get("actions_used").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() { if !acts.contains(&a) { acts.push(a); } }
+            for a in &acts {
+                let ad = action_defs.and_then(|m| m.get(a.as_str()));
+                if ad.map(|x| x.get("mutation").is_some() || x.get("gap").is_some()).unwrap_or(false) {
+                    rows.push(vec!["<span class=\"muted\">write</span>".to_string(), format!("<span class=\"k-op\">{}</span>", h_esc(a)), op_link(ad.and_then(|x| x.get("mutation")).and_then(|q| q.get("$ref")).and_then(|x| x.as_str()), ad.and_then(|x| x.get("gap")).and_then(|x| x.as_str()))]);
+                }
+            }
+            let ops_table = h_table(&["", "UI need", "GraphQL operation"], &rows);
+            let gaps = s.get("gaps").and_then(|x| x.as_sequence()).map(|g| g.iter().filter_map(|x| x.as_str()).map(|g| format!("<li>⚠️ {}</li>", h_esc(g))).collect::<Vec<_>>().join("")).unwrap_or_default();
+            let body = format!("{}<div style=\"display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start\">{}<div style=\"flex:1;min-width:280px\">{}{}</div></div>", reason, mock, ops_table, if gaps.is_empty() { String::new() } else { format!("<p class=\"muted\">Gaps</p><ul>{}</ul>", gaps) });
+            format!("<details class=\"item\" id=\"{}\" data-crumb=\"{} {}\" open><summary><span class=\"tw\">▸</span><span class=\"muted\">Screen:</span> <span class=\"k-type\">{} {}</span> <span class=\"muted\">{}</span> {}{}<a class=\"perma\" href=\"#{}\">🔗</a></summary>{}</details>", danchor("screen", id), d_emo("screen"), h_esc(id), d_emo("screen"), h_esc(id), h_esc(route), badge, auth, danchor("screen", id), body)
+        }).collect();
+        screens_html.push_str(&block);
+        all_screens.extend(screens_arr);
+    }
 
     // descIndex (insertion order preserved via serde_json preserve_order Map)
     let mut desc_map = serde_json::Map::new();
@@ -6229,7 +6256,7 @@ fn emit_documentation_html(model: &Model) -> String {
     if let Some(m) = model.defs.get("observability.yaml").and_then(|v| v.as_mapping()) { for (k, c) in m { if let Some(f) = k.as_str() { let s = format!("Observability contract — criticality: {}.", c.get("criticality").and_then(|x| x.as_str()).unwrap_or("—")); put("obs", f, &s); } } }
     if let Some(m) = rule_defs { for (k, d) in m { if let Some(n) = k.as_str() { put("rule", n, d.get("description").and_then(|x| x.as_str()).unwrap_or("")); } } }
     for (_f, key, t) in translation_entries(model) { let s = format!("{} / {}", t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or(""), t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or("")); put("translation", &key, &s); }
-    for s in &screens_arr { if let Some(id) = s.get("id").and_then(|x| x.as_str()) { let msg = format!("{}screen {}", if s.get("sdui").and_then(|x| x.as_bool()) == Some(false) { "Non-SDUI " } else { "SDUI " }, s.get("route").and_then(|x| x.as_str()).unwrap_or("")); put("screen", id, &msg); } }
+    for s in &all_screens { if let Some(id) = s.get("id").and_then(|x| x.as_str()) { let msg = format!("{}screen {}", if s.get("sdui").and_then(|x| x.as_bool()) == Some(false) { "Non-SDUI " } else { "SDUI " }, s.get("route").and_then(|x| x.as_str()).unwrap_or("")); put("screen", id, &msg); } }
     drop(put);
     let desc_script = format!("<script>window.CF_DESC={};</script>", serde_json::to_string(&serde_json::Value::Object(desc_map)).unwrap().replace('<', "\\u003c"));
 
@@ -6275,7 +6302,7 @@ fn emit_documentation_html(model: &Model) -> String {
     out.push_str("\n  ");
     out.push_str(&ctx_sections);
     out.push_str("\n  ");
-    out.push_str(&h_sec("screens", "📱", "Restaurant front-office screens (SDUI)", &(String::from("<p class=\"muted\">Server-Driven UI screens (restaurant_frontoffice.yaml, ADR-0033). Per screen, the reads (resolvers→queries) and writes (actions→mutations) are $ref-bound to the GraphQL API and validated — the mockups are the <strong>proof the API answers the UI</strong>. ⚠️ marks gaps the API does not serve yet; 🚫 screens are intentionally not SDUI-rendered.</p>") + &screens_html)));
+    out.push_str(&h_sec("screens", "📱", "Front-office screens (SDUI)", &(String::from("<p class=\"muted\">Server-Driven UI screens (specs/screens/*.yaml, one file per audience, ADR-0033/ADR-20260722-091500). Per screen, the reads (resolvers→queries) and writes (actions→mutations) are $ref-bound to the GraphQL API and validated — the mockups are the <strong>proof the API answers the UI</strong>. ⚠️ marks gaps the API does not serve yet; 🚫 screens are intentionally not SDUI-rendered.</p>") + &screens_html)));
     out.push_str("\n  ");
     out.push_str(&h_sec("translations", "🌐", "Translations", &(String::from("<p class=\"muted\">The i18n catalog (translations.yaml) — every screen string, referenced by $ref, generated to one translations.generated.json. {param} tokens are validated against declared params.</p>") + &translations_html)));
     out.push_str("\n  ");
@@ -12321,6 +12348,8 @@ mod tests {
         assert!(is_source_file("api.yaml"));
         assert!(is_source_file("architecture/c4-l2.yaml"));
         assert!(is_source_file("services.yaml"));
+        assert!(is_source_file("screens/captain_frontoffice.yaml"));
+        assert!(is_source_file("restaurant_frontoffice.translations.yaml"));
         assert!(!is_source_file("nope.yaml"));
     }
 
