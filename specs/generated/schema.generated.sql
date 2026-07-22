@@ -4,6 +4,10 @@
 CREATE TABLE ref_thumb_rating(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_thumb_rating (value, sort_order) VALUES ('UP',0),('DOWN',1);
 
+-- DeliveryTimeliness
+CREATE TABLE ref_delivery_timeliness(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_delivery_timeliness (value, sort_order) VALUES ('ON_TIME',0),('ACCEPTABLE_DELAY',1),('TOO_LATE',2);
+
 -- Weekday
 CREATE TABLE ref_weekday(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_weekday (value, sort_order) VALUES ('MONDAY',0),('TUESDAY',1),('WEDNESDAY',2),('THURSDAY',3),('FRIDAY',4),('SATURDAY',5),('SUNDAY',6);
@@ -533,6 +537,7 @@ CREATE TABLE OrderTracking (
   restaurant_stars INTEGER,
   rating_comment TEXT,
   rider_thumb INTEGER,
+  delivery_timeliness INTEGER,
   rider_tip_cents BIGINT,
   restaurant_tip_cents BIGINT,
   captain_tip_cents BIGINT,

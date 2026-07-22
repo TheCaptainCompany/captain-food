@@ -101,6 +101,10 @@ OrderRatedOnceWhenDelivered:
   description: "A delivered order can be rated (rider thumb) exactly once."
 RestaurantRatedOncePerOrder:
   description: "The restaurant can be rated exactly once per order."
+DeliverySatisfactionRecordedOncePerDeliveredOrder:
+  description: "A delivered order's delivery-delay satisfaction survey can be answered exactly once (#62); a second answer, a missing order, or a not-delivered order is rejected."
+DeliverySatisfactionVisibleToRestaurant:
+  description: "A recorded delivery-delay verdict (DeliverySatisfactionRecorded) is projected into the restaurant-facing timeliness read model (restaurantDeliverySatisfaction) so the restaurant can weigh self-dispatch vs Captain routing (#62)."
 TipsAdditiveMultiRecipientSeparate:
   description: "Tips (rider/restaurant/Captain, by customer or restaurant) are additive and separate from the split; an invalid recipient is rejected (ADR-0029)."
 RefundRequestByCustomer:

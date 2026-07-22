@@ -73,6 +73,7 @@ scalar CustomerDisplayName
 scalar OrderNote
 scalar StarRating
 scalar RatingComment
+scalar DeliveryDissatisfactionReason
 scalar TimeOfDay
 scalar ProspectionScore
 scalar DeliveryChannelKey
@@ -85,6 +86,12 @@ scalar DeliveryPartnerName
 enum ThumbRating {
   UP
   DOWN
+}
+
+enum DeliveryTimeliness {
+  ON_TIME
+  ACCEPTABLE_DELAY
+  TOO_LATE
 }
 
 enum Weekday {
@@ -553,6 +560,7 @@ type Order {
   restaurantStars: StarRating
   ratingComment: RatingComment
   riderThumb: ThumbRating
+  deliveryTimeliness: DeliveryTimeliness
   riderTip: Money
   restaurantTip: Money
   captainTip: Money
@@ -672,6 +680,14 @@ type DeliveryJob {
   deliveredAt: DateTime
   order: Order!
   restaurant: Restaurant!
+}
+
+type DeliverySatisfaction {
+  orderId: OrderId!
+  restaurantId: RestaurantId!
+  timeliness: DeliveryTimeliness!
+  reason: DeliveryDissatisfactionReason
+  recordedAt: DateTime!
 }
 
 type DeliveryPartnerAvailability {
@@ -1128,6 +1144,13 @@ input RateRestaurantInput {
   comment: RatingComment
 }
 
+input RecordDeliverySatisfactionInput {
+  orderId: OrderId!
+  restaurantId: RestaurantId!
+  timeliness: DeliveryTimeliness!
+  reason: DeliveryDissatisfactionReason
+}
+
 input TipOrderInput {
   orderId: OrderId!
   restaurantId: RestaurantId!
@@ -1258,6 +1281,11 @@ input MyDeliveriesQueryInput {
 input RestaurantDeliveriesQueryInput {
   restaurantId: RestaurantId!
   status: DeliveryStatus
+}
+
+input RestaurantDeliverySatisfactionQueryInput {
+  restaurantId: RestaurantId!
+  timeliness: DeliveryTimeliness
 }
 
 input PendingRefundsQueryInput {
@@ -1439,6 +1467,7 @@ type Query {
   delivery(input: DeliveryQueryInput!): DeliveryJob @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["View_DeliveryJob"])
   myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
+  restaurantDeliverySatisfaction(input: RestaurantDeliverySatisfactionQueryInput!): [DeliverySatisfaction!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_DeliverySatisfaction"])
   pendingRefunds(input: PendingRefundsQueryInput): [Refund!]! @auth(requires: [RESTAURANT, ADMIN]) @reads(views: ["View_PendingRefunds"])
   deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
@@ -1510,6 +1539,7 @@ type Mutation {
   cancelOrderByRestaurant(input: CancelOrderByRestaurantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @command(name: "CancelOrderByRestaurant")
   rateOrder(input: RateOrderInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RateOrder")
   rateRestaurant(input: RateRestaurantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RateRestaurant")
+  recordDeliverySatisfaction(input: RecordDeliverySatisfactionInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RecordDeliverySatisfaction")
   tipOrder(input: TipOrderInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT]) @command(name: "TipOrder")
   requestRefund(input: RequestRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestRefund")
   approveRefund(input: ApproveRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "ApproveRefund")

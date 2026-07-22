@@ -468,6 +468,14 @@ pub const RESTAURANT_ALREADY_RATED: ErrorDef = ErrorDef {
     message_fr: "Vous avez déjà noté le restaurant pour cette commande.",
 };
 
+/// The delivery-delay satisfaction survey has already been answered for this order; final (one per order).
+/// Context: `orderId`.
+pub const DELIVERY_SATISFACTION_ALREADY_RECORDED: ErrorDef = ErrorDef {
+    code: "DeliverySatisfactionAlreadyRecorded",
+    message_en: "You have already answered the delivery survey for this order.",
+    message_fr: "Vous avez déjà répondu au questionnaire de livraison pour cette commande.",
+};
+
 /// The tipper cannot tip this recipient (e.g. a restaurant tipping itself).
 /// Context: `tippedBy`, `recipient`.
 pub const INVALID_TIP_RECIPIENT: ErrorDef = ErrorDef {
@@ -670,6 +678,7 @@ pub const ERRORS: &[ErrorDef] = &[
     INVALID_ORDER_STATUS,
     ORDER_ALREADY_RATED,
     RESTAURANT_ALREADY_RATED,
+    DELIVERY_SATISFACTION_ALREADY_RECORDED,
     INVALID_TIP_RECIPIENT,
     DELIVERY_ADDRESS_REQUIRED,
     OUTSIDE_DELIVERY_AREA,

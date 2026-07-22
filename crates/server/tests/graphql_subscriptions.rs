@@ -170,6 +170,17 @@ impl application::queries::DeliveryPartnerAvailabilityReadRepository for Empty {
     }
 }
 
+#[async_trait]
+impl application::queries::DeliverySatisfactionReadRepository for Empty {
+    async fn by_restaurant(
+        &self,
+        _r: ds::RestaurantId,
+        _t: Option<ds::DeliveryTimeliness>,
+    ) -> Result<Vec<application::queries::DeliverySatisfactionRow>, DomainError> {
+        Ok(vec![])
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures.
 // ---------------------------------------------------------------------------------------------
@@ -240,6 +251,7 @@ fn order_row(order_id: uuid::Uuid, restaurant_id: uuid::Uuid, status: ds::OrderS
         restaurant_stars: None,
         rating_comment: None,
         rider_thumb: None,
+        delivery_timeliness: None,
         rider_tip_cents: None,
         restaurant_tip_cents: None,
         captain_tip_cents: None,
@@ -266,6 +278,7 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
             customers: Arc::new(Empty),
             deliveries: Arc::new(Empty),
             refunds: Arc::new(Empty),
+            delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
         }),
         None,

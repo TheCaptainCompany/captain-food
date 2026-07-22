@@ -8,7 +8,8 @@
 
 use domain::generated::scalars::{
     CartStatus, CityAvailabilityStatus, CommandChannel, CommandJournalStatus, ComparisonBasis,
-    CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus, GbpLinkStatus,
+    CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus,
+    DeliveryTimeliness, GbpLinkStatus,
     InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     ProspectPipelineStatus, RefundProcessStatus, RefundStatus, RestaurantDispatchMode,
     RestaurantListingStatus, RestaurantStatus, ServiceType, ThumbRating,
@@ -82,6 +83,7 @@ enum_ord!(DeliveryStatus {
 enum_ord!(DeliveryProvider { PARTNER => 0, INDEPENDENT => 1 });
 enum_ord!(ComparisonBasis { ESTIMATED => 0, REAL => 1 });
 enum_ord!(ThumbRating { UP => 0, DOWN => 1 });
+enum_ord!(DeliveryTimeliness { ON_TIME => 0, ACCEPTABLE_DELAY => 1, TOO_LATE => 2 });
 enum_ord!(PaymentStatus { PENDING => 0, CAPTURED => 1, FAILED => 2, REFUNDED => 3 });
 enum_ord!(PaymentProcessStatus { AWAITING_PAYMENT_RESULT => 0, ORDER_PLACED => 1, FAILED => 2 });
 enum_ord!(RefundStatus {

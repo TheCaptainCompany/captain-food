@@ -1084,6 +1084,24 @@ RateRestaurant:
       nullable: true
   required: [orderId, restaurantId, stars]
 
+RecordDeliverySatisfaction:
+  description: >
+    Customer answers the post-delivery delay-satisfaction survey on a delivered DELIVERY order (#62):
+    was the delivery on time? Optional and recorded once per order (final). Beside the rider/restaurant
+    ratings; the subjective signal the restaurant reads to decide self-dispatch vs Captain routing.
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    timeliness:
+      $ref: 'scalars.yaml#/DeliveryTimeliness'
+    reason:
+      $ref: 'scalars.yaml#/DeliveryDissatisfactionReason'
+      nullable: true
+  required: [orderId, restaurantId, timeliness]
+
 TipOrder:
   description: >
     Customer tips one or more of the rider / restaurant / Captain on an order (ADR-012). Optional and

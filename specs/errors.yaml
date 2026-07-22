@@ -535,6 +535,14 @@ RestaurantAlreadyRated:
     en: "You have already rated the restaurant for this order."
     fr: "Vous avez déjà noté le restaurant pour cette commande."
 
+DeliverySatisfactionAlreadyRecorded:
+  description: "The delivery-delay satisfaction survey has already been answered for this order; final (one per order)."
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "You have already answered the delivery survey for this order."
+    fr: "Vous avez déjà répondu au questionnaire de livraison pour cette commande."
+
 InvalidTipRecipient:
   description: "The tipper cannot tip this recipient (e.g. a restaurant tipping itself)."
   context:

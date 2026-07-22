@@ -314,6 +314,16 @@ impl QueryRoot {
         }
         Ok(out)
     }
+    /// A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
+    #[graphql(name = "restaurantDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    async fn restaurant_delivery_satisfaction(&self, ctx: &async_graphql::Context<'_>, input: RestaurantDeliverySatisfactionQueryInput) -> async_graphql::Result<Vec<DeliverySatisfaction>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::DeliverySatisfactionReadRepository>>()?;
+        let rows = repo
+            .by_restaurant(input.restaurant_id.into(), input.timeliness.map(Into::into))
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(DeliverySatisfaction::from).collect())
+    }
     /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
     #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
     async fn pending_refunds(&self, ctx: &async_graphql::Context<'_>, input: Option<PendingRefundsQueryInput>) -> async_graphql::Result<Vec<Refund>> {

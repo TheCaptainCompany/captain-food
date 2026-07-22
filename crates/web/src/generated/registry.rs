@@ -114,6 +114,7 @@ pub enum ComponentKind {
     Countdown,
     StarRating,
     ChipMultiSelect,
+    TipAmountSelector,
 }
 
 impl ComponentKind {
@@ -210,6 +211,7 @@ impl ComponentKind {
         ComponentKind::Countdown,
         ComponentKind::StarRating,
         ComponentKind::ChipMultiSelect,
+        ComponentKind::TipAmountSelector,
     ];
 
     /// The spec `type` key (snake_case) this kind renders — 1:1 with the DSL.
@@ -306,6 +308,7 @@ impl ComponentKind {
             ComponentKind::Countdown => "countdown",
             ComponentKind::StarRating => "star_rating",
             ComponentKind::ChipMultiSelect => "chip_multi_select",
+            ComponentKind::TipAmountSelector => "tip_amount_selector",
         }
     }
 
@@ -403,6 +406,7 @@ impl ComponentKind {
             ComponentKind::Countdown => ComponentGroup::Inputs,
             ComponentKind::StarRating => ComponentGroup::Inputs,
             ComponentKind::ChipMultiSelect => ComponentGroup::Inputs,
+            ComponentKind::TipAmountSelector => ComponentGroup::Inputs,
         }
     }
 
@@ -500,6 +504,7 @@ impl ComponentKind {
             "countdown" => Some(ComponentKind::Countdown),
             "star_rating" => Some(ComponentKind::StarRating),
             "chip_multi_select" => Some(ComponentKind::ChipMultiSelect),
+            "tip_amount_selector" => Some(ComponentKind::TipAmountSelector),
             _ => None,
         }
     }

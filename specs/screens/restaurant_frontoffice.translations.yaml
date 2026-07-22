@@ -51,6 +51,15 @@ rating.tag.accurate:  { messages: { en: "Accurate order", fr: "Commande conforme
 rating.tag.packaging: { messages: { en: "Great packaging", fr: "Bon emballage" } }
 rating.comment_placeholder: { messages: { en: "Add a comment (optional)", fr: "Ajouter un commentaire (facultatif)" } }
 rating.thanks:        { messages: { en: "Thanks for your feedback!", fr: "Merci pour votre retour !" } }
+rating.delivery_question: { messages: { en: "Was the delivery on time?", fr: "La livraison était-elle à l'heure ?" } }
+rating.delivery.on_time:    { messages: { en: "On time", fr: "À l'heure" } }
+rating.delivery.acceptable: { messages: { en: "A bit late, but OK", fr: "Un peu en retard, mais ça va" } }
+rating.delivery.too_late:   { messages: { en: "Too late", fr: "Trop en retard" } }
+rating.delivery.reason_ph:  { messages: { en: "What went wrong? (optional)", fr: "Qu'est-ce qui n'a pas été ? (facultatif)" } }
+tip.title:            { messages: { en: "Tip your courier", fr: "Pourboire pour votre livreur" } }
+tip.subtitle:         { messages: { en: "100% goes to the person who delivered your order.", fr: "100 % revient à la personne qui a livré votre commande." } }
+tip.custom:           { messages: { en: "Other amount", fr: "Autre montant" } }
+tip.thanks:           { messages: { en: "Thanks — your tip is on its way!", fr: "Merci — votre pourboire est en route !" } }
 
 # ── restaurant page ──────────────────────────────────────────────────────────
 restaurant.open:   { messages: { en: "Open", fr: "Ouvert" } }

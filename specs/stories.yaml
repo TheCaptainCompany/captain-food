@@ -65,6 +65,7 @@ customer:
         CancelOrder: { $ref: 'api.yaml#/mutations/cancelOrderByCustomer' }
         RateOrder: { $ref: 'api.yaml#/mutations/rateOrder' }
         RateRestaurant: { $ref: 'api.yaml#/mutations/rateRestaurant' }
+        RateDeliveryTimeliness: { $ref: 'api.yaml#/mutations/recordDeliverySatisfaction' }   # #62 was the delivery on time? (asked with the tip prompt, à la Uber Eats/Deliveroo)
         TipRiderRestaurantOrCaptain: { $ref: 'api.yaml#/mutations/tipOrder' }
         RequestRefund: { $ref: 'api.yaml#/mutations/requestRefund' }
     FavoriteRestaurant:
@@ -175,6 +176,7 @@ restaurant_manager:
         ViewDeliveries: { $ref: 'api.yaml#/queries/restaurantDeliveries' }
         CancelDelivery: { $ref: 'api.yaml#/mutations/cancelDelivery' }
         EscalateDelivery: { $ref: 'api.yaml#/mutations/escalateDelivery' }   # skip the current channel, advance the ranked dispatch walk (#60)
+        ReviewDeliverySatisfaction: { $ref: 'api.yaml#/queries/restaurantDeliverySatisfaction' }   # #62 customers' delay verdicts → self-dispatch-vs-Captain decision
 
 rider:
   description: A courier who delivers orders from restaurants to customers.

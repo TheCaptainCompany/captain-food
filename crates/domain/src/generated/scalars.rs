@@ -250,6 +250,19 @@ pub enum ThumbRating {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RatingComment(pub String);
 
+/// The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the restaurant's self-dispatch-vs-Captain decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum DeliveryTimeliness {
+    ON_TIME,
+    ACCEPTABLE_DELAY,
+    TOO_LATE,
+}
+
+/// Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DeliveryDissatisfactionReason(pub String);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum Weekday {

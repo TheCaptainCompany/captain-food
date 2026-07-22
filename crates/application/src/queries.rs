@@ -7,8 +7,9 @@ use async_trait::async_trait;
 use domain::generated::entities::{Money, OptionList, Product};
 use domain::generated::scalars::{
     CartId, CatalogItemAvailability, CityAvailabilityStatus, CityId, CuisineCategory, CurrencyCode,
-    CustomerId, DeliveryChannelKey, DeliveryJobId, DeliveryPartnerName, DeliveryPartnerRegistrationId,
-    DeliveryProvider, DeliveryStatus, EmailAddress, ExternalReference, OfferId, OfferName,
+    CustomerId, DeliveryChannelKey, DeliveryDissatisfactionReason, DeliveryJobId, DeliveryPartnerName,
+    DeliveryPartnerRegistrationId, DeliveryProvider, DeliveryStatus, DeliveryTimeliness, EmailAddress,
+    ExternalReference, OfferId, OfferName,
     OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId, ProductName,
     ProspectPipelineStatus, Quantity, RefundId, RefundStatus, RestaurantAccountId, RestaurantId,
     RiderId, SessionId, Slug, StockStatus,
@@ -329,6 +330,32 @@ pub struct RefundFilter {
 pub trait RefundReadRepository: Send + Sync {
     /// The refund queue, newest-request-first, honouring the filter.
     async fn list(&self, filter: RefundFilter) -> Result<Vec<RefundRow>, DomainError>;
+}
+
+/// One customer's delivery-delay satisfaction answer for an order (#62) — a row of the
+/// `View_DeliverySatisfaction` fold view (`DeliverySatisfactionRecorded` on the Order stream).
+pub struct DeliverySatisfactionRow {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    /// The customer's timeliness verdict (ON_TIME / ACCEPTABLE_DELAY / TOO_LATE).
+    pub timeliness: DeliveryTimeliness,
+    /// The optional reason given for a TOO_LATE verdict; `None` otherwise.
+    pub reason: Option<DeliveryDissatisfactionReason>,
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Read port over the `View_DeliverySatisfaction` read model (#62). Backs the
+/// `restaurantDeliverySatisfaction` GraphQL query — the restaurant's timeliness insight
+/// (the self-dispatch-vs-Captain signal), scoped to one restaurant and optionally one verdict.
+#[async_trait]
+pub trait DeliverySatisfactionReadRepository: Send + Sync {
+    /// The restaurant's delivery-satisfaction answers, newest-first; filtered to one `timeliness`
+    /// verdict when given.
+    async fn by_restaurant(
+        &self,
+        restaurant_id: RestaurantId,
+        timeliness: Option<DeliveryTimeliness>,
+    ) -> Result<Vec<DeliverySatisfactionRow>, DomainError>;
 }
 
 /// One `View_DeliveryPartnerAvailability` fold-view row (delivery partner self-registration, #61 —

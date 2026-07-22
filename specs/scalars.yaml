@@ -373,6 +373,22 @@ RatingComment:
   maxLength: 1000
   description: "Free-text comment accompanying a restaurant rating."
 
+DeliveryTimeliness:
+  type: string
+  enum:
+    - ON_TIME          # arrived within the promised window
+    - ACCEPTABLE_DELAY # late, but the customer was fine with it
+    - TOO_LATE         # unacceptably late
+  description: >
+    The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is
+    delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the
+    restaurant's self-dispatch-vs-Captain decision.
+
+DeliveryDissatisfactionReason:
+  type: string
+  maxLength: 300
+  description: "Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62)."
+
 # --- Time ---
 
 Weekday:

@@ -15,9 +15,10 @@ use application::generated::services::{IdentityService, PaymentService};
 use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository,
-    DeliveryPartnerAvailabilityReadRepository, DeliveryReadRepository, OrderReadRepository,
-    PricingPolicyReadRepository, ProspectionReadRepository, RefundReadRepository,
-    RestaurantReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
+    DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
+    DeliveryReadRepository, OrderReadRepository, PricingPolicyReadRepository,
+    ProspectionReadRepository, RefundReadRepository, RestaurantReadRepository,
+    UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
 
 use infrastructure::{EventBus, OperationStatusBus};
@@ -42,6 +43,7 @@ pub struct ReadDeps {
     pub customers: Arc<dyn CustomerReadRepository>,
     pub deliveries: Arc<dyn DeliveryReadRepository>,
     pub refunds: Arc<dyn RefundReadRepository>,
+    pub delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository>,
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
 }
 
@@ -94,6 +96,7 @@ pub fn build_schema(
         builder = builder.data(d.customers);
         builder = builder.data(d.deliveries);
         builder = builder.data(d.refunds);
+        builder = builder.data(d.delivery_satisfaction);
         builder = builder.data(d.delivery_partner_availabilities);
     }
     if let Some(w) = writes {

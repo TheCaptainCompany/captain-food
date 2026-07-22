@@ -1070,6 +1070,26 @@ RestaurantRated:
     - restaurantId
     - stars
 
+DeliverySatisfactionRecorded:
+  description: >
+    The customer answered the delivery-delay satisfaction survey for a delivered order (#62): the
+    timeliness verdict (+ an optional reason when TOO_LATE). Recorded once per order.
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    timeliness:
+      $ref: 'scalars.yaml#/DeliveryTimeliness'
+    reason:
+      $ref: 'scalars.yaml#/DeliveryDissatisfactionReason'
+      nullable: true
+  required:
+    - orderId
+    - restaurantId
+    - timeliness
+
 OrderTipped:
   description: >
     A tipper (customer or restaurant) added one or more tips (rider / restaurant / Captain) on an order

@@ -577,6 +577,16 @@ pub struct RestaurantRated {
     pub comment: Option<RatingComment>,
 }
 
+/// The customer answered the delivery-delay satisfaction survey for a delivered order (#62): the timeliness verdict (+ an optional reason when TOO_LATE). Recorded once per order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliverySatisfactionRecorded {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub timeliness: DeliveryTimeliness,
+    pub reason: Option<DeliveryDissatisfactionReason>,
+}
+
 /// A tipper (customer or restaurant) added one or more tips (rider / restaurant / Captain) on an order (ADR-012). Separate from the price; Captain keeps 0%. Additive — multiple OrderTipped accumulate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -944,6 +954,7 @@ pub enum DomainEvent {
     OrderCancelledByRestaurant(OrderCancelledByRestaurant),
     OrderRated(OrderRated),
     RestaurantRated(RestaurantRated),
+    DeliverySatisfactionRecorded(DeliverySatisfactionRecorded),
     OrderTipped(OrderTipped),
     RefundRequested(RefundRequested),
     PaymentIntentCreated(PaymentIntentCreated),

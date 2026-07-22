@@ -107,6 +107,8 @@ actions:
   set_delivery_address_saved: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/setCustomerAddress' } }
   place_order: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/placeOrder' } }
   rate_order:  { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/rateOrder' } }
+  record_delivery_satisfaction: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/recordDeliverySatisfaction' } }   # #62 delay survey
+  tip_order:   { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/tipOrder' }, note: "Post-delivery tip to the courier (recipient RIDER, or RESTAURANT for self-dispatch); à la Uber Eats/Deliveroo." }
   # ── GAPS — UI actions with no backing API mutation yet ──
   apply_promo_code: { kind: gap, gap: "No applyPromoCode mutation — promo codes / cart discount not modelled." }
   set_delivery_mode: { kind: gap, gap: "Cart-level delivery-mode toggle not modelled — serviceType is chosen at placeOrder." }
@@ -132,7 +134,7 @@ component_registry:
   checkout: [checkout_section, address_selector, form, text_input, phone_input, email_input, text_area, stripe_express_checkout_element]
   order: [order_status_hero, eta_bar, order_timeline, restaurant_contact_row, order_items_summary, order_id_row, order_list, order_card, status_chip]
   account: [account_header, menu_section, sign_out_button]
-  inputs: [button, text_button, icon_button, avatar_button, logo, location_pill, search_input, phone_field, otp_input, inline_error, countdown, star_rating, chip_multi_select]
+  inputs: [button, text_button, icon_button, avatar_button, logo, location_pill, search_input, phone_field, otp_input, inline_error, countdown, star_rating, chip_multi_select, tip_amount_selector]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GLOBAL CHROME
@@ -239,6 +241,33 @@ bottom_sheets:
           - { $ref: 'restaurant_frontoffice.translations.yaml#/rating.tag.accurate' }
           - { $ref: 'restaurant_frontoffice.translations.yaml#/rating.tag.packaging' }
       - { type: text_area, id: rating_comment, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.comment_placeholder' }, max_length: 300 }
+      # #62 — delivery-delay survey (DELIVERY orders only). One tap, recorded independently of the food rating.
+      - type: chip_multi_select
+        id: delivery_timeliness
+        label: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.delivery_question' }
+        visible_when: "order.serviceType == 'DELIVERY'"
+        single_select: true
+        options:
+          - { value: ON_TIME, label: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.delivery.on_time' } }
+          - { value: ACCEPTABLE_DELAY, label: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.delivery.acceptable' } }
+          - { value: TOO_LATE, label: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.delivery.too_late' } }
+        on_change:
+          type: record_delivery_satisfaction
+          variables: { orderId: "{{ sheet.data.orderId }}", restaurantId: "{{ order.restaurantId }}", timeliness: "{{ delivery_timeliness.value }}" }
+      # #62 — tip your courier at the same post-delivery moment (à la Uber Eats/Deliveroo); RIDER, or RESTAURANT for self-dispatch.
+      - type: tip_amount_selector
+        id: courier_tip
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/tip.title' }
+        subtitle: { $ref: 'restaurant_frontoffice.translations.yaml#/tip.subtitle' }
+        visible_when: "order.serviceType == 'DELIVERY'"
+        presets_cents: [100, 200, 300, 500]
+        custom_label: { $ref: 'restaurant_frontoffice.translations.yaml#/tip.custom' }
+        action:
+          type: tip_order
+          variables: { orderId: "{{ sheet.data.orderId }}", restaurantId: "{{ order.restaurantId }}", tips: [{ recipient: "{{ order.tipRecipient }}", amount: { amountCents: "{{ courier_tip.value }}", currency: "{{ order.currency }}" } }] }
+          on_success:
+            - { type: show_toast, variant: success, message: { $ref: 'restaurant_frontoffice.translations.yaml#/tip.thanks' } }
+      - { type: text_area, id: delivery_reason, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.delivery.reason_ph' }, max_length: 300, visible_when: "delivery_timeliness.value == 'TOO_LATE'" }
       - type: button
         label: { $ref: 'translations.yaml#/common.action.submit' }
         variant: primary
@@ -398,7 +427,7 @@ screens:
     requires_auth: true
     data_requirements: [order.byId]
     subscription: { $ref: 'api.yaml#/subscriptions/orderStatusChanged' }
-    actions_used: [rate_order, reorder]
+    actions_used: [rate_order, record_delivery_satisfaction, tip_order, reorder]
     gaps:
       - "`reorder` action has no backing op — the client re-adds past lines via add_to_cart."
     components:

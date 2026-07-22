@@ -6,7 +6,7 @@
 #![allow(non_camel_case_types)]
 
 use application::projections::{CartRow, CatalogRow, CustomerRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
-use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
+use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
 use super::scalars::*;
@@ -489,6 +489,8 @@ pub struct Order {
     pub rating_comment: Option<RatingComment>,
     #[graphql(name = "riderThumb")]
     pub rider_thumb: Option<ThumbRating>,
+    #[graphql(name = "deliveryTimeliness")]
+    pub delivery_timeliness: Option<DeliveryTimeliness>,
     #[graphql(name = "riderTip")]
     pub rider_tip: Option<Money>,
     #[graphql(name = "restaurantTip")]
@@ -736,6 +738,22 @@ pub struct DeliveryJob {
     pub order: Order,
     #[graphql(name = "restaurant")]
     pub restaurant: Restaurant,
+}
+
+/// One customer's delivery-delay satisfaction answer for an order (#62): the timeliness verdict and optional reason. Serves the restaurant's timeliness insight (self-dispatch-vs-Captain signal).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliverySatisfaction {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "timeliness")]
+    pub timeliness: DeliveryTimeliness,
+    #[graphql(name = "reason")]
+    pub reason: Option<DeliveryDissatisfactionReason>,
+    #[graphql(name = "recordedAt")]
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue.
@@ -1032,6 +1050,7 @@ impl From<(OrderTrackingRow, RestaurantRow)> for Order {
             restaurant_stars: row.restaurant_stars.map(Into::into),
             rating_comment: row.rating_comment.map(Into::into),
             rider_thumb: row.rider_thumb.map(Into::into),
+            delivery_timeliness: row.delivery_timeliness.map(Into::into),
             rider_tip: row.rider_tip_cents.map(|c| order_money(c, &currency)),
             restaurant_tip: row.restaurant_tip_cents.map(|c| order_money(c, &currency)),
             captain_tip: row.captain_tip_cents.map(|c| order_money(c, &currency)),
@@ -1091,6 +1110,21 @@ impl From<RefundRow> for Refund {
             refund_id: row.refund_id.map(Into::into),
             requested_at: row.requested_at,
             decided_at: row.decided_at,
+        }
+    }
+}
+
+/// Read-model row → API type: the `View_DeliverySatisfaction` fold-view row (#62) — one
+/// customer delivery-delay answer (`DeliverySatisfactionRecorded` folded on the Order stream). Rows
+/// map 1:1 (no navigation fields), so no joins.
+impl From<DeliverySatisfactionRow> for DeliverySatisfaction {
+    fn from(row: DeliverySatisfactionRow) -> Self {
+        Self {
+            order_id: row.order_id.into(),
+            restaurant_id: row.restaurant_id.into(),
+            timeliness: row.timeliness.into(),
+            reason: row.reason.map(Into::into),
+            recorded_at: row.recorded_at,
         }
     }
 }

@@ -480,6 +480,7 @@ pub fn tracking_row_from_order_placed(
         restaurant_stars: None,
         rating_comment: None,
         rider_thumb: None,
+        delivery_timeliness: None,
         rider_tip_cents: None,
         restaurant_tip_cents: None,
         captain_tip_cents: None,

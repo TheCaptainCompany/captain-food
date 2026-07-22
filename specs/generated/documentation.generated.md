@@ -61,6 +61,7 @@ An authenticated person who orders food via Captain.Food.
 |  | CancelOrder | [✏️ `cancelOrderByCustomer`](#mutation-cancelorderbycustomer) |
 |  | RateOrder | [✏️ `rateOrder`](#mutation-rateorder) |
 |  | RateRestaurant | [✏️ `rateRestaurant`](#mutation-raterestaurant) |
+|  | RateDeliveryTimeliness | [✏️ `recordDeliverySatisfaction`](#mutation-recorddeliverysatisfaction) |
 |  | TipRiderRestaurantOrCaptain | [✏️ `tipOrder`](#mutation-tiporder) |
 |  | RequestRefund | [✏️ `requestRefund`](#mutation-requestrefund) |
 | 🧭 **FavoriteRestaurant** | MarkAsFavorite | [✏️ `markRestaurantAsFavorite`](#mutation-markrestaurantasfavorite) |
@@ -137,6 +138,7 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 | 🧭 **TrackDeliveries** | ViewDeliveries | [🔎 `restaurantDeliveries`](#query-restaurantdeliveries) |
 |  | CancelDelivery | [✏️ `cancelDelivery`](#mutation-canceldelivery) |
 |  | EscalateDelivery | [✏️ `escalateDelivery`](#mutation-escalatedelivery) |
+|  | ReviewDeliverySatisfaction | [🔎 `restaurantDeliverySatisfaction`](#query-restaurantdeliverysatisfaction) |
 
 <a id="story-rider"></a>
 ### 🎬 `rider` · 🛵 `RIDER` · 🗣️ `fr-FR`
@@ -209,7 +211,7 @@ A delivery partner (already integrated: a known catalog channel) acting as an EX
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(25)_
+### 🧰 API operations _(26)_
 
 <a id="query-restaurants"></a>
 #### 🔎 Query: `restaurants`
@@ -238,6 +240,16 @@ A restaurant's active delivery jobs (delivery board; ownership enforced server-s
 - **Input**: 🧩 `RestaurantDeliveriesQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid), `status?`: [🔤 `DeliveryStatus`](#scalar-deliverystatus)
 - **Returns**: [🧩 `DeliveryJob`](#type-deliveryjob) (list) · **reads** [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
 - **Roles**: RESTAURANT, RESTAURANT_ACCOUNT · **slice** V0
+
+<a id="query-restaurantdeliverysatisfaction"></a>
+#### 🔎 Query: `restaurantDeliverySatisfaction`
+
+A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. Ownership enforced server-side. Optionally filtered to a single timeliness verdict.
+
+
+- **Input**: 🧩 `RestaurantDeliverySatisfactionQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid), `timeliness?`: [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness)
+- **Returns**: [🧩 `DeliverySatisfaction`](#type-deliverysatisfaction) (list) · **reads** [🗄️ `View_DeliverySatisfaction`](#view-view_deliverysatisfaction)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V1
 
 <a id="query-pendingrefunds"></a>
 #### 🔎 Query: `pendingRefunds`
@@ -2870,7 +2882,7 @@ _Rejects importing into a missing catalog, on a translation failure, or with a m
 
 _Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)._
 
-### 🧰 API operations _(21)_
+### 🧰 API operations _(22)_
 
 <a id="query-cart"></a>
 #### 🔎 Query: `cart`
@@ -2991,6 +3003,13 @@ Order tracking by id; owning customer or the restaurant/admin. Ownership enforce
 - **Roles**: CUSTOMER · **slice** V1
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-recorddeliverysatisfaction"></a>
+#### ✏️ Mutation: `recordDeliverySatisfaction`
+
+- **Command**: [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction) → handled by [🎭 `Order`](#actor-order)
+- **Roles**: CUSTOMER · **slice** V1
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 <a id="mutation-tiporder"></a>
 #### ✏️ Mutation: `tipOrder`
 
@@ -3029,7 +3048,7 @@ Order status change events for ONE order, tracked by orderId — what the confir
 - **Streams**: [🧩 `Order`](#type-order)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
-### 🧩 Output types _(3)_
+### 🧩 Output types _(4)_
 
 <a id="type-cart"></a>
 #### 🧩 Type: `Cart`
@@ -3076,6 +3095,7 @@ An order with its tracking status and payment state.
 | <a id="type-order--restaurantstars"></a>`restaurantStars` | [🔤 `StarRating`](#scalar-starrating) | ⬜ |
 | <a id="type-order--ratingcomment"></a>`ratingComment` | [🔤 `RatingComment`](#scalar-ratingcomment) | ⬜ |
 | <a id="type-order--riderthumb"></a>`riderThumb` | [🔤 `ThumbRating`](#scalar-thumbrating) | ⬜ |
+| <a id="type-order--deliverytimeliness"></a>`deliveryTimeliness` | [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness) | ⬜ |
 | <a id="type-order--ridertip"></a>`riderTip` | [📦 `Money`](#entity-money) | ⬜ |
 | <a id="type-order--restauranttip"></a>`restaurantTip` | [📦 `Money`](#entity-money) | ⬜ |
 | <a id="type-order--captaintip"></a>`captainTip` | [📦 `Money`](#entity-money) | ⬜ |
@@ -3084,6 +3104,22 @@ An order with its tracking status and payment state.
 | <a id="type-order--courier"></a>`courier` | [📦 `Courier`](#entity-courier) | ⬜ |
 | <a id="type-order--estimateddropoffat"></a>`estimatedDropoffAt` | `string` _date-time_ | ⬜ |
 | <a id="type-order--ratedat"></a>`ratedAt` | `string` _date-time_ | ⬜ |
+
+<a id="type-deliverysatisfaction"></a>
+#### 🧩 Type: `DeliverySatisfaction`
+
+One customer's delivery-delay satisfaction answer for an order (#62): the timeliness verdict and optional reason. Serves the restaurant's timeliness insight (self-dispatch-vs-Captain signal).
+
+
+- **Read model**: [🗄️ `View_DeliverySatisfaction`](#view-view_deliverysatisfaction)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-deliverysatisfaction--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
+| <a id="type-deliverysatisfaction--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |
+| <a id="type-deliverysatisfaction--timeliness"></a>`timeliness` | [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness) | ✅ |
+| <a id="type-deliverysatisfaction--reason"></a>`reason` | [🔤 `DeliveryDissatisfactionReason`](#scalar-deliverydissatisfactionreason) | ⬜ |
+| <a id="type-deliverysatisfaction--recordedat"></a>`recordedAt` | `string` _date-time_ | ✅ |
 
 <a id="type-refund"></a>
 #### 🧩 Type: `Refund`
@@ -3146,6 +3182,7 @@ _🧩 aggregate_ — A single order through its lifecycle. Born from OrderPlaced
 | [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant) | [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | [📩 `RateOrder`](#command-rateorder) | [⚡ `OrderRated`](#event-orderrated) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `OrderAlreadyRated`](#error-orderalreadyrated) |
 | [📩 `RateRestaurant`](#command-raterestaurant) | [⚡ `RestaurantRated`](#event-restaurantrated) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `RestaurantAlreadyRated`](#error-restaurantalreadyrated) |
+| [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction) | [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `DeliverySatisfactionAlreadyRecorded`](#error-deliverysatisfactionalreadyrecorded) |
 | [📩 `TipOrder`](#command-tiporder) | [⚡ `OrderTipped`](#event-ordertipped) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `InvalidTipRecipient`](#error-invalidtiprecipient) |
 | [📩 `RequestRefund`](#command-requestrefund) | [⚡ `RefundRequested`](#event-refundrequested) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 
@@ -3337,7 +3374,24 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(3)_
+### 🗄️ Views (read models) _(4)_
+
+<a id="view-view_deliverysatisfaction"></a>
+#### 🗄️ View: `View_DeliverySatisfaction`
+
+- **Source**: [🎭 `Order`](#actor-order) · 🔭 V1
+- **Rules**: One row per order, present only once the customer has answered the survey (DeliverySatisfactionRecorded); record-once, so the fold never sees a second answer. `timeliness` is the customer's verdict (ON_TIME / ACCEPTABLE_DELAY / TOO_LATE); the restaurant reads it, filtered by restaurant_id, to weigh self-dispatch vs Captain routing.
+- **Fed by**: [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `order_id` | [🔤 `OrderId`](#scalar-orderid) _(derived)_ | [⚡ `DeliverySatisfactionRecorded`.`orderId`](#event-deliverysatisfactionrecorded--orderid) | PK |  |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ | [⚡ `DeliverySatisfactionRecorded`.`restaurantId`](#event-deliverysatisfactionrecorded--restaurantid) | index |  |
+| `timeliness` | [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness) | [⚡ `DeliverySatisfactionRecorded`.`timeliness`](#event-deliverysatisfactionrecorded--timeliness) | — |  |
+| `reason` | [🔤 `DeliveryDissatisfactionReason`](#scalar-deliverydissatisfactionreason) | [⚡ `DeliverySatisfactionRecorded`.`reason`](#event-deliverysatisfactionrecorded--reason) | nullable |  |
+| `recorded_at` | `timestamptz` | [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded) | — | DeliverySatisfactionRecorded occurrence time. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
 <a id="view-view_pendingrefunds"></a>
 #### 🗄️ View: `View_PendingRefunds`
@@ -3389,8 +3443,8 @@ sequenceDiagram
 
 - **Source**: [🎭 `Order`](#actor-order) · 🛶 V0
 - **Note**: The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status (back-office queue) — via the indexes below; there is no separate per-persona order projection. 
-- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
-- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
+- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `delivery_timeliness` is the customer's post-delivery delay verdict (DeliverySatisfactionRecorded; #62); null until answered — the client hides the survey once set. The restaurant-facing aggregate is View_DeliverySatisfaction. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
+- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -3423,17 +3477,18 @@ sequenceDiagram
 | `restaurant_stars` | [🔤 `StarRating`](#scalar-starrating) _(derived)_ | [⚡ `RestaurantRated`.`stars`](#event-restaurantrated--stars) | nullable | Customer's 0–5 rating of the restaurant; null until rated. |
 | `rating_comment` | [🔤 `RatingComment`](#scalar-ratingcomment) _(derived)_ | [⚡ `RestaurantRated`.`comment`](#event-restaurantrated--comment) | nullable |  |
 | `rider_thumb` | [🔤 `ThumbRating`](#scalar-thumbrating) _(derived)_ | [⚡ `OrderRated`.`riderThumb`](#event-orderrated--riderthumb) | nullable |  |
+| `delivery_timeliness` | [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness) | [⚡ `DeliverySatisfactionRecorded`.`timeliness`](#event-deliverysatisfactionrecorded--timeliness) | nullable | Customer's post-delivery delay verdict (#62); null until answered. |
 | `rider_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==RIDER].amount (all tippers); null if none. |
 | `restaurant_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==RESTAURANT].amount; null if none. |
 | `captain_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==CAPTAIN].amount; null if none. |
-| `rated_at` | `timestamptz` | [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `OrderTipped`](#event-ordertipped) | nullable | Occurrence time of the latest rating/tip event. |
+| `rated_at` | `timestamptz` | [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped) | nullable | Occurrence time of the latest rating/tip/survey event. |
 | `delivery_status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556). |
 | `courier` | `jsonb` | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider) | nullable | Assigned Courier { displayName, phone?, riderId? } once accepted; null before. |
 | `estimated_dropoff_at` | `timestamptz` | [⚡ `DeliveryAcceptedByPartner`.`estimatedDropoffAt`](#event-deliveryacceptedbypartner--estimateddropoffat) | nullable | Partner-reported ETA to the customer; null when unknown. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(18)_
+### 📩 Commands _(19)_
 
 <a id="command-addcartline"></a>
 #### 📩 Command: `AddCartLine`
@@ -3638,6 +3693,22 @@ Customer rates the restaurant of a completed order (0–5 stars + optional comme
 | <a id="command-raterestaurant--stars"></a>`stars` | [🔤 `StarRating`](#scalar-starrating) | ✅ |  |
 | <a id="command-raterestaurant--comment"></a>`comment` | [🔤 `RatingComment`](#scalar-ratingcomment) | ⬜ |  |
 
+<a id="command-recorddeliverysatisfaction"></a>
+#### 📩 Command: `RecordDeliverySatisfaction`
+
+Customer answers the post-delivery delay-satisfaction survey on a delivered DELIVERY order (#62): was the delivery on time? Optional and recorded once per order (final). Beside the rider/restaurant ratings; the subjective signal the restaurant reads to decide self-dispatch vs Captain routing.
+
+- **Dispatched by**: [✏️ `recordDeliverySatisfaction`](#mutation-recorddeliverysatisfaction) · **handled by** [🎭 `Order`](#actor-order)
+- **Emits**: [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded)
+- **Throws**: [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `DeliverySatisfactionAlreadyRecorded`](#error-deliverysatisfactionalreadyrecorded)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-recorddeliverysatisfaction--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-recorddeliverysatisfaction--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-recorddeliverysatisfaction--timeliness"></a>`timeliness` | [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness) | ✅ |  |
+| <a id="command-recorddeliverysatisfaction--reason"></a>`reason` | [🔤 `DeliveryDissatisfactionReason`](#scalar-deliverydissatisfactionreason) | ⬜ |  |
+
 <a id="command-tiporder"></a>
 #### 📩 Command: `TipOrder`
 
@@ -3711,7 +3782,7 @@ The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
 | <a id="command-denyrefund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="command-denyrefund--reason"></a>`reason` | `string` | ✅ |  |
 
-### ⚡ Events _(25)_
+### ⚡ Events _(26)_
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -3959,6 +4030,22 @@ The customer rated the restaurant of a completed order (0–5 stars + optional c
 | <a id="event-restaurantrated--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
 | <a id="event-restaurantrated--stars"></a>`stars` | [🔤 `StarRating`](#scalar-starrating) | ✅ |  |
 | <a id="event-restaurantrated--comment"></a>`comment` | [🔤 `RatingComment`](#scalar-ratingcomment) | ⬜ |  |
+
+<a id="event-deliverysatisfactionrecorded"></a>
+#### ⚡ Event: `DeliverySatisfactionRecorded`
+
+The customer answered the delivery-delay satisfaction survey for a delivered order (#62): the timeliness verdict (+ an optional reason when TOO_LATE). Recorded once per order.
+
+- **Emitted by**: [🎭 `Order`](#actor-order)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_DeliverySatisfaction`](#view-view_deliverysatisfaction), [🗄️ `OrderTracking`](#view-ordertracking)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-deliverysatisfactionrecorded--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-deliverysatisfactionrecorded--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-deliverysatisfactionrecorded--timeliness"></a>`timeliness` | [🔤 `DeliveryTimeliness`](#scalar-deliverytimeliness) | ✅ |  |
+| <a id="event-deliverysatisfactionrecorded--reason"></a>`reason` | [🔤 `DeliveryDissatisfactionReason`](#scalar-deliverydissatisfactionreason) | ⬜ |  |
 
 <a id="event-ordertipped"></a>
 #### ⚡ Event: `OrderTipped`
@@ -4254,7 +4341,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
 | <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
-### 🔤 Scalars _(17)_
+### 🔤 Scalars _(19)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -4268,6 +4355,8 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="scalar-starrating"></a>🔤 `StarRating` | integer | Restaurant rating in stars (0–5), given by the customer on a delivered order. |
 | <a id="scalar-thumbrating"></a>🔤 `ThumbRating` | enum (UP \| DOWN) | Rider rating: thumbs up or down. |
 | <a id="scalar-ratingcomment"></a>🔤 `RatingComment` | string | Free-text comment accompanying a restaurant rating. |
+| <a id="scalar-deliverytimeliness"></a>🔤 `DeliveryTimeliness` | enum (ON_TIME \| ACCEPTABLE_DELAY \| TOO_LATE) | The customer's post-delivery verdict on the delivery delay (#62), asked once a DELIVERY order is delivered. The subjective counterpart of the objective delivered/late facts (ADR-0031/#60); feeds the restaurant's self-dispatch-vs-Captain decision.  |
+| <a id="scalar-deliverydissatisfactionreason"></a>🔤 `DeliveryDissatisfactionReason` | string | Optional free-text reason a customer gives for a TOO_LATE delivery-timeliness verdict (#62). |
 | <a id="scalar-orderstatus"></a>🔤 `OrderStatus` | enum (PLACED \| ACCEPTED \| REJECTED \| PREPARING \| READY \| OUT_FOR_DELIVERY \| DELIVERED \| CANCELLED_BY_CUSTOMER \| CANCELLED_BY_RESTAURANT) |  |
 | <a id="scalar-tiprecipient"></a>🔤 `TipRecipient` | enum (RIDER \| RESTAURANT \| CAPTAIN) | Who a tip goes to (ADR-012). Tips are separate from the core 3-way split and Captain skims 0% (100% passes through); a tip to CAPTAIN is the tipper's explicit choice, not a cut of others' tips.  |
 | <a id="scalar-tipper"></a>🔤 `Tipper` | enum (CUSTOMER \| RESTAURANT) | Who gives a tip: the CUSTOMER (may tip rider/restaurant/Captain) or the RESTAURANT (may tip rider/ Captain — e.g. thanking the courier). Derived server-side from the caller's role, not client-supplied.  |
@@ -4276,7 +4365,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="scalar-refundstatus"></a>🔤 `RefundStatus` | enum (REQUESTED \| APPROVED \| DENIED \| REFUNDED) | Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.  |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
 
-### ⛔ Errors _(22)_
+### ⛔ Errors _(23)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -4290,10 +4379,11 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="error-cartrestaurantmismatch"></a>⛔ `CartRestaurantMismatch` | Line/checkout restaurant differs from the cart's restaurant (no mixing). | 🇬🇧 Your cart already has items from another restaurant, not '{restaurantName}'. | 🇫🇷 Votre panier contient déjà des articles d'un autre restaurant que '{restaurantName}'. | [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-cartlinenotfound"></a>⛔ `CartLineNotFound` | No line with this id in the cart. | 🇬🇧 This cart line no longer exists. | 🇫🇷 Cette ligne du panier n'existe plus. | [📩 `RemoveCartLine`](#command-removecartline), [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity) |
 | <a id="error-cartempty"></a>⛔ `CartEmpty` | Checkout attempted on an empty cart. | 🇬🇧 Your cart is empty. | 🇫🇷 Votre panier est vide. | [📩 `PlaceOrder`](#command-placeorder) |
-| <a id="error-ordernotfound"></a>⛔ `OrderNotFound` | No order with this id. | 🇬🇧 Order not found. | 🇫🇷 Commande introuvable. | [📩 `AcceptOrder`](#command-acceptorder), [📩 `StartPreparation`](#command-startpreparation), [📩 `MarkOrderReady`](#command-markorderready), [📩 `MarkOrderDelivered`](#command-markorderdelivered), [📩 `RejectOrder`](#command-rejectorder), [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer), [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant), [📩 `RateOrder`](#command-rateorder), [📩 `RateRestaurant`](#command-raterestaurant), [📩 `TipOrder`](#command-tiporder), [📩 `RequestRefund`](#command-requestrefund) |
-| <a id="error-invalidorderstatus"></a>⛔ `InvalidOrderStatus` | Order is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the order is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la commande est '{currentStatus}'. | [📩 `AcceptOrder`](#command-acceptorder), [📩 `StartPreparation`](#command-startpreparation), [📩 `MarkOrderReady`](#command-markorderready), [📩 `MarkOrderDelivered`](#command-markorderdelivered), [📩 `RejectOrder`](#command-rejectorder), [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer), [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant), [📩 `RateOrder`](#command-rateorder), [📩 `RateRestaurant`](#command-raterestaurant), [📩 `TipOrder`](#command-tiporder), [📩 `RequestRefund`](#command-requestrefund) |
+| <a id="error-ordernotfound"></a>⛔ `OrderNotFound` | No order with this id. | 🇬🇧 Order not found. | 🇫🇷 Commande introuvable. | [📩 `AcceptOrder`](#command-acceptorder), [📩 `StartPreparation`](#command-startpreparation), [📩 `MarkOrderReady`](#command-markorderready), [📩 `MarkOrderDelivered`](#command-markorderdelivered), [📩 `RejectOrder`](#command-rejectorder), [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer), [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant), [📩 `RateOrder`](#command-rateorder), [📩 `RateRestaurant`](#command-raterestaurant), [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction), [📩 `TipOrder`](#command-tiporder), [📩 `RequestRefund`](#command-requestrefund) |
+| <a id="error-invalidorderstatus"></a>⛔ `InvalidOrderStatus` | Order is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the order is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la commande est '{currentStatus}'. | [📩 `AcceptOrder`](#command-acceptorder), [📩 `StartPreparation`](#command-startpreparation), [📩 `MarkOrderReady`](#command-markorderready), [📩 `MarkOrderDelivered`](#command-markorderdelivered), [📩 `RejectOrder`](#command-rejectorder), [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer), [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant), [📩 `RateOrder`](#command-rateorder), [📩 `RateRestaurant`](#command-raterestaurant), [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction), [📩 `TipOrder`](#command-tiporder), [📩 `RequestRefund`](#command-requestrefund) |
 | <a id="error-orderalreadyrated"></a>⛔ `OrderAlreadyRated` | The delivery (rider thumb) has already been rated for this order; final. | 🇬🇧 You have already rated this delivery. | 🇫🇷 Vous avez déjà noté cette livraison. | [📩 `RateOrder`](#command-rateorder) |
 | <a id="error-restaurantalreadyrated"></a>⛔ `RestaurantAlreadyRated` | The restaurant has already been rated for this order; final (one per order). | 🇬🇧 You have already rated the restaurant for this order. | 🇫🇷 Vous avez déjà noté le restaurant pour cette commande. | [📩 `RateRestaurant`](#command-raterestaurant) |
+| <a id="error-deliverysatisfactionalreadyrecorded"></a>⛔ `DeliverySatisfactionAlreadyRecorded` | The delivery-delay satisfaction survey has already been answered for this order; final (one per order). | 🇬🇧 You have already answered the delivery survey for this order. | 🇫🇷 Vous avez déjà répondu au questionnaire de livraison pour cette commande. | [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction) |
 | <a id="error-invalidtiprecipient"></a>⛔ `InvalidTipRecipient` | The tipper cannot tip this recipient (e.g. a restaurant tipping itself). | 🇬🇧 You can't send a tip to this recipient. | 🇫🇷 Vous ne pouvez pas envoyer de pourboire à ce destinataire. | [📩 `TipOrder`](#command-tiporder) |
 | <a id="error-deliveryaddressrequired"></a>⛔ `DeliveryAddressRequired` | serviceType is DELIVERY but no delivery address was provided. | 🇬🇧 A delivery address is required for delivery. | 🇫🇷 Une adresse de livraison est requise pour la livraison. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-outsidedeliveryarea"></a>⛔ `OutsideDeliveryArea` | Delivery address is outside the restaurant's delivery area. | 🇬🇧 This address is outside the delivery area of '{restaurantName}'. | 🇫🇷 Cette adresse est en dehors de la zone de livraison de '{restaurantName}'. | [📩 `PlaceOrder`](#command-placeorder) |
@@ -4303,7 +4393,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 
-### 📐 Business rules _(19)_
+### 📐 Business rules _(21)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -4346,6 +4436,20 @@ _A delivered order can be rated (rider thumb) exactly once._
 _The restaurant can be rated exactly once per order._
 
 - **Verified by**: [🧪 `TestOrderRestaurantRated`](#test-testorderrestaurantrated), [🧪 `TestOrderRateRestaurantTwiceIsRejected`](#test-testorderraterestauranttwiceisrejected)
+
+<a id="rule-deliverysatisfactionrecordedonceperdeliveredorder"></a>
+#### 📐 Rule: `DeliverySatisfactionRecordedOncePerDeliveredOrder`
+
+_A delivered order's delivery-delay satisfaction survey can be answered exactly once (#62); a second answer, a missing order, or a not-delivered order is rejected._
+
+- **Verified by**: [🧪 `TestDeliverySatisfactionRecorded`](#test-testdeliverysatisfactionrecorded), [🧪 `TestDeliverySatisfactionIsRejected`](#test-testdeliverysatisfactionisrejected)
+
+<a id="rule-deliverysatisfactionvisibletorestaurant"></a>
+#### 📐 Rule: `DeliverySatisfactionVisibleToRestaurant`
+
+_A recorded delivery-delay verdict (DeliverySatisfactionRecorded) is projected into the restaurant-facing timeliness read model (restaurantDeliverySatisfaction) so the restaurant can weigh self-dispatch vs Captain routing (#62)._
+
+- **Verified by**: [🧪 `TestDeliverySatisfactionRecorded`](#test-testdeliverysatisfactionrecorded)
 
 <a id="rule-tipsadditivemultirecipientseparate"></a>
 #### 📐 Rule: `TipsAdditiveMultiRecipientSeparate`
@@ -4663,6 +4767,26 @@ _Rejects rating the restaurant a second time for the same order_
 - **When**: [📩 `RateRestaurant`](#command-raterestaurant)
 - **Thrown**: [⛔ `RestaurantAlreadyRated`](#error-restaurantalreadyrated)
 - **Verifies**: [📐 `RestaurantRatedOncePerOrder`](#rule-restaurantratedonceperorder)
+
+<a id="test-testdeliverysatisfactionrecorded"></a>
+#### 🧪 Test: `TestDeliverySatisfactionRecorded`
+
+_Customer answers the delivery-delay survey (on time) after delivery; the verdict feeds the restaurant insight (#62)_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderDelivered`](#event-orderdelivered)
+- **When**: [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction)
+- **Then**: [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded)
+- **Verifies**: [📐 `DeliverySatisfactionRecordedOncePerDeliveredOrder`](#rule-deliverysatisfactionrecordedonceperdeliveredorder), [📐 `DeliverySatisfactionVisibleToRestaurant`](#rule-deliverysatisfactionvisibletorestaurant)
+
+<a id="test-testdeliverysatisfactionisrejected"></a>
+#### 🧪 Test: `TestDeliverySatisfactionIsRejected`
+
+_Rejects the delivery survey on a missing/not-delivered order or answering it twice_
+
+- **Given**: _(none)_
+- **When**: [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction)
+- **Thrown**: [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `DeliverySatisfactionAlreadyRecorded`](#error-deliverysatisfactionalreadyrecorded)
+- **Verifies**: [📐 `DeliverySatisfactionRecordedOncePerDeliveredOrder`](#rule-deliverysatisfactionrecordedonceperdeliveredorder)
 
 <a id="test-testordertipped"></a>
 #### 🧪 Test: `TestOrderTipped`
@@ -8344,6 +8468,8 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | read | `order.byId` | [🔎 `order`](#query-order) |
 | write | `reorder` | ⚠️ _gap: No reorder op — client re-adds past order lines via add_to_cart._ |
 | write | `rate_order` | [✏️ `rateOrder`](#mutation-rateorder) |
+| write | `record_delivery_satisfaction` | [✏️ `recordDeliverySatisfaction`](#mutation-recorddeliverysatisfaction) |
+| write | `tip_order` | [✏️ `tipOrder`](#mutation-tiporder) |
 
 **Gaps**
 - ⚠️ `reorder` action has no backing op — the client re-adds past lines via add_to_cart.
@@ -8463,6 +8589,15 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rating-tag-packaging"></a>`rating.tag.packaging` | — | Great packaging | Bon emballage |
 | <a id="translation-rating-comment_placeholder"></a>`rating.comment_placeholder` | — | Add a comment (optional) | Ajouter un commentaire (facultatif) |
 | <a id="translation-rating-thanks"></a>`rating.thanks` | — | Thanks for your feedback! | Merci pour votre retour ! |
+| <a id="translation-rating-delivery_question"></a>`rating.delivery_question` | — | Was the delivery on time? | La livraison était-elle à l'heure ? |
+| <a id="translation-rating-delivery-on_time"></a>`rating.delivery.on_time` | — | On time | À l'heure |
+| <a id="translation-rating-delivery-acceptable"></a>`rating.delivery.acceptable` | — | A bit late, but OK | Un peu en retard, mais ça va |
+| <a id="translation-rating-delivery-too_late"></a>`rating.delivery.too_late` | — | Too late | Trop en retard |
+| <a id="translation-rating-delivery-reason_ph"></a>`rating.delivery.reason_ph` | — | What went wrong? (optional) | Qu'est-ce qui n'a pas été ? (facultatif) |
+| <a id="translation-tip-title"></a>`tip.title` | — | Tip your courier | Pourboire pour votre livreur |
+| <a id="translation-tip-subtitle"></a>`tip.subtitle` | — | 100% goes to the person who delivered your order. | 100 % revient à la personne qui a livré votre commande. |
+| <a id="translation-tip-custom"></a>`tip.custom` | — | Other amount | Autre montant |
+| <a id="translation-tip-thanks"></a>`tip.thanks` | — | Thanks — your tip is on its way! | Merci — votre pourboire est en route ! |
 | <a id="translation-restaurant-open"></a>`restaurant.open` | — | Open | Ouvert |
 | <a id="translation-restaurant-closed"></a>`restaurant.closed` | — | Closed | Fermé |
 | <a id="translation-restaurant-opens_at"></a>`restaurant.opens_at` | `time` | Opens at {time} | Ouvre à {time} |

@@ -16,16 +16,16 @@ use std::sync::Arc;
 use application::generated::services::{IdentityService, PaymentService};
 use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
 use application::queries::{
-    CartReadRepository, CatalogReadRepository, CustomerReadRepository, DeliveryReadRepository,
-    OrderReadRepository, PricingPolicyReadRepository, ProspectionReadRepository,
-    RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
-    UberSplitPolicyReadRepository,
+    CartReadRepository, CatalogReadRepository, CustomerReadRepository,
+    DeliverySatisfactionReadRepository, DeliveryReadRepository, OrderReadRepository,
+    PricingPolicyReadRepository, ProspectionReadRepository, RefundReadRepository,
+    RestaurantReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
     PgCartRepository, PgCatalogRepository, PgCommandJournal, PgCustomerRepository,
-    PgDeliveryRepository, PgEventStore, PgOrderRepository, PgPricingPolicyRepository,
-    PgProspectionRepository, PgRefundQueueRepository, PgRestaurantRepository,
+    PgDeliveryRepository, PgDeliverySatisfactionRepository, PgEventStore, PgOrderRepository,
+    PgPricingPolicyRepository, PgProspectionRepository, PgRefundQueueRepository, PgRestaurantRepository,
     PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, UnverifiedGbpOrderLinkProbe,
 };
 use server::graphql_acl::RequestRole;
@@ -126,6 +126,8 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
     let customers: Arc<dyn CustomerReadRepository> = Arc::new(PgCustomerRepository::new(pool.clone()));
     let deliveries: Arc<dyn DeliveryReadRepository> = Arc::new(PgDeliveryRepository::new(pool.clone()));
     let refunds: Arc<dyn RefundReadRepository> = Arc::new(PgRefundQueueRepository::new(pool.clone()));
+    let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
+        Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
     let delivery_partner_availabilities: Arc<dyn application::queries::DeliveryPartnerAvailabilityReadRepository> =
         Arc::new(infrastructure::PgDeliveryPartnerAvailabilityRepository::new(pool.clone()));
     let event_store: Arc<dyn EventStore> = Arc::new(PgEventStore::new(pool.clone()));
@@ -152,6 +154,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             customers,
             deliveries,
             refunds,
+            delivery_satisfaction,
             delivery_partner_availabilities,
         }),
         Some(server::graphql_schema::WriteDeps {

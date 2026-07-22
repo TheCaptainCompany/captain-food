@@ -157,6 +157,22 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `View_DeliverySatisfaction` · 🔭 V1 · source aggregate `Order`
+
+- **Fed by**: `DeliverySatisfactionRecorded`
+- **Rules**: One row per order, present only once the customer has answered the survey (DeliverySatisfactionRecorded); record-once, so the fold never sees a second answer. `timeliness` is the customer's verdict (ON_TIME / ACCEPTABLE_DELAY / TOO_LATE); the restaurant reads it, filtered by restaurant_id, to weigh self-dispatch vs Captain routing.
+- **Indexes**: `(restaurant_id, timeliness)`
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `order_id` | `OrderId` | `UUID` | PK |  |
+| `restaurant_id` | `RestaurantId` | `UUID` | index |  |
+| `timeliness` | `DeliveryTimeliness` | `INTEGER` | — |  |
+| `reason` | `DeliveryDissatisfactionReason` | `TEXT` | nullable |  |
+| `recorded_at` | `timestamptz` | `TIMESTAMPTZ` | — | DeliverySatisfactionRecorded occurrence time. |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 ### `View_DeliveryPartnerAvailability` · 🔭 V1 · source aggregate `DeliveryPartnerRegistration`
 
 - **Fed by**: `DeliveryPartnerAvailabilityRequested`, `DeliveryPartnerAvailabilityApproved`, `DeliveryPartnerAvailabilityRevoked`
@@ -311,8 +327,8 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `OrderTracking` · 🛶 V0 · source aggregate `Order`
 
-- **Fed by**: `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`, `PaymentCaptured`, `PaymentRefunded`, `OrderRated`, `RestaurantRated`, `OrderTipped`, `DeliveryAcceptedByPartner`, `DeliveryAcceptedByRider`, `DeliveryStatusUpdated`, `DeliveryCompleted`, `DeliveryDispatchFailed`
-- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
+- **Fed by**: `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`, `PaymentCaptured`, `PaymentRefunded`, `OrderRated`, `RestaurantRated`, `DeliverySatisfactionRecorded`, `OrderTipped`, `DeliveryAcceptedByPartner`, `DeliveryAcceptedByRider`, `DeliveryStatusUpdated`, `DeliveryCompleted`, `DeliveryDispatchFailed`
+- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `delivery_timeliness` is the customer's post-delivery delay verdict (DeliverySatisfactionRecorded; #62); null until answered — the client hides the survey once set. The restaurant-facing aggregate is View_DeliverySatisfaction. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
 - **Note**: The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status (back-office queue) — via the indexes below; there is no separate per-persona order projection.
 
 - **Indexes**: `(restaurant_id, status, placed_at)`
@@ -349,10 +365,11 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `restaurant_stars` | `StarRating` | `INTEGER` | nullable | Customer's 0–5 rating of the restaurant; null until rated. |
 | `rating_comment` | `RatingComment` | `TEXT` | nullable |  |
 | `rider_thumb` | `ThumbRating` | `INTEGER` | nullable |  |
+| `delivery_timeliness` | `DeliveryTimeliness` | `INTEGER` | nullable | Customer's post-delivery delay verdict (#62); null until answered. |
 | `rider_tip_cents` | `MoneyCents` | `BIGINT` | nullable | Σ OrderTipped.tips[recipient==RIDER].amount (all tippers); null if none. |
 | `restaurant_tip_cents` | `MoneyCents` | `BIGINT` | nullable | Σ OrderTipped.tips[recipient==RESTAURANT].amount; null if none. |
 | `captain_tip_cents` | `MoneyCents` | `BIGINT` | nullable | Σ OrderTipped.tips[recipient==CAPTAIN].amount; null if none. |
-| `rated_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Occurrence time of the latest rating/tip event. |
+| `rated_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Occurrence time of the latest rating/tip/survey event. |
 | `delivery_status` | `DeliveryStatus` | `INTEGER` | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556). |
 | `courier` | `jsonb` | `JSONB` | nullable | Assigned Courier { displayName, phone?, riderId? } once accepted; null before. |
 | `estimated_dropoff_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Partner-reported ETA to the customer; null when unknown. |
