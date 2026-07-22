@@ -86,6 +86,27 @@ fn load_model(specs: &PathBuf) -> Result<Model, String> {
             load(format!("database/tables/{}", name), &p)?;
         }
     }
+    // Generic: every `specs/screens/*.translations.yaml` is a per-surface i18n sidecar
+    // (ADR-20260722-101500), keyed BARE (no `screens/` prefix) so screens `$ref` it as
+    // `<surface>.translations.yaml#/<key>` and §11 (which filters `screens/`-prefixed keys) does not
+    // mistake it for a screen spec. Sorted for determinism.
+    let sdir = specs.join("screens");
+    if let Ok(rd) = fs::read_dir(&sdir) {
+        let mut paths: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name().and_then(|n| n.to_str()).map(|n| n.ends_with(".translations.yaml")).unwrap_or(false)
+            })
+            .collect();
+        paths.sort();
+        for p in paths {
+            let name = match p.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            load(name, &p)?;
+        }
+    }
     Ok(Model { defs })
 }
 
@@ -113,7 +134,10 @@ fn parse_ref(r: &str) -> Option<ParsedRef> {
 }
 
 fn is_source_file(f: &str) -> bool {
-    SOURCE_FILES.contains(&f) || (f.starts_with("database/tables/") && f.ends_with(".yaml"))
+    SOURCE_FILES.contains(&f)
+        || (f.starts_with("database/tables/") && f.ends_with(".yaml"))
+        // Per-surface i18n sidecars (ADR-20260722-101500), keyed BARE (`<surface>.translations.yaml`).
+        || f.ends_with(".translations.yaml")
 }
 
 /// The bare definition name a `$ref` denotes: the FIRST pointer segment (mirrors refs.ts `refName`).
@@ -1366,14 +1390,19 @@ fn validate(model: &Model) -> Report {
         }
     }
 
-    // --- 10. Translations (translations.yaml) ---------------------------------------------------
-    if let Some(tr) = model.defs.get("translations.yaml").and_then(|x| x.as_mapping()) {
-        for (kk, t) in tr {
-            let key = match kk.as_str() {
-                Some(s) => s,
-                None => continue,
-            };
-            let at = format!("translations.yaml/{}", key);
+    // --- 10. Translations (translations.yaml + screens/*.translations.yaml sidecars) ------------
+    // Merged across all sources (ADR-20260722-101500); keys must be globally unique across files.
+    {
+        let mut seen: BTreeMap<String, String> = BTreeMap::new(); // key -> first file it was defined in
+        for (file, key, t) in translation_entries(model) {
+            let at = format!("{}/{}", file, key);
+            if let Some(prev) = seen.insert(key.clone(), file.clone()) {
+                issues.push(err(
+                    "translation-duplicate-key",
+                    at.clone(),
+                    format!("translation key '{}' is defined in both '{}' and '{}' — keys must be unique across all translation files.", key, prev, file),
+                ));
+            }
             cov.translations += 1;
             let messages = t.get("messages");
             for loc in ["en", "fr"] {
@@ -1583,30 +1612,51 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
     args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1).cloned())
 }
 
+/// All translation ENTRIES merged from every source (ADR-20260722-101500): the shared `translations.yaml`
+/// plus every per-surface `screens/*.translations.yaml` sidecar. Returns `(fileKey, entryKey, node)` per
+/// real entry (skips file-level meta — only nodes carrying `messages`), file-sorted then file-order, so
+/// output is deterministic. Keys must be unique across files (the §10 validator enforces it).
+fn translation_entries(model: &Model) -> Vec<(String, String, &Value)> {
+    let mut files: Vec<&String> = model
+        .defs
+        .keys()
+        .filter(|k| k.as_str() == "translations.yaml" || k.ends_with(".translations.yaml"))
+        .collect();
+    files.sort();
+    let mut out = Vec::new();
+    for f in files {
+        if let Some(Value::Mapping(m)) = model.defs.get(f) {
+            for (k, v) in m {
+                if let Some(key) = k.as_str() {
+                    if v.get("messages").is_some() {
+                        out.push((f.clone(), key.to_string(), v));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Emit the single i18n bundle from translations.yaml (ADR-0033) — the first ported emitter. Must be
 /// BYTE-IDENTICAL to the TypeScript `emitTranslationsJson` output (keys sorted; `{ "<key>": { en, fr } }`;
 /// 2-space pretty JSON + trailing newline) so the CI generate+diff gate stays clean during the migration.
 fn emit_translations_json(model: &Model) -> String {
     let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
-    if let Some(Value::Mapping(m)) = model.defs.get("translations.yaml") {
-        for (k, v) in m {
-            let key = match k.as_str() {
-                Some(s) => s,
-                None => continue,
-            };
-            // skip file-level meta (version/description) — only real translation entries have `messages`.
-            let messages = match v.get("messages").and_then(|x| x.as_mapping()) {
-                Some(mm) => mm,
-                None => continue,
-            };
-            let mut locales = BTreeMap::new();
-            for (lk, lv) in messages {
-                if let (Some(l), Some(t)) = (lk.as_str(), lv.as_str()) {
-                    locales.insert(l.to_string(), t.to_string());
-                }
+    // Merge translations.yaml + every screens/*.translations.yaml sidecar (keys are globally unique and
+    // BTreeMap-sorted, so the flat catalog stays byte-identical regardless of which file a key lives in).
+    for (_file, key, v) in translation_entries(model) {
+        let messages = match v.get("messages").and_then(|x| x.as_mapping()) {
+            Some(mm) => mm,
+            None => continue,
+        };
+        let mut locales = BTreeMap::new();
+        for (lk, lv) in messages {
+            if let (Some(l), Some(t)) = (lk.as_str(), lv.as_str()) {
+                locales.insert(l.to_string(), t.to_string());
             }
-            out.insert(key.to_string(), locales);
         }
+        out.insert(key, locales);
     }
     let mut s = serde_json::to_string_pretty(&out).expect("serialize translations");
     s.push('\n');
@@ -5454,11 +5504,11 @@ fn emit_documentation(model: &Model) -> String {
     let sf = model.defs.get("screens/restaurant_frontoffice.yaml");
     let resolvers = sf.and_then(|v| v.get("resolvers")).and_then(|v| v.as_mapping());
     let action_defs = sf.and_then(|v| v.get("actions")).and_then(|v| v.as_mapping());
-    let tr_defs = model.defs.get("translations.yaml").and_then(|v| v.as_mapping());
+    // translations merged from translations.yaml + screens/*.translations.yaml (translation_entries)
     let cellf = |s: &str| s.replace('|', "\\|");
     let tr_en = |rf: &str| -> String { resolve_ref(model, rf, "screens/restaurant_frontoffice.yaml").and_then(|t| t.get("messages")).and_then(|m| m.get("en")).and_then(|x| x.as_str()).map(|s| s.to_string()).unwrap_or_else(|| rf.rsplit('/').next().unwrap_or(rf).to_string()) };
     let t_text = |v: &Value| -> String { if let Some(rf) = v.get("$ref").and_then(|x| x.as_str()) { tr_en(rf) } else if let Some(s) = v.as_str() { s.to_string() } else { String::new() } };
-    let tr_rows: Vec<Vec<String>> = tr_defs.map(|m| m.iter().filter_map(|(k, t)| k.as_str().map(|key| { let params = t.get("params").and_then(|x| x.as_mapping()).map(|pm| pm.iter().filter_map(|(pk, _)| pk.as_str().map(|p| format!("`{}`", p))).collect::<Vec<_>>().join(", ")).unwrap_or_default(); let params = if params.is_empty() { "—".to_string() } else { params }; vec![format!("{}`{}`", id_tag(&danchor("translation", key)), key), params, cellf(t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or("")), cellf(t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or(""))] })).collect()).unwrap_or_default();
+    let tr_rows: Vec<Vec<String>> = translation_entries(model).into_iter().map(|(_f, key, t)| { let params = t.get("params").and_then(|x| x.as_mapping()).map(|pm| pm.iter().filter_map(|(pk, _)| pk.as_str().map(|p| format!("`{}`", p))).collect::<Vec<_>>().join(", ")).unwrap_or_default(); let params = if params.is_empty() { "—".to_string() } else { params }; vec![format!("{}`{}`", id_tag(&danchor("translation", &key)), key), params, cellf(t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or("")), cellf(t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or(""))] }).collect();
     let translations_section = md_table(&["Key", "Params", "🇬🇧 en", "🇫🇷 fr"], &tr_rows);
     let op_cell = |rf: Option<&str>, gap: Option<&str>| -> String { if let Some(g) = gap { return format!("⚠️ _gap: {}_", cellf(g)); } match rf { None => "—".to_string(), Some(rf) => { let name = rf.rsplit('/').next().unwrap_or(""); let kind = if rf.contains("/mutations/") { "mutation" } else if rf.contains("/subscriptions/") { "subscription" } else { "query" }; dlink(kind, name) } } };
     let action_keys: HashSet<String> = action_defs.map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
@@ -6079,10 +6129,10 @@ fn emit_documentation_html(model: &Model) -> String {
     // SDUI screens + translations
     let resolvers = sf.and_then(|v| v.get("resolvers")).and_then(|v| v.as_mapping());
     let action_defs = sf.and_then(|v| v.get("actions")).and_then(|v| v.as_mapping());
-    let tr_defs = model.defs.get("translations.yaml").and_then(|v| v.as_mapping());
+    // translations merged from translations.yaml + screens/*.translations.yaml (translation_entries)
     let tr_en = |rf: &str| -> String { resolve_ref(model, rf, "screens/restaurant_frontoffice.yaml").and_then(|t| t.get("messages")).and_then(|m| m.get("en")).and_then(|x| x.as_str()).map(|s| s.to_string()).unwrap_or_else(|| rf.rsplit('/').next().unwrap_or(rf).to_string()) };
     let t_text = |v: &Value| -> String { if let Some(rf) = v.get("$ref").and_then(|x| x.as_str()) { tr_en(rf) } else if let Some(s) = v.as_str() { s.to_string() } else { String::new() } };
-    let tr_rows: Vec<Vec<String>> = tr_defs.map(|m| m.iter().filter_map(|(k, t)| k.as_str().map(|key| { let params = t.get("params").and_then(|x| x.as_mapping()).map(|pm| pm.iter().filter_map(|(pk, _)| pk.as_str().map(|p| format!("<span class=\"k-param\">{}</span>", h_esc(p)))).collect::<Vec<_>>().join(", ")).unwrap_or_default(); let params = if params.is_empty() { "<span class=\"muted\">—</span>".to_string() } else { params }; vec![format!("<span id=\"{}\" class=\"k-scalar\">{} {}</span>", danchor("translation", key), d_emo("translation"), h_esc(key)), params, format!("🇬🇧 {}", h_esc(t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or(""))), format!("🇫🇷 {}", h_esc(t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or("")))] })).collect()).unwrap_or_default();
+    let tr_rows: Vec<Vec<String>> = translation_entries(model).into_iter().map(|(_f, key, t)| { let params = t.get("params").and_then(|x| x.as_mapping()).map(|pm| pm.iter().filter_map(|(pk, _)| pk.as_str().map(|p| format!("<span class=\"k-param\">{}</span>", h_esc(p)))).collect::<Vec<_>>().join(", ")).unwrap_or_default(); let params = if params.is_empty() { "<span class=\"muted\">—</span>".to_string() } else { params }; vec![format!("<span id=\"{}\" class=\"k-scalar\">{} {}</span>", danchor("translation", &key), d_emo("translation"), h_esc(&key)), params, format!("🇬🇧 {}", h_esc(t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or(""))), format!("🇫🇷 {}", h_esc(t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or("")))] }).collect();
     let translations_html = h_table(&["Key", "Params", "en", "fr"], &tr_rows);
     let op_link = |rf: Option<&str>, gap: Option<&str>| -> String { if let Some(g) = gap { return format!("<span class=\"opt\">⚠️ {}</span>", h_esc(g)); } match rf { None => "—".to_string(), Some(rf) => { let name = rf.rsplit('/').next().unwrap_or(""); let kind = if rf.contains("/mutations/") { "mutation" } else if rf.contains("/subscriptions/") { "subscription" } else { "query" }; h_link(kind, name) } } };
     let action_keys: HashSet<String> = action_defs.map(|m| m.iter().filter_map(|(k, _)| k.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
@@ -6140,7 +6190,7 @@ fn emit_documentation_html(model: &Model) -> String {
     for s in &api.subscriptions { put("subscription", &s.name, s.description.as_deref().unwrap_or("")); }
     if let Some(m) = model.defs.get("observability.yaml").and_then(|v| v.as_mapping()) { for (k, c) in m { if let Some(f) = k.as_str() { let s = format!("Observability contract — criticality: {}.", c.get("criticality").and_then(|x| x.as_str()).unwrap_or("—")); put("obs", f, &s); } } }
     if let Some(m) = rule_defs { for (k, d) in m { if let Some(n) = k.as_str() { put("rule", n, d.get("description").and_then(|x| x.as_str()).unwrap_or("")); } } }
-    if let Some(m) = tr_defs { for (k, t) in m { if let Some(key) = k.as_str() { let s = format!("{} / {}", t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or(""), t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or("")); put("translation", key, &s); } } }
+    for (_f, key, t) in translation_entries(model) { let s = format!("{} / {}", t.get("messages").and_then(|mm| mm.get("en")).and_then(|x| x.as_str()).unwrap_or(""), t.get("messages").and_then(|mm| mm.get("fr")).and_then(|x| x.as_str()).unwrap_or("")); put("translation", &key, &s); }
     for s in &screens_arr { if let Some(id) = s.get("id").and_then(|x| x.as_str()) { let msg = format!("{}screen {}", if s.get("sdui").and_then(|x| x.as_bool()) == Some(false) { "Non-SDUI " } else { "SDUI " }, s.get("route").and_then(|x| x.as_str()).unwrap_or("")); put("screen", id, &msg); } }
     drop(put);
     let desc_script = format!("<script>window.CF_DESC={};</script>", serde_json::to_string(&serde_json::Value::Object(desc_map)).unwrap().replace('<', "\\u003c"));

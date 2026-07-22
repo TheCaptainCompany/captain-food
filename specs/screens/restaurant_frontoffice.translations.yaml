@@ -1,0 +1,199 @@
+version: 1
+description: >
+  Restaurant Front-Office UI strings (ADR-0033; sidecar convention ADR-20260722-101500) — the
+  surface-specific translation catalog for `restaurant_frontoffice.yaml`. SHARED strings (common.*) live
+  in `translations.yaml`; this file holds only strings unique to this surface. The codegen merges both
+  into a single `translations.generated.json`; keys are globally namespaced and unique across all files.
+  Same convention as translations.yaml (dotted key · optional params · en+fr messages with matching
+  {param} tokens). NOTE: the marketplace discovery strings (home.*, search.*, partner.*) currently here
+  move to `captain_frontoffice.translations.yaml` with the marketplace content-split (ADR-20260722-091500).
+
+# ── location picker ──────────────────────────────────────────────────────────
+location.title:            { messages: { en: "Delivery address", fr: "Adresse de livraison" } }
+location.search_placeholder: { messages: { en: "Search for an address…", fr: "Rechercher une adresse…" } }
+location.recent:           { messages: { en: "Recent", fr: "Récentes" } }
+location.saved:            { messages: { en: "Saved",  fr: "Enregistrées" } }
+location.use_current:      { messages: { en: "Use current location", fr: "Utiliser ma position" } }
+
+# ── auth / OTP ───────────────────────────────────────────────────────────────
+auth.title:    { messages: { en: "Sign in or create account", fr: "Se connecter ou créer un compte" } }
+auth.body:     { messages: { en: "Enter your phone number to continue. No password needed.", fr: "Entrez votre numéro de téléphone pour continuer. Aucun mot de passe requis." } }
+auth.phone_label: { messages: { en: "Phone number", fr: "Numéro de téléphone" } }
+auth.continue: { messages: { en: "Continue", fr: "Continuer" } }
+auth.or:       { messages: { en: "or", fr: "ou" } }
+auth.passkey:  { messages: { en: "Continue with passkey", fr: "Continuer avec une clé d'accès" } }
+auth.otp_title: { messages: { en: "Verify your number", fr: "Vérifiez votre numéro" } }
+auth.otp_body:
+  params: { phone: "the masked phone number the code was sent to" }
+  messages: { en: "We sent a code to {phone}. Enter it below.", fr: "Nous avons envoyé un code au {phone}. Saisissez-le ci-dessous." }
+auth.resend:   { messages: { en: "Resend code", fr: "Renvoyer le code" } }
+auth.resend_in:
+  params: { seconds: "seconds until resend is available" }
+  messages: { en: "Resend in {seconds}s", fr: "Renvoyer dans {seconds}s" }
+
+# ── item detail sheet ────────────────────────────────────────────────────────
+item.choose_one:            { messages: { en: "Choose 1", fr: "Choisissez 1" } }
+item.instructions_placeholder: { messages: { en: "Special instructions (optional)", fr: "Instructions spéciales (facultatif)" } }
+item.add_to_cart:
+  params: { total: "formatted line total" }
+  messages: { en: "Add to cart — {total}", fr: "Ajouter au panier — {total}" }
+
+# ── rating sheet ─────────────────────────────────────────────────────────────
+rating.title:         { messages: { en: "Rate your order", fr: "Évaluez votre commande" } }
+rating.food_question: { messages: { en: "How was the food?", fr: "Comment était le repas ?" } }
+rating.tags_label:    { messages: { en: "What went well? (optional)", fr: "Qu'est-ce qui vous a plu ? (facultatif)" } }
+rating.tag.taste:     { messages: { en: "Great taste", fr: "Très bon goût" } }
+rating.tag.portions:  { messages: { en: "Good portions", fr: "Bonnes portions" } }
+rating.tag.fast:      { messages: { en: "Fast delivery", fr: "Livraison rapide" } }
+rating.tag.accurate:  { messages: { en: "Accurate order", fr: "Commande conforme" } }
+rating.tag.packaging: { messages: { en: "Great packaging", fr: "Bon emballage" } }
+rating.comment_placeholder: { messages: { en: "Add a comment (optional)", fr: "Ajouter un commentaire (facultatif)" } }
+rating.thanks:        { messages: { en: "Thanks for your feedback!", fr: "Merci pour votre retour !" } }
+
+# ── home (marketplace discovery — moves to captain_frontoffice with the split) ─
+home.search_placeholder: { messages: { en: "Search restaurants or dishes…", fr: "Rechercher un restaurant ou un plat…" } }
+home.craving:            { messages: { en: "What are you craving?", fr: "Une envie particulière ?" } }
+home.featured:           { messages: { en: "Featured near you", fr: "En vedette près de chez vous" } }
+home.all_restaurants:    { messages: { en: "All restaurants", fr: "Tous les restaurants" } }
+home.sort.recommended:   { messages: { en: "Recommended", fr: "Recommandés" } }
+home.sort.delivery_time: { messages: { en: "Fastest delivery", fr: "Livraison la plus rapide" } }
+home.sort.rating:        { messages: { en: "Top rated", fr: "Les mieux notés" } }
+home.sort.price:         { messages: { en: "Price: low to high", fr: "Prix : croissant" } }
+home.filter.category:    { messages: { en: "Category", fr: "Catégorie" } }
+home.filter.delivery_mode: { messages: { en: "Delivery / Pickup", fr: "Livraison / À emporter" } }
+home.empty.title:        { messages: { en: "No restaurants match", fr: "Aucun restaurant correspondant" } }
+home.empty.body:         { messages: { en: "Try adjusting your filters.", fr: "Essayez d'ajuster vos filtres." } }
+home.partner_cta.title:  { messages: { en: "Are you a restaurant?", fr: "Vous êtes un restaurant ?" } }
+home.partner_cta.body:   { messages: { en: "Join Captain.Food and grow your sales.", fr: "Rejoignez Captain.Food et augmentez vos ventes." } }
+home.partner_cta.button: { messages: { en: "Become a partner", fr: "Devenir partenaire" } }
+
+# ── search ───────────────────────────────────────────────────────────────────
+search.placeholder:  { messages: { en: "Restaurants, dishes, cuisines…", fr: "Restaurants, plats, cuisines…" } }
+search.recent:       { messages: { en: "Recent searches", fr: "Recherches récentes" } }
+search.popular:      { messages: { en: "Popular categories", fr: "Catégories populaires" } }
+search.restaurants:  { messages: { en: "Restaurants", fr: "Restaurants" } }
+search.dishes:       { messages: { en: "Dishes", fr: "Plats" } }
+search.empty.title:
+  params: { query: "the search query" }
+  messages: { en: "No results for \"{query}\"", fr: "Aucun résultat pour « {query} »" }
+search.empty.body:   { messages: { en: "Try a different dish or restaurant name.", fr: "Essayez un autre plat ou nom de restaurant." } }
+
+# ── restaurant page ──────────────────────────────────────────────────────────
+restaurant.open:   { messages: { en: "Open", fr: "Ouvert" } }
+restaurant.closed: { messages: { en: "Closed", fr: "Fermé" } }
+restaurant.opens_at:
+  params: { time: "opening time" }
+  messages: { en: "Opens at {time}", fr: "Ouvre à {time}" }
+restaurant.min_order:
+  params: { amount: "formatted minimum order amount" }
+  messages: { en: "Min. {amount}", fr: "Min. {amount}" }
+restaurant.unavailable: { messages: { en: "Unavailable", fr: "Indisponible" } }
+
+# ── cart ─────────────────────────────────────────────────────────────────────
+cart.title:        { messages: { en: "Your cart", fr: "Votre panier" } }
+cart.empty.title:  { messages: { en: "Your cart is empty", fr: "Votre panier est vide" } }
+cart.empty.body:   { messages: { en: "Add items from a restaurant to get started.", fr: "Ajoutez des articles d'un restaurant pour commencer." } }
+cart.empty.browse: { messages: { en: "Browse restaurants", fr: "Parcourir les restaurants" } }
+cart.promo_placeholder: { messages: { en: "Promo code", fr: "Code promo" } }
+cart.promo_applied:
+  params: { code: "the applied promo code", amount: "formatted discount amount" }
+  messages: { en: "Code {code} applied — {amount} off", fr: "Code {code} appliqué — {amount} de réduction" }
+cart.subtotal:     { messages: { en: "Subtotal", fr: "Sous-total" } }
+cart.delivery_fee: { messages: { en: "Delivery fee", fr: "Frais de livraison" } }
+cart.service_fee:  { messages: { en: "Service fee", fr: "Frais de service" } }
+cart.discount:     { messages: { en: "Discount", fr: "Réduction" } }
+cart.total:        { messages: { en: "Total", fr: "Total" } }
+cart.min_warning:
+  params: { min: "formatted minimum order", shortfall: "formatted amount still needed" }
+  messages: { en: "Minimum order is {min}. Add {shortfall} more.", fr: "Commande minimum : {min}. Ajoutez {shortfall}." }
+cart.checkout_cta:
+  params: { total: "formatted cart total" }
+  messages: { en: "Go to checkout — {total}", fr: "Passer au paiement — {total}" }
+
+# ── checkout ─────────────────────────────────────────────────────────────────
+checkout.title:            { messages: { en: "Checkout", fr: "Paiement" } }
+checkout.delivery_details: { messages: { en: "Delivery details", fr: "Détails de livraison" } }
+checkout.contact:          { messages: { en: "Contact", fr: "Contact" } }
+checkout.full_name:        { messages: { en: "Full name", fr: "Nom complet" } }
+checkout.phone:            { messages: { en: "Phone", fr: "Téléphone" } }
+checkout.phone_helper:     { messages: { en: "Verified via SMS", fr: "Vérifié par SMS" } }
+checkout.email:            { messages: { en: "Email (for receipt)", fr: "E-mail (pour le reçu)" } }
+checkout.delivery_instructions: { messages: { en: "Delivery instructions", fr: "Instructions de livraison" } }
+checkout.delivery_instructions_ph: { messages: { en: "Floor, door code, landmarks…", fr: "Étage, code d'accès, points de repère…" } }
+checkout.order_summary:    { messages: { en: "Order summary", fr: "Récapitulatif" } }
+checkout.payment:          { messages: { en: "Payment", fr: "Paiement" } }
+checkout.processing:       { messages: { en: "Processing…", fr: "Traitement…" } }
+checkout.place_order:
+  params: { total: "formatted order total" }
+  messages: { en: "Place order — {total}", fr: "Commander — {total}" }
+
+# ── order tracking + history ─────────────────────────────────────────────────
+order.tracking_title: { messages: { en: "Order tracking", fr: "Suivi de commande" } }
+order.status.placed.title: { messages: { en: "Order placed!", fr: "Commande passée !" } }
+order.status.placed.body:
+  params: { restaurant: "restaurant name" }
+  messages: { en: "Your order is being sent to {restaurant}.", fr: "Votre commande est envoyée à {restaurant}." }
+order.status.accepted.title: { messages: { en: "Order accepted", fr: "Commande acceptée" } }
+order.status.accepted.body:
+  params: { restaurant: "restaurant name" }
+  messages: { en: "{restaurant} is preparing your food.", fr: "{restaurant} prépare votre commande." }
+order.status.rejected.title: { messages: { en: "Order rejected", fr: "Commande refusée" } }
+order.status.rejected.body:  { messages: { en: "The restaurant couldn't accept your order. You will be refunded.", fr: "Le restaurant n'a pas pu accepter votre commande. Vous serez remboursé." } }
+order.status.preparing.title: { messages: { en: "Being prepared", fr: "En préparation" } }
+order.status.preparing.body:
+  params: { minutes: "minutes remaining" }
+  messages: { en: "Estimated ready in {minutes} min.", fr: "Prêt dans environ {minutes} min." }
+order.status.ready.title:    { messages: { en: "Ready for pickup!", fr: "Prêt à récupérer !" } }
+order.status.ready.body:     { messages: { en: "Your order is ready.", fr: "Votre commande est prête." } }
+order.status.out_for_delivery.title: { messages: { en: "On the way!", fr: "En route !" } }
+order.status.out_for_delivery.body:  { messages: { en: "Your delivery is en route.", fr: "Votre livraison est en route." } }
+order.status.delivered.title: { messages: { en: "Delivered!", fr: "Livré !" } }
+order.status.delivered.body:  { messages: { en: "Enjoy your meal. 🎉", fr: "Bon appétit. 🎉" } }
+order.status.cancelled.title: { messages: { en: "Order cancelled", fr: "Commande annulée" } }
+order.status.cancelled.body:  { messages: { en: "If you were charged, a refund is on its way.", fr: "Si vous avez été débité, un remboursement est en cours." } }
+order.eta:        { messages: { en: "Estimated arrival", fr: "Arrivée estimée" } }
+order.id_label:   { messages: { en: "Order ID", fr: "N° de commande" } }
+order.rate:       { messages: { en: "Rate your order", fr: "Évaluer la commande" } }
+order.reorder:    { messages: { en: "Reorder", fr: "Recommander" } }
+order.help:       { messages: { en: "Get help", fr: "Obtenir de l'aide" } }
+order.history_title: { messages: { en: "Your orders", fr: "Vos commandes" } }
+order.tab.active: { messages: { en: "Active", fr: "En cours" } }
+order.tab.past:   { messages: { en: "Past", fr: "Passées" } }
+order.count_total:
+  params: { count: "number of items", total: "formatted order total" }
+  messages: { en: "{count} items · {total}", fr: "{count} articles · {total}" }
+order.empty.title: { messages: { en: "No orders yet", fr: "Aucune commande" } }
+order.empty.body: { messages: { en: "Your order history will appear here.", fr: "Votre historique de commandes apparaîtra ici." } }
+order.empty.cta:  { messages: { en: "Order now", fr: "Commander" } }
+
+# ── account ──────────────────────────────────────────────────────────────────
+account.default_name:     { messages: { en: "Captain", fr: "Captain" } }
+account.section.my_account: { messages: { en: "My account", fr: "Mon compte" } }
+account.saved_addresses:  { messages: { en: "Saved addresses", fr: "Adresses enregistrées" } }
+account.payment_methods:  { messages: { en: "Payment methods", fr: "Moyens de paiement" } }
+account.passkeys:         { messages: { en: "Passkeys", fr: "Clés d'accès" } }
+account.notifications:    { messages: { en: "Notifications", fr: "Notifications" } }
+account.section.captain:  { messages: { en: "Captain.Food", fr: "Captain.Food" } }
+account.captain_coins:    { messages: { en: "Captain Coins", fr: "Captain Coins" } }
+account.refer:            { messages: { en: "Refer a friend", fr: "Parrainer un ami" } }
+account.favorites:        { messages: { en: "Favorite restaurants", fr: "Restaurants favoris" } }
+account.section.support:  { messages: { en: "Support", fr: "Assistance" } }
+account.help:             { messages: { en: "Help Center", fr: "Centre d'aide" } }
+account.contact:          { messages: { en: "Contact us", fr: "Nous contacter" } }
+account.legal:            { messages: { en: "Terms & Privacy", fr: "Conditions et confidentialité" } }
+account.sign_out:         { messages: { en: "Sign out", fr: "Se déconnecter" } }
+account.coins_badge:
+  params: { points: "loyalty points balance" }
+  messages: { en: "{points} pts", fr: "{points} pts" }
+
+# ── partner landing ──────────────────────────────────────────────────────────
+partner.header:     { messages: { en: "Partner with us", fr: "Devenez partenaire" } }
+partner.hero_title: { messages: { en: "Grow your restaurant with Captain.Food", fr: "Développez votre restaurant avec Captain.Food" } }
+partner.hero_body:  { messages: { en: "Join Tours' leading food platform. No commission model — flat subscription.", fr: "Rejoignez la première plateforme food de Tours. Sans commission — abonnement forfaitaire." } }
+partner.prop.orders.title:  { messages: { en: "Increase orders", fr: "Augmentez vos commandes" } }
+partner.prop.orders.body:   { messages: { en: "Reach thousands of new customers in your city.", fr: "Touchez des milliers de nouveaux clients dans votre ville." } }
+partner.prop.margins.title: { messages: { en: "Keep your margins", fr: "Préservez vos marges" } }
+partner.prop.margins.body:  { messages: { en: "Flat monthly fee. No per-order commission.", fr: "Forfait mensuel fixe. Aucune commission par commande." } }
+partner.prop.control.title: { messages: { en: "Full control", fr: "Contrôle total" } }
+partner.prop.control.body:  { messages: { en: "Manage your menu, hours, and catalog in real-time.", fr: "Gérez votre menu, vos horaires et votre catalogue en temps réel." } }
+partner.apply:      { messages: { en: "Apply to join", fr: "Postuler" } }

@@ -169,35 +169,35 @@ bottom_sheets:
   location_picker:
     id: location_picker
     type: bottom_sheet
-    title: { $ref: 'translations.yaml#/location.title' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/location.title' }
     sections:
-      - { type: search_input, placeholder: { $ref: 'translations.yaml#/location.search_placeholder' }, autofocus: true }
-      - { type: list, id: recent_addresses, title: { $ref: 'translations.yaml#/location.recent' }, items: "{{ customer.recent_addresses }}", item_action: { type: set_delivery_address, address: "{{ item }}" } }
-      - { type: list, id: saved_addresses, title: { $ref: 'translations.yaml#/location.saved' }, items: "{{ customer.saved_addresses }}", item_action: { type: set_delivery_address, address: "{{ item }}" } }
-      - { type: button, label: { $ref: 'translations.yaml#/location.use_current' }, variant: ghost, icon: crosshair, action: { type: use_geolocation } }
+      - { type: search_input, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/location.search_placeholder' }, autofocus: true }
+      - { type: list, id: recent_addresses, title: { $ref: 'restaurant_frontoffice.translations.yaml#/location.recent' }, items: "{{ customer.recent_addresses }}", item_action: { type: set_delivery_address, address: "{{ item }}" } }
+      - { type: list, id: saved_addresses, title: { $ref: 'restaurant_frontoffice.translations.yaml#/location.saved' }, items: "{{ customer.saved_addresses }}", item_action: { type: set_delivery_address, address: "{{ item }}" } }
+      - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/location.use_current' }, variant: ghost, icon: crosshair, action: { type: use_geolocation } }
 
   auth_sheet:
     id: auth_sheet
     type: bottom_sheet
-    title: { $ref: 'translations.yaml#/auth.title' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.title' }
     sections:
-      - { type: text, value: { $ref: 'translations.yaml#/auth.body' } }
-      - { type: phone_field, id: phone_field, label: { $ref: 'translations.yaml#/auth.phone_label' }, country_picker: true, autofocus: true }
-      - { type: button, id: send_otp_btn, label: { $ref: 'translations.yaml#/auth.continue' }, variant: primary, full_width: true, action: { type: send_otp, phone: "{{ phone_field.value }}" } }
-      - { type: divider, label: { $ref: 'translations.yaml#/auth.or' } }
-      - { type: button, label: { $ref: 'translations.yaml#/auth.passkey' }, variant: outline, icon: fingerprint, visible_when: passkey_available, action: { type: authenticate_passkey } }
+      - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.body' } }
+      - { type: phone_field, id: phone_field, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.phone_label' }, country_picker: true, autofocus: true }
+      - { type: button, id: send_otp_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.continue' }, variant: primary, full_width: true, action: { type: send_otp, phone: "{{ phone_field.value }}" } }
+      - { type: divider, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.or' } }
+      - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.passkey' }, variant: outline, icon: fingerprint, visible_when: passkey_available, action: { type: authenticate_passkey } }
 
   otp_sheet:
     id: otp_sheet
     type: bottom_sheet
-    title: { $ref: 'translations.yaml#/auth.otp_title' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.otp_title' }
     drag_to_close: false
     sections:
-      - { type: text, value: { $ref: 'translations.yaml#/auth.otp_body' } }   # params: { phone }
+      - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.otp_body' } }   # params: { phone }
       - { type: otp_input, id: otp_field, length: 6, autofocus: true, on_complete: { type: verify_otp, code: "{{ otp_field.value }}" } }
       - { type: inline_error, visible_when: otp_error, message: "{{ otp_error_message }}" }
-      - { type: text_button, label: { $ref: 'translations.yaml#/auth.resend' }, visible_when: resend_available, action: { type: resend_otp } }
-      - { type: countdown, visible_when: "!resend_available", label: { $ref: 'translations.yaml#/auth.resend_in' } }   # params: { seconds }
+      - { type: text_button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.resend' }, visible_when: resend_available, action: { type: resend_otp } }
+      - { type: countdown, visible_when: "!resend_available", label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.resend_in' } }   # params: { seconds }
 
   item_detail_sheet:
     id: item_detail_sheet
@@ -208,13 +208,13 @@ bottom_sheets:
       - { type: item_header, title: "{{ item.name }}", description: "{{ item.description }}", price: "{{ item.price | format_currency }}" }
       - type: option_groups
         groups: "{{ item.optionGroups }}"
-        required_label: { $ref: 'translations.yaml#/item.choose_one' }
+        required_label: { $ref: 'restaurant_frontoffice.translations.yaml#/item.choose_one' }
       - { type: quantity_selector, id: qty_selector, min: 1, max: 20, value: 1 }
-      - { type: text_area, id: item_instructions, placeholder: { $ref: 'translations.yaml#/item.instructions_placeholder' }, max_length: 200 }
+      - { type: text_area, id: item_instructions, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/item.instructions_placeholder' }, max_length: 200 }
       - type: sticky_bottom_bar
         content:
           - type: button
-            label: { $ref: 'translations.yaml#/item.add_to_cart' }   # params: { total }
+            label: { $ref: 'restaurant_frontoffice.translations.yaml#/item.add_to_cart' }   # params: { total }
             variant: primary
             full_width: true
             action: { type: add_to_cart, item_id: "{{ item.id }}", options: "{{ selected_options }}", quantity: "{{ qty_selector.value }}", instructions: "{{ item_instructions.value }}" }
@@ -222,19 +222,19 @@ bottom_sheets:
   rating_sheet:
     id: rating_sheet
     type: bottom_sheet
-    title: { $ref: 'translations.yaml#/rating.title' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.title' }
     sections:
-      - { type: star_rating, id: restaurant_rating, label: { $ref: 'translations.yaml#/rating.food_question' }, max: 5 }
+      - { type: star_rating, id: restaurant_rating, label: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.food_question' }, max: 5 }
       - type: chip_multi_select
         id: rating_tags
-        label: { $ref: 'translations.yaml#/rating.tags_label' }
+        label: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.tags_label' }
         options:
-          - { $ref: 'translations.yaml#/rating.tag.taste' }
-          - { $ref: 'translations.yaml#/rating.tag.portions' }
-          - { $ref: 'translations.yaml#/rating.tag.fast' }
-          - { $ref: 'translations.yaml#/rating.tag.accurate' }
-          - { $ref: 'translations.yaml#/rating.tag.packaging' }
-      - { type: text_area, id: rating_comment, placeholder: { $ref: 'translations.yaml#/rating.comment_placeholder' }, max_length: 300 }
+          - { $ref: 'restaurant_frontoffice.translations.yaml#/rating.tag.taste' }
+          - { $ref: 'restaurant_frontoffice.translations.yaml#/rating.tag.portions' }
+          - { $ref: 'restaurant_frontoffice.translations.yaml#/rating.tag.fast' }
+          - { $ref: 'restaurant_frontoffice.translations.yaml#/rating.tag.accurate' }
+          - { $ref: 'restaurant_frontoffice.translations.yaml#/rating.tag.packaging' }
+      - { type: text_area, id: rating_comment, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.comment_placeholder' }, max_length: 300 }
       - type: button
         label: { $ref: 'translations.yaml#/common.action.submit' }
         variant: primary
@@ -244,7 +244,7 @@ bottom_sheets:
           variables: { orderId: "{{ sheet.data.orderId }}", rating: "{{ restaurant_rating.value }}", tags: "{{ rating_tags.selected }}", comment: "{{ rating_comment.value }}" }
           on_success:
             - { type: close_sheet }
-            - { type: show_toast, variant: success, message: { $ref: 'translations.yaml#/rating.thanks' } }
+            - { type: show_toast, variant: success, message: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.thanks' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
@@ -262,18 +262,18 @@ screens:
       - "`promotions.active` (promo banners) has no backing query — deals deferred."
     components:
       - { component: topbar }
-      - { type: hero_search_bar, id: hero_search, placeholder: { $ref: 'translations.yaml#/home.search_placeholder' }, action: { type: navigate, route: "/search" } }
+      - { type: hero_search_bar, id: hero_search, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/home.search_placeholder' }, action: { type: navigate, route: "/search" } }
       - { type: horizontal_scroll, id: promo_banners, items: "{{ promotions }}", item_type: promo_card }
-      - { type: section, id: categories_row, title: { $ref: 'translations.yaml#/home.craving' }, content: [{ type: horizontal_scroll, items: "{{ categories }}", item_type: category_pill, item_action: { type: filter, key: category, value: "{{ item.id }}" } }] }
+      - { type: section, id: categories_row, title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.craving' }, content: [{ type: horizontal_scroll, items: "{{ categories }}", item_type: category_pill, item_action: { type: filter, key: category, value: "{{ item.id }}" } }] }
       - type: section
         id: featured_restaurants
-        title: { $ref: 'translations.yaml#/home.featured' }
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.featured' }
         subtitle: "{{ delivery_city }}"
         header_action: { label: { $ref: 'translations.yaml#/common.action.see_all' }, route: "/search" }
         content: [{ type: restaurant_card_grid, columns: { mobile: 1, tablet: 2, desktop: 3 }, items: "{{ featured_restaurants }}", item_type: restaurant_card }]
       - type: section
         id: all_restaurants
-        title: { $ref: 'translations.yaml#/home.all_restaurants' }
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.all_restaurants' }
         content:
           - type: filter_bar
             filters:
@@ -281,13 +281,13 @@ screens:
                 label: { $ref: 'translations.yaml#/common.filter.sort' }
                 type: dropdown
                 options:
-                  - { label: { $ref: 'translations.yaml#/home.sort.recommended' }, value: recommended }
-                  - { label: { $ref: 'translations.yaml#/home.sort.delivery_time' }, value: delivery_time_asc }
-                  - { label: { $ref: 'translations.yaml#/home.sort.rating' }, value: rating_desc }
-                  - { label: { $ref: 'translations.yaml#/home.sort.price' }, value: price_asc }
-              - { id: category, label: { $ref: 'translations.yaml#/home.filter.category' }, type: multi_select_chips, options: "{{ categories }}" }
+                  - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.sort.recommended' }, value: recommended }
+                  - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.sort.delivery_time' }, value: delivery_time_asc }
+                  - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.sort.rating' }, value: rating_desc }
+                  - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.sort.price' }, value: price_asc }
+              - { id: category, label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.filter.category' }, type: multi_select_chips, options: "{{ categories }}" }
               - id: delivery_mode
-                label: { $ref: 'translations.yaml#/home.filter.delivery_mode' }
+                label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.filter.delivery_mode' }
                 type: toggle_chips
                 options:
                   - { label: { $ref: 'translations.yaml#/common.mode.delivery' }, value: delivery }
@@ -295,12 +295,12 @@ screens:
           - type: restaurant_card_list
             items: "{{ all_restaurants }}"
             item_type: restaurant_card
-            empty_state: { icon: search_off, title: { $ref: 'translations.yaml#/home.empty.title' }, body: { $ref: 'translations.yaml#/home.empty.body' } }
+            empty_state: { icon: search_off, title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.empty.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/home.empty.body' } }
       - type: cta_banner
         id: footer_cta
-        title: { $ref: 'translations.yaml#/home.partner_cta.title' }
-        body: { $ref: 'translations.yaml#/home.partner_cta.body' }
-        button_label: { $ref: 'translations.yaml#/home.partner_cta.button' }
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/home.partner_cta.title' }
+        body: { $ref: 'restaurant_frontoffice.translations.yaml#/home.partner_cta.body' }
+        button_label: { $ref: 'restaurant_frontoffice.translations.yaml#/home.partner_cta.button' }
         button_action: { type: navigate, route: "/partner" }
       - { component: cart_fab }
       - { component: bottom_nav }
@@ -316,19 +316,19 @@ screens:
       - "`dishes.search` (the \"Dishes\" results) has no backing query — only restaurant search exists."
     components:
       - { component: topbar }
-      - { type: search_bar_active, id: search_input, placeholder: { $ref: 'translations.yaml#/search.placeholder' }, autofocus: true, back_button: true, on_change: { type: search_query, query: "{{ search_input.value }}" } }
+      - { type: search_bar_active, id: search_input, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/search.placeholder' }, autofocus: true, back_button: true, on_change: { type: search_query, query: "{{ search_input.value }}" } }
       - type: conditional_section
         condition: search_input.value == ""
         if_true:
-          - { type: section, title: { $ref: 'translations.yaml#/search.recent' }, visible_when: recent_searches.length > 0, content: [{ type: list, items: "{{ recent_searches }}", item_action: { type: set_search, query: "{{ item }}" } }] }
-          - { type: section, title: { $ref: 'translations.yaml#/search.popular' }, content: [{ type: category_grid, columns: 4, items: "{{ popular_categories }}", item_type: category_tile }] }
+          - { type: section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.recent' }, visible_when: recent_searches.length > 0, content: [{ type: list, items: "{{ recent_searches }}", item_action: { type: set_search, query: "{{ item }}" } }] }
+          - { type: section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.popular' }, content: [{ type: category_grid, columns: 4, items: "{{ popular_categories }}", item_type: category_tile }] }
         if_false:
           - type: search_results
             query: "{{ search_input.value }}"
             sections:
-              - { id: restaurant_results, title: { $ref: 'translations.yaml#/search.restaurants' }, items: "{{ results.restaurants }}", item_type: restaurant_card }
-              - { id: dish_results, title: { $ref: 'translations.yaml#/search.dishes' }, items: "{{ results.dishes }}", item_type: dish_row }
-            empty_state: { icon: search_off, title: { $ref: 'translations.yaml#/search.empty.title' }, body: { $ref: 'translations.yaml#/search.empty.body' } }
+              - { id: restaurant_results, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.restaurants' }, items: "{{ results.restaurants }}", item_type: restaurant_card }
+              - { id: dish_results, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.dishes' }, items: "{{ results.dishes }}", item_type: dish_row }
+            empty_state: { icon: search_off, title: { $ref: 'restaurant_frontoffice.translations.yaml#/search.empty.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/search.empty.body' } }
       - { component: bottom_nav }
 
   # SCREEN 3 — Restaurant page
@@ -357,16 +357,16 @@ screens:
               - { icon: star, value: "{{ restaurant.rating }}", visible_when: restaurant.rating }
               - { icon: clock, value: "{{ restaurant.deliveryTime }}–{{ restaurant.deliveryTime + 10 }} min" }
               - { icon: truck, value: "{{ restaurant.deliveryFee == 0 ? '' : restaurant.deliveryFee | format_currency }}", empty_ref: { $ref: 'translations.yaml#/common.delivery.free' } }
-              - { icon: shopping_bag, value: { $ref: 'translations.yaml#/restaurant.min_order' } }   # params: { amount }
+              - { icon: shopping_bag, value: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.min_order' } }   # params: { amount }
           - type: opening_hours_row
             schedule: "{{ restaurant.openingHours }}"
-            labels: { open: { $ref: 'translations.yaml#/restaurant.open' }, closed: { $ref: 'translations.yaml#/restaurant.closed' }, opens_at: { $ref: 'translations.yaml#/restaurant.opens_at' } }
+            labels: { open: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.open' }, closed: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.closed' }, opens_at: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.opens_at' } }
       - { type: sticky_category_nav, id: catalog_nav, items: "{{ restaurant.catalog.categories }}" }
       - type: catalog_sections
         categories: "{{ restaurant.catalog.categories }}"
         item_type: catalog_item_row
         item_add_action: { type: open_bottom_sheet, sheet_id: item_detail_sheet, data: { item: "{{ item }}" } }
-        disabled_overlay: { $ref: 'translations.yaml#/restaurant.unavailable' }
+        disabled_overlay: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.unavailable' }
       - { type: spacer, height: "6rem" }
       - { component: cart_fab }
       - { component: bottom_nav }
@@ -375,7 +375,7 @@ screens:
   - id: cart
     roles: [PUBLIC, CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/cart"
-    title: { $ref: 'translations.yaml#/cart.title' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.title' }
     sdui: true
     data_requirements: [cart.current]
     gaps:
@@ -383,17 +383,17 @@ screens:
       - "`set_delivery_mode` action has no backing mutation — serviceType is chosen at placeOrder, not stored on the cart."
     empty_state:
       icon: shopping_cart_outline
-      title: { $ref: 'translations.yaml#/cart.empty.title' }
-      body: { $ref: 'translations.yaml#/cart.empty.body' }
-      action: { label: { $ref: 'translations.yaml#/cart.empty.browse' }, route: "/" }
+      title: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.empty.title' }
+      body: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.empty.body' }
+      action: { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.empty.browse' }, route: "/" }
     components:
-      - { type: back_button_header, title: { $ref: 'translations.yaml#/cart.title' }, subtitle: "{{ cart.restaurantName }}" }
+      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.title' }, subtitle: "{{ cart.restaurantName }}" }
       - type: cart_lines
         items: "{{ cart.lines }}"
         item_template:
           type: cart_line_row
           quantity_stepper: { min: 0, on_change: { type: change_cart_line_quantity, line_id: "{{ line.id }}", quantity: "{{ new_quantity }}" } }
-      - { type: promo_code_input, id: promo_field, placeholder: { $ref: 'translations.yaml#/cart.promo_placeholder' }, button_label: { $ref: 'translations.yaml#/common.action.apply' }, action: { type: apply_promo_code, code: "{{ promo_field.value }}" }, success_message: { $ref: 'translations.yaml#/cart.promo_applied' } }
+      - { type: promo_code_input, id: promo_field, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.promo_placeholder' }, button_label: { $ref: 'translations.yaml#/common.action.apply' }, action: { type: apply_promo_code, code: "{{ promo_field.value }}" }, success_message: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.promo_applied' } }
       - type: delivery_mode_toggle
         value: "{{ selected_delivery_mode }}"
         on_change: { type: set_delivery_mode }
@@ -402,17 +402,17 @@ screens:
           - { label: { $ref: 'translations.yaml#/common.mode.pickup' }, value: pickup, icon: walking }
       - type: order_summary_block
         rows:
-          - { label: { $ref: 'translations.yaml#/cart.subtotal' }, value: "{{ cart.subtotal | format_currency }}" }
-          - { label: { $ref: 'translations.yaml#/cart.delivery_fee' }, value: "{{ cart.deliveryFee | format_currency }}", visible_when: selected_delivery_mode == delivery }
-          - { label: { $ref: 'translations.yaml#/cart.service_fee' }, value: "{{ cart.serviceFee | format_currency }}" }
-          - { label: { $ref: 'translations.yaml#/cart.discount' }, value: "–{{ cart.discount | format_currency }}", color: success, visible_when: cart.discount > 0 }
-          - { label: { $ref: 'translations.yaml#/cart.total' }, value: "{{ cart.total | format_currency }}", style: { weight: bold, size: lg } }
-      - { type: minimum_order_warning, visible_when: "!cart.minimumOrderMet", message: { $ref: 'translations.yaml#/cart.min_warning' } }   # params: { min, shortfall }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.subtotal' }, value: "{{ cart.subtotal | format_currency }}" }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.delivery_fee' }, value: "{{ cart.deliveryFee | format_currency }}", visible_when: selected_delivery_mode == delivery }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.service_fee' }, value: "{{ cart.serviceFee | format_currency }}" }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.discount' }, value: "–{{ cart.discount | format_currency }}", color: success, visible_when: cart.discount > 0 }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.total' }, value: "{{ cart.total | format_currency }}", style: { weight: bold, size: lg } }
+      - { type: minimum_order_warning, visible_when: "!cart.minimumOrderMet", message: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.min_warning' } }   # params: { min, shortfall }
       - type: sticky_bottom_bar
         content:
           - type: button
             id: checkout_btn
-            label: { $ref: 'translations.yaml#/cart.checkout_cta' }   # params: { total }
+            label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.checkout_cta' }   # params: { total }
             variant: primary
             full_width: true
             disabled_when: "!cart.minimumOrderMet || cart.lines.length == 0"
@@ -422,36 +422,36 @@ screens:
   - id: checkout
     roles: [CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/checkout"
-    title: { $ref: 'translations.yaml#/checkout.title' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.title' }
     sdui: false
     sdui_reason: "Stripe Elements + payment security — a static React page, not runtime JSON."
     requires_auth: true
     data_requirements: [cart.current, me.profile]
     actions_used: [place_order, set_delivery_address_saved]
     components:
-      - { type: back_button_header, title: { $ref: 'translations.yaml#/checkout.title' } }
-      - { type: checkout_section, title: { $ref: 'translations.yaml#/checkout.delivery_details' }, visible_when: selected_delivery_mode == delivery, content: [{ type: address_selector, id: delivery_address, trailing: { $ref: 'translations.yaml#/common.action.change' }, action: { type: open_bottom_sheet, sheet_id: location_picker } }] }
+      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.title' } }
+      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_details' }, visible_when: selected_delivery_mode == delivery, content: [{ type: address_selector, id: delivery_address, trailing: { $ref: 'translations.yaml#/common.action.change' }, action: { type: open_bottom_sheet, sheet_id: location_picker } }] }
       - type: checkout_section
-        title: { $ref: 'translations.yaml#/checkout.contact' }
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.contact' }
         content:
           - type: form
             id: contact_form
             fields:
-              - { id: full_name, type: text_input, label: { $ref: 'translations.yaml#/checkout.full_name' }, value: "{{ customer.fullName }}", required: true }
-              - { id: phone, type: phone_input, label: { $ref: 'translations.yaml#/checkout.phone' }, value: "{{ customer.phone }}", disabled: true, helper: { $ref: 'translations.yaml#/checkout.phone_helper' } }
-              - { id: email, type: email_input, label: { $ref: 'translations.yaml#/checkout.email' }, value: "{{ customer.email }}", required: false }
-      - { type: checkout_section, title: { $ref: 'translations.yaml#/checkout.delivery_instructions' }, visible_when: selected_delivery_mode == delivery, content: [{ type: text_area, id: delivery_instructions, placeholder: { $ref: 'translations.yaml#/checkout.delivery_instructions_ph' }, max_length: 200 }] }
-      - { type: checkout_section, title: { $ref: 'translations.yaml#/checkout.order_summary' }, collapsible: true, content: [{ type: cart_summary_mini, lines: "{{ cart.lines }}", total: "{{ cart.total | format_currency }}" }] }
+              - { id: full_name, type: text_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.full_name' }, value: "{{ customer.fullName }}", required: true }
+              - { id: phone, type: phone_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.phone' }, value: "{{ customer.phone }}", disabled: true, helper: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.phone_helper' } }
+              - { id: email, type: email_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.email' }, value: "{{ customer.email }}", required: false }
+      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions' }, visible_when: selected_delivery_mode == delivery, content: [{ type: text_area, id: delivery_instructions, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions_ph' }, max_length: 200 }] }
+      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.order_summary' }, collapsible: true, content: [{ type: cart_summary_mini, lines: "{{ cart.lines }}", total: "{{ cart.total | format_currency }}" }] }
       - type: checkout_section
-        title: { $ref: 'translations.yaml#/checkout.payment' }
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment' }
         content:
           - { type: stripe_express_checkout_element, id: stripe_payment, payment_intent_source: "{{ payment_status.clientSecret }}", on_confirm: { type: confirm_payment } }
       - type: sticky_bottom_bar
         content:
           - type: button
             id: place_order_btn
-            label: { $ref: 'translations.yaml#/checkout.place_order' }   # params: { total }
-            loading_label: { $ref: 'translations.yaml#/checkout.processing' }
+            label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.place_order' }   # params: { total }
+            loading_label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.processing' }
             variant: primary
             full_width: true
             action:
@@ -468,7 +468,7 @@ screens:
   - id: order_tracking
     roles: [CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/orders/:orderId/confirmation"
-    title: { $ref: 'translations.yaml#/order.tracking_title' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.tracking_title' }
     sdui: false
     sdui_reason: "Realtime GraphQL subscription + order state machine — a static React page."
     requires_auth: true
@@ -481,47 +481,47 @@ screens:
       - type: order_status_hero
         status: "{{ order.status }}"
         status_config:
-          PLACED:           { icon: check_circle, title: { $ref: 'translations.yaml#/order.status.placed.title' },   body: { $ref: 'translations.yaml#/order.status.placed.body' } }
-          ACCEPTED:         { icon: chef_hat,     title: { $ref: 'translations.yaml#/order.status.accepted.title' }, body: { $ref: 'translations.yaml#/order.status.accepted.body' } }
-          REJECTED:         { icon: x_circle,     title: { $ref: 'translations.yaml#/order.status.rejected.title' }, body: { $ref: 'translations.yaml#/order.status.rejected.body' } }
-          PREPARING:        { icon: fire,         title: { $ref: 'translations.yaml#/order.status.preparing.title' },body: { $ref: 'translations.yaml#/order.status.preparing.body' } }
-          READY:            { icon: bag_check,    title: { $ref: 'translations.yaml#/order.status.ready.title' },    body: { $ref: 'translations.yaml#/order.status.ready.body' } }
-          OUT_FOR_DELIVERY: { icon: truck,        title: { $ref: 'translations.yaml#/order.status.out_for_delivery.title' }, body: { $ref: 'translations.yaml#/order.status.out_for_delivery.body' } }
-          DELIVERED:        { icon: home,         title: { $ref: 'translations.yaml#/order.status.delivered.title' },body: { $ref: 'translations.yaml#/order.status.delivered.body' } }
-          CANCELLED:        { icon: x_circle,     title: { $ref: 'translations.yaml#/order.status.cancelled.title' },body: { $ref: 'translations.yaml#/order.status.cancelled.body' } }
-      - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY']", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'translations.yaml#/order.eta' } }
+          PLACED:           { icon: check_circle, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.placed.title' },   body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.placed.body' } }
+          ACCEPTED:         { icon: chef_hat,     title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.accepted.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.accepted.body' } }
+          REJECTED:         { icon: x_circle,     title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.rejected.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.rejected.body' } }
+          PREPARING:        { icon: fire,         title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.preparing.title' },body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.preparing.body' } }
+          READY:            { icon: bag_check,    title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.ready.title' },    body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.ready.body' } }
+          OUT_FOR_DELIVERY: { icon: truck,        title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.out_for_delivery.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.out_for_delivery.body' } }
+          DELIVERED:        { icon: home,         title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.delivered.title' },body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.delivered.body' } }
+          CANCELLED:        { icon: x_circle,     title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.title' },body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.cancelled.body' } }
+      - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY']", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.eta' } }
       - { type: order_timeline, events: "{{ order.timeline }}" }
       - { type: restaurant_contact_row, name: "{{ order.restaurant.name }}", phone: "{{ order.restaurant.phone }}", action: { type: phone_call, number: "{{ order.restaurant.phone }}" } }
       - { type: order_items_summary, lines: "{{ order.lines }}", total: "{{ order.total | format_currency }}" }
-      - { type: order_id_row, label: { $ref: 'translations.yaml#/order.id_label' }, value: "{{ order.id }}", action: { type: copy_to_clipboard } }
+      - { type: order_id_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.id_label' }, value: "{{ order.id }}", action: { type: copy_to_clipboard } }
       - type: section
         id: post_order_actions
         content:
-          - { type: button, label: { $ref: 'translations.yaml#/order.rate' }, variant: outline, icon: star, visible_when: "order.status == 'DELIVERED'", action: { type: open_bottom_sheet, sheet_id: rating_sheet, data: { orderId: "{{ order.id }}" } } }
-          - { type: button, label: { $ref: 'translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED']", action: { type: reorder, cart_lines: "{{ order.lines }}" } }
-          - { type: button, label: { $ref: 'translations.yaml#/order.help' }, variant: ghost, icon: life_buoy, action: { type: navigate, route: "/help/orders/{{ order.id }}" } }
+          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.rate' }, variant: outline, icon: star, visible_when: "order.status == 'DELIVERED'", action: { type: open_bottom_sheet, sheet_id: rating_sheet, data: { orderId: "{{ order.id }}" } } }
+          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED']", action: { type: reorder, cart_lines: "{{ order.lines }}" } }
+          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.help' }, variant: ghost, icon: life_buoy, action: { type: navigate, route: "/help/orders/{{ order.id }}" } }
 
   # SCREEN 7 — Order history
   - id: order_history
     roles: [CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/orders"
-    title: { $ref: 'translations.yaml#/order.history_title' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.history_title' }
     sdui: true
     requires_auth: true
     data_requirements: [orders.mine]
     components:
       - { component: topbar }
-      - { type: page_header, title: { $ref: 'translations.yaml#/order.history_title' } }
+      - { type: page_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.history_title' } }
       - type: tab_bar
         id: order_tabs
         tabs:
-          - { id: active, label: { $ref: 'translations.yaml#/order.tab.active' } }
-          - { id: past,   label: { $ref: 'translations.yaml#/order.tab.past' } }
+          - { id: active, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.tab.active' } }
+          - { id: past,   label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.tab.past' } }
       - type: order_list
         items: "{{ orders }}"
         item_type: order_card
-        line_summary: { $ref: 'translations.yaml#/order.count_total' }   # params: { count, total }
-        empty_state: { icon: receipt, title: { $ref: 'translations.yaml#/order.empty.title' }, body: { $ref: 'translations.yaml#/order.empty.body' }, action: { label: { $ref: 'translations.yaml#/order.empty.cta' }, route: "/" } }
+        line_summary: { $ref: 'restaurant_frontoffice.translations.yaml#/order.count_total' }   # params: { count, total }
+        empty_state: { icon: receipt, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.body' }, action: { label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.cta' }, route: "/" } }
       - { component: bottom_nav }
 
   # SCREEN 8 — Account
@@ -539,47 +539,47 @@ screens:
       - { component: topbar }
       - type: account_header
         name: "{{ customer.fullName }}"
-        default_name: { $ref: 'translations.yaml#/account.default_name' }
+        default_name: { $ref: 'restaurant_frontoffice.translations.yaml#/account.default_name' }
         phone: "{{ customer.phone }}"
-        captain_coins: { value: "{{ customer.captainCoins }}", badge: { $ref: 'translations.yaml#/account.coins_badge' }, action: { type: navigate, route: "/account/rewards" } }
+        captain_coins: { value: "{{ customer.captainCoins }}", badge: { $ref: 'restaurant_frontoffice.translations.yaml#/account.coins_badge' }, action: { type: navigate, route: "/account/rewards" } }
       - type: menu_section
-        title: { $ref: 'translations.yaml#/account.section.my_account' }
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/account.section.my_account' }
         items:
-          - { icon: map_pin, label: { $ref: 'translations.yaml#/account.saved_addresses' }, route: "/account/addresses" }
-          - { icon: credit_card, label: { $ref: 'translations.yaml#/account.payment_methods' }, route: "/account/payment" }
-          - { icon: fingerprint, label: { $ref: 'translations.yaml#/account.passkeys' }, route: "/account/passkeys" }
-          - { icon: bell, label: { $ref: 'translations.yaml#/account.notifications' }, route: "/account/notifications" }
+          - { icon: map_pin, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.saved_addresses' }, route: "/account/addresses" }
+          - { icon: credit_card, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.payment_methods' }, route: "/account/payment" }
+          - { icon: fingerprint, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.passkeys' }, route: "/account/passkeys" }
+          - { icon: bell, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.notifications' }, route: "/account/notifications" }
       - type: menu_section
-        title: { $ref: 'translations.yaml#/account.section.captain' }
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/account.section.captain' }
         items:
-          - { icon: coin, label: { $ref: 'translations.yaml#/account.captain_coins' }, route: "/account/rewards" }
-          - { icon: users, label: { $ref: 'translations.yaml#/account.refer' }, route: "/account/referral" }
-          - { icon: heart, label: { $ref: 'translations.yaml#/account.favorites' }, route: "/account/favorites" }
+          - { icon: coin, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.captain_coins' }, route: "/account/rewards" }
+          - { icon: users, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.refer' }, route: "/account/referral" }
+          - { icon: heart, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.favorites' }, route: "/account/favorites" }
       - type: menu_section
-        title: { $ref: 'translations.yaml#/account.section.support' }
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/account.section.support' }
         items:
-          - { icon: life_buoy, label: { $ref: 'translations.yaml#/account.help' }, route: "/help" }
-          - { icon: message_circle, label: { $ref: 'translations.yaml#/account.contact' }, action: { type: open_intercom } }
-          - { icon: file_text, label: { $ref: 'translations.yaml#/account.legal' }, route: "/legal" }
-      - { type: sign_out_button, label: { $ref: 'translations.yaml#/account.sign_out' }, variant: ghost, color: error, action: { type: sign_out, redirect: "/" } }
+          - { icon: life_buoy, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.help' }, route: "/help" }
+          - { icon: message_circle, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.contact' }, action: { type: open_intercom } }
+          - { icon: file_text, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.legal' }, route: "/legal" }
+      - { type: sign_out_button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/account.sign_out' }, variant: ghost, color: error, action: { type: sign_out, redirect: "/" } }
       - { component: bottom_nav }
 
   # SCREEN 9 — Partner landing (marketing; external onboarding)
   - id: partner_landing
     roles: [PUBLIC]   # which UserTypes may see this screen (ADR-0037)
     route: "/partner"
-    title: { $ref: 'translations.yaml#/partner.header' }
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.header' }
     sdui: true
     data_requirements: []
     components:
-      - { type: back_button_header, title: { $ref: 'translations.yaml#/partner.header' } }
-      - { type: hero_section, image: "/assets/partner-hero.jpg", title: { $ref: 'translations.yaml#/partner.hero_title' }, body: { $ref: 'translations.yaml#/partner.hero_body' } }
+      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.header' } }
+      - { type: hero_section, image: "/assets/partner-hero.jpg", title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.hero_title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.hero_body' } }
       - type: value_props
         items:
-          - { icon: trending_up, title: { $ref: 'translations.yaml#/partner.prop.orders.title' }, body: { $ref: 'translations.yaml#/partner.prop.orders.body' } }
-          - { icon: euro, title: { $ref: 'translations.yaml#/partner.prop.margins.title' }, body: { $ref: 'translations.yaml#/partner.prop.margins.body' } }
-          - { icon: smartphone, title: { $ref: 'translations.yaml#/partner.prop.control.title' }, body: { $ref: 'translations.yaml#/partner.prop.control.body' } }
-      - { type: cta_section, button_label: { $ref: 'translations.yaml#/partner.apply' }, button_action: { type: navigate, route: "https://restos.captain.food/onboarding", target: blank } }
+          - { icon: trending_up, title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.orders.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.orders.body' } }
+          - { icon: euro, title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.margins.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.margins.body' } }
+          - { icon: smartphone, title: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.control.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.prop.control.body' } }
+      - { type: cta_section, button_label: { $ref: 'restaurant_frontoffice.translations.yaml#/partner.apply' }, button_action: { type: navigate, route: "https://restos.captain.food/onboarding", target: blank } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PERFORMANCE & ACCESSIBILITY (contracts)

@@ -8398,19 +8398,6 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 
 | Key | Params | 🇬🇧 en | 🇫🇷 fr |
 | --- | --- | --- | --- |
-| <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
-| <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
-| <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |
-| <a id="translation-common-nav-account"></a>`common.nav.account` | — | Account | Compte |
-| <a id="translation-common-cart-view"></a>`common.cart.view` | — | View cart | Voir le panier |
-| <a id="translation-common-action-change"></a>`common.action.change` | — | Change | Modifier |
-| <a id="translation-common-action-apply"></a>`common.action.apply` | — | Apply | Appliquer |
-| <a id="translation-common-action-submit"></a>`common.action.submit` | — | Submit | Envoyer |
-| <a id="translation-common-action-see_all"></a>`common.action.see_all` | — | See all | Tout voir |
-| <a id="translation-common-filter-sort"></a>`common.filter.sort` | — | Sort | Trier |
-| <a id="translation-common-delivery-free"></a>`common.delivery.free` | — | Free delivery | Livraison gratuite |
-| <a id="translation-common-mode-delivery"></a>`common.mode.delivery` | — | Delivery | Livraison |
-| <a id="translation-common-mode-pickup"></a>`common.mode.pickup` | — | Pickup | À emporter |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |
@@ -8547,6 +8534,19 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-partner-prop-control-title"></a>`partner.prop.control.title` | — | Full control | Contrôle total |
 | <a id="translation-partner-prop-control-body"></a>`partner.prop.control.body` | — | Manage your menu, hours, and catalog in real-time. | Gérez votre menu, vos horaires et votre catalogue en temps réel. |
 | <a id="translation-partner-apply"></a>`partner.apply` | — | Apply to join | Postuler |
+| <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
+| <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
+| <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |
+| <a id="translation-common-nav-account"></a>`common.nav.account` | — | Account | Compte |
+| <a id="translation-common-cart-view"></a>`common.cart.view` | — | View cart | Voir le panier |
+| <a id="translation-common-action-change"></a>`common.action.change` | — | Change | Modifier |
+| <a id="translation-common-action-apply"></a>`common.action.apply` | — | Apply | Appliquer |
+| <a id="translation-common-action-submit"></a>`common.action.submit` | — | Submit | Envoyer |
+| <a id="translation-common-action-see_all"></a>`common.action.see_all` | — | See all | Tout voir |
+| <a id="translation-common-filter-sort"></a>`common.filter.sort` | — | Sort | Trier |
+| <a id="translation-common-delivery-free"></a>`common.delivery.free` | — | Free delivery | Livraison gratuite |
+| <a id="translation-common-mode-delivery"></a>`common.mode.delivery` | — | Delivery | Livraison |
+| <a id="translation-common-mode-pickup"></a>`common.mode.pickup` | — | Pickup | À emporter |
 
 <a id="sec-architecture"></a>
 ## 🏛️ Architecture (C4)

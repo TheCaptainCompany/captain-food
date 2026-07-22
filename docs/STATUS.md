@@ -1,7 +1,17 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-22 (09:15 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-22 (10:15 UTC). Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 🚧 **2026-07-22 — #73: per-surface translation sidecars (ADR-20260722-101500, refines ADR-0033).**
+> Shared strings (`common.*` + future backend text) stay in `specs/translations.yaml`; surface-specific
+> strings moved to a co-located sidecar `specs/screens/restaurant_frontoffice.translations.yaml`. Screens
+> `$ref` the file holding the key (globally unique; new `translation-duplicate-key` check). Codegen
+> merges `translations.yaml` + every `screens/*.translations.yaml` (`is_source_file` + `load_model` glob
+> + `translation_entries()`) across the validator, the JSON emitter, and the docs table.
+> **`translations.generated.json` byte-identical** (149 keys) — `leptos_i18n` unaffected. `errors.yaml`
+> untouched. `make rust` + `cargo build --workspace` green. Follow-up: move marketplace strings to
+> `captain_frontoffice.translations.yaml` with the content-split.
 
 > 🚧 **2026-07-22 — #71: SDUI screens taxonomy by audience (ADR-20260722-091500, refines ADR-0037).**
 > Renamed `specs/screens/customer_screens.yaml` → **`restaurant_frontoffice.yaml`** (the customer-facing
