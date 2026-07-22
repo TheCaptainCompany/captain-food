@@ -110,7 +110,7 @@
 > a partner SDUI app) is the deferred follow-up.**
 
 > ✅ **2026-07-22 — #62: delivery-delay satisfaction survey + post-delivery tip/reward prompt
-> (ADR-20260722-101500 — realizes the #60 deferral).** After a delivered DELIVERY order the customer is
+> (ADR-20260722-181500 — realizes the #60 deferral).** After a delivered DELIVERY order the customer is
 > asked one timeliness question (*was the delivery on time?*) and, at the same moment, prompted to tip
 > the courier — the Uber Eats / Deliveroo pattern. Tipping already existed (`TipOrder`/`OrderTipped`,
 > ADR-012), so the tip is **reused** (recipient RIDER, or RESTAURANT for self-dispatch); the new work is

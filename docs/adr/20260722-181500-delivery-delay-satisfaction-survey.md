@@ -1,4 +1,4 @@
-# ADR-20260722-101500 — Delivery-delay satisfaction survey + post-delivery tip/reward prompt (#62)
+# ADR-20260722-181500 — Delivery-delay satisfaction survey + post-delivery tip/reward prompt (#62)
 
 ## Status
 Accepted — realizes the deferred "delivery-delay **satisfaction** survey" of the #60 delivery-dispatch

@@ -1,6 +1,6 @@
 # Design Proposal — Delivery-delay satisfaction check + post-delivery tip/reward prompt (#62)
 
-> **Status:** ✅ Approved & implemented end-to-end (2026-07-22) — landed with **ADR-20260722-101500**,
+> **Status:** ✅ Approved & implemented end-to-end (2026-07-22) — landed with **ADR-20260722-181500**,
 > including the `restaurantDeliverySatisfaction` read resolver (`PgDeliverySatisfactionRepository`). The
 > recorded decision is the ADR; this proposal is kept as the design narrative.
 >
