@@ -2,3 +2,8 @@
 [toolchain]
 channel = "stable"
 components = ["rustfmt", "clippy"]
+# The wasm hydrate build (split 4/4 of #21): declaring the target HERE means every rustup-managed
+# environment (dev box, ci.yml, the Docker image build) installs it WITH the toolchain — a bare
+# `rustup target add` in one layer targets whatever toolchain is active THERE, which broke the
+# image build when cargo-chef's skeleton (carrying this file) resolved a fresher stable at cook time.
+targets = ["wasm32-unknown-unknown"]

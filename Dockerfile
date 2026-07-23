@@ -16,14 +16,18 @@ FROM chef AS builder
 # The wasm toolchain (split 4/4 of #21): the hydrate bundle is built INTO the image so the server
 # can serve /assets/web.js. wasm-bindgen-cli is pinned to the exact wasm-bindgen version of
 # crates/web (the CLI refuses a mismatch) — bump both together.
-RUN rustup target add wasm32-unknown-unknown \
-    && cargo install wasm-bindgen-cli --locked --version 0.2.126
+RUN cargo install wasm-bindgen-cli --locked --version 0.2.126
 COPY --from=planner /app/recipe.json recipe.json
 # Cook dependencies only — cached unless Cargo.lock / a Cargo.toml changes. Two cooks: the native
-# server tree and the wasm32 hydrate tree (each is its own cached layer).
+# server tree and the wasm32 hydrate tree (each is its own cached layer). The wasm target comes
+# with the toolchain via rust-toolchain.toml `targets` (cargo-chef's skeleton carries the file, so
+# the toolchain rustup resolves AT COOK TIME is the file's — a target added in an earlier layer
+# landed on the base image's default toolchain instead, which is exactly how the first image build
+# broke); the explicit add here is an idempotent belt-and-braces for the active toolchain.
 RUN cargo chef cook --release --recipe-path recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json \
-    --target wasm32-unknown-unknown --no-default-features --features hydrate --package web
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo chef cook --release --recipe-path recipe.json \
+       --target wasm32-unknown-unknown --no-default-features --features hydrate --package web
 COPY . .
 RUN cargo build --release -p server
 # The hydrate bundle: wasm32 cdylib -> wasm-bindgen --target web -> /app/dist (web.js + web_bg.wasm).
