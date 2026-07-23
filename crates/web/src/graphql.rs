@@ -160,7 +160,7 @@ pub enum ResolverError {
 ///
 /// Variables: the DSL's pinned static `.args()` are inserted FIRST, then `extra_variables` — so a
 /// caller-supplied key overrides a pin (the pin is the binding's default, e.g. `restaurants.featured`
-/// → `listKey: RECOMMENDED`; a screen passing its own `listKey` is asking a different question on
+/// → `list: RECOMMENDED`; a screen passing its own `list` is asking a different question on
 /// purpose). Everything lands under the single `$input` variable per the api.yaml convention
 /// (`<Query>QueryInput` — args are never inlined on the field).
 ///
@@ -305,7 +305,7 @@ mod tests {
         assert!(document.contains("$input: RestaurantsQueryInput!"), "{document}");
         assert!(document.contains("restaurants(input: $input)"), "{document}");
         // DSL pin AND caller variable are both in the merged input.
-        assert_eq!(variables["input"]["listKey"], json!("RECOMMENDED"));
+        assert_eq!(variables["input"]["list"], json!("RECOMMENDED"));
         assert_eq!(variables["input"]["city"], json!("tours"));
     }
 
@@ -313,10 +313,10 @@ mod tests {
     async fn caller_variables_override_a_pinned_arg() {
         let fake = FakeTransport::scripted(vec![Ok(json!({ "restaurants": [] }))]);
         let mut extra = Map::new();
-        extra.insert("listKey".into(), json!("NEARBY"));
+        extra.insert("list".into(), json!("TOP_DEALS"));
         execute_resolver(&fake, ResolverKey::RestaurantsFeatured, extra).await.unwrap();
         // The pin is a default, not a lock — the caller's own value wins.
-        assert_eq!(fake.call(0).1["input"]["listKey"], json!("NEARBY"));
+        assert_eq!(fake.call(0).1["input"]["list"], json!("TOP_DEALS"));
     }
 
     #[tokio::test]

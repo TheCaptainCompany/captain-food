@@ -65,7 +65,7 @@ design_tokens:
 # (a UI data need the API does not serve yet — surfaced, never silently invented).
 # ──────────────────────────────────────────────────────────────────────────────
 resolvers:
-  restaurants.featured: { query: { $ref: 'api.yaml#/queries/restaurants' }, args: { listKey: RECOMMENDED } }
+  restaurants.featured: { query: { $ref: 'api.yaml#/queries/restaurants' }, args: { list: RECOMMENDED } }
   restaurants.all:      { query: { $ref: 'api.yaml#/queries/restaurants' } }
   restaurants.search:   { query: { $ref: 'api.yaml#/queries/restaurants' } }
   categories.all:       { query: { $ref: 'api.yaml#/queries/categories' } }

@@ -876,6 +876,79 @@ fn validate_ref_kinds(model: &Model, issues: &mut Vec<Issue>) {
     }
 }
 
+/// A resolver's pinned static `args:` (#82) — the ONLY place a screens surface names an api.yaml
+/// query ARGUMENT by hand. §1 proves the resolver's `query.$ref` RESOLVES and §1b proves it resolves
+/// to a QUERY, but neither looks inside `args:`, so a typo in a pinned key (`listKey` where the query
+/// declares `list`) stayed invisible until a client actually issued the query — the server then
+/// rejects the whole operation on an unknown input field. Fail closed here instead:
+///
+/// - `resolver-unknown-arg` — the pinned key is not an argument of the bound query;
+/// - `resolver-invalid-arg-value` — the argument IS declared and enum-typed, but the pinned literal
+///   is not one of its members (mirrors the `test-invalid-enum-value` check of `check_shape`, done
+///   inline here because `check_shape` resolves refs against `tests.yaml`, not `api.yaml`).
+///
+/// NOT checked: that every REQUIRED arg is pinned. A pin is a static DEFAULT — the remaining args are
+/// supplied by the caller at runtime (`crates/web/src/graphql.rs#execute_resolver` merges caller
+/// variables OVER the pins), so an unpinned required arg is normal, not an error.
+fn validate_resolver_args(model: &Model, issues: &mut Vec<Issue>, at: &str, query: &str, args: &Value) {
+    let Some(pinned) = args.as_mapping() else { return };
+    let empty = serde_yaml::Mapping::new();
+    let declared = model
+        .defs
+        .get("api.yaml")
+        .and_then(|v| v.get("queries"))
+        .and_then(|v| v.get(query))
+        .and_then(|v| v.get("args"))
+        .and_then(|v| v.as_mapping())
+        .unwrap_or(&empty);
+    let names: Vec<&str> = declared.keys().filter_map(|k| k.as_str()).collect();
+
+    for (ak, av) in pinned {
+        let Some(name) = ak.as_str() else { continue };
+        let Some(node) = declared.get(Value::String(name.to_string())) else {
+            issues.push(err(
+                "resolver-unknown-arg",
+                at.into(),
+                format!(
+                    "pinned arg '{}' is not an argument of api.yaml query '{}' ({}).",
+                    name,
+                    query,
+                    if names.is_empty() {
+                        "it declares none".to_string()
+                    } else {
+                        format!("declared: {}", names.join("|"))
+                    }
+                ),
+            ));
+            continue;
+        };
+        // Enum-typed arg: the pinned literal (or every item of an `array: true` pin) must be a member.
+        let Some(rf) = node.get("$ref").and_then(|x| x.as_str()) else { continue };
+        let Some(target) = resolve_ref(model, rf, "api.yaml") else { continue };
+        let Some(vals) = target.get("enum").and_then(|e| e.as_sequence()) else { continue };
+        let pins: Vec<&Value> = match av.as_sequence() {
+            Some(seq) => seq.iter().collect(),
+            None => vec![av],
+        };
+        for p in pins {
+            let Some(lit) = p.as_str() else { continue };
+            if !vals.iter().any(|v| v.as_str() == Some(lit)) {
+                issues.push(err(
+                    "resolver-invalid-arg-value",
+                    at.into(),
+                    format!(
+                        "pinned arg '{}' = '{}' is not a value of enum {} ({}).",
+                        name,
+                        lit,
+                        rf,
+                        vals.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("|")
+                    ),
+                ));
+            }
+        }
+    }
+}
+
 /// The full validator — a faithful port of validate.ts §1–§11. Returns issues + coverage.
 fn validate(model: &Model) -> Report {
     let mut issues: Vec<Issue> = Vec::new();
@@ -2000,6 +2073,17 @@ fn validate(model: &Model) -> Report {
                                 ));
                             } else {
                                 cov.screen_bindings += 1;
+                                // The binding is a real query — now prove its pinned static args
+                                // name real arguments of THAT query (#82).
+                                if let Some(args) = r.get("args") {
+                                    validate_resolver_args(
+                                        model,
+                                        &mut issues,
+                                        &format!("{}/resolvers/{}/args", sfkey, name),
+                                        &op_name(rf),
+                                        args,
+                                    );
+                                }
                             }
                         }
                     }
@@ -12824,7 +12908,7 @@ struct ResolverDef {
     key: String,
     /// The bound `api.yaml` query name — `None` for a `gap:` entry.
     query: Option<String>,
-    /// Static args the DSL pins on the binding (e.g. `restaurants.featured` → `listKey: RECOMMENDED`).
+    /// Static args the DSL pins on the binding (e.g. `restaurants.featured` → `list: RECOMMENDED`).
     args: Vec<(String, String)>,
     gap: Option<String>,
     /// The GraphQL selection set for the bound query's return type, expanded from the api.yaml
@@ -13081,7 +13165,7 @@ fn emit_web_data_layer(model: &Model) -> String {
 
     // ── Resolvers (reads) ────────────────────────────────────────────────────────────────────
     out.push_str(
-        "\n/// A static argument the screens DSL pins on a resolver binding (`args:`), e.g.\n/// `restaurants.featured` → `listKey: RECOMMENDED`. Applied before any caller-supplied variables.\npub type ResolverArg = (&'static str, &'static str);\n",
+        "\n/// A static argument the screens DSL pins on a resolver binding (`args:`), e.g.\n/// `restaurants.featured` → `list: RECOMMENDED`. Applied before any caller-supplied variables.\npub type ResolverArg = (&'static str, &'static str);\n",
     );
     out.push_str("\n/// The allowlisted resolvers — one variant per `resolvers` key across every screens surface.\n");
     out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]\n");
@@ -13526,6 +13610,70 @@ types:
         validate_ref_kinds(&m, &mut issues);
         let hit = issues.iter().find(|i| i.rule == "ref-site-undeclared").expect("undeclared site reported");
         assert!(hit.message.contains("'RefundProcess.brand_new_field'"), "{}", hit.message);
+    }
+
+    // ─── pinned resolver args (#82) ─────────────────────────────────────────────────────────────
+
+    /// An api.yaml whose `restaurants` query declares `list` (an enum-typed arg) and `city` — the
+    /// shape #82 tripped over: the screens surfaces pinned `listKey`, which does not exist.
+    fn resolver_args_fixture() -> Model {
+        inline_model(&[
+            (
+                "scalars.yaml",
+                "RestaurantListKey:\n  type: string\n  enum: [ORDER_AGAIN, RECOMMENDED, TOP_DEALS]\nCityName: { type: string }\n",
+            ),
+            (
+                "api.yaml",
+                "queries:\n  restaurants:\n    args:\n      city: { $ref: 'scalars.yaml#/CityName' }\n      list: { $ref: 'scalars.yaml#/RestaurantListKey' }\n    returns: { $ref: '#/types/Restaurant', array: true }\n  me:\n    returns: { $ref: '#/types/Customer', nullable: true }\n",
+            ),
+        ])
+    }
+
+    /// The #82 regression: a pinned key the bound query does not declare is an ERROR, not silence.
+    #[test]
+    fn resolver_arg_not_declared_by_the_bound_query_is_an_error() {
+        let m = resolver_args_fixture();
+        let args: Value = serde_yaml::from_str("listKey: RECOMMENDED").expect("valid yaml");
+        let mut issues = Vec::new();
+        validate_resolver_args(&m, &mut issues, "screens/x.yaml/resolvers/r/args", "restaurants", &args);
+        assert_eq!(issues.len(), 1, "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert_eq!(issues[0].rule, "resolver-unknown-arg");
+        // The message names the real args, so the fix is obvious from the error alone.
+        assert!(issues[0].message.contains("declared: city|list"), "{}", issues[0].message);
+    }
+
+    /// A query that declares NO args at all still rejects a pin (rather than skipping the check).
+    #[test]
+    fn resolver_arg_on_an_argless_query_is_an_error() {
+        let m = resolver_args_fixture();
+        let args: Value = serde_yaml::from_str("anything: X").expect("valid yaml");
+        let mut issues = Vec::new();
+        validate_resolver_args(&m, &mut issues, "screens/x.yaml/resolvers/r/args", "me", &args);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].rule, "resolver-unknown-arg");
+        assert!(issues[0].message.contains("it declares none"), "{}", issues[0].message);
+    }
+
+    /// The key exists but the pinned literal is outside the arg's enum.
+    #[test]
+    fn resolver_arg_value_outside_the_enum_is_an_error() {
+        let m = resolver_args_fixture();
+        let args: Value = serde_yaml::from_str("list: NEARBY").expect("valid yaml");
+        let mut issues = Vec::new();
+        validate_resolver_args(&m, &mut issues, "screens/x.yaml/resolvers/r/args", "restaurants", &args);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].rule, "resolver-invalid-arg-value");
+        assert!(issues[0].message.contains("ORDER_AGAIN|RECOMMENDED|TOP_DEALS"), "{}", issues[0].message);
+    }
+
+    /// The corrected pin — and a non-enum arg, which the value check leaves alone.
+    #[test]
+    fn correctly_pinned_resolver_args_are_clean() {
+        let m = resolver_args_fixture();
+        let args: Value = serde_yaml::from_str("list: RECOMMENDED\ncity: Tours").expect("valid yaml");
+        let mut issues = Vec::new();
+        validate_resolver_args(&m, &mut issues, "screens/x.yaml/resolvers/r/args", "restaurants", &args);
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
     }
 
     #[test]

@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A static argument the screens DSL pins on a resolver binding (`args:`), e.g.
-/// `restaurants.featured` → `listKey: RECOMMENDED`. Applied before any caller-supplied variables.
+/// `restaurants.featured` → `list: RECOMMENDED`. Applied before any caller-supplied variables.
 pub type ResolverArg = (&'static str, &'static str);
 
 /// The allowlisted resolvers — one variant per `resolvers` key across every screens surface.
@@ -153,7 +153,7 @@ impl ResolverKey {
     /// The static args the DSL pins on this binding (empty when it pins none).
     pub fn args(&self) -> &'static [ResolverArg] {
         match self {
-            ResolverKey::RestaurantsFeatured => &[("listKey", "RECOMMENDED")],
+            ResolverKey::RestaurantsFeatured => &[("list", "RECOMMENDED")],
             ResolverKey::RestaurantsAll => &[],
             ResolverKey::RestaurantsSearch => &[],
             ResolverKey::CategoriesAll => &[],

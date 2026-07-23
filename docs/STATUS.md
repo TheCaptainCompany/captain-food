@@ -3,6 +3,29 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-23 — #82: pinned SDUI resolver args are validated against the bound query
+> (ADR-20260723-145959).** A `screens/*.yaml` resolver may pin static args on its query binding; both
+> customer front offices pinned `restaurants.featured` with the key **`listKey`**, but
+> `api.yaml#/queries/restaurants` declares it as **`list`** — so the home screen's featured rail would
+> have sent an unknown input field and been rejected by the server rather than showing the RECOMMENDED
+> shelf. The validator never caught it: §1 proves a `$ref` RESOLVES and §1b (ADR-20260722-152201)
+> proves WHAT KIND it resolves to, but neither looks INSIDE `args:` — and this was the only `args:` pin
+> in the whole spec, so the typo survived until #80 "Frontend split 2/4" became the first code to
+> consume a pin. Both parts landed: the pin is corrected on both surfaces, and (ADR-0032 — the fix for
+> a CLASS of error is a new check) new `validate_resolver_args` in validator §11 adds two fail-closed
+> rules — **`resolver-unknown-arg`** (pinned key is not an argument of the bound query; the message
+> lists the real ones, and an arg-less query rejects every pin rather than skipping the check) and
+> **`resolver-invalid-arg-value`** (declared enum-typed arg, pinned literal not a member; `array: true`
+> pins check each item). Errors, not warnings. Explicit non-goals: required-arg COVERAGE is not checked
+> (a pin is a static default — `execute_resolver` merges caller variables OVER it, caller winning), and
+> scope is `resolvers` only (`actions:` has no `args:` pin in the DSL or in `ActionDef`). No
+> `REF_CONTRACT` entry — pinned values are plain scalars, not refs. **The rule was proven against the
+> live bug before the fix**: with the check in place and the pin uncorrected, `make validate` reported
+> `resolver-unknown-arg` on BOTH surfaces. Ripple: `crates/web/src/generated/data_layer.rs`
+> regenerates, and the hand-written `crates/web/src/graphql.rs` doc comment + two pin-merge tests move
+> to `list` (the override test's `NEARBY` — never a `RestaurantListKey` member — becomes `TOP_DEALS`).
+> 4 new codegen tests incl. the #82 regression; `make rust` green (0 errors, no drift).
+
 > 🚧 **2026-07-23 — #21 frontend renderer split 2/4 (#80 "Frontend split 2/4 — resolver/action wiring
 > + session layer (#12) + two-step mutations (#17)", PR #81 "Frontend split 2/4: resolver/action wiring
 > + session layer + two-step mutations").** The SDUI DATA LAYER lands, following #68 "Frontend split
