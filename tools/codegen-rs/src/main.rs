@@ -13686,4 +13686,51 @@ geocoding:
         assert!(!svc_adapter_route_ok("POST /adapters/Stripe/refunds"));
         assert!(!svc_adapter_route_ok("POST /adapters/stripe/refunds/"));
     }
+
+    // ─── Makefile portability — recipe lines must be pure ASCII ─────────────────────────────────
+
+    /// Native Windows GNU Make hands recipe lines to Cygwin's `sh` with broken quoting as soon as
+    /// the line contains a byte > 127: `sh` receives the entire recipe as ONE word and dies with
+    /// `$'...': command not found`, so the target fails for a reason unrelated to what it does —
+    /// an em dash in the `check-drift` message once made `make rust` fail with zero actual drift.
+    /// Only tab-indented RECIPE text reaches `sh`; comments, variable assignments and
+    /// `$(shell ...)` lines are interpreted by make itself and may keep non-ASCII.
+    ///
+    /// Detection is deliberately the simple over-approximation "any line starting with a TAB":
+    /// this Makefile does not set `.RECIPEPREFIX`, and treating a stray tab-indented non-recipe
+    /// line as a recipe only tightens the guard, never loosens it.
+    #[test]
+    fn makefile_recipe_lines_are_ascii() {
+        // CARGO_MANIFEST_DIR (= tools/codegen-rs) is the one anchor that holds both locally and
+        // in CI; the repo Makefile is two levels up. A guard that silently no-ops when it cannot
+        // find its target is worse than no guard, so a missing Makefile FAILS, never skips.
+        let makefile = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Makefile");
+        let bytes = std::fs::read(&makefile).unwrap_or_else(|e| {
+            panic!(
+                "cannot read the repo Makefile at {} ({e}) — if the crate moved, fix this path; \
+                 do NOT let this guard silently pass",
+                makefile.display()
+            )
+        });
+        let text = String::from_utf8_lossy(&bytes);
+        let offenders: Vec<String> = text
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.starts_with('\t') && !line.is_ascii())
+            .map(|(idx, line)| format!("  Makefile:{}: {}", idx + 1, line.trim_end()))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "Makefile RECIPE lines (tab-indented) must be pure ASCII, but these are not:\n{}\n\
+             Fix: replace typographic characters with ASCII equivalents — `--` for `—` (em dash), \
+             `->` for `→`, `|` for `·`.\n\
+             Why: native Windows GNU Make passes each recipe line to Cygwin's `sh` with broken \
+             quoting once the line contains a byte > 127 — `sh` receives the WHOLE recipe as one \
+             word and fails with `$'...': command not found`, making the target fail for a reason \
+             unrelated to what it does (an em dash in the `check-drift` message once broke \
+             `make rust` while there was zero drift). Non-recipe lines (comments, variable \
+             assignments) may keep non-ASCII; only tab-indented command text is affected.",
+            offenders.join("\n")
+        );
+    }
 }
