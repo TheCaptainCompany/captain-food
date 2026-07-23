@@ -8365,6 +8365,95 @@ _Surface_ **`captain_frontoffice.yaml`**
 
 
 
+_Surface_ **`restaurant_backoffice.yaml`**
+
+<a id="screen-orders_queue"></a>
+### 📱 `orders_queue` · `/` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Order queue                              │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Order queue                │
+│ tab_bar                                  │
+│ order_list                               │
+│ section                                  │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `orders.byRestaurant` | [🔎 `orders`](#query-orders) |
+| write | `accept_order` | [✏️ `acceptOrder`](#mutation-acceptorder) |
+| write | `reject_order` | [✏️ `rejectOrder`](#mutation-rejectorder) |
+| write | `start_preparation` | [✏️ `startPreparation`](#mutation-startpreparation) |
+| write | `mark_order_ready` | [✏️ `markOrderReady`](#mutation-markorderready) |
+| write | `cancel_order_by_restaurant` | [✏️ `cancelOrderByRestaurant`](#mutation-cancelorderbyrestaurant) |
+| write | `change_order_acceptance` | [✏️ `changeOrderAcceptanceMode`](#mutation-changeorderacceptancemode) |
+
+<a id="screen-deliveries_board"></a>
+### 📱 `deliveries_board` · `/deliveries` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Delivery board                           │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Delivery board             │
+│ order_list                               │
+│ section                                  │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `deliveries.byRestaurant` | [🔎 `restaurantDeliveries`](#query-restaurantdeliveries) |
+| write | `escalate_delivery` | [✏️ `escalateDelivery`](#mutation-escalatedelivery) |
+| write | `mark_order_delivered` | [✏️ `markOrderDelivered`](#mutation-markorderdelivered) |
+
+<a id="screen-refunds_queue"></a>
+### 📱 `refunds_queue` · `/refunds` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Refund requests                          │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Refund requests            │
+│ order_list                               │
+│ section                                  │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `refunds.pending` | [🔎 `pendingRefunds`](#query-pendingrefunds) |
+| write | `approve_refund` | [✏️ `approveRefund`](#mutation-approverefund) |
+| write | `deny_refund` | [✏️ `denyRefund`](#mutation-denyrefund) |
+
+<a id="screen-satisfaction"></a>
+### 📱 `satisfaction` · `/satisfaction` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Delivery satisfaction                    │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Delivery satisfaction      │
+│ text                                     │
+│ order_list                               │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `satisfaction.byRestaurant` | [🔎 `restaurantDeliverySatisfaction`](#query-restaurantdeliverysatisfaction) |
+
 _Surface_ **`restaurant_frontoffice.yaml`**
 
 <a id="screen-restaurant"></a>
@@ -8521,6 +8610,49 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 **Gaps**
 - ⚠️ `rewards.balance` (Captain Coins), referral and passkeys/notifications management are not modelled (deferred domains).
 
+_Surface_ **`rider.yaml`**
+
+<a id="screen-jobs"></a>
+### 📱 `jobs` · `/` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ My deliveries                            │
+├──────────────────────────────────────────┤
+│ «rider_topbar»                           │
+│ page_header — My deliveries              │
+│ order_list                               │
+│ section                                  │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `deliveries.mine` | [🔎 `myDeliveries`](#query-mydeliveries) |
+| write | `accept_delivery` | [✏️ `acceptDelivery`](#mutation-acceptdelivery) |
+
+<a id="screen-job_detail"></a>
+### 📱 `job_detail` · `/jobs/:orderId` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Delivery                                 │
+├──────────────────────────────────────────┤
+│ back_button_header — Delivery            │
+│ status_chip                              │
+│ info_row — Pickup                        │
+│ info_row — Drop-off                      │
+│ restaurant_contact_row                   │
+│ sticky_bottom_bar                        │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `delivery.byOrder` | [🔎 `delivery`](#query-delivery) |
+| write | `confirm_pickup` | [✏️ `confirmPickup`](#mutation-confirmpickup) |
+| write | `complete_delivery` | [✏️ `completeDelivery`](#mutation-completedelivery) |
+
 <a id="sec-translations"></a>
 ## 🌐 Translations
 
@@ -8561,6 +8693,37 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-partner-prop-control-title"></a>`partner.prop.control.title` | — | Full control | Contrôle total |
 | <a id="translation-partner-prop-control-body"></a>`partner.prop.control.body` | — | Manage your menu, hours, and catalog in real-time. | Gérez votre menu, vos horaires et votre catalogue en temps réel. |
 | <a id="translation-partner-apply"></a>`partner.apply` | — | Apply to join | Postuler |
+| <a id="translation-back-title"></a>`back.title` | — | Back office | Espace restaurant |
+| <a id="translation-back-pause_orders"></a>`back.pause_orders` | — | Pause orders | Suspendre les commandes |
+| <a id="translation-back-nav-orders"></a>`back.nav.orders` | — | Orders | Commandes |
+| <a id="translation-back-nav-deliveries"></a>`back.nav.deliveries` | — | Deliveries | Livraisons |
+| <a id="translation-back-nav-refunds"></a>`back.nav.refunds` | — | Refunds | Remboursements |
+| <a id="translation-back-nav-satisfaction"></a>`back.nav.satisfaction` | — | Satisfaction | Satisfaction |
+| <a id="translation-back-orders-title"></a>`back.orders.title` | — | Order queue | File des commandes |
+| <a id="translation-back-orders-tab-incoming"></a>`back.orders.tab.incoming` | — | Incoming | Entrantes |
+| <a id="translation-back-orders-tab-preparing"></a>`back.orders.tab.preparing` | — | Preparing | En préparation |
+| <a id="translation-back-orders-tab-ready"></a>`back.orders.tab.ready` | — | Ready | Prêtes |
+| <a id="translation-back-orders-accept"></a>`back.orders.accept` | — | Accept | Accepter |
+| <a id="translation-back-orders-reject"></a>`back.orders.reject` | — | Reject | Refuser |
+| <a id="translation-back-orders-start"></a>`back.orders.start` | — | Start preparing | Lancer la préparation |
+| <a id="translation-back-orders-ready"></a>`back.orders.ready` | — | Mark ready | Marquer prête |
+| <a id="translation-back-orders-cancel"></a>`back.orders.cancel` | — | Cancel order | Annuler la commande |
+| <a id="translation-back-orders-empty-title"></a>`back.orders.empty.title` | — | No orders right now | Aucune commande pour le moment |
+| <a id="translation-back-orders-empty-body"></a>`back.orders.empty.body` | — | New orders appear here the moment they are placed. | Les nouvelles commandes apparaissent ici dès qu'elles sont passées. |
+| <a id="translation-back-deliveries-title"></a>`back.deliveries.title` | — | Delivery board | Tableau des livraisons |
+| <a id="translation-back-deliveries-escalate"></a>`back.deliveries.escalate` | — | Escalate dispatch | Escalader la course |
+| <a id="translation-back-deliveries-delivered"></a>`back.deliveries.delivered` | — | Mark delivered | Marquer livrée |
+| <a id="translation-back-deliveries-empty-title"></a>`back.deliveries.empty.title` | — | No active deliveries | Aucune livraison en cours |
+| <a id="translation-back-deliveries-empty-body"></a>`back.deliveries.empty.body` | — | Delivery jobs for your orders show up here. | Les courses de vos commandes s'affichent ici. |
+| <a id="translation-back-refunds-title"></a>`back.refunds.title` | — | Refund requests | Demandes de remboursement |
+| <a id="translation-back-refunds-approve"></a>`back.refunds.approve` | — | Approve refund | Approuver le remboursement |
+| <a id="translation-back-refunds-deny"></a>`back.refunds.deny` | — | Deny refund | Refuser le remboursement |
+| <a id="translation-back-refunds-empty-title"></a>`back.refunds.empty.title` | — | No pending refunds | Aucun remboursement en attente |
+| <a id="translation-back-refunds-empty-body"></a>`back.refunds.empty.body` | — | Refund requests awaiting your decision show up here. | Les demandes en attente de votre décision s'affichent ici. |
+| <a id="translation-back-satisfaction-title"></a>`back.satisfaction.title` | — | Delivery satisfaction | Satisfaction livraison |
+| <a id="translation-back-satisfaction-explainer"></a>`back.satisfaction.explainer` | — | How customers judged the timeliness of your deliveries — the signal for choosing self-dispatch or Captain routing. | Comment vos clients ont jugé la ponctualité de vos livraisons — le signal pour choisir entre livraison en propre et Captain. |
+| <a id="translation-back-satisfaction-empty-title"></a>`back.satisfaction.empty.title` | — | No answers yet | Pas encore de réponses |
+| <a id="translation-back-satisfaction-empty-body"></a>`back.satisfaction.empty.body` | — | Post-delivery survey answers show up here. | Les réponses au sondage post-livraison s'affichent ici. |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |
@@ -8674,6 +8837,17 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-account-legal"></a>`account.legal` | — | Terms & Privacy | Conditions et confidentialité |
 | <a id="translation-account-sign_out"></a>`account.sign_out` | — | Sign out | Se déconnecter |
 | <a id="translation-account-coins_badge"></a>`account.coins_badge` | `points` | {points} pts | {points} pts |
+| <a id="translation-rider-title"></a>`rider.title` | — | Captain Rider | Captain Rider |
+| <a id="translation-rider-go_online"></a>`rider.go_online` | — | Go online | Passer en ligne |
+| <a id="translation-rider-jobs-title"></a>`rider.jobs.title` | — | My deliveries | Mes courses |
+| <a id="translation-rider-jobs-accept"></a>`rider.jobs.accept` | — | Accept job | Accepter la course |
+| <a id="translation-rider-jobs-empty-title"></a>`rider.jobs.empty.title` | — | No deliveries | Aucune course |
+| <a id="translation-rider-jobs-empty-body"></a>`rider.jobs.empty.body` | — | Offered and assigned delivery jobs show up here. | Les courses proposées et attribuées s'affichent ici. |
+| <a id="translation-rider-job-title"></a>`rider.job.title` | — | Delivery | Course |
+| <a id="translation-rider-job-pickup"></a>`rider.job.pickup` | — | Pickup | Retrait |
+| <a id="translation-rider-job-dropoff"></a>`rider.job.dropoff` | — | Drop-off | Livraison |
+| <a id="translation-rider-job-picked_up"></a>`rider.job.picked_up` | — | Picked up | Commande récupérée |
+| <a id="translation-rider-job-delivered"></a>`rider.job.delivered` | — | Delivered | Livrée |
 | <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
 | <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
 | <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |

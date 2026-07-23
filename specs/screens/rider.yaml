@@ -1,0 +1,110 @@
+# ==============================================================================
+# Captain.Food — Rider UI Specification (Spec-Driven Server-Driven UI)
+# ------------------------------------------------------------------------------
+# The RIDER APP: the independent courier's job surface — assigned/available delivery jobs, the
+# pickup→dropoff flow (accept → confirm pickup → complete) and the contact rows — served at
+# riders.captain.food (audience role RIDER; host→surface convention in the split-4 ADR). One file per
+# audience (ADR-0037 as refined by ADR-20260722-091500); siblings: `restaurant_frontoffice.yaml`,
+# `captain_frontoffice.yaml`, `restaurant_backoffice.yaml`.
+#
+# Same two-layer contract as every surface (ADR-0033): a `resolvers`/`actions` data-layer allowlist
+# $ref-bound to api.yaml. Binds ONLY existing api.yaml operations (zero new API surface) and REUSES
+# the shared renderer registry declared in `restaurant_frontoffice.yaml` — no new component kinds.
+# Every user-visible string is a `$ref` into `rider.translations.yaml` (sidecar,
+# ADR-20260722-101500) or the shared `translations.yaml`.
+# ==============================================================================
+
+version: 1
+spec_version: "1.0.0"
+app_id: captain.food.rider
+app_name: "Captain.Food Rider"
+base_url: "https://riders.captain.food"
+default_locale: fr
+supported_locales: [en, fr]
+app_types: [web, ios, android]   # couriers live on phones; web is the V0 vehicle (ADR-0037)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATA LAYER — RESOLVERS (reads). Both bound to EXISTING api.yaml queries.
+# ──────────────────────────────────────────────────────────────────────────────
+resolvers:
+  deliveries.mine:  { query: { $ref: 'api.yaml#/queries/myDeliveries' } }
+  delivery.byOrder: { query: { $ref: 'api.yaml#/queries/delivery' } }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATA LAYER — ACTIONS. The pickup→dropoff flow; `mark_order_delivered` redeclares the
+# back-office binding IDENTICALLY (union rule). The online/offline availability toggle is a
+# recorded GAP: api.yaml has no rider-status mutation yet.
+# ──────────────────────────────────────────────────────────────────────────────
+actions:
+  navigate: { kind: client }
+  phone_call: { kind: client }
+  accept_delivery:   { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/acceptDelivery' } }
+  confirm_pickup:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/confirmPickup' } }
+  complete_delivery: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/completeDelivery' } }
+  mark_order_delivered: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderDelivered' }, note: "Self-dispatch: the restaurant confirms the handover itself." }
+  rider_toggle_online: { kind: gap, gap: "No rider availability mutation in api.yaml (ChangeRiderStatus is domain-only, not exposed) — the toggle renders disabled until the op exists." }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GLOBAL CHROME
+# ──────────────────────────────────────────────────────────────────────────────
+global_components:
+  rider_topbar:
+    id: rider_topbar
+    type: sticky_header
+    slots:
+      left: [{ type: logo, asset: "/assets/logo.svg", link: "/" }]
+      center:
+        - { type: text, value: { $ref: 'rider.translations.yaml#/rider.title' } }
+      right:
+        - type: button
+          id: online_toggle
+          label: { $ref: 'rider.translations.yaml#/rider.go_online' }
+          variant: outline
+          action: { type: rider_toggle_online }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SCREENS
+# ──────────────────────────────────────────────────────────────────────────────
+screens:
+
+  # SCREEN 1 — Job list (assigned/available deliveries; accept from here)
+  - id: jobs
+    roles: [RIDER]
+    route: "/"
+    title: { $ref: 'rider.translations.yaml#/rider.jobs.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [deliveries.mine]
+    actions_used: [accept_delivery]
+    components:
+      - { component: rider_topbar }
+      - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.jobs.title' } }
+      - type: order_list
+        items: "{{ deliveries }}"
+        item_type: order_card
+        item_action: { type: navigate, route: "/jobs/{{ item.orderId }}" }
+        empty_state: { icon: truck, title: { $ref: 'rider.translations.yaml#/rider.jobs.empty.title' }, body: { $ref: 'rider.translations.yaml#/rider.jobs.empty.body' } }
+      - type: section
+        id: job_list_actions
+        content:
+          - { type: button, label: { $ref: 'rider.translations.yaml#/rider.jobs.accept' }, variant: primary, action: { type: accept_delivery, variables: { orderId: "{{ delivery.orderId }}" } } }
+
+  # SCREEN 2 — Job detail (the pickup→dropoff state machine + contact rows)
+  - id: job_detail
+    roles: [RIDER]
+    route: "/jobs/:orderId"
+    title: { $ref: 'rider.translations.yaml#/rider.job.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [delivery.byOrder]
+    actions_used: [confirm_pickup, complete_delivery, phone_call]
+    components:
+      - { type: back_button_header, title: { $ref: 'rider.translations.yaml#/rider.job.title' } }
+      - { type: status_chip, status: "{{ delivery.status }}" }
+      - { type: info_row, icon: map_pin, label: { $ref: 'rider.translations.yaml#/rider.job.pickup' },  value: "{{ delivery.pickupAddress }}" }
+      - { type: info_row, icon: home,    label: { $ref: 'rider.translations.yaml#/rider.job.dropoff' }, value: "{{ delivery.dropoffAddress }}" }
+      - { type: restaurant_contact_row, name: "{{ delivery.restaurantName }}", phone: "{{ delivery.restaurantPhone }}", action: { type: phone_call, number: "{{ delivery.restaurantPhone }}" } }
+      - type: sticky_bottom_bar
+        content:
+          - { type: button, id: confirm_pickup_btn,   label: { $ref: 'rider.translations.yaml#/rider.job.picked_up' }, variant: primary, full_width: true, action: { type: confirm_pickup,    variables: { orderId: "{{ delivery.orderId }}" } } }
+          - { type: button, id: complete_delivery_btn, label: { $ref: 'rider.translations.yaml#/rider.job.delivered' }, variant: primary, full_width: true, action: { type: complete_delivery, variables: { orderId: "{{ delivery.orderId }}" } } }

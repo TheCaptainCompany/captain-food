@@ -103,6 +103,130 @@
     "en": "Sign in or create account",
     "fr": "Se connecter ou créer un compte"
   },
+  "back.deliveries.delivered": {
+    "en": "Mark delivered",
+    "fr": "Marquer livrée"
+  },
+  "back.deliveries.empty.body": {
+    "en": "Delivery jobs for your orders show up here.",
+    "fr": "Les courses de vos commandes s'affichent ici."
+  },
+  "back.deliveries.empty.title": {
+    "en": "No active deliveries",
+    "fr": "Aucune livraison en cours"
+  },
+  "back.deliveries.escalate": {
+    "en": "Escalate dispatch",
+    "fr": "Escalader la course"
+  },
+  "back.deliveries.title": {
+    "en": "Delivery board",
+    "fr": "Tableau des livraisons"
+  },
+  "back.nav.deliveries": {
+    "en": "Deliveries",
+    "fr": "Livraisons"
+  },
+  "back.nav.orders": {
+    "en": "Orders",
+    "fr": "Commandes"
+  },
+  "back.nav.refunds": {
+    "en": "Refunds",
+    "fr": "Remboursements"
+  },
+  "back.nav.satisfaction": {
+    "en": "Satisfaction",
+    "fr": "Satisfaction"
+  },
+  "back.orders.accept": {
+    "en": "Accept",
+    "fr": "Accepter"
+  },
+  "back.orders.cancel": {
+    "en": "Cancel order",
+    "fr": "Annuler la commande"
+  },
+  "back.orders.empty.body": {
+    "en": "New orders appear here the moment they are placed.",
+    "fr": "Les nouvelles commandes apparaissent ici dès qu'elles sont passées."
+  },
+  "back.orders.empty.title": {
+    "en": "No orders right now",
+    "fr": "Aucune commande pour le moment"
+  },
+  "back.orders.ready": {
+    "en": "Mark ready",
+    "fr": "Marquer prête"
+  },
+  "back.orders.reject": {
+    "en": "Reject",
+    "fr": "Refuser"
+  },
+  "back.orders.start": {
+    "en": "Start preparing",
+    "fr": "Lancer la préparation"
+  },
+  "back.orders.tab.incoming": {
+    "en": "Incoming",
+    "fr": "Entrantes"
+  },
+  "back.orders.tab.preparing": {
+    "en": "Preparing",
+    "fr": "En préparation"
+  },
+  "back.orders.tab.ready": {
+    "en": "Ready",
+    "fr": "Prêtes"
+  },
+  "back.orders.title": {
+    "en": "Order queue",
+    "fr": "File des commandes"
+  },
+  "back.pause_orders": {
+    "en": "Pause orders",
+    "fr": "Suspendre les commandes"
+  },
+  "back.refunds.approve": {
+    "en": "Approve refund",
+    "fr": "Approuver le remboursement"
+  },
+  "back.refunds.deny": {
+    "en": "Deny refund",
+    "fr": "Refuser le remboursement"
+  },
+  "back.refunds.empty.body": {
+    "en": "Refund requests awaiting your decision show up here.",
+    "fr": "Les demandes en attente de votre décision s'affichent ici."
+  },
+  "back.refunds.empty.title": {
+    "en": "No pending refunds",
+    "fr": "Aucun remboursement en attente"
+  },
+  "back.refunds.title": {
+    "en": "Refund requests",
+    "fr": "Demandes de remboursement"
+  },
+  "back.satisfaction.empty.body": {
+    "en": "Post-delivery survey answers show up here.",
+    "fr": "Les réponses au sondage post-livraison s'affichent ici."
+  },
+  "back.satisfaction.empty.title": {
+    "en": "No answers yet",
+    "fr": "Pas encore de réponses"
+  },
+  "back.satisfaction.explainer": {
+    "en": "How customers judged the timeliness of your deliveries — the signal for choosing self-dispatch or Captain routing.",
+    "fr": "Comment vos clients ont jugé la ponctualité de vos livraisons — le signal pour choisir entre livraison en propre et Captain."
+  },
+  "back.satisfaction.title": {
+    "en": "Delivery satisfaction",
+    "fr": "Satisfaction livraison"
+  },
+  "back.title": {
+    "en": "Back office",
+    "fr": "Espace restaurant"
+  },
   "cart.checkout_cta": {
     "en": "Go to checkout — {total}",
     "fr": "Passer au paiement — {total}"
@@ -586,6 +710,50 @@
   "restaurant.unavailable": {
     "en": "Unavailable",
     "fr": "Indisponible"
+  },
+  "rider.go_online": {
+    "en": "Go online",
+    "fr": "Passer en ligne"
+  },
+  "rider.job.delivered": {
+    "en": "Delivered",
+    "fr": "Livrée"
+  },
+  "rider.job.dropoff": {
+    "en": "Drop-off",
+    "fr": "Livraison"
+  },
+  "rider.job.picked_up": {
+    "en": "Picked up",
+    "fr": "Commande récupérée"
+  },
+  "rider.job.pickup": {
+    "en": "Pickup",
+    "fr": "Retrait"
+  },
+  "rider.job.title": {
+    "en": "Delivery",
+    "fr": "Course"
+  },
+  "rider.jobs.accept": {
+    "en": "Accept job",
+    "fr": "Accepter la course"
+  },
+  "rider.jobs.empty.body": {
+    "en": "Offered and assigned delivery jobs show up here.",
+    "fr": "Les courses proposées et attribuées s'affichent ici."
+  },
+  "rider.jobs.empty.title": {
+    "en": "No deliveries",
+    "fr": "Aucune course"
+  },
+  "rider.jobs.title": {
+    "en": "My deliveries",
+    "fr": "Mes courses"
+  },
+  "rider.title": {
+    "en": "Captain Rider",
+    "fr": "Captain Rider"
   },
   "search.dishes": {
     "en": "Dishes",

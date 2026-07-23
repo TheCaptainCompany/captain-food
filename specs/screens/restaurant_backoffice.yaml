@@ -1,0 +1,182 @@
+# ==============================================================================
+# Captain.Food — Restaurant Back-Office UI Specification (Spec-Driven Server-Driven UI)
+# ------------------------------------------------------------------------------
+# The RESTAURANT BACK OFFICE: the staff-facing operations dashboard — live order queue
+# (accept/reject/prepare/ready), delivery board, refund decisions and the #62 delivery-satisfaction
+# signal — served at restos.captain.food (audience roles RESTAURANT + RESTAURANT_ACCOUNT; host→surface
+# convention in the split-4 ADR). One file per audience (ADR-0037 as refined by ADR-20260722-091500);
+# the customer-facing surfaces are `restaurant_frontoffice.yaml` (storefront) and
+# `captain_frontoffice.yaml` (marketplace); `rider.yaml` is the courier app.
+#
+# Same two-layer contract as every surface (ADR-0033): a `resolvers`/`actions` data-layer allowlist
+# $ref-bound to api.yaml (the codegen PROVES the API answers the UI), and the layout layer below.
+# Binds ONLY existing api.yaml operations — this surface adds zero API surface. The component
+# vocabulary REUSES the shared renderer registry declared in `restaurant_frontoffice.yaml`
+# (one renderer, one ComponentKind dispatch surface); no new kinds are introduced.
+# Every user-visible string is a `$ref` into `restaurant_backoffice.translations.yaml` (sidecar,
+# ADR-20260722-101500) or the shared `translations.yaml`.
+# ==============================================================================
+
+version: 1
+spec_version: "1.0.0"
+app_id: captain.food.backoffice
+app_name: "Captain.Food Back Office"
+base_url: "https://restos.captain.food"
+default_locale: fr
+supported_locales: [en, fr]
+app_types: [web, windows]   # staff dashboard: web first; the counter tablet/till build follows (ADR-0037)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATA LAYER — RESOLVERS (reads). All bound to EXISTING api.yaml queries; the restaurant scope
+# (restaurantId) is caller-supplied at runtime from the staff session's restaurant binding.
+# ──────────────────────────────────────────────────────────────────────────────
+resolvers:
+  orders.byRestaurant:       { query: { $ref: 'api.yaml#/queries/orders' } }
+  deliveries.byRestaurant:   { query: { $ref: 'api.yaml#/queries/restaurantDeliveries' } }
+  refunds.pending:           { query: { $ref: 'api.yaml#/queries/pendingRefunds' } }
+  satisfaction.byRestaurant: { query: { $ref: 'api.yaml#/queries/restaurantDeliverySatisfaction' } }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATA LAYER — ACTIONS (writes + client behaviours). All mutations exist in api.yaml already.
+# `navigate`/`phone_call` redeclare the shared client kinds IDENTICALLY (union rule).
+# ──────────────────────────────────────────────────────────────────────────────
+actions:
+  navigate: { kind: client }
+  phone_call: { kind: client }
+  accept_order:      { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/acceptOrder' } }
+  reject_order:      { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/rejectOrder' } }
+  start_preparation: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/startPreparation' } }
+  mark_order_ready:  { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderReady' } }
+  cancel_order_by_restaurant: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/cancelOrderByRestaurant' } }
+  change_order_acceptance:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/changeOrderAcceptanceMode' }, note: "The pause/resume toggle in the header." }
+  mark_order_delivered: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderDelivered' }, note: "Self-dispatch: the restaurant confirms the handover itself." }
+  escalate_delivery:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/escalateDelivery' }, note: "Skip the current channel and advance the ranked dispatch walk (#60)." }
+  approve_refund: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/approveRefund' } }
+  deny_refund:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/denyRefund' } }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GLOBAL CHROME — the staff top bar (shared across the four screens).
+# ──────────────────────────────────────────────────────────────────────────────
+global_components:
+  staff_topbar:
+    id: staff_topbar
+    type: sticky_header
+    slots:
+      left: [{ type: logo, asset: "/assets/logo.svg", link: "/" }]
+      center:
+        - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.title' } }
+      right:
+        - type: button
+          id: acceptance_toggle
+          label: { $ref: 'restaurant_backoffice.translations.yaml#/back.pause_orders' }
+          variant: outline
+          action: { type: change_order_acceptance }
+  staff_nav:
+    id: staff_nav
+    type: bottom_navigation
+    items:
+      - { id: orders,       label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.orders' },       icon: receipt, route: "/" }
+      - { id: deliveries,   label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.deliveries' },   icon: truck,   route: "/deliveries" }
+      - { id: refunds,      label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.refunds' },      icon: coin,    route: "/refunds" }
+      - { id: satisfaction, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.satisfaction' }, icon: star,    route: "/satisfaction" }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SCREENS
+# ──────────────────────────────────────────────────────────────────────────────
+screens:
+
+  # SCREEN 1 — Live order queue (the core loop: PLACED → accept/reject → prepare → ready)
+  - id: orders_queue
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    route: "/"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [orders.byRestaurant]
+    actions_used: [accept_order, reject_order, start_preparation, mark_order_ready, cancel_order_by_restaurant, change_order_acceptance]
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.title' } }
+      - type: tab_bar
+        id: queue_tabs
+        tabs:
+          - { id: incoming,  label: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.tab.incoming' } }
+          - { id: preparing, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.tab.preparing' } }
+          - { id: ready,     label: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.tab.ready' } }
+      - type: order_list
+        items: "{{ orders }}"
+        item_type: order_card
+        empty_state: { icon: receipt, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.empty.title' }, body: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.empty.body' } }
+      - type: section
+        id: order_actions
+        content:
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.accept' },  variant: primary, action: { type: accept_order,      variables: { orderId: "{{ order.id }}", restaurantId: "{{ restaurant.id }}" } } }
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.reject' },  variant: outline, action: { type: reject_order,      variables: { orderId: "{{ order.id }}", restaurantId: "{{ restaurant.id }}" } } }
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.start' },   variant: primary, action: { type: start_preparation, variables: { orderId: "{{ order.id }}", restaurantId: "{{ restaurant.id }}" } } }
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.ready' },   variant: primary, action: { type: mark_order_ready,  variables: { orderId: "{{ order.id }}", restaurantId: "{{ restaurant.id }}" } } }
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.cancel' },  variant: ghost,   action: { type: cancel_order_by_restaurant, variables: { orderId: "{{ order.id }}", restaurantId: "{{ restaurant.id }}" } } }
+      - { component: staff_nav }
+
+  # SCREEN 2 — Delivery board (jobs of my orders; escalate a stuck dispatch; confirm self-dispatch handover)
+  - id: deliveries_board
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    route: "/deliveries"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [deliveries.byRestaurant]
+    actions_used: [escalate_delivery, mark_order_delivered]
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.title' } }
+      - type: order_list
+        items: "{{ deliveries }}"
+        item_type: order_card
+        empty_state: { icon: truck, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.empty.title' }, body: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.empty.body' } }
+      - type: section
+        id: delivery_actions
+        content:
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.escalate' },  variant: outline, action: { type: escalate_delivery,    variables: { orderId: "{{ delivery.orderId }}", restaurantId: "{{ restaurant.id }}" } } }
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.delivered' }, variant: primary, action: { type: mark_order_delivered, variables: { orderId: "{{ delivery.orderId }}", restaurantId: "{{ restaurant.id }}" } } }
+      - { component: staff_nav }
+
+  # SCREEN 3 — Refund queue (RefundProcess: REQUESTED rows awaiting the restaurant's decision)
+  - id: refunds_queue
+    roles: [RESTAURANT]
+    route: "/refunds"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.refunds.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [refunds.pending]
+    actions_used: [approve_refund, deny_refund]
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.refunds.title' } }
+      - type: order_list
+        items: "{{ refunds }}"
+        item_type: order_card
+        empty_state: { icon: coin, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.refunds.empty.title' }, body: { $ref: 'restaurant_backoffice.translations.yaml#/back.refunds.empty.body' } }
+      - type: section
+        id: refund_actions
+        content:
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.refunds.approve' }, variant: primary, action: { type: approve_refund, variables: { refundId: "{{ refund.id }}" } } }
+          - { type: button, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.refunds.deny' },    variant: outline, action: { type: deny_refund,    variables: { refundId: "{{ refund.id }}" } } }
+      - { component: staff_nav }
+
+  # SCREEN 4 — Delivery-satisfaction signal (#62: the self-dispatch-vs-Captain decision data)
+  - id: satisfaction
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    route: "/satisfaction"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [satisfaction.byRestaurant]
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.title' } }
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.explainer' } }
+      - type: order_list
+        items: "{{ satisfaction }}"
+        item_type: info_row
+        empty_state: { icon: star, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.empty.title' }, body: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.empty.body' } }
+      - { component: staff_nav }

@@ -18,7 +18,15 @@ thiserror = { workspace = true }    # typed data-layer errors (gap refusals, tra
 async-trait = { workspace = true }  # the object-safe `Transport` seam (fake-injectable in tests)
 uuid = { workspace = true, features = ["v7"] }  # v7: client-minted messageId/sessionId (time-ordered, ADR-20260720-015500)
 leptos = { version = "0.8", default-features = false }
-wasm-bindgen = { version = "0.2", optional = true }   # hydrate-only: the wasm entry point
+# hydrate-only: the wasm entry point. Pinned EXACTLY (=) because the Docker/CI bundle step installs
+# wasm-bindgen-cli at the SAME version — the CLI refuses a version mismatch with the compiled crate,
+# so the pin is what keeps the image build deterministic (bump both together).
+wasm-bindgen = { version = "=0.2.126", optional = true }
+
+# The wasm cdylib wasm-bindgen-cli processes into /assets/web.js + web_bg.wasm (rlib kept for the
+# native ssr consumers: server + tests).
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 # Native (ssr) side of the data layer: reqwest is the house HTTP client (same pin + feature set as the
 # adapters/server — native-tls maps to SChannel on Windows dev boxes, OpenSSL on the Linux build image).
@@ -38,7 +46,7 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen-futures = "0.4"    # spawn_local: the WS reconnect loop + Stripe promise adapters
 js-sys = "0.3"                  # Object/Reflect/Promise: the Stripe.js interop surface (stripe.rs)
 # WebSocket + events: the graphql-transport-ws browser driver (subscriptions.rs, split 3).
-web-sys = { version = "0.3", features = ["Window", "Storage", "WebSocket", "MessageEvent", "CloseEvent"] }
+web-sys = { version = "0.3", features = ["Window", "Storage", "Location", "WebSocket", "MessageEvent", "CloseEvent"] }
 
 [features]
 default = ["ssr"]

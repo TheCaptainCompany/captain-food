@@ -1,71 +1,387 @@
-//! The SDUI renderer (split 1/4 of #21).
+//! The SDUI renderer (splits 1+4 of #21).
 //!
-//! Every renderable node is keyed by a GENERATED [`ComponentKind`] (the spec allowlist), so a screen
-//! can only reference components declared in `restaurant_frontoffice.yaml#/component_registry`. This first
-//! slice renders ONE static screen. It compiles two ways from the SAME view tree:
-//!   * `ssr` (default, native)  — [`render_home_html`] produces the initial HTML on the server;
-//!   * `hydrate` (wasm32)       — [`hydrate`] attaches the client to that server-rendered DOM.
-//! Live resolvers/actions and the two-step mutation layer (#17) arrive in later splits.
+//! Split 1 proved the registry-dispatch seam on one static screen; split 4 makes it GENERIC: the
+//! renderer walks the GENERATED screen trees (`generated/screens.rs` — the DSL compiled to static
+//! data) and renders REAL markup per [`ComponentKind`], resolving:
+//!   * `PropValue::I18n(key)`   → the embedded translation catalog (`i18n`, fr default);
+//!   * `PropValue::Binding(p)`  → the screen's resolved resolver data ([`RenderContext::data`]),
+//!     via a dotted-path walk (`| filter` suffixes: `format_currency` on Money objects);
+//!   * item-list kinds (`order_list`, `restaurant_card_grid/list`, `cart_lines`, …) → one card per
+//!     row of the bound array.
+//!
+//! Markup depth is deliberately tiered: the load-bearing kinds (navigation chrome, lists/cards,
+//! sections, text, buttons, inputs) have dedicated shapes; every other registered kind renders a
+//! `data-c`-tagged container with its resolved text slots and children — visibly present,
+//! auditable against the spec, restyled without re-architecture. Non-SDUI screens (`sdui: false`)
+//! never reach this renderer: checkout.rs / tracking.rs own their markup.
 
 use leptos::prelude::*;
+use serde_json::{Map, Value};
 
 use crate::generated::registry::ComponentKind;
+use crate::generated::screens::{Node, PropValue, Screen};
+use crate::i18n;
 
-/// A minimal static SDUI node: a registered component kind plus its literal text. The live renderer
-/// will carry props/children/bindings; this skeleton proves the registry dispatch seam.
-#[derive(Debug, Clone, Copy)]
-pub struct StaticNode {
-    pub kind: ComponentKind,
-    pub text: &'static str,
+/// What a screen renders FROM: the resolver results keyed by BINDING NAME + the locale.
+///
+/// Binding names: each resolver result is stored under its dotted spec key (`orders.byRestaurant`)
+/// AND its natural template aliases — the FIRST segment (`orders`) and, when the second segment is
+/// a plain lowercase word, the reversed `second_first` form (`restaurants.featured` →
+/// `featured_restaurants`) — matching how the DSL's `{{ … }}` templates name their data.
+#[derive(Debug, Clone, Default)]
+pub struct RenderContext {
+    pub data: Map<String, Value>,
+    pub locale: String,
 }
 
-impl StaticNode {
-    pub const fn new(kind: ComponentKind, text: &'static str) -> Self {
-        Self { kind, text }
+impl RenderContext {
+    pub fn new(locale: &str) -> Self {
+        Self { data: Map::new(), locale: locale.to_string() }
+    }
+
+    /// Store one resolver result under its spec key + template aliases (see type docs).
+    pub fn insert_resolved(&mut self, resolver_key: &str, value: Value) {
+        let mut parts = resolver_key.splitn(2, '.');
+        let first = parts.next().unwrap_or(resolver_key);
+        if let Some(second) = parts.next() {
+            if second.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                self.data.insert(format!("{second}_{first}"), value.clone());
+            }
+        }
+        self.data.insert(first.to_string(), value.clone());
+        self.data.insert(resolver_key.to_string(), value);
+    }
+
+    /// Resolve a `{{ path | filter }}` binding to display text ("" when absent — bindings are
+    /// data slots, not errors).
+    fn binding_text(&self, raw: &str) -> String {
+        let mut parts = raw.split('|');
+        let path = parts.next().unwrap_or("").trim();
+        let filter = parts.next().map(str::trim);
+        let value = self.lookup(path);
+        match (value, filter) {
+            (Some(v), Some("format_currency")) => format_currency(v),
+            (Some(Value::String(s)), _) => s.clone(),
+            (Some(Value::Number(n)), _) => n.to_string(),
+            (Some(Value::Bool(b)), _) => b.to_string(),
+            (Some(other), _) if !other.is_null() => format_currency(other), // Money-ish objects
+            _ => String::new(),
+        }
+    }
+
+    /// Dotted-path walk into the data map (`order.status` → data["order"]["status"]).
+    fn lookup(&self, path: &str) -> Option<&Value> {
+        let mut segs = path.split('.');
+        let mut cur = self.data.get(segs.next()?)?;
+        for seg in segs {
+            cur = cur.get(seg)?;
+        }
+        Some(cur)
     }
 }
 
-/// The one static screen this slice renders — a minimal subset of the `home` chrome. Every node is
-/// dispatched through the generated registry.
-const HOME_NODES: &[StaticNode] = &[
-    StaticNode::new(ComponentKind::PageHeader, "Captain.Food"),
-    StaticNode::new(ComponentKind::Text, "Order from independent restaurants in Tours."),
-    StaticNode::new(ComponentKind::CtaBanner, "Run a restaurant? Partner with us."),
-];
+/// `{ amountCents, currency }` → "12,34 EUR" (fr-style decimal comma — V0 market). Non-Money
+/// values render empty rather than lying.
+fn format_currency(v: &Value) -> String {
+    let (Some(cents), Some(cur)) = (
+        v.get("amountCents").and_then(Value::as_i64),
+        v.get("currency").and_then(Value::as_str),
+    ) else {
+        return String::new();
+    };
+    format!("{},{:02} {}", cents / 100, (cents % 100).abs(), cur)
+}
 
-/// Render one node as a Leptos view, dispatching on its [`ComponentKind`]. The element shape is a
-/// skeleton stand-in (the real per-component views land next); the invariant proven here is that
-/// rendering is driven by the generated allowlist, each node tagged with its spec `type`.
-fn node_view(node: StaticNode) -> AnyView {
-    let ty = node.kind.as_str();
-    let body = node.text;
-    match node.kind {
-        ComponentKind::PageHeader => {
-            view! { <header data-c=ty><h1>{body}</h1></header> }.into_any()
-        }
-        ComponentKind::Text => view! { <p data-c=ty>{body}</p> }.into_any(),
-        ComponentKind::CtaBanner => {
-            view! { <aside data-c=ty class="cta">{body}</aside> }.into_any()
-        }
-        // Skeleton fallback: any other registered kind renders as a tagged block until its real view lands.
-        _ => view! { <div data-c=ty>{body}</div> }.into_any(),
+/// Resolve any prop value to display text.
+fn text_of(prop: PropValue, ctx: &RenderContext) -> String {
+    match prop {
+        PropValue::Text(s) => s.to_string(),
+        PropValue::I18n(key) => i18n::resolve(key, &ctx.locale),
+        PropValue::Binding(path) => ctx.binding_text(path),
     }
 }
 
-/// The static `home` screen as a Leptos component. The `data-hydrate` marker on the root is where the
-/// client hydration entry attaches.
-#[component]
-pub fn HomeScreen() -> impl IntoView {
-    let nodes: Vec<AnyView> = HOME_NODES.iter().copied().map(node_view).collect();
+/// A node's prop as text, "" when absent.
+fn prop_text(node: &Node, key: &str, ctx: &RenderContext) -> String {
+    node.prop(key).map(|p| text_of(p, ctx)).unwrap_or_default()
+}
+
+/// The bound item array of a list-rendering node (`items: "{{ orders }}"`), empty when unresolved.
+fn items_of(node: &Node, ctx: &RenderContext) -> Vec<Value> {
+    match node.prop("items") {
+        Some(PropValue::Binding(path)) => ctx
+            .lookup(path.split('|').next().unwrap_or(path).trim())
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn children_views(node: &Node, ctx: &RenderContext) -> Vec<AnyView> {
+    node.children.iter().map(|c| render_node(c, ctx)).collect()
+}
+
+/// One restaurant row/card (discovery lists) — the fields every Restaurant read carries.
+fn restaurant_card(item: &Value) -> AnyView {
+    let name = item.get("displayName").and_then(Value::as_str).unwrap_or("").to_string();
+    let cuisine = item.get("cuisineCategory").and_then(Value::as_str).unwrap_or("").to_string();
+    let city = item
+        .get("address")
+        .and_then(|a| a.get("city"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let rating = item.get("rating").map(|r| r.to_string()).unwrap_or_default();
+    let slug = item.get("slug").and_then(Value::as_str).unwrap_or("").to_string();
     view! {
-        <main id="app" data-hydrate="home">
+        <article data-c="restaurant_card" data-slug=slug>
+            <h3>{name}</h3>
+            <p>{cuisine}" - "{city}</p>
+            <span data-c="rating_badge">{rating}</span>
+        </article>
+    }
+    .into_any()
+}
+
+/// One order row/card (queues, history) — id/status/total, the triage essentials.
+fn order_card(item: &Value) -> AnyView {
+    let id = item.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+    let id_attr = id.clone();
+    let status = item.get("status").and_then(Value::as_str).unwrap_or("").to_string();
+    let status_attr = status.clone();
+    let total = item.get("totalAmount").map(format_currency).unwrap_or_default();
+    view! {
+        <article data-c="order_card" data-order=id_attr>
+            <span data-c="status_chip" data-status=status_attr>{status}</span>
+            <span>{id}</span>
+            <strong>{total}</strong>
+        </article>
+    }
+    .into_any()
+}
+
+/// One cart line row.
+fn cart_line_row(item: &Value) -> AnyView {
+    let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+    let qty = item.get("quantity").and_then(Value::as_i64).unwrap_or(0);
+    let total = item.get("lineTotal").map(format_currency).unwrap_or_default();
+    view! {
+        <div data-c="cart_line_row">
+            <span data-c="quantity_stepper">{qty.to_string()}</span>
+            <span>{name}</span>
+            <strong>{total}</strong>
+        </div>
+    }
+    .into_any()
+}
+
+/// Render one generated node — the registry-dispatch heart of the renderer.
+pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
+    let ty = node.kind.as_str();
+    match node.kind {
+        // ── chrome ──────────────────────────────────────────────────────────────
+        ComponentKind::StickyHeader => {
+            view! { <header data-c=ty class="sticky">{children_views(node, ctx)}</header> }.into_any()
+        }
+        ComponentKind::PageHeader | ComponentKind::BackButtonHeader => {
+            let title = prop_text(node, "title", ctx);
+            view! { <header data-c=ty><h1>{title}</h1></header> }.into_any()
+        }
+        ComponentKind::BottomNavigation => {
+            // items.N.{label,route,icon} — flattened props; walk indices until one is missing.
+            let mut links: Vec<AnyView> = Vec::new();
+            for i in 0..16 {
+                let label = prop_text(node, &format!("items.{i}.label"), ctx);
+                let route = prop_text(node, &format!("items.{i}.route"), ctx);
+                if label.is_empty() && route.is_empty() {
+                    break;
+                }
+                links.push(view! { <a href=route>{label}</a> }.into_any());
+            }
+            view! { <nav data-c=ty>{links}</nav> }.into_any()
+        }
+        ComponentKind::FloatingActionButton => {
+            let label = prop_text(node, "label", ctx);
+            view! { <button data-c=ty class="fab">{label}</button> }.into_any()
+        }
+
+        // ── layout ──────────────────────────────────────────────────────────────
+        ComponentKind::Section | ComponentKind::CheckoutSection | ComponentKind::ConditionalSection => {
+            let title = prop_text(node, "title", ctx);
+            let has_title = !title.is_empty();
+            view! {
+                <section data-c=ty>
+                    {has_title.then(|| view! { <h2>{title.clone()}</h2> })}
+                    {children_views(node, ctx)}
+                </section>
+            }
+            .into_any()
+        }
+        ComponentKind::StickyBottomBar => {
+            view! { <footer data-c=ty>{children_views(node, ctx)}</footer> }.into_any()
+        }
+        ComponentKind::TabBar => {
+            let mut tabs: Vec<AnyView> = Vec::new();
+            for i in 0..12 {
+                let label = prop_text(node, &format!("tabs.{i}.label"), ctx);
+                if label.is_empty() {
+                    break;
+                }
+                tabs.push(view! { <button role="tab">{label}</button> }.into_any());
+            }
+            view! { <nav data-c=ty role="tablist">{tabs}</nav> }.into_any()
+        }
+        ComponentKind::HorizontalScroll | ComponentKind::Row | ComponentKind::Column => {
+            view! { <div data-c=ty>{children_views(node, ctx)}</div> }.into_any()
+        }
+
+        // ── content ─────────────────────────────────────────────────────────────
+        ComponentKind::Text => {
+            let value = prop_text(node, "value", ctx);
+            view! { <p data-c=ty>{value}</p> }.into_any()
+        }
+        ComponentKind::Image | ComponentKind::HeroImage | ComponentKind::Logo => {
+            let src = {
+                let asset = prop_text(node, "asset", ctx);
+                if asset.is_empty() { prop_text(node, "src", ctx) } else { asset }
+            };
+            view! { <img data-c=ty src=src alt=""/> }.into_any()
+        }
+        ComponentKind::CtaBanner | ComponentKind::CtaSection => {
+            let title = prop_text(node, "title", ctx);
+            let button = {
+                let b = prop_text(node, "button_label", ctx);
+                if b.is_empty() { prop_text(node, "cta_label", ctx) } else { b }
+            };
+            let has_button = !button.is_empty();
+            view! {
+                <aside data-c=ty class="cta">
+                    {title}
+                    {has_button.then(|| view! { <button>{button.clone()}</button> })}
+                    {children_views(node, ctx)}
+                </aside>
+            }
+            .into_any()
+        }
+        ComponentKind::ValueProps => {
+            let mut items: Vec<AnyView> = Vec::new();
+            for i in 0..12 {
+                let title = prop_text(node, &format!("items.{i}.title"), ctx);
+                if title.is_empty() {
+                    break;
+                }
+                let body = prop_text(node, &format!("items.{i}.body"), ctx);
+                items.push(view! { <li><strong>{title}</strong><p>{body}</p></li> }.into_any());
+            }
+            view! { <ul data-c=ty>{items}</ul> }.into_any()
+        }
+        ComponentKind::InfoRow | ComponentKind::OpeningHoursRow => {
+            let label = prop_text(node, "label", ctx);
+            let value = prop_text(node, "value", ctx);
+            view! { <div data-c=ty><span>{label}</span><span>{value}</span></div> }.into_any()
+        }
+
+        // ── discovery lists ─────────────────────────────────────────────────────
+        ComponentKind::RestaurantCardGrid | ComponentKind::RestaurantCardList | ComponentKind::SearchResults => {
+            let cards: Vec<AnyView> = items_of(node, ctx).iter().map(restaurant_card).collect();
+            view! { <div data-c=ty>{cards}</div> }.into_any()
+        }
+
+        // ── order lists ─────────────────────────────────────────────────────────
+        ComponentKind::OrderList => {
+            let items = items_of(node, ctx);
+            if items.is_empty() {
+                let title = prop_text(node, "empty_state.title", ctx);
+                let body = prop_text(node, "empty_state.body", ctx);
+                view! { <div data-c=ty data-empty="true"><h3>{title}</h3><p>{body}</p></div> }.into_any()
+            } else {
+                let cards: Vec<AnyView> = items.iter().map(order_card).collect();
+                view! { <div data-c=ty>{cards}</div> }.into_any()
+            }
+        }
+
+        // ── cart ────────────────────────────────────────────────────────────────
+        ComponentKind::CartLines => {
+            let rows: Vec<AnyView> = match node.prop("lines") {
+                Some(PropValue::Binding(path)) => ctx
+                    .lookup(path.trim())
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().map(cart_line_row).collect())
+                    .unwrap_or_default(),
+                _ => items_of(node, ctx).iter().map(cart_line_row).collect(),
+            };
+            view! { <div data-c=ty>{rows}</div> }.into_any()
+        }
+        ComponentKind::CartSummaryMini | ComponentKind::OrderSummaryBlock => {
+            let total = prop_text(node, "total", ctx);
+            view! { <div data-c=ty><strong>{total}</strong>{children_views(node, ctx)}</div> }.into_any()
+        }
+
+        // ── inputs ──────────────────────────────────────────────────────────────
+        ComponentKind::Button | ComponentKind::TextButton | ComponentKind::IconButton | ComponentKind::SignOutButton | ComponentKind::AddButton => {
+            let label = prop_text(node, "label", ctx);
+            let variant = prop_text(node, "variant", ctx);
+            let action = prop_text(node, "action.type", ctx);
+            view! { <button data-c=ty data-variant=variant data-action=action>{label}</button> }.into_any()
+        }
+        ComponentKind::TextInput | ComponentKind::PhoneInput | ComponentKind::EmailInput | ComponentKind::SearchInput | ComponentKind::PhoneField | ComponentKind::OtpInput => {
+            let label = prop_text(node, "label", ctx);
+            let placeholder = prop_text(node, "placeholder", ctx);
+            view! { <label data-c=ty>{label}<input placeholder=placeholder/></label> }.into_any()
+        }
+        ComponentKind::StatusChip => {
+            let status = prop_text(node, "status", ctx);
+            let status_attr = status.clone();
+            view! { <span data-c=ty data-status=status_attr>{status}</span> }.into_any()
+        }
+
+        // ── account ─────────────────────────────────────────────────────────────
+        ComponentKind::MenuSection => {
+            let title = prop_text(node, "title", ctx);
+            let mut items: Vec<AnyView> = Vec::new();
+            for i in 0..16 {
+                let label = prop_text(node, &format!("items.{i}.label"), ctx);
+                if label.is_empty() {
+                    break;
+                }
+                let route = prop_text(node, &format!("items.{i}.route"), ctx);
+                items.push(view! { <li><a href=route>{label}</a></li> }.into_any());
+            }
+            view! { <section data-c=ty><h2>{title}</h2><ul>{items}</ul></section> }.into_any()
+        }
+
+        // ── everything else: the tagged generic container (visible + auditable) ─
+        _ => {
+            let text = {
+                let t = prop_text(node, "title", ctx);
+                if !t.is_empty() {
+                    t
+                } else {
+                    let l = prop_text(node, "label", ctx);
+                    if !l.is_empty() { l } else { prop_text(node, "value", ctx) }
+                }
+            };
+            let group = format!("{:?}", node.kind.group());
+            view! { <div data-c=ty data-group=group>{text}{children_views(node, ctx)}</div> }.into_any()
+        }
+    }
+}
+
+/// A whole SDUI screen as a Leptos view.
+#[component]
+pub fn SduiScreen(screen: &'static Screen, ctx: RenderContext) -> impl IntoView {
+    let nodes: Vec<AnyView> = screen.tree.iter().map(|n| render_node(n, &ctx)).collect();
+    view! {
+        <main id="app" data-hydrate=screen.id>
             {nodes}
         </main>
     }
 }
 
 /// Wrap a rendered screen body in the shared HTML document shell (the `ssr` build). One shell for
-/// every server-rendered page — home here, checkout/tracking in their own modules (split 3).
+/// every server-rendered page — SDUI screens here, checkout/tracking in their own modules.
+/// `hydrate_script` (the wasm bundle loader) is appended when serving with assets.
 #[cfg(feature = "ssr")]
 pub(crate) fn page_html(title: &str, body: &str) -> String {
     format!(
@@ -75,34 +391,146 @@ pub(crate) fn page_html(title: &str, body: &str) -> String {
     )
 }
 
-/// Server-side render the `home` screen to a full HTML document (the `ssr` build). The BFF serves this
-/// as the initial response; the shipped wasm bundle then hydrates it.
+/// Server-side render one SDUI screen to a full document.
 #[cfg(feature = "ssr")]
-pub fn render_home_html() -> String {
-    // The screen is static (no signals), so rendering the view to HTML needs no reactive runtime.
-    page_html("Captain.Food", &HomeScreen().to_html())
+pub fn render_screen_html(screen: &'static Screen, ctx: RenderContext) -> String {
+    let body = SduiScreen(SduiScreenProps { screen, ctx }).to_html();
+    page_html("Captain.Food", &body)
 }
 
-/// Client hydration entry (the `hydrate` build, wasm32): attach the app to the server-rendered DOM.
+/// Client hydration entry (the `hydrate` build, wasm32): resolve the surface + screen from the
+/// browser location, mount, then fetch the screen's `data_requirements` and re-render with live
+/// data (SSR ships the shell; the client owns freshness — the split-4 serving model).
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn hydrate() {
-    leptos::mount::hydrate_body(HomeScreen);
+    use crate::router;
+    let window = web_sys::window().expect("browser window");
+    let location = window.location();
+    let host = location.host().unwrap_or_default();
+    let path = location.pathname().unwrap_or_else(|_| "/".into());
+    let surface = router::surface_for_host(&host);
+    let Some(matched) = router::match_route(surface, &path) else { return };
+    let screen: &'static Screen = matched.screen;
+    if !screen.sdui {
+        // checkout / order_tracking: their hand-written flows own hydration (split 3 modules).
+        return;
+    }
+
+    let session = crate::session::SessionId::load_or_mint();
+    let origin = location.origin().unwrap_or_default();
+    let transport = crate::graphql::HttpTransport::new(&origin, surface.role(), session);
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let mut ctx = RenderContext::new(i18n::DEFAULT_LOCALE);
+        for resolver in screen.data_requirements {
+            let mut vars = serde_json::Map::new();
+            for (k, v) in matched.param_args(*resolver) {
+                vars.insert(k, v);
+            }
+            if let Ok(value) = crate::graphql::execute_resolver(&transport, *resolver, vars).await {
+                ctx.insert_resolved(resolver.as_str(), value);
+            }
+        }
+        leptos::mount::mount_to_body(move || SduiScreen(SduiScreenProps { screen, ctx }));
+    });
 }
 
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
+    use crate::router::Surface;
+    use serde_json::json;
+
+    fn ctx() -> RenderContext {
+        RenderContext::new("en")
+    }
 
     #[test]
-    fn static_home_renders_registered_components_only() {
-        let html = render_home_html();
-        assert!(html.contains("<title>Captain.Food</title>"));
-        assert!(html.contains("data-hydrate=\"home\""));
-        // Every rendered component tag is a member of the generated allowlist.
-        assert!(html.contains("data-c=\"page_header\""));
-        assert!(html.contains("data-c=\"text\""));
-        assert!(html.contains("data-c=\"cta_banner\""));
+    fn every_sdui_screen_of_every_surface_renders() {
+        // The whole generated surface area renders without panicking, empty data included —
+        // the "no placeholder left behind a reachable route" gate at the smoke level.
+        for surface in [
+            Surface::CaptainFrontoffice,
+            Surface::RestaurantFrontoffice,
+            Surface::RestaurantBackoffice,
+            Surface::Rider,
+        ] {
+            for screen in surface.screens() {
+                if !screen.sdui {
+                    continue;
+                }
+                let html = render_screen_html(screen, ctx());
+                assert!(
+                    html.contains(&format!("data-hydrate=\"{}\"", screen.id)),
+                    "{}: no hydrate root",
+                    screen.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn i18n_props_render_real_strings() {
+        // The backoffice queue renders localized text from the merged catalog.
+        let screen = Surface::RestaurantBackoffice
+            .screens()
+            .iter()
+            .find(|s| s.id == "orders_queue")
+            .unwrap();
+        let fr = render_screen_html(screen, RenderContext::new("fr"));
+        assert!(fr.contains("File des commandes"), "fr title missing");
+        assert!(fr.contains("Accepter"), "fr accept button missing");
+        let en = render_screen_html(screen, RenderContext::new("en"));
+        assert!(en.contains("Order queue"), "en title missing");
+    }
+
+    #[test]
+    fn bindings_render_lists_from_resolved_data() {
+        let screen = Surface::RestaurantBackoffice
+            .screens()
+            .iter()
+            .find(|s| s.id == "orders_queue")
+            .unwrap();
+        let mut c = ctx();
+        c.insert_resolved(
+            "orders.byRestaurant",
+            json!([
+                { "id": "o-1", "status": "PLACED", "totalAmount": { "amountCents": 2350, "currency": "EUR" } },
+                { "id": "o-2", "status": "ACCEPTED", "totalAmount": { "amountCents": 980, "currency": "EUR" } },
+            ]),
+        );
+        let html = render_screen_html(screen, c);
+        assert!(html.contains("data-order=\"o-1\""), "{html}");
+        assert!(html.contains("23,50 EUR"));
+        assert!(html.contains("data-status=\"ACCEPTED\""));
+
+        // Empty data → the spec's empty state, not a blank div.
+        let html = render_screen_html(screen, ctx());
+        assert!(html.contains("data-empty=\"true\""));
+    }
+
+    #[test]
+    fn resolver_alias_convention_feeds_the_marketplace_rails() {
+        // restaurants.featured → alias featured_restaurants (the template name on home).
+        let mut c = ctx();
+        c.insert_resolved(
+            "restaurants.featured",
+            json!([{ "displayName": "Chez Test", "slug": "chez-test", "address": { "city": "Tours" } }]),
+        );
+        assert!(c.data.contains_key("featured_restaurants"));
+        assert!(c.data.contains_key("restaurants"));
+        let home = Surface::CaptainFrontoffice.screens().iter().find(|s| s.id == "home").unwrap();
+        let html = render_screen_html(home, c);
+        assert!(html.contains("Chez Test"), "{html}");
+        assert!(html.contains("data-slug=\"chez-test\""));
+    }
+
+    #[test]
+    fn money_formats_fr_style() {
+        assert_eq!(format_currency(&json!({ "amountCents": 980, "currency": "EUR" })), "9,80 EUR");
+        assert_eq!(format_currency(&json!({ "amountCents": 2305, "currency": "EUR" })), "23,05 EUR");
+        assert_eq!(format_currency(&json!("not money")), "");
     }
 
     #[test]

@@ -1,0 +1,22 @@
+version: 1
+description: >
+  Rider UI strings (ADR-0033; sidecar convention ADR-20260722-101500) — the surface-specific
+  translation catalog for `rider.yaml`. SHARED strings (common.*) live in `translations.yaml`; keys
+  are globally namespaced (`rider.*`) and unique across all files.
+
+# ── chrome ───────────────────────────────────────────────────────────────────
+rider.title:     { messages: { en: "Captain Rider", fr: "Captain Rider" } }
+rider.go_online: { messages: { en: "Go online", fr: "Passer en ligne" } }
+
+# ── job list ─────────────────────────────────────────────────────────────────
+rider.jobs.title:       { messages: { en: "My deliveries", fr: "Mes courses" } }
+rider.jobs.accept:      { messages: { en: "Accept job", fr: "Accepter la course" } }
+rider.jobs.empty.title: { messages: { en: "No deliveries", fr: "Aucune course" } }
+rider.jobs.empty.body:  { messages: { en: "Offered and assigned delivery jobs show up here.", fr: "Les courses proposées et attribuées s'affichent ici." } }
+
+# ── job detail ───────────────────────────────────────────────────────────────
+rider.job.title:     { messages: { en: "Delivery", fr: "Course" } }
+rider.job.pickup:    { messages: { en: "Pickup", fr: "Retrait" } }
+rider.job.dropoff:   { messages: { en: "Drop-off", fr: "Livraison" } }
+rider.job.picked_up: { messages: { en: "Picked up", fr: "Commande récupérée" } }
+rider.job.delivered: { messages: { en: "Delivered", fr: "Livrée" } }

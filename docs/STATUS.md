@@ -3,6 +3,44 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-23 — #21 frontend renderer split 4/4 (#87 "Frontend split 4/4 - per-component markup,
+> customer polish + restaurant/rider screen adoption", PR #89, ADR-20260723-172013) — #21 COMPLETE.**
+> The renderer goes GENERIC and the platform SERVES it. (1) New codegen emitter `emit_web_screens`:
+> every `screens/*.yaml` surface compiles to `crates/web/src/generated/screens.rs` — static `Screen`
+> tables (route/roles/`requires_auth`/`sdui`/`data_requirements` bound to `ResolverKey`) + the
+> component tree as `Node` data (translation refs → `I18n(key)`, `{{ … }}` → `Binding(path)`, nested
+> config → dotted props; `{ component: topbar }` chrome expands at emit time; children only under
+> `components`/`content`/`fields`/`slots`). FAIL-CLOSED on unregistered component types — which
+> immediately caught two live spec drifts: `cta_section` used unregistered by the partner landing
+> (now the split's ONE registry addition) and `filter_bar.filters[].type: dropdown` being config
+> vocabulary, not a component. `sdui:false` screens emit an empty tree but register their route.
+> (2) **Two NEW surfaces** (plan-approved DSL): `restaurant_backoffice.yaml` (orders queue/
+> deliveries board/refunds queue/#62 satisfaction; RESTAURANT+RESTAURANT_ACCOUNT) and `rider.yaml`
+> (job list/detail; RIDER) + en/fr sidecars — ZERO new API ops, existing component vocabulary;
+> `rider_toggle_online` is an explicit gap (no rider-status mutation exists). (3) **Generic
+> renderer** (`renderer.rs` rewrite): walks the generated trees with real markup for the
+> load-bearing kinds (chrome/nav, lists+cards with per-row templates, sections, tab bars, text,
+> buttons, inputs, menu sections; the rest render tagged auditable containers), `{{ path | filter }}`
+> bindings into resolved resolver data (`format_currency` fr-style), i18n from the EMBEDDED generated
+> catalog (fr default/en fallback, missing key renders `[key]` — fail-visible), and the
+> `restaurants.featured → featured_restaurants` template-alias convention. (4) **Router**
+> (`router.rs`): host→surface per ADR-0036's RESERVED subdomains (`restos.`/`riders.` — mirrored
+> with the server's `classify_host`, NOT new `back.`/`rider.` labels), path→screen with `:param`
+> capture feeding resolver args (`:orderId`→`order.byId#id` bridge); route-aware `hydrate()` fetches
+> `data_requirements` and re-renders. (5) **Full pipeline** (user-approved scope): the server's host
+> fallback SSRs matched screens (`web::router::render_path`, SSR-shell + hydrate-fetch model;
+> unknown path 404s; non-app hosts keep text landings), `/assets` serves `WEB_ASSETS_DIR`
+> (tower-http); the Docker build gains wasm32 + `wasm-bindgen-cli` PINNED to the crate's `=0.2.126`
+> (CLI refuses mismatch; bump together) + a second chef cook for the wasm tree, emitting
+> `web.js`/`web_bg.wasm` into the image; `ci.yml` adds the cheap `make wasm` compile-check INSIDE the
+> required `codegen` job (a separate workflow would not be a required check). Verified: codegen 34
+> tests (2 new emitter tests incl. the fail-closed abort), `web` 54 tests (surface-wide SSR sweep,
+> fr/en i18n, binding lists, alias convention, router matrix, render_path × 4 surfaces), workspace +
+> wasm32 builds green, `make rust` 0 errors/no drift. Honest residuals (in the ADR): server-side
+> data resolution for SSR, screen-level auth redirects, generic-button → `ActionKey` dispatch
+> wiring, sheets/overlays, runtime JSON screen delivery (ADR-0033's deferred contract), the
+> rider-status op.
+
 > ✅ **2026-07-23 — #21 frontend renderer split 3/4 (#86 "Frontend split 3/4 - checkout + order
 > tracking (non-SDUI: Stripe element, subscriptions)", PR #88).** The NON-SDUI MONEY PATH lands in
 > `crates/web`, on the #80 data layer. (1) **`subscriptions.rs`** — the graphql-transport-ws client,

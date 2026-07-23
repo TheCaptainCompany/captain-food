@@ -558,9 +558,19 @@ pub fn router() -> Router {
         // The DERIVED `/services/<service>/<op>` surface (issue #26): emitted per the spec's
         // `expose` flags — empty while every service declares `expose: false` (V0).
         .merge(generated::services_routes::services_router())
-        // Host-based landing (ADR-0036): any path not matched above is dispatched by the request `Host`
-        // to its per-audience/tenant placeholder. Explicit routes (/health, /ping, /{role}/graphql) win,
-        // so Render's health check (internal *.onrender.com host) is unaffected. Covers `/` too.
+        // The wasm hydrate bundle (split 4/4 of #21): built by wasm-bindgen in the Docker image into
+        // WEB_ASSETS_DIR (default /app/web-assets) and served under /assets. A deployment without the
+        // dir simply 404s here and pages stay SSR-only — degraded, never broken.
+        .nest_service(
+            "/assets",
+            tower_http::services::ServeDir::new(
+                std::env::var("WEB_ASSETS_DIR").unwrap_or_else(|_| "/app/web-assets".into()),
+            ),
+        )
+        // Host-based serving (ADR-0036 + split 4/4 of #21): any path not matched above is dispatched by
+        // the request `Host` — the SDUI surfaces (live/restos/riders/{slug}) SSR their generated screen
+        // trees, non-app hosts keep plain-text landings. Explicit routes (/health, /ping, /{role}/graphql)
+        // win, so Render's health check (internal *.onrender.com host) is unaffected. Covers `/` too.
         .fallback(hosts::host_root)
         // API auth (ADR-0047): the Supabase-JWT verifier, available to the `/{role}/graphql` handler which
         // gates every non-public path. Shared as an Extension so the JWKS cache is process-wide.

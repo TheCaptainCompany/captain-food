@@ -20,6 +20,11 @@ avelo37-adapter = { path = "../adapters/avelo37" }
 coopcycle-adapter = { path = "../adapters/coopcycle" }
 uber-direct-adapter = { path = "../adapters/uber_direct" }
 hubrise-adapter = { path = "../adapters/hubrise" }
+# The SDUI web app (split 4/4 of #21): the server-side (ssr) renderer — the host fallback serves the
+# generated screen trees as SSR pages; the wasm bundle hydrates them (built in the Docker image).
+web = { path = "../web" }
+# Static assets: /assets/* serves the wasm-bindgen bundle out of WEB_ASSETS_DIR (Docker: /app/web-assets).
+tower-http = { version = "0.6", features = ["fs"] }
 
 # Generated GraphQL type layer: wrapper scalar inners (uuid/chrono) + serde derives.
 serde = { workspace = true }

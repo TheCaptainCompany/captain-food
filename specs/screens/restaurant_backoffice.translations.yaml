@@ -1,0 +1,46 @@
+version: 1
+description: >
+  Restaurant Back-Office UI strings (ADR-0033; sidecar convention ADR-20260722-101500) — the
+  surface-specific translation catalog for `restaurant_backoffice.yaml`. SHARED strings (common.*)
+  live in `translations.yaml`; keys are globally namespaced (`back.*`) and unique across all files.
+
+# ── chrome ───────────────────────────────────────────────────────────────────
+back.title:        { messages: { en: "Back office", fr: "Espace restaurant" } }
+back.pause_orders: { messages: { en: "Pause orders", fr: "Suspendre les commandes" } }
+back.nav.orders:       { messages: { en: "Orders", fr: "Commandes" } }
+back.nav.deliveries:   { messages: { en: "Deliveries", fr: "Livraisons" } }
+back.nav.refunds:      { messages: { en: "Refunds", fr: "Remboursements" } }
+back.nav.satisfaction: { messages: { en: "Satisfaction", fr: "Satisfaction" } }
+
+# ── order queue ──────────────────────────────────────────────────────────────
+back.orders.title:         { messages: { en: "Order queue", fr: "File des commandes" } }
+back.orders.tab.incoming:  { messages: { en: "Incoming", fr: "Entrantes" } }
+back.orders.tab.preparing: { messages: { en: "Preparing", fr: "En préparation" } }
+back.orders.tab.ready:     { messages: { en: "Ready", fr: "Prêtes" } }
+back.orders.accept:        { messages: { en: "Accept", fr: "Accepter" } }
+back.orders.reject:        { messages: { en: "Reject", fr: "Refuser" } }
+back.orders.start:         { messages: { en: "Start preparing", fr: "Lancer la préparation" } }
+back.orders.ready:         { messages: { en: "Mark ready", fr: "Marquer prête" } }
+back.orders.cancel:        { messages: { en: "Cancel order", fr: "Annuler la commande" } }
+back.orders.empty.title:   { messages: { en: "No orders right now", fr: "Aucune commande pour le moment" } }
+back.orders.empty.body:    { messages: { en: "New orders appear here the moment they are placed.", fr: "Les nouvelles commandes apparaissent ici dès qu'elles sont passées." } }
+
+# ── delivery board ───────────────────────────────────────────────────────────
+back.deliveries.title:       { messages: { en: "Delivery board", fr: "Tableau des livraisons" } }
+back.deliveries.escalate:    { messages: { en: "Escalate dispatch", fr: "Escalader la course" } }
+back.deliveries.delivered:   { messages: { en: "Mark delivered", fr: "Marquer livrée" } }
+back.deliveries.empty.title: { messages: { en: "No active deliveries", fr: "Aucune livraison en cours" } }
+back.deliveries.empty.body:  { messages: { en: "Delivery jobs for your orders show up here.", fr: "Les courses de vos commandes s'affichent ici." } }
+
+# ── refund queue ─────────────────────────────────────────────────────────────
+back.refunds.title:       { messages: { en: "Refund requests", fr: "Demandes de remboursement" } }
+back.refunds.approve:     { messages: { en: "Approve refund", fr: "Approuver le remboursement" } }
+back.refunds.deny:        { messages: { en: "Deny refund", fr: "Refuser le remboursement" } }
+back.refunds.empty.title: { messages: { en: "No pending refunds", fr: "Aucun remboursement en attente" } }
+back.refunds.empty.body:  { messages: { en: "Refund requests awaiting your decision show up here.", fr: "Les demandes en attente de votre décision s'affichent ici." } }
+
+# ── satisfaction (#62) ───────────────────────────────────────────────────────
+back.satisfaction.title:       { messages: { en: "Delivery satisfaction", fr: "Satisfaction livraison" } }
+back.satisfaction.explainer:   { messages: { en: "How customers judged the timeliness of your deliveries — the signal for choosing self-dispatch or Captain routing.", fr: "Comment vos clients ont jugé la ponctualité de vos livraisons — le signal pour choisir entre livraison en propre et Captain." } }
+back.satisfaction.empty.title: { messages: { en: "No answers yet", fr: "Pas encore de réponses" } }
+back.satisfaction.empty.body:  { messages: { en: "Post-delivery survey answers show up here.", fr: "Les réponses au sondage post-livraison s'affichent ici." } }
