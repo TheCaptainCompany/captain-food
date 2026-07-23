@@ -12709,7 +12709,11 @@ fn main() {
     }
     for (name, content) in [
         ("registry.rs", emit_web_registry(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod registry;\n".to_string()),
+        ("data_layer.rs", emit_web_data_layer(&model)),
+        (
+            "mod.rs",
+            "// GENERATED module index — do not edit by hand.\npub mod data_layer;\npub mod registry;\n".to_string(),
+        ),
     ] {
         let path = web_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
@@ -12813,9 +12817,351 @@ fn emit_web_registry(model: &Model) -> String {
     out
 }
 
+// ─── crates/web/src/generated/data_layer.rs (#80 — SDUI resolver/action allowlist) ─────────────
+
+/// One resolver binding, flattened from `screens/*.yaml#/resolvers/<key>`.
+struct ResolverDef {
+    key: String,
+    /// The bound `api.yaml` query name — `None` for a `gap:` entry.
+    query: Option<String>,
+    /// Static args the DSL pins on the binding (e.g. `restaurants.featured` → `listKey: RECOMMENDED`).
+    args: Vec<(String, String)>,
+    gap: Option<String>,
+}
+
+/// One action binding, flattened from `screens/*.yaml#/actions/<key>`.
+struct ActionDef {
+    key: String,
+    /// The DSL `kind`: `client` | `mutation` | `auth` | `gap`.
+    kind: String,
+    /// The bound `api.yaml` mutation name — `Some` only for `kind: mutation`.
+    mutation: Option<String>,
+    gap: Option<String>,
+}
+
+/// Render a resolver/action definition to a stable descriptor, so the SAME key declared by several
+/// surfaces can be proven identical before the union collapses it into one variant.
+fn resolver_fingerprint(d: &ResolverDef) -> String {
+    format!("{:?}|{:?}|{:?}", d.query, d.args, d.gap)
+}
+
+fn action_fingerprint(d: &ActionDef) -> String {
+    format!("{}|{:?}|{:?}", d.kind, d.mutation, d.gap)
+}
+
+/// The Rust variant name for a dotted DSL key: `restaurants.featured` → `RestaurantsFeatured`.
+fn dotted_variant(key: &str) -> String {
+    pascal_snake(&key.replace('.', "_"))
+}
+
+/// The `api.yaml` operation name a `{ $ref: 'api.yaml#/queries/<name>' }` node binds.
+fn ref_op_name(node: &serde_yaml::Value) -> Option<String> {
+    let r = node.get("$ref")?.as_str()?;
+    parse_ref(r).and_then(|p| p.path.last().cloned())
+}
+
+fn rust_str(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Collect the `resolvers` + `actions` blocks of every `screens/*.yaml` surface into ONE allowlist.
+///
+/// The registry (`emit_web_registry`) is already a renderer-level SHARED allowlist across the two
+/// customer front offices (ADR-20260722-160000); the data layer follows the same rule — one renderer,
+/// one dispatch surface. A key declared by several surfaces must bind IDENTICALLY, else the union
+/// would silently pick one; that is a spec smell, so it aborts.
+fn collect_web_data_layer(model: &Model) -> (Vec<ResolverDef>, Vec<ActionDef>) {
+    let mut surfaces: Vec<&String> = model.defs.keys().filter(|k| k.starts_with("screens/")).collect();
+    surfaces.sort();
+
+    let mut resolvers: Vec<ResolverDef> = Vec::new();
+    let mut actions: Vec<ActionDef> = Vec::new();
+    let mut r_seen: std::collections::BTreeMap<String, (String, String)> = std::collections::BTreeMap::new();
+    let mut a_seen: std::collections::BTreeMap<String, (String, String)> = std::collections::BTreeMap::new();
+
+    for sf in surfaces {
+        let doc = match model.defs.get(sf) {
+            Some(d) => d,
+            None => continue,
+        };
+        if let Some(map) = doc.get("resolvers").and_then(|v| v.as_mapping()) {
+            for (k, v) in map {
+                let key = match k.as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let def = ResolverDef {
+                    key: key.clone(),
+                    query: v.get("query").and_then(ref_op_name),
+                    args: v
+                        .get("args")
+                        .and_then(|a| a.as_mapping())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|(ak, av)| {
+                                    let name = ak.as_str()?.to_string();
+                                    let value = match av {
+                                        serde_yaml::Value::String(s) => s.clone(),
+                                        other => serde_yaml::to_string(other).ok()?.trim().to_string(),
+                                    };
+                                    Some((name, value))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    gap: v.get("gap").and_then(|g| g.as_str()).map(str::to_owned),
+                };
+                let fp = resolver_fingerprint(&def);
+                match r_seen.get(&key) {
+                    Some((first_surface, first_fp)) => assert_eq!(
+                        first_fp, &fp,
+                        "resolvers.{key}: '{sf}' binds it differently from '{first_surface}' — a shared \
+                         resolver key must bind identically across surfaces (one renderer, one data layer)"
+                    ),
+                    None => {
+                        r_seen.insert(key, (sf.clone(), fp));
+                        resolvers.push(def);
+                    }
+                }
+            }
+        }
+        if let Some(map) = doc.get("actions").and_then(|v| v.as_mapping()) {
+            for (k, v) in map {
+                let key = match k.as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let def = ActionDef {
+                    key: key.clone(),
+                    kind: v.get("kind").and_then(|x| x.as_str()).unwrap_or("client").to_string(),
+                    mutation: v.get("mutation").and_then(ref_op_name),
+                    gap: v.get("gap").and_then(|g| g.as_str()).map(str::to_owned),
+                };
+                let fp = action_fingerprint(&def);
+                match a_seen.get(&key) {
+                    Some((first_surface, first_fp)) => assert_eq!(
+                        first_fp, &fp,
+                        "actions.{key}: '{sf}' binds it differently from '{first_surface}' — a shared \
+                         action key must bind identically across surfaces (one renderer, one data layer)"
+                    ),
+                    None => {
+                        a_seen.insert(key, (sf.clone(), fp));
+                        actions.push(def);
+                    }
+                }
+            }
+        }
+    }
+    (resolvers, actions)
+}
+
+/// Emit `crates/web/src/generated/data_layer.rs` — the GENERATED SDUI **data layer**: the resolver
+/// (read) and action (write) allowlists from `screens/*.yaml#/resolvers` + `#/actions`, each carrying
+/// the `api.yaml` operation it binds. The renderer dispatches on these enums, so a screen can only
+/// name a resolver/action the client actually implements AND the API actually serves — the same rule
+/// `ComponentKind` enforces for markup (ADR-0033, codegen roadmap item 6).
+///
+/// `gap:` entries (UI needs with no backing operation yet) are emitted as explicitly UNBOUND rather
+/// than omitted, so referencing one fails closed at the dispatcher instead of silently no-op'ing.
+fn emit_web_data_layer(model: &Model) -> String {
+    let (resolvers, actions) = collect_web_data_layer(model);
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/screens/*.yaml (#/resolvers, #/actions)\n// — do not edit by hand. The SDUI DATA LAYER allowlist (ADR-0033, codegen roadmap item 6): reads\n// bind to api.yaml queries, writes to api.yaml mutations, and the renderer dispatches on these\n// enums — so a screen can only name data the API serves. `gap` entries are UNBOUND on purpose:\n// they fail closed at the dispatcher instead of silently doing nothing.\n\nuse serde::{Deserialize, Serialize};\n",
+    );
+
+    // ── Resolvers (reads) ────────────────────────────────────────────────────────────────────
+    out.push_str(
+        "\n/// A static argument the screens DSL pins on a resolver binding (`args:`), e.g.\n/// `restaurants.featured` → `listKey: RECOMMENDED`. Applied before any caller-supplied variables.\npub type ResolverArg = (&'static str, &'static str);\n",
+    );
+    out.push_str("\n/// The allowlisted resolvers — one variant per `resolvers` key across every screens surface.\n");
+    out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]\n");
+    out.push_str("pub enum ResolverKey {\n");
+    for r in &resolvers {
+        out.push_str(&format!("    {},\n", dotted_variant(&r.key)));
+    }
+    out.push_str("}\n");
+
+    out.push_str("\nimpl ResolverKey {\n");
+    out.push_str("    /// Every allowlisted resolver, in spec order.\n");
+    out.push_str("    pub const ALL: &'static [ResolverKey] = &[\n");
+    for r in &resolvers {
+        out.push_str(&format!("        ResolverKey::{},\n", dotted_variant(&r.key)));
+    }
+    out.push_str("    ];\n\n");
+
+    out.push_str("    /// The spec key (dotted) this resolver is declared under — 1:1 with the DSL.\n");
+    out.push_str("    pub fn as_str(&self) -> &'static str {\n        match self {\n");
+    for r in &resolvers {
+        out.push_str(&format!(
+            "            ResolverKey::{} => \"{}\",\n",
+            dotted_variant(&r.key),
+            rust_str(&r.key)
+        ));
+    }
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str("    /// Resolve a spec key to its resolver — `None` for anything outside the allowlist.\n");
+    out.push_str("    pub fn from_key(key: &str) -> Option<ResolverKey> {\n        match key {\n");
+    for r in &resolvers {
+        out.push_str(&format!(
+            "            \"{}\" => Some(ResolverKey::{}),\n",
+            rust_str(&r.key),
+            dotted_variant(&r.key)
+        ));
+    }
+    out.push_str("            _ => None,\n        }\n    }\n\n");
+
+    out.push_str("    /// The `api.yaml` query this resolver reads — `None` when the binding is a `gap`.\n");
+    out.push_str("    pub fn query(&self) -> Option<&'static str> {\n        match self {\n");
+    for r in &resolvers {
+        let v = match &r.query {
+            Some(q) => format!("Some(\"{}\")", rust_str(q)),
+            None => "None".to_string(),
+        };
+        out.push_str(&format!("            ResolverKey::{} => {},\n", dotted_variant(&r.key), v));
+    }
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str("    /// The static args the DSL pins on this binding (empty when it pins none).\n");
+    out.push_str("    pub fn args(&self) -> &'static [ResolverArg] {\n        match self {\n");
+    for r in &resolvers {
+        let v = if r.args.is_empty() {
+            "&[]".to_string()
+        } else {
+            let items: Vec<String> = r
+                .args
+                .iter()
+                .map(|(k, val)| format!("(\"{}\", \"{}\")", rust_str(k), rust_str(val)))
+                .collect();
+            format!("&[{}]", items.join(", "))
+        };
+        out.push_str(&format!("            ResolverKey::{} => {},\n", dotted_variant(&r.key), v));
+    }
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str("    /// The spec `gap` note when the UI needs data no API query serves yet, else `None`.\n");
+    out.push_str("    pub fn gap(&self) -> Option<&'static str> {\n        match self {\n");
+    for r in &resolvers {
+        let v = match &r.gap {
+            Some(g) => format!("Some(\"{}\")", rust_str(g)),
+            None => "None".to_string(),
+        };
+        out.push_str(&format!("            ResolverKey::{} => {},\n", dotted_variant(&r.key), v));
+    }
+    out.push_str("        }\n    }\n}\n");
+
+    // ── Actions (writes + client behaviours) ─────────────────────────────────────────────────
+    let mut kinds: Vec<String> = actions.iter().map(|a| a.kind.clone()).collect();
+    kinds.sort();
+    kinds.dedup();
+    out.push_str("\n/// What an action DOES (spec `kind`): a client-side behaviour, a domain write, an\n/// auth-provider call outside the domain, or a declared gap with no backing mutation.\n");
+    out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]\n");
+    out.push_str("pub enum ActionKind {\n");
+    for k in &kinds {
+        out.push_str(&format!("    {},\n", pascal_snake(k)));
+    }
+    out.push_str("}\n");
+
+    out.push_str("\nimpl ActionKind {\n    /// The spec `kind` token — 1:1 with the DSL.\n");
+    out.push_str("    pub fn as_str(&self) -> &'static str {\n        match self {\n");
+    for k in &kinds {
+        out.push_str(&format!("            ActionKind::{} => \"{}\",\n", pascal_snake(k), rust_str(k)));
+    }
+    out.push_str("        }\n    }\n}\n");
+
+    out.push_str("\n/// The allowlisted actions — one variant per `actions` key across every screens surface.\n");
+    out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]\n");
+    out.push_str("pub enum ActionKey {\n");
+    for a in &actions {
+        out.push_str(&format!("    {},\n", dotted_variant(&a.key)));
+    }
+    out.push_str("}\n");
+
+    out.push_str("\nimpl ActionKey {\n");
+    out.push_str("    /// Every allowlisted action, in spec order.\n");
+    out.push_str("    pub const ALL: &'static [ActionKey] = &[\n");
+    for a in &actions {
+        out.push_str(&format!("        ActionKey::{},\n", dotted_variant(&a.key)));
+    }
+    out.push_str("    ];\n\n");
+
+    out.push_str("    /// The spec key this action is declared under — 1:1 with the DSL.\n");
+    out.push_str("    pub fn as_str(&self) -> &'static str {\n        match self {\n");
+    for a in &actions {
+        out.push_str(&format!(
+            "            ActionKey::{} => \"{}\",\n",
+            dotted_variant(&a.key),
+            rust_str(&a.key)
+        ));
+    }
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str("    /// Resolve a spec key to its action — `None` for anything outside the allowlist.\n");
+    out.push_str("    pub fn from_key(key: &str) -> Option<ActionKey> {\n        match key {\n");
+    for a in &actions {
+        out.push_str(&format!(
+            "            \"{}\" => Some(ActionKey::{}),\n",
+            rust_str(&a.key),
+            dotted_variant(&a.key)
+        ));
+    }
+    out.push_str("            _ => None,\n        }\n    }\n\n");
+
+    out.push_str("    /// What this action does (spec `kind`).\n");
+    out.push_str("    pub fn kind(&self) -> ActionKind {\n        match self {\n");
+    for a in &actions {
+        out.push_str(&format!(
+            "            ActionKey::{} => ActionKind::{},\n",
+            dotted_variant(&a.key),
+            pascal_snake(&a.kind)
+        ));
+    }
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str("    /// The `api.yaml` mutation this action writes through — `None` for client/auth/gap kinds.\n");
+    out.push_str("    pub fn mutation(&self) -> Option<&'static str> {\n        match self {\n");
+    for a in &actions {
+        let v = match &a.mutation {
+            Some(m) => format!("Some(\"{}\")", rust_str(m)),
+            None => "None".to_string(),
+        };
+        out.push_str(&format!("            ActionKey::{} => {},\n", dotted_variant(&a.key), v));
+    }
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str("    /// The spec `gap` note when the UI wants a write the API does not model yet, else `None`.\n");
+    out.push_str("    pub fn gap(&self) -> Option<&'static str> {\n        match self {\n");
+    for a in &actions {
+        let v = match &a.gap {
+            Some(g) => format!("Some(\"{}\")", rust_str(g)),
+            None => "None".to_string(),
+        };
+        out.push_str(&format!("            ActionKey::{} => {},\n", dotted_variant(&a.key), v));
+    }
+    out.push_str("        }\n    }\n}\n");
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dotted_keys_become_pascal_variants() {
+        assert_eq!(dotted_variant("restaurants.featured"), "RestaurantsFeatured");
+        assert_eq!(dotted_variant("operationStatus.byMessage"), "OperationStatusByMessage");
+        assert_eq!(dotted_variant("add_to_cart"), "AddToCart");
+    }
+
+    #[test]
+    fn ref_op_name_takes_the_last_pointer_segment() {
+        let node: serde_yaml::Value =
+            serde_yaml::from_str("$ref: 'api.yaml#/mutations/addCartLine'").expect("parses");
+        assert_eq!(ref_op_name(&node).as_deref(), Some("addCartLine"));
+        let plain: serde_yaml::Value = serde_yaml::from_str("gap: 'nothing binds this'").expect("parses");
+        assert_eq!(ref_op_name(&plain), None);
+    }
 
     #[test]
     fn parse_ref_splits_file_and_pointer() {
