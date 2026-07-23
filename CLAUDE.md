@@ -82,6 +82,13 @@ validation. In the story map, inbound events are marked 📥.
   user-facing message, commit, or doc, include its **title** alongside the number — e.g.
   `#21 "Frontend: Leptos/WASM SDUI renderer"`, not just `#21`. A bare number is not memorable to a human
   reader; the title carries the meaning.
+- **Makefile recipe lines are ASCII-only** — use `--`, `->`, `|` rather than `—`, `→`, `·`. Native
+  Windows GNU Make hands a recipe to Cygwin's `sh` with broken quoting as soon as the line contains a
+  byte > 127: `sh` receives the whole recipe as ONE word and reports `$'...': command not found`, so
+  the target fails for a reason that has nothing to do with what it does. This bit `check-drift` (an
+  em dash in its message made `make rust` fail with **zero** drift). Comments, variables and
+  `$(shell ...)` are unaffected — only the tab-indented recipe text. Enforced by the
+  `makefile_recipe_lines_are_ascii` codegen test, so it cannot silently come back.
 
 ## Operating model (read [docs/PLAYBOOK.md](docs/PLAYBOOK.md))
 
