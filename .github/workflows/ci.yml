@@ -32,6 +32,11 @@ jobs:
       - name: Build the workspace (codegen + all layer crates — enforces the ADR-0035 dependency graph)
         run: cargo build --workspace --verbose
 
+      - name: Compile-check the wasm32 hydrate build (split 4/4 of #21 — the bundle itself is built in build-image.yml's Docker step)
+        run: |
+          rustup target add wasm32-unknown-unknown
+          make wasm
+
       - name: Unit tests (whole workspace)
         run: cargo test --workspace --verbose
 

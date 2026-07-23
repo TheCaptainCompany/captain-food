@@ -72,6 +72,13 @@ rust-test:
 rust: rust-build rust-test validate check-drift
 	@echo "rust: build + test + validate + generate(+diff) OK"
 
+# Compile-check the wasm32 hydrate build of crates/web (split 4/4 of #21). The real bundle
+# (wasm-bindgen output) is produced in the Docker image build; this is the fast CI/local gate that
+# the hydrate target still compiles. Needs: rustup target add wasm32-unknown-unknown
+wasm:
+	$(CARGO) build -p web --target wasm32-unknown-unknown --no-default-features --features hydrate
+	@echo "wasm: hydrate target compiles OK"
+
 # Independent review: regenerate, then confirm the generated artifacts are in step with the DSL.
 review: validate generate
 	@git status --porcelain || true

@@ -253,6 +253,34 @@ interactive sheets), customer polish, restaurant/rider surface adoption.
 
 ---
 
+## 6c. Where split 4 (#87) fits — generated screen trees, routing, serving (ADR-20260723-172013)
+
+The renderer goes generic and the platform serves it end to end:
+
+- **Generated screen trees** — `emit_web_screens` compiles every `screens/*.yaml` surface into
+  `crates/web/src/generated/screens.rs`: `Screen` tables (route, roles, `data_requirements` →
+  `ResolverKey`) + the component tree as `Node { kind: ComponentKind, props, children }` static
+  data. Fail-closed on unregistered component types (which caught two live spec drifts on landing).
+  ADR-0033's runtime JSON screen delivery stays deferred — the tree shape is already its input type.
+- **Generic renderer** — `render_node` walks the trees: real markup for chrome/nav, lists+cards
+  (per-row templates for restaurants/orders/cart lines), sections, tabs, text, buttons, inputs;
+  everything else renders a tagged, auditable container. `{{ path | filter }}` bindings resolve into
+  the screen's fetched resolver data; i18n resolves from the embedded generated catalog (fr
+  default, en fallback, `[key]` when missing — fail-visible).
+- **Router + surfaces** — host→surface per ADR-0036's reserved subdomains (`live.` marketplace,
+  `restos.` back office, `riders.` rider app, `{slug}.` storefront), path→screen with `:param`
+  capture feeding resolver args. Two NEW spec surfaces: `restaurant_backoffice.yaml` +
+  `rider.yaml` — zero new API ops, shared component vocabulary.
+- **Serving** — the BFF's host fallback SSRs the matched screen (SSR shell + hydrate-fetch); the
+  Docker image builds the wasm bundle (`wasm-bindgen-cli` pinned to the crate's exact version) into
+  `/app/web-assets`, served under `/assets`; `ci.yml` compile-checks the hydrate target inside the
+  required `codegen` job.
+
+Residuals recorded in ADR-20260723-172013: SSR data pre-fill, auth redirects, generic-button
+action dispatch, sheets/overlays, runtime screen delivery, the rider-status op.
+
+---
+
 ## 7. Prior art — a proven technique, and where the markup lives
 
 SDUI is not novel; it is a proven pattern at scale. Publicly documented adopters include **Meta**

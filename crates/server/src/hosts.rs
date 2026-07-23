@@ -13,8 +13,8 @@
 //! injection-safe.
 
 use axum::{
-    http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    http::{header, HeaderMap, StatusCode, Uri},
+    response::{Html, IntoResponse, Response},
 };
 
 /// The apex under which every audience/tenant host lives.
@@ -57,25 +57,39 @@ pub fn classify_host(raw_host: &str) -> HostRoute {
     }
 }
 
-/// Router fallback: resolve the request `Host` and return its placeholder landing.
-pub async fn host_root(headers: HeaderMap) -> Response {
+/// Router fallback: resolve the request `Host` + path and serve the SDUI app (split 4/4 of #21) —
+/// the audience surfaces (`live`/`restos`/`riders`) and every restaurant tenant render their
+/// GENERATED screen trees server-side (`web::router::render_path`; the wasm bundle hydrates with
+/// live data). Non-app hosts keep their plain-text landings; an app host with an unknown path 404s.
+pub async fn host_root(headers: HeaderMap, uri: Uri) -> Response {
     let raw = headers
         .get("x-forwarded-host")
         .or_else(|| headers.get(header::HOST))
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    render(classify_host(raw))
+    render(classify_host(raw), raw, uri.path())
 }
 
-fn render(route: HostRoute) -> Response {
+fn render(route: HostRoute, raw_host: &str, path: &str) -> Response {
     match route {
-        HostRoute::Live => text("This is the captain.food front-office"),
-        HostRoute::Restos => text("Restaurants' backoffice"),
-        HostRoute::Riders => text("Riders' backoffice"),
+        // The four SDUI surfaces: SSR the matched screen (web::router mirrors classify_host's
+        // audience mapping — see its module docs).
+        HostRoute::Live | HostRoute::Restos | HostRoute::Riders | HostRoute::Tenant(_) => {
+            match web::router::render_path(raw_host, path, web::i18n::DEFAULT_LOCALE) {
+                Some(html) => Html(html).into_response(),
+                None => (StatusCode::NOT_FOUND, "no such page").into_response(),
+            }
+        }
         HostRoute::System => text("System backoffice"),
         HostRoute::Api => text("Captain.Food API — GraphQL served at /{role}/graphql (see /public/graphql)"),
-        HostRoute::Tenant(slug) => text(&format!("This is the front-office for the restaurant '{slug}'")),
-        HostRoute::Default => text("Captain.Food server — address a *.captain.food host"),
+        HostRoute::Default => {
+            // localhost / *.onrender.com / IPs: serve the marketplace app too — a dev box or the
+            // Render health-check host hitting `/` should see the product, not a placeholder.
+            match web::router::render_path(raw_host, path, web::i18n::DEFAULT_LOCALE) {
+                Some(html) => Html(html).into_response(),
+                None => text("Captain.Food server — address a *.captain.food host"),
+            }
+        }
         HostRoute::Unknown(sub) => {
             (StatusCode::NOT_FOUND, format!("unknown host '{sub}.{APEX}'")).into_response()
         }

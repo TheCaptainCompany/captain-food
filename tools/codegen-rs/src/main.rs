@@ -12794,9 +12794,10 @@ fn main() {
     for (name, content) in [
         ("registry.rs", emit_web_registry(&model)),
         ("data_layer.rs", emit_web_data_layer(&model)),
+        ("screens.rs", emit_web_screens(&model)),
         (
             "mod.rs",
-            "// GENERATED module index — do not edit by hand.\npub mod data_layer;\npub mod registry;\n".to_string(),
+            "// GENERATED module index — do not edit by hand.\npub mod data_layer;\npub mod registry;\npub mod screens;\n".to_string(),
         ),
     ] {
         let path = web_gen.join(name);
@@ -13350,6 +13351,283 @@ fn emit_web_data_layer(model: &Model) -> String {
     out
 }
 
+// ─── crates/web/src/generated/screens.rs (#87 — SDUI screen trees) ─────────────────────────────
+
+/// A prop value flattened from a screen node's YAML (split 4, #87): literal text, a translation
+/// key, or a `{{ path }}` data binding. Mirrored 1:1 by the generated `PropValue` enum.
+enum EmittedProp {
+    Text(String),
+    I18n(String),
+    Binding(String),
+}
+
+/// The DSL keys whose sequences hold RENDERABLE CHILD COMPONENTS (`components` = a screen root,
+/// `content` = section bodies, `fields` = form inputs; `slots` is special-cased as a map of
+/// sequences). Deliberately a whitelist, not a "mapping with `type`" heuristic: other keys reuse
+/// `type` as plain CONFIG vocabulary (e.g. `filter_bar.filters[].type: dropdown`,
+/// `status_config.*.icon`) and must flatten into props, not be forced through the registry.
+const CHILD_KEYS: [&str; 3] = ["components", "content", "fields"];
+
+/// True when the sequence under a child-carrying key really is a list of component nodes (every
+/// mapping item carries `type` or `component`).
+fn is_component_seq(seq: &[Value]) -> bool {
+    !seq.is_empty()
+        && seq.iter().all(|v| {
+            v.as_mapping()
+                .map(|m| {
+                    m.contains_key(Value::String("type".into()))
+                        || m.contains_key(Value::String("component".into()))
+                })
+                .unwrap_or(false)
+        })
+}
+
+/// Flatten one non-component YAML value into dotted-path props: translation `$ref`s → `I18n(key)`,
+/// whole-string `{{ … }}` templates → `Binding(inner)`, every other scalar → `Text`. Nested
+/// mappings/sequences recurse with a dotted/indexed path — full data fidelity without a bespoke
+/// schema per component.
+fn flatten_screen_props(path: &str, v: &Value, props: &mut Vec<(String, EmittedProp)>) {
+    match v {
+        Value::Mapping(m) => {
+            if let Some(rf) = m.get(Value::String("$ref".into())).and_then(|x| x.as_str()) {
+                // A translation ref: the KEY is the last pointer segment (dotted keys are one
+                // segment — parse_ref keeps them whole). Validator §11 already proved it resolves.
+                if let Some(key) = parse_ref(rf).and_then(|p| p.path.last().cloned()) {
+                    props.push((path.to_string(), EmittedProp::I18n(key)));
+                }
+                return;
+            }
+            for (k, val) in m {
+                if let Some(ks) = k.as_str() {
+                    let sub = if path.is_empty() { ks.to_string() } else { format!("{path}.{ks}") };
+                    flatten_screen_props(&sub, val, props);
+                }
+            }
+        }
+        Value::Sequence(seq) => {
+            for (i, item) in seq.iter().enumerate() {
+                flatten_screen_props(&format!("{path}.{i}"), item, props);
+            }
+        }
+        Value::String(s) => {
+            let t = s.trim();
+            if t.starts_with("{{") && t.ends_with("}}") {
+                props.push((
+                    path.to_string(),
+                    EmittedProp::Binding(t.trim_start_matches("{{").trim_end_matches("}}").trim().to_string()),
+                ));
+            } else {
+                props.push((path.to_string(), EmittedProp::Text(s.clone())));
+            }
+        }
+        Value::Bool(b) => props.push((path.to_string(), EmittedProp::Text(b.to_string()))),
+        Value::Number(n) => props.push((path.to_string(), EmittedProp::Text(n.to_string()))),
+        _ => {}
+    }
+}
+
+/// Render one screen component node to a generated `Node { … }` literal. `globals` is the
+/// surface's `global_components` map — `{ component: <name> }` refs expand here at emit time.
+/// Unknown component types ABORT (fail-closed, same stance as the data layer): the registry is the
+/// allowlist, and an unregistered type reaching the renderer would otherwise render nothing.
+fn emit_screen_node(
+    node: &Value,
+    globals: Option<&serde_yaml::Mapping>,
+    registry_types: &BTreeSet<String>,
+    at: &str,
+    indent: usize,
+) -> String {
+    let m = match node.as_mapping() {
+        Some(m) => m,
+        None => panic!("{at}: screen node is not a mapping"),
+    };
+    // { component: <name> } — expand the shared chrome definition.
+    if let Some(name) = m.get(Value::String("component".into())).and_then(|v| v.as_str()) {
+        let def = globals
+            .and_then(|g| g.get(Value::String(name.to_string())))
+            .unwrap_or_else(|| panic!("{at}: `component: {name}` names no global_components entry"));
+        return emit_screen_node(def, globals, registry_types, &format!("{at}/{name}"), indent);
+    }
+    let ty = m
+        .get(Value::String("type".into()))
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("{at}: screen node has neither `type` nor `component`"));
+    assert!(
+        registry_types.contains(ty),
+        "{at}: component type '{ty}' is not in the shared component_registry — screens may only use registered kinds (ADR-0033)"
+    );
+
+    let mut props: Vec<(String, EmittedProp)> = Vec::new();
+    let mut children: Vec<String> = Vec::new();
+    let pad = "    ".repeat(indent);
+
+    for (k, v) in m {
+        let key = match k.as_str() {
+            Some("type") => continue,
+            Some(s) => s,
+            None => continue,
+        };
+        match v {
+            // Child-carrying shapes: a component sequence under a whitelisted key, or the chrome
+            // `slots` map (each slot is a component sequence, flattened in slot order).
+            Value::Sequence(seq) if CHILD_KEYS.contains(&key) && is_component_seq(seq) => {
+                for (i, item) in seq.iter().enumerate() {
+                    children.push(emit_screen_node(
+                        item,
+                        globals,
+                        registry_types,
+                        &format!("{at}/{key}[{i}]"),
+                        indent + 1,
+                    ));
+                }
+            }
+            Value::Mapping(slots) if key == "slots" => {
+                for (sk, sv) in slots {
+                    let slot = sk.as_str().unwrap_or("?");
+                    if let Some(seq) = sv.as_sequence() {
+                        for (i, item) in seq.iter().enumerate() {
+                            children.push(emit_screen_node(
+                                item,
+                                globals,
+                                registry_types,
+                                &format!("{at}/slots.{slot}[{i}]"),
+                                indent + 1,
+                            ));
+                        }
+                    }
+                }
+            }
+            other => flatten_screen_props(key, other, &mut props),
+        }
+    }
+
+    let props_lit = if props.is_empty() {
+        "&[]".to_string()
+    } else {
+        let items: Vec<String> = props
+            .iter()
+            .map(|(k, p)| {
+                let val = match p {
+                    EmittedProp::Text(s) => format!("PropValue::Text(\"{}\")", rust_str(s)),
+                    EmittedProp::I18n(s) => format!("PropValue::I18n(\"{}\")", rust_str(s)),
+                    EmittedProp::Binding(s) => format!("PropValue::Binding(\"{}\")", rust_str(s)),
+                };
+                format!("(\"{}\", {})", rust_str(k), val)
+            })
+            .collect();
+        format!("&[{}]", items.join(", "))
+    };
+    let children_lit = if children.is_empty() {
+        "&[]".to_string()
+    } else {
+        format!("&[\n{}\n{pad}]", children.join(",\n"))
+    };
+    format!(
+        "{pad}Node {{ kind: ComponentKind::{}, props: {props_lit}, children: {children_lit} }}",
+        pascal_snake(ty)
+    )
+}
+
+/// Emit `crates/web/src/generated/screens.rs` — the GENERATED screen trees (#87, split 4/4 of
+/// #21): every `screens/*.yaml` surface as a static table of `Screen`s (route, roles,
+/// `data_requirements` bound to `ResolverKey`, and the component tree as `Node` data). The DSL
+/// stays the source of truth; the renderer walks these trees — there is no runtime JSON screen
+/// delivery yet (that ADR-0033 contract stays deferred; this emitter realizes it as build-time
+/// codegen instead).
+fn emit_web_screens(model: &Model) -> String {
+    let registry_types: BTreeSet<String> = model
+        .defs
+        .get("screens/restaurant_frontoffice.yaml")
+        .and_then(|v| v.get("component_registry"))
+        .and_then(|v| v.as_mapping())
+        .map(|reg| {
+            reg.iter()
+                .filter_map(|(_, gv)| gv.as_sequence())
+                .flatten()
+                .filter_map(|t| t.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut surfaces: Vec<&String> = model.defs.keys().filter(|k| k.starts_with("screens/")).collect();
+    surfaces.sort();
+
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/screens/*.yaml (#/screens) — do not edit\n// by hand. The SDUI SCREEN TREES (#87, ADR-0033): one module per surface, each screen's route,\n// roles, resolver bindings and component tree as static data. The renderer walks these trees and\n// dispatches on `ComponentKind`; `sdui: false` screens carry an EMPTY tree (their markup is\n// hand-written — checkout.rs / tracking.rs) but still register their route for the router.\n\nuse super::data_layer::ResolverKey;\nuse super::registry::ComponentKind;\n\n/// One flattened prop on a screen node: literal text, a translation key (resolve via the i18n\n/// catalog), or a `{{ path }}` binding into the screen's resolved resolver data.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum PropValue {\n    Text(&'static str),\n    I18n(&'static str),\n    Binding(&'static str),\n}\n\n/// One renderable node of a screen tree.\n#[derive(Debug, Clone, Copy)]\npub struct Node {\n    pub kind: ComponentKind,\n    /// Dotted-path props flattened from the DSL (`empty_state.title`, `action.type`, …).\n    pub props: &'static [(&'static str, PropValue)],\n    pub children: &'static [Node],\n}\n\n/// One screen of a surface.\n#[derive(Debug, Clone, Copy)]\npub struct Screen {\n    pub id: &'static str,\n    pub route: &'static str,\n    /// UserType tokens (scalars.yaml#/UserType) admitted to this screen.\n    pub roles: &'static [&'static str],\n    pub requires_auth: bool,\n    /// False = deliberately NOT SDUI-rendered (hand-written page); tree is empty.\n    pub sdui: bool,\n    pub data_requirements: &'static [ResolverKey],\n    pub tree: &'static [Node],\n}\n\nimpl Node {\n    /// The first value of a dotted prop path, if present.\n    pub fn prop(&self, key: &str) -> Option<PropValue> {\n        self.props.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)\n    }\n}\n",
+    );
+
+    for sf in &surfaces {
+        let stem = sf.trim_start_matches("screens/").trim_end_matches(".yaml").to_string();
+        let doc = &model.defs[*sf];
+        let globals = doc.get("global_components").and_then(|v| v.as_mapping());
+        let screens = match doc.get("screens").and_then(|v| v.as_sequence()) {
+            Some(s) => s,
+            None => continue,
+        };
+        out.push_str(&format!("\n/// `specs/{sf}` — {} screen(s).\npub mod {stem} {{\n    use super::*;\n\n    pub const SCREENS: &[Screen] = &[\n", screens.len()));
+        for s in screens {
+            let id = s.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            let at = format!("{sf}/screens/{id}");
+            let route = s.get("route").and_then(|v| v.as_str()).unwrap_or_else(|| panic!("{at}: screen has no route"));
+            let sdui = s.get("sdui").and_then(|v| v.as_bool()).unwrap_or(true);
+            let requires_auth = s.get("requires_auth").and_then(|v| v.as_bool()).unwrap_or(false);
+            let roles: Vec<String> = s
+                .get("roles")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| seq.iter().filter_map(|r| r.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            let roles_lit: Vec<String> = roles.iter().map(|r| format!("\"{}\"", rust_str(r))).collect();
+            let reqs: Vec<String> = s
+                .get("data_requirements")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|r| r.as_str())
+                        .map(|key| {
+                            // Validator §11 proved the key names a declared resolver; the union
+                            // emitter proved cross-surface identity — so from_key is total here.
+                            format!("ResolverKey::{}", dotted_variant(key))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let tree = if !sdui {
+                "&[]".to_string()
+            } else {
+                let nodes: Vec<String> = s
+                    .get("components")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .enumerate()
+                            .map(|(i, n)| {
+                                emit_screen_node(n, globals, &registry_types, &format!("{at}/components[{i}]"), 3)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if nodes.is_empty() {
+                    "&[]".to_string()
+                } else {
+                    format!("&[\n{}\n        ]", nodes.join(",\n"))
+                }
+            };
+            out.push_str(&format!(
+                "        Screen {{\n            id: \"{}\",\n            route: \"{}\",\n            roles: &[{}],\n            requires_auth: {},\n            sdui: {},\n            data_requirements: &[{}],\n            tree: {},\n        }},\n",
+                rust_str(id),
+                rust_str(route),
+                roles_lit.join(", "),
+                requires_auth,
+                sdui,
+                reqs.join(", "),
+                tree
+            ));
+        }
+        out.push_str("    ];\n}\n");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -13674,6 +13952,98 @@ types:
         let mut issues = Vec::new();
         validate_resolver_args(&m, &mut issues, "screens/x.yaml/resolvers/r/args", "restaurants", &args);
         assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    // ─── screen-tree emitter (#87) ──────────────────────────────────────────────────────────────
+
+    /// A minimal surface exercising: global-chrome expansion, prop flattening (i18n ref, binding,
+    /// literal, nested config with a non-component `type`), child recursion, and `sdui: false`.
+    fn screens_fixture() -> Model {
+        inline_model(&[
+            (
+                "screens/restaurant_frontoffice.yaml",
+                r#"
+component_registry:
+  layout: [section, tab_bar]
+  chrome: [sticky_header, page_header]
+  content: [text]
+  order: [order_list]
+  inputs: [button, logo]
+resolvers:
+  orders.mine: { query: { $ref: 'api.yaml#/queries/orders' } }
+global_components:
+  topbar:
+    type: sticky_header
+    slots:
+      left: [{ type: logo, asset: "/assets/logo.svg" }]
+screens:
+  - id: queue
+    roles: [RESTAURANT]
+    route: "/"
+    sdui: true
+    requires_auth: true
+    data_requirements: [orders.mine]
+    components:
+      - { component: topbar }
+      - { type: page_header, title: { $ref: 'x.translations.yaml#/q.title' } }
+      - type: tab_bar
+        filters:
+          - { id: sort, type: dropdown }
+      - type: order_list
+        items: "{{ orders }}"
+        empty_state: { title: { $ref: 'x.translations.yaml#/q.empty' } }
+      - type: section
+        content:
+          - { type: button, label: { $ref: 'x.translations.yaml#/q.go' }, variant: primary }
+  - id: pay
+    roles: [CUSTOMER]
+    route: "/pay"
+    sdui: false
+    components:
+      - { type: text, value: "never emitted" }
+"#,
+            ),
+            ("api.yaml", "queries:\n  orders:\n    returns: { type: string }\n"),
+        ])
+    }
+
+    #[test]
+    fn screen_trees_expand_chrome_flatten_props_and_bind_resolvers() {
+        let out = emit_web_screens(&screens_fixture());
+        // The surface module + both screens.
+        assert!(out.contains("pub mod restaurant_frontoffice"), "{out}");
+        assert!(out.contains("id: \"queue\""));
+        // { component: topbar } expanded to its sticky_header definition, slots flattened to children.
+        assert!(out.contains("ComponentKind::StickyHeader"));
+        assert!(out.contains("ComponentKind::Logo"));
+        // Prop kinds: i18n ref (dotted key kept whole), binding, literal, and the flattened
+        // nested empty_state config.
+        assert!(out.contains("PropValue::I18n(\"q.title\")"));
+        assert!(out.contains("PropValue::Binding(\"orders\")"));
+        assert!(out.contains("(\"variant\", PropValue::Text(\"primary\"))"));
+        assert!(out.contains("(\"empty_state.title\", PropValue::I18n(\"q.empty\"))"));
+        // `filters[].type: dropdown` is CONFIG, not a child component — flattened, not dispatched.
+        assert!(out.contains("(\"filters.0.type\", PropValue::Text(\"dropdown\"))"), "{out}");
+        // data_requirements bound through ResolverKey.
+        assert!(out.contains("data_requirements: &[ResolverKey::OrdersMine]"));
+        // sdui:false → empty tree but the route still registers.
+        assert!(out.contains("route: \"/pay\""));
+        let pay = out.split("id: \"pay\"").nth(1).expect("pay screen emitted");
+        assert!(pay.contains("tree: &[]"), "non-SDUI screens carry no tree");
+    }
+
+    #[test]
+    #[should_panic(expected = "not in the shared component_registry")]
+    fn unregistered_component_type_aborts_the_emitter() {
+        let mut m = screens_fixture();
+        m.defs.insert(
+            "screens/rogue.yaml".into(),
+            serde_yaml::from_str(
+                "screens:\n  - id: r\n    route: \"/r\"\n    components:\n      - { type: not_registered }\n",
+            )
+            .expect("valid yaml"),
+        );
+        emit_web_screens(&m);
     }
 
     #[test]
