@@ -6,6 +6,12 @@
 
 Accepted (amends ADR-0042 — the *build/deploy mechanism* only; hosting decision unchanged)
 
+> **Superseded (image path only), 2026-07-22 — [ADR-20260722-225945](20260722-225945-captain-company-umbrella-org-rename.md).**
+> The GHCR namespace follows the GitHub org, which was renamed `Captain-Food` → `TheCaptainCompany`.
+> Wherever this ADR shows `ghcr.io/captain-food/captain-food`, the live path is now
+> **`ghcr.io/thecaptaincompany/captain-food`**. The mechanism (CI builds → GHCR → Render pulls via the
+> deploy hook) is unchanged; only the image path moved.
+
 ## Context
 
 ADR-0042 hosts the Axum BFF on **Render** and builds it there from the repo via the cargo-chef
