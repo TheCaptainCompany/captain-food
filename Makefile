@@ -5,6 +5,11 @@
 #
 # The codegen is the Rust tool (tools/codegen-rs, ADR-0034); it needs a local Rust toolchain (`cargo`).
 
+# PORTABILITY: keep RECIPE lines pure ASCII (use `--`, `->`, `|` rather than em dashes/arrows).
+# Native Windows GNU Make hands recipes to Cygwin's `sh` with broken quoting as soon as the line
+# contains a byte > 127: `sh` then receives the whole recipe as ONE word and reports
+# "$'...': command not found". Comments and $(shell ...) are fine; only recipe text matters.
+
 CODEGEN_RS = tools/codegen-rs
 
 # How to invoke cargo. Plain `cargo` everywhere (Linux, macOS, CI, Git-Bash/MSYS) — EXCEPT under
@@ -25,7 +30,7 @@ endif
 
 help:
 	@echo "targets: validate generate typecheck review gate night-loop budgeted-loop budget-check docs"
-	@echo "         c4-render (Structurizr Lite + docs/ADRs) · c4-export (validate/export DSL)"
+	@echo "         c4-render (Structurizr Lite + docs/ADRs) | c4-export (validate/export DSL)"
 	@echo "         (validate-schema test-behaviour test-observability c4-validate -> all fold into 'validate')"
 	@echo "         budgeted-loop runs the night loop under a 30-min/week budget (.claude/loop-budget.json)"
 	@echo "         codegen = tools/codegen-rs (Rust, ADR-0034); needs cargo. 'rust' = build+test alias."
@@ -57,7 +62,7 @@ generate:
 # Whole-tree diff (matches CI): generated output spans specs/generated + specs/database.md AND the
 # generated Rust under crates/**/generated. Run on a clean tree — it's the gate, not a mid-edit helper.
 check-drift: generate
-	@git diff --quiet --ignore-cr-at-eol || { echo "check-drift: generated artifacts drifted — run 'make generate' and commit the regenerated files."; git --no-pager diff --ignore-cr-at-eol --stat; exit 1; }
+	@git diff --quiet --ignore-cr-at-eol || { echo "check-drift: generated artifacts drifted -- run 'make generate' and commit the regenerated files."; git --no-pager diff --ignore-cr-at-eol --stat; exit 1; }
 
 # --- Rust codegen build/test aliases (ADR-0034). ---
 rust-build:
@@ -92,7 +97,7 @@ budgeted-loop:
 		bash .claude/hooks/loop-budget.sh stop; \
 		exit $$rc; \
 	else \
-		echo "budgeted-loop: skipped — weekly budget exhausted (resets Monday)."; \
+		echo "budgeted-loop: skipped -- weekly budget exhausted (resets Monday)."; \
 	fi
 
 docs: generate
@@ -113,14 +118,14 @@ c4-export: generate
 	elif command -v docker >/dev/null 2>&1; then \
 		MSYS_NO_PATHCONV=1 docker run --rm -v "$$(pwd -W 2>/dev/null || pwd)/$(SCRATCH):/work" structurizr/structurizr export -workspace /work/c4.generated.dsl -format mermaid -output /work; \
 	else \
-		echo "c4-export: no structurizr-cli or Docker — skipped. DSL is at $(DSL)"; \
+		echo "c4-export: no structurizr-cli or Docker -- skipped. DSL is at $(DSL)"; \
 	fi
 
 # Open the model in Structurizr Lite (SystemContext / Containers / ApiComponents views) with the ADRs and
 # docs embedded. Stages a docs-enriched workspace under .structurizr/ so the portable $(DSL) stays clean.
 c4-render: generate
-	@command -v docker >/dev/null 2>&1 || { echo "c4-render: Docker not found — skipped. DSL is at $(DSL)"; exit 0; }
+	@command -v docker >/dev/null 2>&1 || { echo "c4-render: Docker not found -- skipped. DSL is at $(DSL)"; exit 0; }
 	@rm -rf .structurizr && mkdir -p .structurizr && cp $(DSL) .structurizr/workspace.dsl && cp -r docs .structurizr/docs
 	@node -e "const fs=require('fs'),f='.structurizr/workspace.dsl';let s=fs.readFileSync(f,'utf8');const i=s.lastIndexOf('}');fs.writeFileSync(f,s.slice(0,i)+'  !docs docs\n  !adrs docs/adr\n'+s.slice(i));"
-	@echo "Structurizr Lite → http://localhost:8080  (Ctrl+C to stop)"
+	@echo "Structurizr Lite -> http://localhost:8080  (Ctrl+C to stop)"
 	MSYS_NO_PATHCONV=1 docker run --rm -p 8080:8080 -v "$$(pwd -W 2>/dev/null || pwd)/.structurizr:/usr/local/structurizr" structurizr/lite
