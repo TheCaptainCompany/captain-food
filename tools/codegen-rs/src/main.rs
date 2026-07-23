@@ -12827,6 +12827,109 @@ struct ResolverDef {
     /// Static args the DSL pins on the binding (e.g. `restaurants.featured` → `listKey: RECOMMENDED`).
     args: Vec<(String, String)>,
     gap: Option<String>,
+    /// The GraphQL selection set for the bound query's return type, expanded from the api.yaml
+    /// type registry — `None` for `gap` bindings and scalar-returning queries.
+    selection: Option<String>,
+}
+
+/// How deep a generated selection set may nest OBJECT fields, root type included. The deepest
+/// real chain in api.yaml today is 4 object levels (Order → items → selectedOptions → price →
+/// amountCents), so 8 leaves comfortable headroom for spec growth while still forcing
+/// termination — the on-path cycle guard in `selection_fields` already stops every true cycle,
+/// but only a hard bound caps how deep an ACYCLIC (diamond-re-expanding) type graph may blow the
+/// document up.
+const SELECTION_MAX_DEPTH: usize = 8;
+
+/// The `file#pointer` identity of a `$ref` target — the cycle-guard key: the SAME type reached
+/// twice on one expansion path means the spec recursed, so the descent must stop there.
+fn selection_ref_key(rf: &str, ctx: &str) -> Option<String> {
+    let file = ref_target_file(rf, ctx)?;
+    Some(format!("{}#{}", file, parse_ref(rf)?.path.join("/")))
+}
+
+/// Expand one object type's `properties` into a GraphQL selection set (`{ a b c { … } }`).
+///
+/// Leaves (inline primitives, `scalars.yaml` refs) are selected by name; object-typed fields
+/// (`#/types/*`, `entities.yaml#/*`) recurse with `depth - 1` and the ref pushed on `path`.
+/// TRUNCATION RULE: when the descent stops (depth bound reached, cycle on the path, or a child
+/// whose own expansion came up empty), the field is OMITTED — an object field with no selection
+/// set (`field {}` or a bare `field`) is invalid GraphQL, so "less data" always beats "an
+/// unexecutable document". An object that loses every field this way returns `None`, which makes
+/// its parent omit it in turn (the rule bubbles up).
+fn selection_fields(
+    model: &Model,
+    def: &Value,
+    ctx: &str,
+    depth: usize,
+    path: &mut Vec<String>,
+) -> Option<String> {
+    if depth == 0 {
+        return None; // bound reached — the caller omits the field (see TRUNCATION RULE above)
+    }
+    let props = def.get("properties").and_then(|p| p.as_mapping())?;
+    let mut parts: Vec<String> = Vec::new();
+    for (k, p) in props {
+        let name = match k.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        // `array: true` never changes the selection; a JSON-Schema `type: array` wraps the real
+        // node in `items`, so unwrap to it (entities.yaml uses that spelling).
+        let node = if p.get("type").and_then(|t| t.as_str()) == Some("array") {
+            p.get("items").unwrap_or(p)
+        } else {
+            p
+        };
+        let Some(rf) = node.get("$ref").and_then(|r| r.as_str()) else {
+            parts.push(name.to_string()); // inline primitive (boolean/string/integer/number)
+            continue;
+        };
+        let Some(file) = ref_target_file(rf, ctx) else {
+            continue; // unresolvable ref — §1b flags it; never emit a field we cannot verify
+        };
+        if file == "scalars.yaml" {
+            parts.push(name.to_string()); // domain scalar or enum — a GraphQL leaf
+            continue;
+        }
+        let Some(target) = resolve_ref(model, rf, ctx) else {
+            continue;
+        };
+        if target.get("properties").is_none() {
+            parts.push(name.to_string()); // field-less target renders as a leaf in the SDL
+            continue;
+        }
+        let Some(key) = selection_ref_key(rf, ctx) else {
+            continue;
+        };
+        if path.contains(&key) {
+            continue; // cycle — omit rather than emit an unexecutable bare object field
+        }
+        path.push(key);
+        let sub = selection_fields(model, target, &file, depth - 1, path);
+        path.pop();
+        if let Some(sub) = sub {
+            parts.push(format!("{} {}", name, sub));
+        }
+    }
+    if parts.is_empty() {
+        return None; // nothing selectable survived — bubble the omission up
+    }
+    Some(format!("{{ {} }}", parts.join(" ")))
+}
+
+/// The selection set an `api.yaml` query needs: resolve its `returns` ref (list/nullable wrappers
+/// are selection-irrelevant) into the type registry and expand it. `None` when the query returns
+/// a scalar (no selection set is legal there) or does not resolve (a spec smell §1b reports).
+fn query_selection(model: &Model, query: &str) -> Option<String> {
+    let q = model.defs.get("api.yaml")?.get("queries")?.get(query)?;
+    let rf = q.get("returns")?.get("$ref")?.as_str()?;
+    let file = ref_target_file(rf, "api.yaml")?;
+    if file == "scalars.yaml" {
+        return None; // scalar-returning query — selected bare by construction
+    }
+    let target = resolve_ref(model, rf, "api.yaml")?;
+    let mut path = vec![selection_ref_key(rf, "api.yaml")?];
+    selection_fields(model, target, &file, SELECTION_MAX_DEPTH, &mut path)
 }
 
 /// One action binding, flattened from `screens/*.yaml#/actions/<key>`.
@@ -12890,9 +12993,14 @@ fn collect_web_data_layer(model: &Model) -> (Vec<ResolverDef>, Vec<ActionDef>) {
                     Some(s) => s.to_string(),
                     None => continue,
                 };
+                let query = v.get("query").and_then(ref_op_name);
+                // Derived from the query alone, so identical queries always carry identical
+                // selections — no need to fold it into the cross-surface fingerprint.
+                let selection = query.as_deref().and_then(|q| query_selection(model, q));
                 let def = ResolverDef {
                     key: key.clone(),
-                    query: v.get("query").and_then(ref_op_name),
+                    query,
+                    selection,
                     args: v
                         .get("args")
                         .and_then(|a| a.as_mapping())
@@ -12957,16 +13065,18 @@ fn collect_web_data_layer(model: &Model) -> (Vec<ResolverDef>, Vec<ActionDef>) {
 
 /// Emit `crates/web/src/generated/data_layer.rs` — the GENERATED SDUI **data layer**: the resolver
 /// (read) and action (write) allowlists from `screens/*.yaml#/resolvers` + `#/actions`, each carrying
-/// the `api.yaml` operation it binds. The renderer dispatches on these enums, so a screen can only
-/// name a resolver/action the client actually implements AND the API actually serves — the same rule
-/// `ComponentKind` enforces for markup (ADR-0033, codegen roadmap item 6).
+/// the `api.yaml` operation it binds — and, for resolvers, the SELECTION SET expanded from that
+/// query's return type in the api.yaml type registry (`query_selection`), so the client's documents
+/// are schema-derived rather than guessed. The renderer dispatches on these enums, so a screen can
+/// only name a resolver/action the client actually implements AND the API actually serves — the same
+/// rule `ComponentKind` enforces for markup (ADR-0033, codegen roadmap item 6).
 ///
 /// `gap:` entries (UI needs with no backing operation yet) are emitted as explicitly UNBOUND rather
 /// than omitted, so referencing one fails closed at the dispatcher instead of silently no-op'ing.
 fn emit_web_data_layer(model: &Model) -> String {
     let (resolvers, actions) = collect_web_data_layer(model);
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/screens/*.yaml (#/resolvers, #/actions)\n// — do not edit by hand. The SDUI DATA LAYER allowlist (ADR-0033, codegen roadmap item 6): reads\n// bind to api.yaml queries, writes to api.yaml mutations, and the renderer dispatches on these\n// enums — so a screen can only name data the API serves. `gap` entries are UNBOUND on purpose:\n// they fail closed at the dispatcher instead of silently doing nothing.\n\nuse serde::{Deserialize, Serialize};\n",
+        "// GENERATED by the Captain.Food codegen from specs/screens/*.yaml (#/resolvers, #/actions)\n// — do not edit by hand. The SDUI DATA LAYER allowlist (ADR-0033, codegen roadmap item 6): reads\n// bind to api.yaml queries (each carrying its selection set expanded from the api.yaml type\n// registry), writes to api.yaml mutations, and the renderer dispatches on these enums — so a\n// screen can only name data the API serves. `gap` entries are UNBOUND on purpose:\n// they fail closed at the dispatcher instead of silently doing nothing.\n\nuse serde::{Deserialize, Serialize};\n",
     );
 
     // ── Resolvers (reads) ────────────────────────────────────────────────────────────────────
@@ -13016,6 +13126,19 @@ fn emit_web_data_layer(model: &Model) -> String {
     for r in &resolvers {
         let v = match &r.query {
             Some(q) => format!("Some(\"{}\")", rust_str(q)),
+            None => "None".to_string(),
+        };
+        out.push_str(&format!("            ResolverKey::{} => {},\n", dotted_variant(&r.key), v));
+    }
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str("    /// The GraphQL selection set for the bound query's return type, EXPANDED from the\n");
+    out.push_str("    /// api.yaml type registry (depth-bounded and cycle-guarded in the codegen) — `None`\n");
+    out.push_str("    /// only for `gap` bindings and scalar-returning queries, which need no selection set.\n");
+    out.push_str("    pub fn selection(&self) -> Option<&'static str> {\n        match self {\n");
+    for r in &resolvers {
+        let v = match &r.selection {
+            Some(s) => format!("Some(\"{}\")", rust_str(s)),
             None => "None".to_string(),
         };
         out.push_str(&format!("            ResolverKey::{} => {},\n", dotted_variant(&r.key), v));
@@ -13161,6 +13284,118 @@ mod tests {
         assert_eq!(ref_op_name(&node).as_deref(), Some("addCartLine"));
         let plain: serde_yaml::Value = serde_yaml::from_str("gap: 'nothing binds this'").expect("parses");
         assert_eq!(ref_op_name(&plain), None);
+    }
+
+    // ─── data-layer selection sets (#80) ────────────────────────────────────────────────────────
+
+    /// A minimal api.yaml/scalars.yaml/entities.yaml model exercising every selection shape:
+    /// inline primitives, scalar refs, entity value objects (with entity-LOCAL refs and the
+    /// `type: array` + `items` spelling), a SELF-recursive type, and a deep acyclic chain.
+    fn selection_fixture() -> Model {
+        let mut defs = BTreeMap::new();
+        let y = |s: &str| serde_yaml::from_str::<Value>(s).expect("valid yaml");
+        defs.insert(
+            "scalars.yaml".into(),
+            y("NodeId: { type: string }\nMoneyCents: { type: integer }\nCurrencyCode: { type: string }\n"),
+        );
+        defs.insert(
+            "entities.yaml".into(),
+            y(r#"
+Money:
+  type: object
+  properties:
+    amountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+    currency: { $ref: 'scalars.yaml#/CurrencyCode' }
+Line:
+  type: object
+  properties:
+    unitPrice: { $ref: '#/Money' }
+    options:
+      type: array
+      items: { $ref: '#/Money' }
+"#),
+        );
+        // `nodes` recurses (Node → next → Node); `cart` mixes shapes; `deep` is a 10-level
+        // acyclic chain (deeper than SELECTION_MAX_DEPTH = 8) whose tail must be truncated.
+        let mut api = String::from(
+            r#"
+types:
+  Node:
+    properties:
+      id: { $ref: 'scalars.yaml#/NodeId' }
+      next: { $ref: '#/types/Node', nullable: true }
+  Loop:
+    properties:
+      inner: { $ref: '#/types/Loop', nullable: true }
+  Cart:
+    properties:
+      id: { $ref: 'scalars.yaml#/NodeId' }
+      open: { type: boolean }
+      lines: { $ref: 'entities.yaml#/Line', array: true }
+      dead: { $ref: '#/types/Loop', nullable: true }
+"#,
+        );
+        for i in 1..=10 {
+            api.push_str(&format!(
+                "  D{i}:\n    properties:\n      tag{i}: {{ type: string }}\n{}",
+                if i < 10 { format!("      child: {{ $ref: '#/types/D{}' }}\n", i + 1) } else { String::new() }
+            ));
+        }
+        api.push_str(
+            r#"queries:
+  node:
+    returns: { $ref: '#/types/Node', nullable: true }
+  cart:
+    returns: { $ref: '#/types/Cart', nullable: true }
+  deep:
+    returns: { $ref: '#/types/D1' }
+  tag:
+    returns: { $ref: 'scalars.yaml#/NodeId' }
+"#,
+        );
+        defs.insert("api.yaml".into(), y(&api));
+        Model { defs }
+    }
+
+    #[test]
+    fn selection_terminates_on_a_type_cycle_and_omits_the_recursive_field() {
+        let m = selection_fixture();
+        // Node → next → Node is a cycle: the descent stops and `next` is OMITTED (a bare object
+        // field would be invalid GraphQL), leaving only the scalar.
+        assert_eq!(query_selection(&m, "node").as_deref(), Some("{ id }"));
+    }
+
+    #[test]
+    fn selection_expands_entities_arrays_and_drops_a_field_with_nothing_selectable() {
+        let m = selection_fixture();
+        // `lines` expands through entities.yaml (entity-LOCAL `#/Money` refs + the
+        // `type: array` + `items` spelling); `dead` (a pure self-cycle with no leaves) collapses
+        // to an EMPTY selection and is omitted entirely — the omission bubbles up.
+        assert_eq!(
+            query_selection(&m, "cart").as_deref(),
+            Some(
+                "{ id open lines { unitPrice { amountCents currency } options { amountCents currency } } }"
+            )
+        );
+    }
+
+    #[test]
+    fn selection_truncated_at_the_depth_bound_omits_the_object_field_not_emits_it_bare() {
+        let m = selection_fixture();
+        let sel = query_selection(&m, "deep").expect("object-typed query expands");
+        // The chain is 10 levels; the bound is SELECTION_MAX_DEPTH = 8. Level 8's `child` would
+        // start level 9, which the bound refuses — so D8 keeps its scalar and OMITS `child`.
+        assert!(sel.contains("tag8"), "level at the bound keeps its leaves: {sel}");
+        assert!(!sel.contains("tag9"), "level past the bound must be truncated: {sel}");
+        // The truncated object field is dropped, never emitted bare/empty (invalid GraphQL).
+        assert!(!sel.contains("child }"), "no bare object field: {sel}");
+        assert!(!sel.contains("{ }") && !sel.contains("{}"), "no empty selection set: {sel}");
+    }
+
+    #[test]
+    fn scalar_returning_query_needs_no_selection_set() {
+        let m = selection_fixture();
+        assert_eq!(query_selection(&m, "tag"), None);
     }
 
     #[test]

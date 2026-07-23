@@ -11,8 +11,10 @@
 //!     [`ResolverError::GapBinding`] instead of silently rendering nothing (the rule stated in the
 //!     generated file's header).
 //!
-//! Document construction is CONVENTION-DERIVED, not schema-derived — see [`execute_resolver`] for
-//! the honest statement of what that does and does not guarantee.
+//! Documents are assembled from two sources: the OPERATION SHAPE (name + input type) follows the
+//! api.yaml naming conventions, while the SELECTION SET is GENERATED per resolver from the
+//! api.yaml type registry ([`ResolverKey::selection`]) — see [`execute_resolver`] for the honest
+//! statement of what that does and does not guarantee.
 
 use serde_json::{json, Map, Value};
 
@@ -162,15 +164,16 @@ pub enum ResolverError {
 /// purpose). Everything lands under the single `$input` variable per the api.yaml convention
 /// (`<Query>QueryInput` — args are never inlined on the field).
 ///
-/// HONESTY NOTE on the document (do not mistake this for type safety): the query text is derived
-/// from naming CONVENTIONS frozen in api.yaml — operation `restaurants` takes
-/// `input: RestaurantsQueryInput` — not from the schema itself, and this split has no generated
-/// selection sets. So: the two transient read models whose fields api.yaml pins verbatim
-/// (`Operation`, `PaymentIntent` — see [`selection_for`]) get a real selection set and WORK against
-/// the live server (they are what the two-step write flow needs); every other resolver requests the
-/// operation BARE and returns the raw JSON subtree — the live server will reject object-typed ones
-/// until the codegen emits typed selection sets (a later split). The allowlist/gap enforcement and
-/// the variable contract are what this layer guarantees today.
+/// HONESTY NOTE on the document (do not mistake this for full schema-derivation): the OPERATION
+/// SHAPE is still naming-CONVENTION-derived — operation `restaurants` takes
+/// `input: RestaurantsQueryInput` because api.yaml freezes that convention, not because the SDL was
+/// read. The SELECTION SET however is GENERATED per resolver from the api.yaml type registry
+/// ([`ResolverKey::selection`]): every query-bound resolver expands its return type's full field
+/// tree (depth-bounded and cycle-guarded in the codegen; FK navigation edges are not selected), so
+/// every one of them builds a VALID document and can run against the live server. The only
+/// resolvers that cannot run live are the declared `gap:` bindings (`promotions.active`,
+/// `dishes.search`, `rewards.balance`) — they bind no query at all and fail closed with
+/// [`ResolverError::GapBinding`] before any network.
 pub async fn execute_resolver(
     transport: &dyn Transport,
     key: ResolverKey,
@@ -192,28 +195,13 @@ pub async fn execute_resolver(
     }
     input.extend(extra_variables);
 
-    let document = query_document(operation, !input.is_empty(), selection_for(key));
+    let document = query_document(operation, !input.is_empty(), key.selection());
     let variables = if input.is_empty() { json!({}) } else { json!({ "input": input }) };
 
     let data = transport.execute(&document, variables).await?;
     match data.get(operation) {
         Some(subtree) => Ok(subtree.clone()),
         None => Err(ResolverError::MissingOperation { operation }),
-    }
-}
-
-/// The selection sets we can honestly hardcode: NON-PROJECTED transient types whose fields api.yaml
-/// pins verbatim on the acceptance-first contract (they cannot drift without an ADR changing the
-/// write model itself). Everything else returns `None` → requested bare (see `execute_resolver`).
-fn selection_for(key: ResolverKey) -> Option<&'static str> {
-    match key {
-        // api.yaml `#/types/Operation` — the poll target of every two-step write (#17).
-        ResolverKey::OperationStatusByMessage => {
-            Some("{ messageId correlationId status errorCode message occurredAt }")
-        }
-        // api.yaml `#/types/PaymentIntent` — the checkout read (split 3 consumes it).
-        ResolverKey::PaymentStatusByOrder => Some("{ paymentIntentId clientSecret status }"),
-        _ => None,
     }
 }
 
@@ -332,18 +320,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn variable_free_resolver_requests_the_operation_bare() {
+    async fn variable_free_resolver_still_selects_its_generated_field_tree() {
         let fake = FakeTransport::scripted(vec![Ok(json!({ "me": null }))]);
         execute_resolver(&fake, ResolverKey::MeProfile, Map::new()).await.unwrap();
         let (document, variables) = fake.call(0);
-        assert_eq!(document, "query Resolver { me }");
+        // No args → no $input declaration, but the CustomerProfile selection set is still there
+        // (a bare `{ me }` would be invalid GraphQL — CustomerProfile is an object type).
+        assert!(!document.contains("$input"), "{document}");
+        assert!(document.starts_with("query Resolver { me { "), "{document}");
+        assert!(document.contains("customerId"), "{document}");
         assert_eq!(variables, json!({}));
     }
 
+    #[test]
+    fn every_query_bound_resolver_carries_a_selection_set() {
+        // Every api.yaml query the screens bind today returns an OBJECT type, so a bound resolver
+        // without a selection set would build an invalid document — the generated allowlist must
+        // never put us there (selection() is None only for gaps / scalar returns).
+        for key in ResolverKey::ALL {
+            assert_eq!(
+                key.query().is_some(),
+                key.selection().is_some(),
+                "resolver `{}` breaks the query↔selection pairing",
+                key.as_str()
+            );
+        }
+    }
+
     #[tokio::test]
-    async fn operation_status_gets_its_pinned_selection_set() {
-        // The two-step write flow depends on this resolver actually working — its selection set is
-        // the api.yaml-pinned Operation shape, errorCode included.
+    async fn operation_status_selects_what_the_write_dispatcher_reads() {
+        // The two-step write flow depends on this resolver actually working — the GENERATED
+        // Operation selection must keep covering what actions.rs consumes (status, errorCode,
+        // message, messageId).
         let fake = FakeTransport::scripted(vec![Ok(json!({ "operationStatus": null }))]);
         let mut vars = Map::new();
         vars.insert("messageId".into(), json!("00000000-0000-0000-0000-000000000000"));
