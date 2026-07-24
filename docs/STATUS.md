@@ -3,6 +3,28 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #94: bottom sheets — generated sheet trees, the sheet host, form-field bindings
+> + the OTP identity flow (PR #102; ADR-20260723-172013 residual 4 + #17's identity item).** The
+> DSL's `bottom_sheets:` (location picker, auth/OTP, item detail, rating — the #62 survey carrier)
+> now compile and render. (1) **Emitter**: each surface's `bottom_sheets:` emits a generated
+> `SHEETS` table (`Sheet { id, node }`, same Node trees; `sections` joined the child-key
+> whitelist); fail-closed vocabulary check caught `type: list` used unregistered by the location
+> picker — registered (content group), the same corrective class as #87's `cta_section`.
+> (2) **Renderer**: every SDUI screen mounts its surface's sheets HIDDEN after the content
+> (`data-sheet-id`; SSR + hydrate identical); real `bottom_sheet`/`list` markup; input fields carry
+> their DSL `id` on the `<input>` (the binding target). (3) **Executor**: action variables now
+> accept the sheets' BARE spelling (`action.phone`) alongside `action.variables.*`; an unresolved
+> `{{ <field>.value }}` binding travels as null AND is reported in a `data-var-bindings` map —
+> interact.rs fills those from the LIVE inputs by element id at dispatch time, and
+> `open_bottom_sheet`/`close_sheet` toggle the sheet DOM (one sheet at a time). (4) **`auth.rs`** —
+> the OTP identity flow with the COMMAND payloads as authority (split `dialingCode`/
+> `nationalNumber`, minted `customerId`, the SESSION id in the payload — the CartBindingProcess
+> contract): `request_otp` → `verify_otp` → on SUCCEEDED the `me` read is the proof; a wrong code
+> is the anticipated `InvalidOtp` rejection, native-tested end-to-end against a fake transport.
+> 36 codegen + 75 web tests, wasm32 green, `make rust` 0 errors/no drift. Residuals: `otp_input`
+> on_complete auto-submit + chip `on_change` dispatch (click wiring covers buttons only),
+> item-sheet option state, passkeys (declared gap).
+
 > ✅ **2026-07-24 — #98: tenant root serves the storefront; unclaimed slugs get the join landing
 > (PR #101; production bug found by the owner: `chezmarco.captain.food` answered 404).** The
 > storefront surface has no screen at `/` (the restaurant screen is `/r/:slug`; discovery moved to

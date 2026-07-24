@@ -127,7 +127,7 @@ actions:
 component_registry:
   layout: [screen, section, row, column, spacer, divider, horizontal_scroll, sticky_bottom_bar, conditional_section, tab_bar]
   chrome: [sticky_header, bottom_navigation, floating_action_button, back_button_header, page_header, toast_notification, overlay, bottom_sheet]
-  content: [text, image, hero_image, badge, badge_row, rating_badge, dot_separator, promo_card, cta_banner, cta_section, value_props, hero_section, info_row, opening_hours_row]   # cta_section: the partner-landing CTA block (was used unregistered — caught by the #87 emitter's fail-closed check)
+  content: [text, image, hero_image, badge, badge_row, rating_badge, dot_separator, promo_card, cta_banner, cta_section, value_props, hero_section, info_row, opening_hours_row, list]   # cta_section (#87) + list (#94, the location-picker address lists): both were used unregistered — caught by the emitter's fail-closed check
   discovery: [hero_search_bar, search_bar_active, filter_bar, category_pill, category_tile, category_grid, restaurant_card, restaurant_card_grid, restaurant_card_list, dish_row, search_results]
   catalog: [sticky_category_nav, catalog_sections, catalog_item_row, item_thumbnail, add_button, item_header, option_groups, quantity_selector]
   cart: [cart_lines, cart_line_row, quantity_stepper, promo_code_input, delivery_mode_toggle, order_summary_block, minimum_order_warning, cart_summary_mini]

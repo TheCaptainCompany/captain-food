@@ -50,7 +50,7 @@ js-sys = "0.3"                  # Object/Reflect/Promise: the Stripe.js interop 
 web-sys = { version = "0.3", features = [
     "Window", "Storage", "Location", "WebSocket", "MessageEvent", "CloseEvent",
     "Document", "Element", "HtmlElement", "MouseEvent", "Event", "EventTarget",
-    "CustomEvent", "CustomEventInit", "Node",
+    "CustomEvent", "CustomEventInit", "Node", "NodeList", "HtmlInputElement",
 ] }
 
 [features]

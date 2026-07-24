@@ -25,6 +25,15 @@ pub struct Node {
     pub children: &'static [Node],
 }
 
+/// One bottom sheet of a surface (#94): the DSL `bottom_sheets` entry as a renderable tree — the
+/// renderer mounts every sheet HIDDEN into each of the surface's screens; `open_bottom_sheet`
+/// toggles them by id.
+#[derive(Debug, Clone, Copy)]
+pub struct Sheet {
+    pub id: &'static str,
+    pub node: Node,
+}
+
 /// One screen of a surface.
 #[derive(Debug, Clone, Copy)]
 pub struct Screen {
@@ -115,6 +124,32 @@ pub mod captain_frontoffice {
             Node { kind: ComponentKind::CtaSection, props: &[("button_label", PropValue::I18n("partner.apply")), ("button_action.type", PropValue::Text("navigate")), ("button_action.route", PropValue::Text("https://restos.captain.food/onboarding")), ("button_action.target", PropValue::Text("blank"))], children: &[] }
         ],
         },
+    ];
+
+    pub const SHEETS: &[Sheet] = &[
+        Sheet { id: "location_picker", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("location_picker")), ("title", PropValue::I18n("location.title"))], children: &[
+                Node { kind: ComponentKind::SearchInput, props: &[("placeholder", PropValue::I18n("location.search_placeholder")), ("autofocus", PropValue::Text("true"))], children: &[] },
+                Node { kind: ComponentKind::List, props: &[("id", PropValue::Text("recent_addresses")), ("title", PropValue::I18n("location.recent")), ("items", PropValue::Binding("customer.recent_addresses")), ("item_action.type", PropValue::Text("set_delivery_address")), ("item_action.address", PropValue::Binding("item"))], children: &[] },
+                Node { kind: ComponentKind::List, props: &[("id", PropValue::Text("saved_addresses")), ("title", PropValue::I18n("location.saved")), ("items", PropValue::Binding("customer.saved_addresses")), ("item_action.type", PropValue::Text("set_delivery_address")), ("item_action.address", PropValue::Binding("item"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("label", PropValue::I18n("location.use_current")), ("variant", PropValue::Text("ghost")), ("icon", PropValue::Text("crosshair")), ("action.type", PropValue::Text("use_geolocation"))], children: &[] }
+            ] } },
+        Sheet { id: "auth_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("auth_sheet")), ("title", PropValue::I18n("auth.title"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("auth.body"))], children: &[] },
+                Node { kind: ComponentKind::PhoneField, props: &[("id", PropValue::Text("phone_field")), ("label", PropValue::I18n("auth.phone_label")), ("country_picker", PropValue::Text("true")), ("autofocus", PropValue::Text("true"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("send_otp_btn")), ("label", PropValue::I18n("auth.continue")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("send_otp")), ("action.phone", PropValue::Binding("phone_field.value"))], children: &[] },
+                Node { kind: ComponentKind::Divider, props: &[("label", PropValue::I18n("auth.or"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("label", PropValue::I18n("auth.passkey")), ("variant", PropValue::Text("outline")), ("icon", PropValue::Text("fingerprint")), ("visible_when", PropValue::Text("passkey_available")), ("action.type", PropValue::Text("authenticate_passkey"))], children: &[] }
+            ] } },
+        Sheet { id: "otp_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("otp_sheet")), ("title", PropValue::I18n("auth.otp_title")), ("drag_to_close", PropValue::Text("false"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("auth.otp_body"))], children: &[] },
+                Node { kind: ComponentKind::OtpInput, props: &[("id", PropValue::Text("otp_field")), ("length", PropValue::Text("6")), ("autofocus", PropValue::Text("true")), ("on_complete.type", PropValue::Text("verify_otp")), ("on_complete.code", PropValue::Binding("otp_field.value"))], children: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("visible_when", PropValue::Text("otp_error")), ("message", PropValue::Binding("otp_error_message"))], children: &[] },
+                Node { kind: ComponentKind::TextButton, props: &[("label", PropValue::I18n("auth.resend")), ("visible_when", PropValue::Text("resend_available")), ("action.type", PropValue::Text("resend_otp"))], children: &[] },
+                Node { kind: ComponentKind::Countdown, props: &[("visible_when", PropValue::Text("!resend_available")), ("label", PropValue::I18n("auth.resend_in"))], children: &[] }
+            ] } },
     ];
 }
 
@@ -212,6 +247,9 @@ pub mod restaurant_backoffice {
             Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("staff_nav")), ("items.0.id", PropValue::Text("orders")), ("items.0.label", PropValue::I18n("back.nav.orders")), ("items.0.icon", PropValue::Text("receipt")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("deliveries")), ("items.1.label", PropValue::I18n("back.nav.deliveries")), ("items.1.icon", PropValue::Text("truck")), ("items.1.route", PropValue::Text("/deliveries")), ("items.2.id", PropValue::Text("refunds")), ("items.2.label", PropValue::I18n("back.nav.refunds")), ("items.2.icon", PropValue::Text("coin")), ("items.2.route", PropValue::Text("/refunds")), ("items.3.id", PropValue::Text("satisfaction")), ("items.3.label", PropValue::I18n("back.nav.satisfaction")), ("items.3.icon", PropValue::Text("star")), ("items.3.route", PropValue::Text("/satisfaction"))], children: &[] }
         ],
         },
+    ];
+
+    pub const SHEETS: &[Sheet] = &[
     ];
 }
 
@@ -323,6 +361,53 @@ pub mod restaurant_frontoffice {
         ],
         },
     ];
+
+    pub const SHEETS: &[Sheet] = &[
+        Sheet { id: "location_picker", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("location_picker")), ("title", PropValue::I18n("location.title"))], children: &[
+                Node { kind: ComponentKind::SearchInput, props: &[("placeholder", PropValue::I18n("location.search_placeholder")), ("autofocus", PropValue::Text("true"))], children: &[] },
+                Node { kind: ComponentKind::List, props: &[("id", PropValue::Text("recent_addresses")), ("title", PropValue::I18n("location.recent")), ("items", PropValue::Binding("customer.recent_addresses")), ("item_action.type", PropValue::Text("set_delivery_address")), ("item_action.address", PropValue::Binding("item"))], children: &[] },
+                Node { kind: ComponentKind::List, props: &[("id", PropValue::Text("saved_addresses")), ("title", PropValue::I18n("location.saved")), ("items", PropValue::Binding("customer.saved_addresses")), ("item_action.type", PropValue::Text("set_delivery_address")), ("item_action.address", PropValue::Binding("item"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("label", PropValue::I18n("location.use_current")), ("variant", PropValue::Text("ghost")), ("icon", PropValue::Text("crosshair")), ("action.type", PropValue::Text("use_geolocation"))], children: &[] }
+            ] } },
+        Sheet { id: "auth_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("auth_sheet")), ("title", PropValue::I18n("auth.title"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("auth.body"))], children: &[] },
+                Node { kind: ComponentKind::PhoneField, props: &[("id", PropValue::Text("phone_field")), ("label", PropValue::I18n("auth.phone_label")), ("country_picker", PropValue::Text("true")), ("autofocus", PropValue::Text("true"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("send_otp_btn")), ("label", PropValue::I18n("auth.continue")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("send_otp")), ("action.phone", PropValue::Binding("phone_field.value"))], children: &[] },
+                Node { kind: ComponentKind::Divider, props: &[("label", PropValue::I18n("auth.or"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("label", PropValue::I18n("auth.passkey")), ("variant", PropValue::Text("outline")), ("icon", PropValue::Text("fingerprint")), ("visible_when", PropValue::Text("passkey_available")), ("action.type", PropValue::Text("authenticate_passkey"))], children: &[] }
+            ] } },
+        Sheet { id: "otp_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("otp_sheet")), ("title", PropValue::I18n("auth.otp_title")), ("drag_to_close", PropValue::Text("false"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("auth.otp_body"))], children: &[] },
+                Node { kind: ComponentKind::OtpInput, props: &[("id", PropValue::Text("otp_field")), ("length", PropValue::Text("6")), ("autofocus", PropValue::Text("true")), ("on_complete.type", PropValue::Text("verify_otp")), ("on_complete.code", PropValue::Binding("otp_field.value"))], children: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("visible_when", PropValue::Text("otp_error")), ("message", PropValue::Binding("otp_error_message"))], children: &[] },
+                Node { kind: ComponentKind::TextButton, props: &[("label", PropValue::I18n("auth.resend")), ("visible_when", PropValue::Text("resend_available")), ("action.type", PropValue::Text("resend_otp"))], children: &[] },
+                Node { kind: ComponentKind::Countdown, props: &[("visible_when", PropValue::Text("!resend_available")), ("label", PropValue::I18n("auth.resend_in"))], children: &[] }
+            ] } },
+        Sheet { id: "item_detail_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("item_detail_sheet")), ("height", PropValue::Text("90vh"))], children: &[
+                Node { kind: ComponentKind::HeroImage, props: &[("image", PropValue::Binding("item.photoUrl")), ("aspect_ratio", PropValue::Text("16/9"))], children: &[] },
+                Node { kind: ComponentKind::ItemHeader, props: &[("title", PropValue::Binding("item.name")), ("description", PropValue::Binding("item.description")), ("price", PropValue::Binding("item.price | format_currency"))], children: &[] },
+                Node { kind: ComponentKind::OptionGroups, props: &[("groups", PropValue::Binding("item.optionGroups")), ("required_label", PropValue::I18n("item.choose_one"))], children: &[] },
+                Node { kind: ComponentKind::QuantitySelector, props: &[("id", PropValue::Text("qty_selector")), ("min", PropValue::Text("1")), ("max", PropValue::Text("20")), ("value", PropValue::Text("1"))], children: &[] },
+                Node { kind: ComponentKind::TextArea, props: &[("id", PropValue::Text("item_instructions")), ("placeholder", PropValue::I18n("item.instructions_placeholder")), ("max_length", PropValue::Text("200"))], children: &[] },
+                Node { kind: ComponentKind::StickyBottomBar, props: &[], children: &[
+                    Node { kind: ComponentKind::Button, props: &[("label", PropValue::I18n("item.add_to_cart")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("add_to_cart")), ("action.item_id", PropValue::Binding("item.id")), ("action.options", PropValue::Binding("selected_options")), ("action.quantity", PropValue::Binding("qty_selector.value")), ("action.instructions", PropValue::Binding("item_instructions.value"))], children: &[] }
+                ] }
+            ] } },
+        Sheet { id: "rating_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("rating_sheet")), ("title", PropValue::I18n("rating.title"))], children: &[
+                Node { kind: ComponentKind::StarRating, props: &[("id", PropValue::Text("restaurant_rating")), ("label", PropValue::I18n("rating.food_question")), ("max", PropValue::Text("5"))], children: &[] },
+                Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("rating_tags")), ("label", PropValue::I18n("rating.tags_label")), ("options.0", PropValue::I18n("rating.tag.taste")), ("options.1", PropValue::I18n("rating.tag.portions")), ("options.2", PropValue::I18n("rating.tag.fast")), ("options.3", PropValue::I18n("rating.tag.accurate")), ("options.4", PropValue::I18n("rating.tag.packaging"))], children: &[] },
+                Node { kind: ComponentKind::TextArea, props: &[("id", PropValue::Text("rating_comment")), ("placeholder", PropValue::I18n("rating.comment_placeholder")), ("max_length", PropValue::Text("300"))], children: &[] },
+                Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("delivery_timeliness")), ("label", PropValue::I18n("rating.delivery_question")), ("visible_when", PropValue::Text("order.serviceType == 'DELIVERY'")), ("single_select", PropValue::Text("true")), ("options.0.value", PropValue::Text("ON_TIME")), ("options.0.label", PropValue::I18n("rating.delivery.on_time")), ("options.1.value", PropValue::Text("ACCEPTABLE_DELAY")), ("options.1.label", PropValue::I18n("rating.delivery.acceptable")), ("options.2.value", PropValue::Text("TOO_LATE")), ("options.2.label", PropValue::I18n("rating.delivery.too_late")), ("on_change.type", PropValue::Text("record_delivery_satisfaction")), ("on_change.variables.orderId", PropValue::Binding("sheet.data.orderId")), ("on_change.variables.restaurantId", PropValue::Binding("order.restaurantId")), ("on_change.variables.timeliness", PropValue::Binding("delivery_timeliness.value"))], children: &[] },
+                Node { kind: ComponentKind::TipAmountSelector, props: &[("id", PropValue::Text("courier_tip")), ("title", PropValue::I18n("tip.title")), ("subtitle", PropValue::I18n("tip.subtitle")), ("visible_when", PropValue::Text("order.serviceType == 'DELIVERY'")), ("presets_cents.0", PropValue::Text("100")), ("presets_cents.1", PropValue::Text("200")), ("presets_cents.2", PropValue::Text("300")), ("presets_cents.3", PropValue::Text("500")), ("custom_label", PropValue::I18n("tip.custom")), ("action.type", PropValue::Text("tip_order")), ("action.variables.orderId", PropValue::Binding("sheet.data.orderId")), ("action.variables.restaurantId", PropValue::Binding("order.restaurantId")), ("action.variables.tips.0.recipient", PropValue::Binding("order.tipRecipient")), ("action.variables.tips.0.amount.amountCents", PropValue::Binding("courier_tip.value")), ("action.variables.tips.0.amount.currency", PropValue::Binding("order.currency")), ("action.on_success.0.type", PropValue::Text("show_toast")), ("action.on_success.0.variant", PropValue::Text("success")), ("action.on_success.0.message", PropValue::I18n("tip.thanks"))], children: &[] },
+                Node { kind: ComponentKind::TextArea, props: &[("id", PropValue::Text("delivery_reason")), ("placeholder", PropValue::I18n("rating.delivery.reason_ph")), ("max_length", PropValue::Text("300")), ("visible_when", PropValue::Text("delivery_timeliness.value == 'TOO_LATE'"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("label", PropValue::I18n("common.action.submit")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("rate_order")), ("action.variables.orderId", PropValue::Binding("sheet.data.orderId")), ("action.variables.rating", PropValue::Binding("restaurant_rating.value")), ("action.variables.tags", PropValue::Binding("rating_tags.selected")), ("action.variables.comment", PropValue::Binding("rating_comment.value")), ("action.on_success.0.type", PropValue::Text("close_sheet")), ("action.on_success.1.type", PropValue::Text("show_toast")), ("action.on_success.1.variant", PropValue::Text("success")), ("action.on_success.1.message", PropValue::I18n("rating.thanks"))], children: &[] }
+            ] } },
+    ];
 }
 
 /// `specs/screens/rider.yaml` — 2 screen(s).
@@ -369,5 +454,8 @@ pub mod rider {
             ] }
         ],
         },
+    ];
+
+    pub const SHEETS: &[Sheet] = &[
     ];
 }

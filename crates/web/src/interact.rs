@@ -159,8 +159,15 @@ impl Driver {
                         let _ = w.location().set_href(&format!("tel:{number}"));
                     }
                 }
-                // Sheets/clipboard/share: re-emitted for the sheet host (#94) — visible, not
-                // swallowed.
+                // The sheet host (#94): sheets render HIDDEN with `data-sheet-id`; open/close
+                // toggle the `hidden` attribute.
+                "open_bottom_sheet" => {
+                    if let Some(sheet_id) = attr(attrs::SHEET) {
+                        set_sheet_hidden(Some(&sheet_id), false);
+                    }
+                }
+                "close_sheet" => set_sheet_hidden(None, true),
+                // Clipboard/share: re-emitted as CustomEvents — visible, not swallowed.
                 _ => emit_action_event(&el, &action),
             },
             // auth/gap render disabled — a click can only mean the DOM was tampered with; ignore.
@@ -172,10 +179,25 @@ impl Driver {
         if el.get_attribute("data-busy").is_some() {
             return; // double-tap guard: the idempotency story handles retries, not double UI flows
         }
-        let vars: Map<String, Value> = el
+        let mut vars: Map<String, Value> = el
             .get_attribute(attrs::VARS)
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
+        // Form-field bindings (#94): a var whose `{{ <field>.value }}` binding had no screen data
+        // is filled from the LIVE input by its element id at dispatch time.
+        if let Some(bindings) = el
+            .get_attribute(attrs::VAR_BINDINGS)
+            .and_then(|raw| serde_json::from_str::<Map<String, Value>>(&raw).ok())
+        {
+            for (name, binding) in bindings {
+                let Some(field_id) = binding.as_str().and_then(|b| b.strip_suffix(".value")) else {
+                    continue;
+                };
+                if let Some(value) = input_value(field_id) {
+                    vars.insert(name, Value::String(value));
+                }
+            }
+        }
         let on_success = el.get_attribute(attrs::ON_SUCCESS);
         let retry_id = el.get_attribute("data-retry").and_then(|s| Uuid::parse_str(&s).ok());
 
@@ -272,6 +294,31 @@ impl Driver {
             }
             Ok(None) => {}  // PENDING frame — keep watching
             Err(_) => {}    // malformed push — the poll fallback owns the verdict
+        }
+    }
+}
+
+/// The live value of a form field by element id (`{{ <id>.value }}` bindings).
+fn input_value(field_id: &str) -> Option<String> {
+    let doc = web_sys::window()?.document()?;
+    let el = doc.get_element_by_id(field_id)?;
+    el.dyn_into::<web_sys::HtmlInputElement>().ok().map(|i| i.value())
+}
+
+/// Toggle sheet visibility: `Some(id)` shows THAT sheet (hiding the others — one sheet at a
+/// time), `None` + hide=true closes them all.
+fn set_sheet_hidden(open_id: Option<&str>, hide_all: bool) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Ok(sheets) = doc.query_selector_all("[data-sheet-id]") else { return };
+    for i in 0..sheets.length() {
+        let Some(el) = sheets.get(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) else {
+            continue;
+        };
+        let is_target = open_id.is_some_and(|id| el.get_attribute("data-sheet-id").as_deref() == Some(id));
+        if is_target && !hide_all {
+            let _ = el.remove_attribute("hidden");
+        } else {
+            let _ = el.set_attribute("hidden", "");
         }
     }
 }
