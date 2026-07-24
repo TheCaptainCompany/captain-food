@@ -3,6 +3,22 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-24. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-07-24 — Captain ID: a shared auth SERVICE for all products (new repo
+> [TheCaptainCompany/captain-identity](https://github.com/TheCaptainCompany/captain-identity),
+> product-owner directive).** Auth is company-wide, not per-product — the "Captain ID" concept
+> reserved by ADR-20260722-225945 / ADR-20260722-174500 is now a real repo. Decision (its
+> ADR-20260724-172808 + AskUserQuestion): a **deployable auth service** at `id.thecaptaincompany.com`
+> owning identity (phone `authRef`), the Supabase wrapper (ADR-0015), OTP verify/send, httpOnly
+> session-cookie minting (the #112 design generalized), the Supabase→OVHcloud SMS hook, and the
+> JWKS/`captain_role` contract; products keep their own role paths + `@auth` ACL + domain data (the
+> ADR-20260722-174500 controller split). Rollout = **scaffold + reserve**: the repo is
+> established structure-first (README, ADR, proposal, tracking issue, operating-model conventions),
+> but Captain.Food's LIVE #112 auth code STAYS here and migrates once the service shape is proven —
+> nothing in-flight moved. #117 (Supabase adapter) + #122 (OVH SMS hook) stay in captain-food for
+> now, cross-linked to their permanent home [captain-identity #1](https://github.com/TheCaptainCompany/captain-identity/issues/1).
+> **Repo visibility: created PRIVATE** (auth service default) — revisit vs the public-repo/free-GHA
+> operating model before CI/image-build is added there.
+
 > ✅ **2026-07-24 — #114: sheet input dispatch — OTP auto-submit + chip on_change fires the #62
 > survey (PR #121).** The #93 delegated driver covered BUTTONS only; two sheet interactions were
 > dead. The executor's action parsing generalized to a PREFIX (`ActionSpec::from_node_prefixed`) so
