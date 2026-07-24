@@ -149,6 +149,19 @@ pub async fn dispatch(
     key: ActionKey,
     input: Map<String, Value>,
 ) -> Result<DispatchHandle, ActionError> {
+    dispatch_with_id(transport, key, input, Uuid::now_v7()).await
+}
+
+/// [`dispatch`] with a caller-supplied `message_id` — the SAME-messageId retry path (`pending.rs`,
+/// #17): re-sending a persisted intent under its original id is what makes the retry idempotent
+/// (the server answers `duplicate: true` and polling converges on the original outcome). Every
+/// fresh dispatch goes through [`dispatch`], which mints here.
+pub async fn dispatch_with_id(
+    transport: &dyn Transport,
+    key: ActionKey,
+    input: Map<String, Value>,
+    message_id: Uuid,
+) -> Result<DispatchHandle, ActionError> {
     match key.kind() {
         ActionKind::Client => return Err(ActionError::ClientSideAction(key.as_str())),
         ActionKind::Auth => return Err(ActionError::AuthAction(key.as_str())),
@@ -162,7 +175,6 @@ pub async fn dispatch(
     }
     let mutation = key.mutation().ok_or(ActionError::UnboundMutation(key.as_str()))?;
 
-    let message_id = Uuid::now_v7();
     let document = mutation_document(mutation);
     // Only messageId goes in metadata here: correlationId/causeId are server-computed defaults
     // (MetadataInput allows them, but this client has no causality chain to assert yet), and

@@ -3,6 +3,26 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #17: two-step writes survive reloads — persisted pending-operation store +
+> same-messageId retry (PR #91; realizes ADR-20260720-015500's client rule).** Splits 2-4 of #21
+> built the dispatcher/checkout/subscriptions, but the contract's durability half — **persist the
+> minted `messageId` until a terminal status is observed** — was unimplemented: a reload mid-flight
+> lost the handle (the exact V0 mobile failure). New `crates/web/src/pending.rs`: `PendingWrite`
+> (messageId + action + FULL input — for `place_order` the input carries the client-minted
+> `orderId`, so a reload recovers BOTH the idempotency id and the confirmation route),
+> `PendingStore` seam (localStorage `captain.pending-writes` on hydrate, mirroring session.rs;
+> injectable memory double), `dispatch_persisted` (recorded BEFORE the send — a network failure in
+> the crash window keeps the id), `settle` (clears ONLY on terminal SUCCEEDED/REJECTED/FAILED;
+> poll exhaustion keeps the record), `retry` (re-send under the ORIGINAL id → `duplicate: true`,
+> converges on the first outcome — no double order), `resume_pending` (boot-time: re-resolve every
+> stored id via the idempotent `operationStatus` read, tight caller-set bounds). Non-dispatchable
+> kinds (client/auth/gap) never pin the queue. `actions.rs` gained `dispatch_with_id` (dispatch =
+> mint + that); `checkout.rs` gained `submit_persisted`. 62 web tests (9 new incl. the
+> record-before-send crash test and the checkout-continuity round trip); wasm32 green; `make rust`
+> 0 errors/no drift. Issue #17's remaining UX items (PENDING spinners, generic-button dispatch
+> wiring, subscription-push resolve as the poll's fast path) stay in the ADR-20260723-172013
+> residual set.
+
 > ✅ **2026-07-23 — #21 frontend renderer split 4/4 (#87 "Frontend split 4/4 - per-component markup,
 > customer polish + restaurant/rider screen adoption", PR #89, ADR-20260723-172013) — #21 COMPLETE.**
 > The renderer goes GENERIC and the platform SERVES it. (1) New codegen emitter `emit_web_screens`:
