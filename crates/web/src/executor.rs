@@ -41,8 +41,14 @@ pub enum ClientEffect {
 /// What a parsed action means for the driver.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionPlan {
-    /// Dispatch through the two-step layer (`pending::dispatch_persisted`).
-    Mutation { key: ActionKey, input: Map<String, Value> },
+    /// Dispatch through the two-step layer (`pending::dispatch_persisted`). `unresolved_bindings`
+    /// names the input fields whose `{{ … }}` binding had no screen data — the driver fills the
+    /// `{{ <field>.value }}` ones from the live form inputs at dispatch time (#94).
+    Mutation {
+        key: ActionKey,
+        input: Map<String, Value>,
+        unresolved_bindings: Vec<(String, String)>,
+    },
     /// Execute locally.
     Client(ClientEffect),
     /// Render/keep disabled — a declared spec gap (note attached) or an auth-kind action that has
@@ -79,7 +85,8 @@ impl ActionSpec {
 
         let plan = match key.kind() {
             ActionKind::Mutation => {
-                ActionPlan::Mutation { key, input: resolved_variables(node, ctx) }
+                let (input, unresolved_bindings) = resolved_variables(node, ctx);
+                ActionPlan::Mutation { key, input, unresolved_bindings }
             }
             ActionKind::Client => match client_effect(key, node, ctx) {
                 Some(effect) => ActionPlan::Client(effect),
@@ -111,24 +118,46 @@ impl ActionSpec {
     }
 }
 
-/// The `action.variables.*` props, resolved: bindings pull the JSON VALUE from the screen data
-/// (`{{ order.id }}` → the id itself, not display text); literals pass through as strings. A
-/// binding with no data resolves to `null` — the server's required-field validation is the
-/// authority on whether that is acceptable, not the client.
-fn resolved_variables(node: &Node, ctx: &RenderContext) -> Map<String, Value> {
-    const PREFIX: &str = "action.variables.";
+/// The action's variables, resolved from TWO spellings the DSL uses: the explicit
+/// `action.variables.<name>` map AND bare `action.<name>` value props (the sheets' style —
+/// `send_otp` carries `action.phone`), excluding the reserved structural keys (`type`, effect
+/// targets, and any nested `x.y` path — `on_success.route`, `if_guest.*`, `data.*` are structure,
+/// not variables). Bindings pull the JSON VALUE from the screen data (`{{ order.id }}` → the id
+/// itself, not display text); an unresolved binding travels as `null` — the server's
+/// required-field validation is the authority — and is REPORTED in the bindings map so the driver
+/// can fill `{{ <field>.value }}` form references from the live DOM at dispatch time (#94).
+fn resolved_variables(
+    node: &Node,
+    ctx: &RenderContext,
+) -> (Map<String, Value>, Vec<(String, String)>) {
+    const EXPLICIT: &str = "action.variables.";
+    const RESERVED: [&str; 4] = ["type", "route", "sheet_id", "number"];
     let mut input = Map::new();
+    let mut unresolved_bindings = Vec::new();
     for (path, prop) in node.props {
-        if let Some(name) = path.strip_prefix(PREFIX) {
-            let value = match prop {
-                PropValue::Binding(b) => ctx.binding_json(b).unwrap_or(Value::Null),
-                PropValue::Text(s) => Value::String((*s).to_string()),
-                PropValue::I18n(key) => Value::String(crate::i18n::resolve(key, &ctx.locale)),
-            };
-            input.insert(name.to_string(), value);
-        }
+        let name = match path.strip_prefix(EXPLICIT) {
+            Some(name) if !name.contains('.') => name,
+            Some(_) => continue,
+            None => match path.strip_prefix("action.") {
+                // Bare style: a single-segment key that is not structural.
+                Some(name) if !name.contains('.') && !RESERVED.contains(&name) => name,
+                _ => continue,
+            },
+        };
+        let value = match prop {
+            PropValue::Binding(b) => {
+                let resolved = ctx.binding_json(b);
+                if resolved.is_none() {
+                    unresolved_bindings.push((name.to_string(), (*b).to_string()));
+                }
+                resolved.unwrap_or(Value::Null)
+            }
+            PropValue::Text(s) => Value::String((*s).to_string()),
+            PropValue::I18n(key) => Value::String(crate::i18n::resolve(key, &ctx.locale)),
+        };
+        input.insert(name.to_string(), value);
     }
-    input
+    (input, unresolved_bindings)
 }
 
 /// `{{ variables.<name> }}` templates inside a route, substituted from the resolved input — the
@@ -197,6 +226,9 @@ pub mod attrs {
     pub const LOADING: &str = "data-loading";
     /// Route to navigate to on acceptance (`data-on-success`).
     pub const ON_SUCCESS: &str = "data-on-success";
+    /// Unresolved `{{ field.value }}` bindings as JSON `{input_name: binding}` — the driver fills
+    /// them from the live form inputs at dispatch time (`data-var-bindings`).
+    pub const VAR_BINDINGS: &str = "data-var-bindings";
     /// Client-effect targets.
     pub const ROUTE: &str = "data-route";
     pub const SHEET: &str = "data-sheet";
@@ -211,9 +243,16 @@ pub fn button_attrs(node: &Node, ctx: &RenderContext) -> (Vec<(&'static str, Str
     let mut out = Vec::new();
     let mut disabled = None;
     match &spec.plan {
-        ActionPlan::Mutation { key, input } => {
+        ActionPlan::Mutation { key, input, unresolved_bindings } => {
             out.push((attrs::ACTION, key.as_str().to_string()));
             out.push((attrs::VARS, Value::Object(input.clone()).to_string()));
+            if !unresolved_bindings.is_empty() {
+                let map: Map<String, Value> = unresolved_bindings
+                    .iter()
+                    .map(|(name, binding)| (name.clone(), Value::String(binding.clone())))
+                    .collect();
+                out.push((attrs::VAR_BINDINGS, Value::Object(map).to_string()));
+            }
             if let Some(label) = &spec.loading_label {
                 out.push((attrs::LOADING, label.clone()));
             }
@@ -290,20 +329,66 @@ mod tests {
         ]);
         let spec = ActionSpec::from_node(accept_button(), &ctx).expect("an action");
         match &spec.plan {
-            ActionPlan::Mutation { key, input } => {
+            ActionPlan::Mutation { key, input, unresolved_bindings } => {
                 assert_eq!(*key, ActionKey::AcceptOrder);
                 assert_eq!(input["orderId"], json!("o-1"));
                 assert_eq!(input["restaurantId"], json!("r-1"));
+                assert!(unresolved_bindings.is_empty(), "everything resolved from screen data");
             }
             other => panic!("expected a mutation plan, got {other:?}"),
         }
     }
 
     #[test]
-    fn unresolved_bindings_travel_as_null_for_the_server_to_judge() {
+    fn unresolved_bindings_travel_as_null_and_are_reported() {
         let spec = ActionSpec::from_node(accept_button(), &ctx_with(&[])).unwrap();
-        let ActionPlan::Mutation { input, .. } = &spec.plan else { panic!() };
+        let ActionPlan::Mutation { input, unresolved_bindings, .. } = &spec.plan else { panic!() };
         assert_eq!(input["orderId"], Value::Null);
+        assert!(
+            unresolved_bindings.iter().any(|(name, b)| name == "orderId" && b == "order.id"),
+            "{unresolved_bindings:?}"
+        );
+    }
+
+    #[test]
+    fn sheet_buttons_use_bare_action_props_and_report_form_field_bindings() {
+        // The auth sheet's send_otp button, straight from the GENERATED sheet trees (#94):
+        // `action.phone: "{{ phone_field.value }}"` — a bare-style variable bound to a FORM FIELD,
+        // unresolvable from screen data; the driver fills it from the live input at dispatch time.
+        fn find_send_otp<'a>(nodes: &'a [Node]) -> Option<&'a Node> {
+            for n in nodes {
+                if matches!(n.prop("action.type"), Some(PropValue::Text("send_otp"))) {
+                    return Some(n);
+                }
+                if let Some(hit) = find_send_otp(n.children) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        let auth = Surface::RestaurantFrontoffice
+            .sheets()
+            .iter()
+            .find(|s| s.id == "auth_sheet")
+            .expect("auth sheet in the generated tables");
+        let btn = find_send_otp(std::slice::from_ref(&auth.node)).expect("send_otp button");
+        let spec = ActionSpec::from_node(btn, &ctx_with(&[])).unwrap();
+        let ActionPlan::Mutation { key, unresolved_bindings, .. } = &spec.plan else {
+            panic!("send_otp is a mutation kind")
+        };
+        assert_eq!(*key, ActionKey::SendOtp);
+        assert!(
+            unresolved_bindings.iter().any(|(n, b)| n == "phone" && b == "phone_field.value"),
+            "{unresolved_bindings:?}"
+        );
+        // And the DOM contract carries the bindings map for the driver.
+        let (attrs_list, _) = button_attrs(btn, &ctx_with(&[]));
+        let bindings = attrs_list
+            .iter()
+            .find(|(a, _)| *a == attrs::VAR_BINDINGS)
+            .map(|(_, v)| v.clone())
+            .expect("data-var-bindings stamped");
+        assert!(bindings.contains("phone_field.value"), "{bindings}");
     }
 
     #[test]

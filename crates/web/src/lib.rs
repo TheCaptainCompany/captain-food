@@ -17,6 +17,7 @@ use app_core::health;
 use shared_types::HealthDto;
 
 pub mod actions;
+pub mod auth;
 pub mod checkout;
 pub mod executor;
 pub mod generated;

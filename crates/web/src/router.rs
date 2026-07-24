@@ -39,6 +39,16 @@ impl Surface {
         }
     }
 
+    /// The generated bottom sheets of this surface (#94) — mounted hidden into every screen.
+    pub fn sheets(&self) -> &'static [crate::generated::screens::Sheet] {
+        match self {
+            Surface::CaptainFrontoffice => screens::captain_frontoffice::SHEETS,
+            Surface::RestaurantFrontoffice => screens::restaurant_frontoffice::SHEETS,
+            Surface::RestaurantBackoffice => screens::restaurant_backoffice::SHEETS,
+            Surface::Rider => screens::rider::SHEETS,
+        }
+    }
+
     /// The GraphQL role path this surface's ANONYMOUS/default client talks to. The customer
     /// surfaces start anonymous (`/public`) and upgrade after auth; staff surfaces are their role
     /// by construction (the path 401s without a matching JWT — fail closed).
@@ -165,10 +175,10 @@ const HYDRATE_SCRIPT: &str = "<script type=\"module\">import init, { hydrate } f
 #[cfg(feature = "ssr")]
 pub fn render_path(host: &str, path: &str, locale: &str) -> Option<String> {
     use crate::renderer::{render_screen_html, RenderContext};
-    let (_, matched) = resolve(host, path);
+    let (surface, matched) = resolve(host, path);
     let matched = matched?;
     let html = if matched.screen.sdui {
-        render_screen_html(matched.screen, RenderContext::new(locale))
+        render_screen_html(matched.screen, surface.sheets(), RenderContext::new(locale))
     } else {
         match matched.screen.id {
             "checkout" => crate::checkout::render_checkout_html(crate::checkout::CheckoutViewState {
@@ -185,7 +195,7 @@ pub fn render_path(host: &str, path: &str, locale: &str) -> Option<String> {
                 crate::tracking::render_tracking_html(crate::tracking::TrackingState::new(order_id))
             }
             // A future sdui:false screen without a hand-written shell: an empty SDUI shell.
-            _ => render_screen_html(matched.screen, RenderContext::new(locale)),
+            _ => render_screen_html(matched.screen, surface.sheets(), RenderContext::new(locale)),
         }
     };
     Some(html.replace("</body>", &format!("{HYDRATE_SCRIPT}</body>")))

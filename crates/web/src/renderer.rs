@@ -242,6 +242,36 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
             view! { <div data-c=ty>{children_views(node, ctx)}</div> }.into_any()
         }
 
+        // ── sheets & overlays (#94) ─────────────────────────────────────────────
+        ComponentKind::BottomSheet => {
+            // Rendered HIDDEN; `open_bottom_sheet` (interact.rs) toggles by `data-sheet-id`.
+            let sheet_id = prop_text(node, "id", ctx);
+            let title = prop_text(node, "title", ctx);
+            let has_title = !title.is_empty();
+            view! {
+                <section data-c=ty data-sheet-id=sheet_id hidden=true>
+                    {has_title.then(|| view! { <h2>{title.clone()}</h2> })}
+                    {children_views(node, ctx)}
+                </section>
+            }
+            .into_any()
+        }
+        ComponentKind::List => {
+            // The generic titled list (location picker's address lists): rows from the bound items.
+            let title = prop_text(node, "title", ctx);
+            let rows: Vec<AnyView> = items_of(node, ctx)
+                .iter()
+                .map(|item| {
+                    let line = item
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| item.get("line1").and_then(Value::as_str).unwrap_or("").to_string());
+                    view! { <li>{line}</li> }.into_any()
+                })
+                .collect();
+            view! { <div data-c=ty><h3>{title}</h3><ul>{rows}</ul></div> }.into_any()
+        }
+
         // ── content ─────────────────────────────────────────────────────────────
         ComponentKind::Text => {
             let value = prop_text(node, "value", ctx);
@@ -344,6 +374,7 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
                     data-variant=variant
                     data-action=get(attrs::ACTION)
                     data-vars=get(attrs::VARS)
+                    data-var-bindings=get(attrs::VAR_BINDINGS)
                     data-loading=get(attrs::LOADING)
                     data-on-success=get(attrs::ON_SUCCESS)
                     data-route=get(attrs::ROUTE)
@@ -360,7 +391,10 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
         ComponentKind::TextInput | ComponentKind::PhoneInput | ComponentKind::EmailInput | ComponentKind::SearchInput | ComponentKind::PhoneField | ComponentKind::OtpInput => {
             let label = prop_text(node, "label", ctx);
             let placeholder = prop_text(node, "placeholder", ctx);
-            view! { <label data-c=ty>{label}<input placeholder=placeholder/></label> }.into_any()
+            // The field id is the `{{ <id>.value }}` binding target (#94) — the driver reads the
+            // live value by this id at dispatch time, so it must land on the <input> itself.
+            let field_id = prop_text(node, "id", ctx);
+            view! { <label data-c=ty>{label}<input id=field_id placeholder=placeholder/></label> }.into_any()
         }
         ComponentKind::StatusChip => {
             let status = prop_text(node, "status", ctx);
@@ -400,13 +434,20 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
     }
 }
 
-/// A whole SDUI screen as a Leptos view.
+/// A whole SDUI screen as a Leptos view: the screen tree + the surface's bottom sheets (#94),
+/// mounted HIDDEN after the content (`open_bottom_sheet` toggles them by id at runtime).
 #[component]
-pub fn SduiScreen(screen: &'static Screen, ctx: RenderContext) -> impl IntoView {
+pub fn SduiScreen(
+    screen: &'static Screen,
+    sheets: &'static [crate::generated::screens::Sheet],
+    ctx: RenderContext,
+) -> impl IntoView {
     let nodes: Vec<AnyView> = screen.tree.iter().map(|n| render_node(n, &ctx)).collect();
+    let sheet_views: Vec<AnyView> = sheets.iter().map(|s| render_node(&s.node, &ctx)).collect();
     view! {
         <main id="app" data-hydrate=screen.id>
             {nodes}
+            {sheet_views}
         </main>
     }
 }
@@ -423,10 +464,14 @@ pub(crate) fn page_html(title: &str, body: &str) -> String {
     )
 }
 
-/// Server-side render one SDUI screen to a full document.
+/// Server-side render one SDUI screen (+ its surface's sheets) to a full document.
 #[cfg(feature = "ssr")]
-pub fn render_screen_html(screen: &'static Screen, ctx: RenderContext) -> String {
-    let body = SduiScreen(SduiScreenProps { screen, ctx }).to_html();
+pub fn render_screen_html(
+    screen: &'static Screen,
+    sheets: &'static [crate::generated::screens::Sheet],
+    ctx: RenderContext,
+) -> String {
+    let body = SduiScreen(SduiScreenProps { screen, sheets, ctx }).to_html();
     page_html("Captain.Food", &body)
 }
 
@@ -457,6 +502,7 @@ pub fn hydrate() {
     // The interaction layer (#93): delegated button dispatch + push socket + boot pending-resume.
     crate::interact::install(&origin, surface.role(), session);
 
+    let sheets = surface.sheets();
     wasm_bindgen_futures::spawn_local(async move {
         let mut ctx = RenderContext::new(i18n::DEFAULT_LOCALE);
         for resolver in screen.data_requirements {
@@ -468,7 +514,7 @@ pub fn hydrate() {
                 ctx.insert_resolved(resolver.as_str(), value);
             }
         }
-        leptos::mount::mount_to_body(move || SduiScreen(SduiScreenProps { screen, ctx }));
+        leptos::mount::mount_to_body(move || SduiScreen(SduiScreenProps { screen, sheets, ctx }));
     });
 }
 
@@ -496,7 +542,7 @@ mod tests {
                 if !screen.sdui {
                     continue;
                 }
-                let html = render_screen_html(screen, ctx());
+                let html = render_screen_html(screen, surface.sheets(), ctx());
                 assert!(
                     html.contains(&format!("data-hydrate=\"{}\"", screen.id)),
                     "{}: no hydrate root",
@@ -514,10 +560,10 @@ mod tests {
             .iter()
             .find(|s| s.id == "orders_queue")
             .unwrap();
-        let fr = render_screen_html(screen, RenderContext::new("fr"));
+        let fr = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), RenderContext::new("fr"));
         assert!(fr.contains("File des commandes"), "fr title missing");
         assert!(fr.contains("Accepter"), "fr accept button missing");
-        let en = render_screen_html(screen, RenderContext::new("en"));
+        let en = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), RenderContext::new("en"));
         assert!(en.contains("Order queue"), "en title missing");
     }
 
@@ -536,13 +582,13 @@ mod tests {
                 { "id": "o-2", "status": "ACCEPTED", "totalAmount": { "amountCents": 980, "currency": "EUR" } },
             ]),
         );
-        let html = render_screen_html(screen, c);
+        let html = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), c);
         assert!(html.contains("data-order=\"o-1\""), "{html}");
         assert!(html.contains("23,50 EUR"));
         assert!(html.contains("data-status=\"ACCEPTED\""));
 
         // Empty data → the spec's empty state, not a blank div.
-        let html = render_screen_html(screen, ctx());
+        let html = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), ctx());
         assert!(html.contains("data-empty=\"true\""));
     }
 
@@ -557,7 +603,7 @@ mod tests {
         assert!(c.data.contains_key("featured_restaurants"));
         assert!(c.data.contains_key("restaurants"));
         let home = Surface::CaptainFrontoffice.screens().iter().find(|s| s.id == "home").unwrap();
-        let html = render_screen_html(home, c);
+        let html = render_screen_html(home, Surface::CaptainFrontoffice.sheets(), c);
         assert!(html.contains("Chez Test"), "{html}");
         assert!(html.contains("data-slug=\"chez-test\""));
     }
@@ -574,7 +620,7 @@ mod tests {
         let mut c = ctx();
         c.insert_resolved("order", json!({ "id": "o-1" }));
         c.insert_resolved("restaurant", json!({ "id": "r-1" }));
-        let html = render_screen_html(screen, c);
+        let html = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), c);
         assert!(html.contains("data-action=\"accept_order\""), "{html}");
         assert!(html.contains("&quot;orderId&quot;:&quot;o-1&quot;"), "resolved vars JSON: {html}");
 
@@ -586,7 +632,25 @@ mod tests {
     }
 
     fn render_tracking_like(screen: &'static crate::generated::screens::Screen) -> String {
-        render_screen_html(screen, ctx())
+        render_screen_html(screen, &[], ctx())
+    }
+
+    #[test]
+    fn sheets_render_hidden_into_every_storefront_screen() {
+        // #94: the surface's bottom sheets mount HIDDEN after the content; open_bottom_sheet
+        // toggles them by data-sheet-id at runtime.
+        let cart = Surface::RestaurantFrontoffice.screens().iter().find(|s| s.id == "cart").unwrap();
+        let html = render_screen_html(cart, Surface::RestaurantFrontoffice.sheets(), RenderContext::new("fr"));
+        for sheet in ["location_picker", "auth_sheet", "otp_sheet", "item_detail_sheet", "rating_sheet"] {
+            assert!(html.contains(&format!("data-sheet-id=\"{sheet}\"")), "missing {sheet}");
+        }
+        assert!(html.contains("hidden"), "sheets must render hidden");
+        // Real strings from the merged catalog, and the send_otp button's dispatch attributes.
+        assert!(html.contains("Se connecter ou créer un compte"), "auth title fr");
+        assert!(html.contains("data-action=\"send_otp\""), "{html}");
+        assert!(html.contains("phone_field.value"), "the form-field binding travels: {html}");
+        // The field itself carries the id the binding targets.
+        assert!(html.contains("id=\"phone_field\""), "{html}");
     }
 
     #[test]
