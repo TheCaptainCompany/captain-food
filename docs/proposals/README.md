@@ -13,13 +13,17 @@ chose what we chose.
   proposal if none exists, name it in the header, and keep the two in step (a re-scoped proposal
   retitles/rescopes its issue). An issue-less proposal is invisible to the prioritised backlog and
   gets lost — the issue is what carries Value/Effort/Impact/Priority and a place on the board.
+- **Issue references are FULL CLICKABLE LINKS** (product-owner directive, 2026-07-24): GitHub does
+  NOT auto-link bare `#NN` inside repo markdown files (only in issues/PRs/commits), so a bare
+  number in a proposal is a dead reference. Always
+  `[#NN "<title>"](https://github.com/TheCaptainCompany/captain-food/issues/NN)`.
 - Header block:
 
   ```markdown
   # PROP-YYYYMMDD-HHMMSS — <title>
   - **Status**: Proposed | Approved | Rejected | Superseded by PROP-…
   - **Date**: YYYY-MM-DD
-  - **Tracking issue**: #NN "<title>" (REQUIRED — create it if missing)
+  - **Tracking issue**: [#NN "<title>"](https://github.com/TheCaptainCompany/captain-food/issues/NN) (REQUIRED — create it if missing; full clickable link, never a bare number)
   - **Realized by**: PR #NN / ADR-… (filled at completion)
   ```
 

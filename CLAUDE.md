@@ -81,7 +81,9 @@ validation. In the story map, inbound events are marked 📥.
 - **Always name issues/PRs, never bare numbers**: whenever referring to a GitHub issue or PR in any
   user-facing message, commit, or doc, include its **title** alongside the number — e.g.
   `#21 "Frontend: Leptos/WASM SDUI renderer"`, not just `#21`. A bare number is not memorable to a human
-  reader; the title carries the meaning.
+  reader; the title carries the meaning. **In repo markdown files (docs/proposals, ADRs, docs/) the
+  reference must be a FULL CLICKABLE LINK** (`[#NN "<title>"](https://github.com/TheCaptainCompany/captain-food/issues/NN)`)
+  — GitHub does not auto-link bare `#NN` outside issues/PRs/commits.
 - **Makefile recipe lines are ASCII-only** — use `--`, `->`, `|` rather than `—`, `→`, `·`. Native
   Windows GNU Make hands a recipe to Cygwin's `sh` with broken quoting as soon as the line contains a
   byte > 127: `sh` receives the whole recipe as ONE word and reports `$'...': command not found`, so

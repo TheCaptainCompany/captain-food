@@ -1,11 +1,15 @@
 # PROP-20260724-133700 — Live spec editing + per-tenant customizations (ADR-0033 deferred contract)
 - **Status**: Proposed
 - **Date**: 2026-07-24
-- **Tracking issue**: #96 "Live spec editing + per-tenant customizations (specs/customizations/) with fail-closed branch publishing" (retitled to this revision's scope on 2026-07-24 — every proposal MUST have one, ADR-20260724-143000)
+- **Tracking issue**: [#96 "Live spec editing + per-tenant customizations (specs/customizations/) with fail-closed branch publishing"](https://github.com/TheCaptainCompany/captain-food/issues/96) (retitled to this proposal's scope on 2026-07-24 — every proposal MUST have one, ADR-20260724-143000; always the full clickable link, never a bare number)
 - **Realized by**: (pending)
 
 > **Status:** Proposed — plan-mode proposal. **No `specs/**` or code changed yet.** On approval it
 > becomes an ADR that lands with the implementation.
+>
+> **Revision 5 (2026-07-24, product-owner direction):** live translation editing explicitly covers
+> the **defaults**, not only tenant customizations — and the catalog is restructured **one file per
+> language** so concurrent live edits in different languages can never merge-conflict (§1b).
 >
 > **Revision 4 (2026-07-24, product-owner direction):** two corrections to revision 3. (a) There is
 > **no runtime override layer for the designed spec** — no `runtime_screens/` platform files and no
@@ -71,13 +75,36 @@ Resolution for a storefront request: `customizations/restaurant_frontoffice_<slu
 designed `specs/screens/restaurant_frontoffice.yaml`. Two levels, no platform override layer in
 between.
 
-## 1b. Translations — no separate mechanism (revision 4)
+## 1b. Translations — the defaults are live-editable, one file per language (revision 5)
 
-Platform copy is edited by editing `specs/translations.yaml` / the surface sidecars through §3's
-publishing flow — the same files, the same validator (params contract, en+fr completeness, key
-uniqueness), the same generated `translations.generated.json` the clients already embed. Tenant
-copy rides the co-located customization sidecar of §1. Revision 3's `runtime translations` overlay
-family is retired (§8).
+**No separate runtime mechanism** (revision 4 holds): platform copy is edited by editing the
+CATALOG SOURCE through §3's publishing flow — that explicitly includes the **defaults** (every
+`common.*` string, every surface's screen copy), not just tenant sidecars. Changing the checkout
+button label in production = a branch editing the catalog → preview → gated merge.
+
+**Restructuring for conflict-free live edits: one file per language.** Today one file holds every
+locale of a key (`messages: { en, fr }`), so two concurrent live edits — a French copy tweak and an
+English one — collide in the same file/lines and can merge-conflict. Proposed layout:
+
+| today | proposed |
+|---|---|
+| `specs/translations.yaml` (`key: { messages: { en, fr } }`) | `specs/translations/en.yaml` + `specs/translations/fr.yaml` (`key: <message>`; shared `params`/descriptions in `specs/translations/keys.yaml`) |
+| `specs/screens/<surface>.translations.yaml` | `specs/screens/<surface>.translations.en.yaml` + `.fr.yaml` (same split) |
+| `specs/customizations/…_<slug>.translations.yaml` | per-language likewise |
+
+- The codegen merge is unchanged in OUTPUT: the same `translations.generated.json`
+  (`key → {en, fr}`) — only the SOURCE layout changes, so `crates/web` and the embedded catalog are
+  untouched.
+- The validator's completeness check becomes CROSS-FILE: every key present in one language file must
+  exist in all supported-locale files (a missing `fr` for a new `en` key is a hard error), and the
+  `params` contract lives once in the shared key manifest — both languages checked against it.
+- Adding a locale later = adding one file per catalog, not touching every key in every file.
+- Open point for the landing ADR: whether `keys.yaml` (params + description manifest) is worth the
+  third file per catalog, or params stay declared in the DEFAULT locale's file with others checked
+  against it.
+
+Tenant copy rides the co-located customization sidecars of §1 (per-language, same split).
+Revision 3's runtime-overlay family stays retired (§8).
 
 ## 2. Wire format
 
@@ -89,7 +116,7 @@ ADR-20260723-172013) are the **versioned contract**:
   One source, one pass — a customization and the surface it customizes cannot drift through CI.
 - For Phase B (§3) the emitter serializes the same trees as JSON artifacts
   (`specs/generated/screens/<surface>[_<slug>].json`) plus the existing
-  `translations.generated.json`. The BFF only ever consumes GENERATED artifacts — the codegen stays
+  `translations.generated.json` (unchanged in shape — §1b only restructures its SOURCE files). The BFF only ever consumes GENERATED artifacts — the codegen stays
   the only YAML reader.
 
 ## 3. Delivery & the publishing flow (revision 4 — fail-closed by construction)

@@ -1,8 +1,8 @@
 # PROP-20260723-150500 — Frontend split 4/4: generated screen trees, real markup, routing, new surfaces, full asset pipeline
 - **Status**: Approved (2026-07-23, incl. two AskUserQuestion scope decisions recorded in the body)
 - **Date**: 2026-07-23
-- **Issue**: #87 "Frontend split 4/4 - per-component markup, customer polish + restaurant/rider screen adoption"
-- **Realized by**: PR #89 + ADR-20260723-172013 (post-approval divergences: host convention corrected to ADR-0036 reserved subdomains restos./riders.; cta_section registry addition surfaced by the fail-closed emitter)
+- **Tracking issue**: [#87 "Frontend split 4/4 - per-component markup, customer polish + restaurant/rider screen adoption"](https://github.com/TheCaptainCompany/captain-food/issues/87)
+- **Realized by**: [PR #89](https://github.com/TheCaptainCompany/captain-food/pull/89) + ADR-20260723-172013 (post-approval divergences: host convention corrected to ADR-0036 reserved subdomains restos./riders.; cta_section registry addition surfaced by the fail-closed emitter)
 
 > BACKFILLED as the inaugural docs/proposals entry (ADR-20260724-135945): the one plan-mode proposal
 > whose session artifact survived. Earlier proposals are unrecoverable; this file marks the cutoff.
