@@ -515,6 +515,25 @@ pub fn hydrate() {
             }
         }
         leptos::mount::mount_to_body(move || SduiScreen(SduiScreenProps { screen, sheets, ctx }));
+
+        // The requires_auth guard (#92, client-side): auth state lives ONLY in the browser (no
+        // auth cookie exists yet — the server-side 302 is the recorded follow-up), and today no
+        // token store exists at all, so every visitor is anonymous. Customer surfaces open the
+        // auth sheet OVER the screen (the DSL's own if_guest pattern — late identification,
+        // ADR-20260722-174500); a staff surface without one bounces to its root, where the
+        // role-pathed GraphQL enforces the real gate.
+        if screen.requires_auth {
+            let opened = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.query_selector("[data-sheet-id=\"auth_sheet\"]").ok().flatten())
+                .map(|sheet| sheet.remove_attribute("hidden").is_ok())
+                .unwrap_or(false);
+            if !opened && path != "/" {
+                if let Some(w) = web_sys::window() {
+                    let _ = w.location().set_href("/");
+                }
+            }
+        }
     });
 }
 

@@ -70,12 +70,25 @@ pub enum TransportError {
     Malformed(String),
 }
 
+/// Platform-conditional `Sync` requirement: NATIVE transports must be `Sync` so futures holding a
+/// `&dyn Transport` across an await are `Send` (the axum SSR handler's requirement, #92); browser
+/// transports are single-threaded by construction and carry no such bound (reqwest's wasm client
+/// is not `Sync`). Blanket-implemented — never implement it by hand.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSync: Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Sync + ?Sized> MaybeSync for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSync {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSync for T {}
+
 /// The transport seam: one method, JSON in / JSON `data` out. Implementations return the `data`
 /// object only — GraphQL `errors` become [`TransportError::Errors`], so callers never inspect the
 /// envelope. `?Send` on wasm32: browser futures are single-threaded by construction.
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
-pub trait Transport {
+pub trait Transport: MaybeSync {
     async fn execute(&self, document: &str, variables: Value) -> Result<Value, TransportError>;
 }
 

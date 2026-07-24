@@ -168,17 +168,63 @@ pub fn resolve(host: &str, path: &str) -> (Surface, Option<RouteMatch>) {
 #[cfg(feature = "ssr")]
 const HYDRATE_SCRIPT: &str = "<script type=\"module\">import init, { hydrate } from '/assets/web.js'; await init(); hydrate();</script>";
 
-/// Server-side render the page for `host` + `path` — the BFF's serving entry (split 4/4).
-/// SDUI screens render their generated tree (empty data: SSR ships the SHELL, the hydrate bundle
-/// fetches the screen's `data_requirements` — the split-4 serving model); the non-SDUI screens
-/// render their hand-written shells (checkout / order tracking). `None` = no such route (404).
+/// Server-side render with LIVE data (#92): resolve the matched SDUI screen's
+/// `data_requirements` through the given transport (the BFF passes its in-process
+/// `SchemaTransport` — no loopback HTTP) before rendering, exactly like the hydrate path (route
+/// `:params` feed resolver args), so the initial HTML carries the real content the screens spec
+/// contracts (`rendering_strategy: SSR_first`). `requires_auth` screens skip the fetch — a
+/// document GET carries no credentials, so their session-scoped reads could only answer
+/// empty; they ship as shells and the client owns their data. A resolver error skips that one
+/// binding (the shell slot renders empty; hydrate retries) — SSR must degrade, never 500.
 #[cfg(feature = "ssr")]
-pub fn render_path(host: &str, path: &str, locale: &str) -> Option<String> {
-    use crate::renderer::{render_screen_html, RenderContext};
+pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
+    transport: &T,
+    host: &str,
+    path: &str,
+    locale: &str,
+) -> Option<String> {
+    use crate::renderer::RenderContext;
     let (surface, matched) = resolve(host, path);
     let matched = matched?;
+    let mut ctx = RenderContext::new(locale);
+    if matched.screen.sdui && !matched.screen.requires_auth {
+        for resolver in matched.screen.data_requirements {
+            let mut vars = serde_json::Map::new();
+            for (k, v) in matched.param_args(*resolver) {
+                vars.insert(k, v);
+            }
+            if let Ok(value) = crate::graphql::execute_resolver(transport, *resolver, vars).await {
+                ctx.insert_resolved(resolver.as_str(), value);
+            }
+        }
+    }
+    Some(render_matched(&matched, surface, ctx, locale))
+}
+
+/// Server-side render the page for `host` + `path` — the data-less entry (SSR SHELL only; the
+/// hydrate bundle fetches). Kept for data-less callers and tests; the BFF serves through
+/// [`render_path_with`]. `None` = no such route (404).
+#[cfg(feature = "ssr")]
+pub fn render_path(host: &str, path: &str, locale: &str) -> Option<String> {
+    use crate::renderer::RenderContext;
+    let (surface, matched) = resolve(host, path);
+    let matched = matched?;
+    Some(render_matched(&matched, surface, RenderContext::new(locale), locale))
+}
+
+/// The shared tail of both entries: render the matched screen (SDUI tree + sheets, or the
+/// hand-written non-SDUI shells) and inject the hydrate boot script.
+#[cfg(feature = "ssr")]
+fn render_matched(
+    matched: &RouteMatch,
+    surface: Surface,
+    ctx: crate::renderer::RenderContext,
+    locale: &str,
+) -> String {
+    use crate::renderer::{render_screen_html, RenderContext};
+    let _ = locale;
     let html = if matched.screen.sdui {
-        render_screen_html(matched.screen, surface.sheets(), RenderContext::new(locale))
+        render_screen_html(matched.screen, surface.sheets(), ctx)
     } else {
         match matched.screen.id {
             "checkout" => crate::checkout::render_checkout_html(crate::checkout::CheckoutViewState {
@@ -198,7 +244,7 @@ pub fn render_path(host: &str, path: &str, locale: &str) -> Option<String> {
             _ => render_screen_html(matched.screen, surface.sheets(), RenderContext::new(locale)),
         }
     };
-    Some(html.replace("</body>", &format!("{HYDRATE_SCRIPT}</body>")))
+    html.replace("</body>", &format!("{HYDRATE_SCRIPT}</body>"))
 }
 
 #[cfg(test)]
@@ -280,6 +326,38 @@ mod tests {
         assert!(resolve("chez-marco.captain.food", "/nope").1.is_none());
         // The marketplace root is untouched by the rule.
         assert_eq!(resolve("captain.food", "/").1.unwrap().screen.id, "home");
+    }
+
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn render_path_with_ships_live_data_in_the_initial_html() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+        // The marketplace home: data_requirements = [promotions.active (GAP — refused before any
+        // network), categories.all, restaurants.featured, restaurants.all] → 3 transport calls.
+        let fake = FakeTransport::scripted(vec![
+            Ok(json!({ "categories": [] })),
+            Ok(json!({ "restaurants": [{ "displayName": "Chez Test", "slug": "chez-test",
+                        "address": { "city": "Tours" } }] })),
+            Ok(json!({ "restaurants": [] })),
+        ]);
+        let html = render_path_with(&fake, "captain.food", "/", "fr").await.expect("home renders");
+        // The SSR HTML carries the restaurant — no client fetch needed for first paint (#92).
+        assert!(html.contains("Chez Test"), "{html}");
+        assert!(html.contains("data-slug=\"chez-test\""));
+        assert_eq!(fake.call_count(), 3, "one read per non-gap data requirement");
+        // The featured rail's pinned arg travelled (the #82 contract, now exercised server-side).
+        assert!(fake.call(1).0.contains("$input: RestaurantsQueryInput!"));
+        assert_eq!(fake.call(1).1["input"]["list"], json!("RECOMMENDED"));
+
+        // A requires_auth screen ships as a SHELL: zero server-side reads (no credentials on a
+        // document GET — its data is the client's).
+        let fake = FakeTransport::scripted(vec![]);
+        let html = render_path_with(&fake, "chez-marco.captain.food", "/orders", "fr")
+            .await
+            .expect("order history renders");
+        assert!(html.contains("data-hydrate=\"order_history\""));
+        assert_eq!(fake.call_count(), 0, "requires_auth screens must not fetch server-side");
     }
 
     #[cfg(feature = "ssr")]
