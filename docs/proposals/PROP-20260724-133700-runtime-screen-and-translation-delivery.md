@@ -7,6 +7,12 @@
 > **Status:** Proposed — plan-mode proposal. **No `specs/**` or code changed yet.** On approval it
 > becomes an ADR that lands with the implementation.
 >
+> **Revision 6 (2026-07-24, product-owner direction):** translation HYGIENE becomes part of the
+> `make validate` gate — full locale coverage is a hard error and unused keys are errors that must
+> be deleted — and the runtime LOCALE RESOLUTION chain is fixed (Accept-Language/device → cookie →
+> `Customer.locale`). Independently shippable before this proposal's approval: tracked by
+> [#110 "Translation hygiene gates (full locale coverage + no unused keys) and the locale resolution chain"](https://github.com/TheCaptainCompany/captain-food/issues/110). See §1c.
+>
 > **Revision 5 (2026-07-24, product-owner direction):** live translation editing explicitly covers
 > the **defaults**, not only tenant customizations — and the catalog is restructured **one file per
 > language** so concurrent live edits in different languages can never merge-conflict (§1b).
@@ -105,6 +111,28 @@ English one — collide in the same file/lines and can merge-conflict. Proposed 
 
 Tenant copy rides the co-located customization sidecars of §1 (per-language, same split).
 Revision 3's runtime-overlay family stays retired (§8).
+
+## 1c. Translation hygiene & locale resolution (revision 6)
+
+Both hygiene rules are **`make validate` rules** — enforced by the same `codegen` CI gate that
+blocks every merge, so nothing can reach production violating them:
+
+- **Full locale coverage is a HARD error** (`translation-locale-missing`): every key carries every
+  supported locale. With §1b's per-language files this is a cross-file key-set equality check; a new
+  `en` string without its `fr` cannot merge.
+- **Every key is USED, or it must be DELETED** (`translation-key-unused`, hard error): a key
+  referenced by no screen/sidecar/customization is disorder. Keys consumed by hand-written Rust
+  (e.g. `order.status.*` via the tracking status hero) are declared in a `code_refs` manifest the
+  validator honors; a companion codegen test greps the crates so a stale manifest entry is itself
+  caught.
+
+**Locale resolution chain** (runtime policy): before any setting, the locale comes from
+**`Accept-Language`** on HTTP (SSR resolves it per request — the hardcoded `fr` default becomes the
+chain's last fallback) and **device settings** on the future mobile shells. A user's explicit
+choice (the existing `changeLanguage` mutation / language switch) is saved **immediately in a
+cookie** — so SSR honors it on the very next request, pre-authentication — and **later in
+`Customer.locale`** once authenticated. Resolution order:
+`Customer.locale → cookie → Accept-Language/device → platform default (fr)`.
 
 ## 2. Wire format
 
