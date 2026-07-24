@@ -3,6 +3,19 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-24. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #114: sheet input dispatch — OTP auto-submit + chip on_change fires the #62
+> survey (PR #121).** The #93 delegated driver covered BUTTONS only; two sheet interactions were
+> dead. The executor's action parsing generalized to a PREFIX (`ActionSpec::from_node_prefixed`) so
+> `on_complete`/`on_change` reuse the entire variable-resolution machinery; `trigger_attrs` stamps
+> the DOM contract + `data-trigger`. Renderer: `otp_input` carries its `on_complete` action +
+> `data-complete-len` on the `<input>`; `chip_multi_select` renders option chips + a hidden input
+> (id = field id) holding the selected value, so the existing form-field binding fill reads it with
+> zero new resolution. interact.rs: an `input` listener auto-dispatches when an OTP field reaches
+> its length (6th digit → `verify_otp`, the #94 flow), and the click listener stashes a picked
+> chip's value into the group's hidden input before dispatching. **This fires the #62
+> delivery-satisfaction survey from the UI for the first time** (the timeliness chips carry
+> `record_delivery_satisfaction`). Code-only, no spec change. 79 web tests (2 new); wasm green.
+
 > ✅ **2026-07-24 — #113: first-class pagination on `queries/restaurants` (PR #120,
 > PROP-20260724-164102).** The #107/#108 OOM hotfix's `LIMIT 200` was an invisible adapter guard —
 > the marketplace silently showed ≤200 and couldn't page. Now a contract: new `PageLimit`/

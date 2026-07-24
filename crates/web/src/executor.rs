@@ -70,7 +70,14 @@ impl ActionSpec {
     /// Parse a node's `action.*` props against the screen's resolved data. `None` = the node
     /// declares no action at all (a plain display node).
     pub fn from_node(node: &Node, ctx: &RenderContext) -> Option<ActionSpec> {
-        let action_type = text_prop(node, "action.type", ctx)?;
+        Self::from_node_prefixed(node, ctx, "action")
+    }
+
+    /// Parse an action rooted at an arbitrary prop PREFIX (#114): buttons use `action`, an
+    /// `otp_input`'s auto-submit uses `on_complete`, a chip's `on_change` uses `on_change` — all
+    /// the same `<prefix>.type` + variable-resolution machinery, just a different root key.
+    pub fn from_node_prefixed(node: &Node, ctx: &RenderContext, prefix: &str) -> Option<ActionSpec> {
+        let action_type = text_prop(node, &format!("{prefix}.type"), ctx)?;
         let Some(key) = ActionKey::from_key(&action_type) else {
             // An action type outside the generated allowlist: fail closed, visibly — the fix is a
             // spec/codegen change, never a silent skip.
@@ -85,10 +92,10 @@ impl ActionSpec {
 
         let plan = match key.kind() {
             ActionKind::Mutation => {
-                let (input, unresolved_bindings) = resolved_variables(node, ctx);
+                let (input, unresolved_bindings) = resolved_variables(node, ctx, prefix);
                 ActionPlan::Mutation { key, input, unresolved_bindings }
             }
-            ActionKind::Client => match client_effect(key, node, ctx) {
+            ActionKind::Client => match client_effect(key, node, ctx, prefix) {
                 Some(effect) => ActionPlan::Client(effect),
                 None => ActionPlan::Disabled {
                     reason: format!("client action `{}` is missing its target prop", key.as_str()),
@@ -107,7 +114,7 @@ impl ActionSpec {
             ActionPlan::Mutation { input, .. } => Some(input),
             _ => None,
         };
-        let on_success_route = text_prop(node, "action.on_success.route", ctx)
+        let on_success_route = text_prop(node, &format!("{prefix}.on_success.route"), ctx)
             .map(|route| substitute_variables(&route, input_for_template));
 
         Some(ActionSpec {
@@ -129,16 +136,18 @@ impl ActionSpec {
 fn resolved_variables(
     node: &Node,
     ctx: &RenderContext,
+    prefix: &str,
 ) -> (Map<String, Value>, Vec<(String, String)>) {
-    const EXPLICIT: &str = "action.variables.";
+    let explicit = format!("{prefix}.variables.");
+    let bare = format!("{prefix}.");
     const RESERVED: [&str; 4] = ["type", "route", "sheet_id", "number"];
     let mut input = Map::new();
     let mut unresolved_bindings = Vec::new();
     for (path, prop) in node.props {
-        let name = match path.strip_prefix(EXPLICIT) {
+        let name = match path.strip_prefix(explicit.as_str()) {
             Some(name) if !name.contains('.') => name,
             Some(_) => continue,
-            None => match path.strip_prefix("action.") {
+            None => match path.strip_prefix(bare.as_str()) {
                 // Bare style: a single-segment key that is not structural.
                 Some(name) if !name.contains('.') && !RESERVED.contains(&name) => name,
                 _ => continue,
@@ -174,25 +183,22 @@ fn substitute_variables(route: &str, input: Option<&Map<String, Value>>) -> Stri
     out
 }
 
-fn client_effect(key: ActionKey, node: &Node, ctx: &RenderContext) -> Option<ClientEffect> {
+fn client_effect(key: ActionKey, node: &Node, ctx: &RenderContext, prefix: &str) -> Option<ClientEffect> {
+    let p = |suffix: &str| text_prop(node, &format!("{prefix}.{suffix}"), ctx);
     match key.as_str() {
-        "navigate" => Some(ClientEffect::Navigate { route: text_prop(node, "action.route", ctx)? }),
-        "open_bottom_sheet" => {
-            Some(ClientEffect::OpenSheet { sheet_id: text_prop(node, "action.sheet_id", ctx)? })
-        }
+        "navigate" => Some(ClientEffect::Navigate { route: p("route")? }),
+        "open_bottom_sheet" => Some(ClientEffect::OpenSheet { sheet_id: p("sheet_id")? }),
         "close_sheet" => Some(ClientEffect::CloseSheet),
-        "phone_call" => {
-            Some(ClientEffect::PhoneCall { number: text_prop(node, "action.number", ctx)? })
-        }
+        "phone_call" => Some(ClientEffect::PhoneCall { number: p("number")? }),
         "copy_to_clipboard" => Some(ClientEffect::CopyToClipboard),
         "share" => Some(ClientEffect::Share),
         // `conditional`: guest branch until auth state exists (see ClientEffect docs). The nested
         // branch is itself a mini-action: navigate or open a sheet.
         "conditional" => {
-            if let Some(route) = text_prop(node, "action.if_guest.route", ctx) {
+            if let Some(route) = p("if_guest.route") {
                 return Some(ClientEffect::Navigate { route });
             }
-            if let Some(sheet) = text_prop(node, "action.if_guest.sheet_id", ctx) {
+            if let Some(sheet) = p("if_guest.sheet_id") {
                 return Some(ClientEffect::OpenSheet { sheet_id: sheet });
             }
             None
@@ -233,13 +239,44 @@ pub mod attrs {
     pub const ROUTE: &str = "data-route";
     pub const SHEET: &str = "data-sheet";
     pub const NUMBER: &str = "data-number";
+    /// The DOM EVENT that fires a non-click action (#114): `complete` (an `otp_input` reaching its
+    /// length) or `change` (a chip/select). Absent = a click (buttons).
+    pub const TRIGGER: &str = "data-trigger";
+    /// The input length an `on_complete` fires at (`otp_input.length`).
+    pub const COMPLETE_LEN: &str = "data-complete-len";
 }
 
 /// The renderer-side half of the contract: a button's plan as `(attribute, value)` pairs, plus
 /// whether it renders disabled (with the reason as its tooltip). SSR'd HTML and hydrated DOM carry
 /// identical attributes, so the delegated listener works on both.
 pub fn button_attrs(node: &Node, ctx: &RenderContext) -> (Vec<(&'static str, String)>, Option<String>) {
-    let Some(spec) = ActionSpec::from_node(node, ctx) else { return (Vec::new(), None) };
+    match ActionSpec::from_node(node, ctx) {
+        Some(spec) => spec_attrs(&spec),
+        None => (Vec::new(), None),
+    }
+}
+
+/// A non-click TRIGGER action (#114): an action rooted at `prefix` (`on_complete`/`on_change`),
+/// stamped with `data-trigger` = the DOM event that fires it. `interact.rs` delegates `input`/
+/// `change` events to these exactly as it delegates clicks to `button_attrs`.
+pub fn trigger_attrs(
+    node: &Node,
+    ctx: &RenderContext,
+    prefix: &str,
+    trigger: &str,
+) -> (Vec<(&'static str, String)>, Option<String>) {
+    let Some(spec) = ActionSpec::from_node_prefixed(node, ctx, prefix) else {
+        return (Vec::new(), None);
+    };
+    let (mut out, disabled) = spec_attrs(&spec);
+    if !out.is_empty() {
+        out.push((attrs::TRIGGER, trigger.to_string()));
+    }
+    (out, disabled)
+}
+
+/// Flatten an [`ActionSpec`] to the DOM attribute contract — shared by click buttons and triggers.
+fn spec_attrs(spec: &ActionSpec) -> (Vec<(&'static str, String)>, Option<String>) {
     let mut out = Vec::new();
     let mut disabled = None;
     match &spec.plan {
@@ -389,6 +426,46 @@ mod tests {
             .map(|(_, v)| v.clone())
             .expect("data-var-bindings stamped");
         assert!(bindings.contains("phone_field.value"), "{bindings}");
+    }
+
+    #[test]
+    fn otp_on_complete_and_chip_on_change_parse_as_trigger_actions() {
+        // #114: the OTP field's on_complete → verify_otp, and the rating sheet's timeliness chips'
+        // on_change → record_delivery_satisfaction (the #62 survey), both from the GENERATED trees.
+        fn find_by_prefix_type<'a>(nodes: &'a [Node], prefix: &str, ty: &str) -> Option<&'a Node> {
+            for n in nodes {
+                if matches!(n.prop(&format!("{prefix}.type")), Some(PropValue::Text(t)) if t == ty) {
+                    return Some(n);
+                }
+                if let Some(hit) = find_by_prefix_type(n.children, prefix, ty) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        let sheets = Surface::RestaurantFrontoffice.sheets();
+        let otp = sheets.iter().find(|s| s.id == "otp_sheet").expect("otp sheet");
+        let field = find_by_prefix_type(std::slice::from_ref(&otp.node), "on_complete", "verify_otp")
+            .expect("otp_input on_complete");
+        let (attrs_list, _) = trigger_attrs(field, &ctx_with(&[]), "on_complete", "complete");
+        let g = |k: &str| attrs_list.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone());
+        assert_eq!(g(attrs::ACTION).as_deref(), Some("verify_otp"));
+        assert_eq!(g(attrs::TRIGGER).as_deref(), Some("complete"));
+        assert!(g(attrs::VAR_BINDINGS).unwrap().contains("otp_field.value"), "code binding");
+
+        let rating = sheets.iter().find(|s| s.id == "rating_sheet").expect("rating sheet");
+        let chips = find_by_prefix_type(
+            std::slice::from_ref(&rating.node),
+            "on_change",
+            "record_delivery_satisfaction",
+        )
+        .expect("timeliness chips on_change");
+        let (attrs_list, _) = trigger_attrs(chips, &ctx_with(&[]), "on_change", "change");
+        let g = |k: &str| attrs_list.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone());
+        assert_eq!(g(attrs::ACTION).as_deref(), Some("record_delivery_satisfaction"));
+        assert_eq!(g(attrs::TRIGGER).as_deref(), Some("change"));
+        // The selected chip feeds `timeliness` via the group's field-value binding.
+        assert!(g(attrs::VAR_BINDINGS).unwrap().contains("delivery_timeliness.value"));
     }
 
     fn find_action<'a>(nodes: &'a [Node], ty: &str) -> Option<&'a Node> {

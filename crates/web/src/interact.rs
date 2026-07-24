@@ -93,7 +93,7 @@ pub fn install(origin: &str, role: Role, session: SessionId) {
         );
     }
 
-    // The ONE delegated listener.
+    // The delegated CLICK listener — buttons, and chip selection (#114).
     {
         let d = Rc::clone(&driver);
         let listener = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(move |e: web_sys::MouseEvent| {
@@ -101,6 +101,22 @@ pub fn install(origin: &str, role: Role, session: SessionId) {
             else {
                 return;
             };
+            // A chip pick (#114): stash the value in the group's hidden input BEFORE dispatching,
+            // so the fieldset action's `{{ <group>.value }}` binding fills from it. Fires the #62
+            // survey (the timeliness chips). Then fall through to the group's data-action.
+            if let Some(chip) = target.closest("[data-chip-value]").ok().flatten() {
+                if let (Some(value), Some(group)) =
+                    (chip.get_attribute("data-chip-value"), chip.get_attribute("data-chip-group"))
+                {
+                    if let Some(input) = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|doc| doc.get_element_by_id(&group))
+                        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    {
+                        input.set_value(&value);
+                    }
+                }
+            }
             let Some(el) = target
                 .closest("[data-action]")
                 .ok()
@@ -113,6 +129,36 @@ pub fn install(origin: &str, role: Role, session: SessionId) {
         });
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let _ = doc.add_event_listener_with_callback("click", listener.as_ref().unchecked_ref());
+        }
+        listener.forget();
+    }
+
+    // The delegated INPUT listener — `on_complete` auto-submit (#114): an `otp_input` that reaches
+    // its declared length dispatches (e.g. the 6th OTP digit fires verify_otp).
+    {
+        let d = Rc::clone(&driver);
+        let listener = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            let Some(el) = e
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+                .filter(|el| el.get_attribute(attrs::TRIGGER).as_deref() == Some("complete"))
+            else {
+                return;
+            };
+            let Some(len) = el.get_attribute(attrs::COMPLETE_LEN).and_then(|s| s.parse::<usize>().ok())
+            else {
+                return;
+            };
+            let filled = el
+                .dyn_ref::<web_sys::HtmlInputElement>()
+                .map(|i| i.value().chars().count())
+                .unwrap_or(0);
+            if filled >= len && el.get_attribute("data-busy").is_none() {
+                d.on_click(el);
+            }
+        });
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            let _ = doc.add_event_listener_with_callback("input", listener.as_ref().unchecked_ref());
         }
         listener.forget();
     }
