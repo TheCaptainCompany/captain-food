@@ -441,8 +441,9 @@ pub fn hydrate() {
     let location = window.location();
     let host = location.host().unwrap_or_default();
     let path = location.pathname().unwrap_or_else(|_| "/".into());
-    let surface = router::surface_for_host(&host);
-    let Some(matched) = router::match_route(surface, &path) else { return };
+    // Shared host+path resolution incl. the tenant-root rule (#98) — same authority as SSR.
+    let (surface, matched) = router::resolve(&host, &path);
+    let Some(matched) = matched else { return };
     let screen: &'static Screen = matched.screen;
     if !screen.sdui {
         // checkout / order_tracking: their hand-written flows own hydration (split 3 modules).

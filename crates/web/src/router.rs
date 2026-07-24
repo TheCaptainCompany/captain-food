@@ -133,6 +133,25 @@ pub fn match_route(surface: Surface, path: &str) -> Option<RouteMatch> {
     None
 }
 
+/// Resolve `host` + `path` to a screen — the table match PLUS the tenant-root rule (#98): on a
+/// `{slug}.captain.food` storefront, `/` IS the restaurant screen, its `slug` param taken from the
+/// HOST (the ADR-0036 tenant model — the host is the tenant selector; the `/r/:slug` path route
+/// stays for path-addressed access). Both the SSR entry (`render_path`) and the hydrate entry go
+/// through here so the two paths cannot disagree.
+pub fn resolve(host: &str, path: &str) -> (Surface, Option<RouteMatch>) {
+    let surface = surface_for_host(host);
+    let matched = match_route(surface, path).or_else(|| {
+        let is_root = path.trim_end_matches('/').is_empty();
+        if surface == Surface::RestaurantFrontoffice && is_root {
+            let slug = Surface::slug_of(host)?;
+            let screen = surface.screens().iter().find(|s| s.id == "restaurant")?;
+            return Some(RouteMatch { screen, params: vec![("slug".into(), slug.to_string())] });
+        }
+        None
+    });
+    (surface, matched)
+}
+
 /// The module script that boots the wasm bundle over an SSR page. The bundle URL is fixed
 /// (`/assets/web.js`, served by the BFF's asset route out of the Docker image); on a deployment
 /// without assets the script 404s and the page simply stays server-rendered — degraded, never broken.
@@ -146,8 +165,8 @@ const HYDRATE_SCRIPT: &str = "<script type=\"module\">import init, { hydrate } f
 #[cfg(feature = "ssr")]
 pub fn render_path(host: &str, path: &str, locale: &str) -> Option<String> {
     use crate::renderer::{render_screen_html, RenderContext};
-    let surface = surface_for_host(host);
-    let matched = match_route(surface, path)?;
+    let (_, matched) = resolve(host, path);
+    let matched = matched?;
     let html = if matched.screen.sdui {
         render_screen_html(matched.screen, RenderContext::new(locale))
     } else {
@@ -236,6 +255,21 @@ mod tests {
             }
             assert!(match_route(surface, "/definitely/not/a/route").is_none());
         }
+    }
+
+    #[test]
+    fn tenant_root_is_the_restaurant_screen_with_the_slug_from_the_host() {
+        // #98: on a {slug} storefront, `/` IS the storefront — slug from the HOST.
+        let (surface, m) = resolve("chez-marco.captain.food", "/");
+        assert_eq!(surface, Surface::RestaurantFrontoffice);
+        let m = m.expect("tenant root must resolve");
+        assert_eq!(m.screen.id, "restaurant");
+        assert_eq!(m.param("slug"), Some("chez-marco"));
+        // The path route keeps working, and a non-root unknown path still 404s.
+        assert_eq!(resolve("chez-marco.captain.food", "/r/other").1.unwrap().screen.id, "restaurant");
+        assert!(resolve("chez-marco.captain.food", "/nope").1.is_none());
+        // The marketplace root is untouched by the rule.
+        assert_eq!(resolve("captain.food", "/").1.unwrap().screen.id, "home");
     }
 
     #[cfg(feature = "ssr")]
