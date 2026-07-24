@@ -237,56 +237,53 @@ impl DispatchHandle {
             let operation =
                 execute_resolver(transport, ResolverKey::OperationStatusByMessage, poll_vars.clone())
                     .await?;
-            // `operationStatus` resolves null to strangers AND during the tiny window before the
-            // journal row is readable — both are "no verdict yet", so keep polling (the bound
-            // protects us from polling a row we will never be allowed to see).
-            if operation.is_null() {
-                continue;
-            }
-            let status = operation
-                .get("status")
-                .and_then(Value::as_str)
-                .and_then(OperationStatus::parse)
-                .ok_or_else(|| {
-                    ActionError::MalformedAcceptance("Operation without a valid status".into())
-                })?;
-            let message =
-                operation.get("message").and_then(Value::as_str).map(str::to_string);
-            match status {
-                OperationStatus::Pending => continue,
-                OperationStatus::Succeeded => {
-                    return Ok(ActionOutcome::Succeeded { message_id: self.message_id })
-                }
-                OperationStatus::Rejected => {
-                    // The stable errors.yaml code is the rejection contract (P-10) — its absence
-                    // is a server bug we surface, not paper over.
-                    let error_code = operation
-                        .get("errorCode")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                        .ok_or_else(|| {
-                            ActionError::MalformedAcceptance("REJECTED without errorCode".into())
-                        })?;
-                    return Ok(ActionOutcome::Rejected {
-                        message_id: self.message_id,
-                        error_code,
-                        message,
-                    });
-                }
-                OperationStatus::Failed => {
-                    return Ok(ActionOutcome::Failed {
-                        message_id: self.message_id,
-                        error_code: operation
-                            .get("errorCode")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                        message,
-                    });
-                }
+            if let Some(outcome) = outcome_from_operation(self.message_id, &operation)? {
+                return Ok(outcome);
             }
         }
         Err(ActionError::PollingExhausted { message_id: self.message_id, attempts: max_attempts })
     }
+}
+
+/// Interpret ONE `Operation` payload for `message_id` — the single operation→outcome authority,
+/// shared by the poll loop above and the push path (`operationStatusChanged` frames arrive as the
+/// same `Operation` shape by construction — the subscription reuses the resolver's selection).
+/// `Ok(None)` = no verdict yet: a `null` read (`operationStatus` resolves null to strangers AND
+/// during the tiny window before the journal row is readable) or a PENDING status — keep waiting.
+pub fn outcome_from_operation(
+    message_id: Uuid,
+    operation: &Value,
+) -> Result<Option<ActionOutcome>, ActionError> {
+    if operation.is_null() {
+        return Ok(None);
+    }
+    let status = operation
+        .get("status")
+        .and_then(Value::as_str)
+        .and_then(OperationStatus::parse)
+        .ok_or_else(|| ActionError::MalformedAcceptance("Operation without a valid status".into()))?;
+    let message = operation.get("message").and_then(Value::as_str).map(str::to_string);
+    Ok(match status {
+        OperationStatus::Pending => None,
+        OperationStatus::Succeeded => Some(ActionOutcome::Succeeded { message_id }),
+        OperationStatus::Rejected => {
+            // The stable errors.yaml code is the rejection contract (P-10) — its absence is a
+            // server bug we surface, not paper over.
+            let error_code = operation
+                .get("errorCode")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    ActionError::MalformedAcceptance("REJECTED without errorCode".into())
+                })?;
+            Some(ActionOutcome::Rejected { message_id, error_code, message })
+        }
+        OperationStatus::Failed => Some(ActionOutcome::Failed {
+            message_id,
+            error_code: operation.get("errorCode").and_then(Value::as_str).map(str::to_string),
+            message,
+        }),
+    })
 }
 
 /// The mutation document: the GENERATED input-type name (#97) + the uniform `MutationAcceptance`

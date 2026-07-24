@@ -339,7 +339,11 @@ pub mod browser {
     }
 
     /// The subscribing surface handed to `on_connect`: wraps the state machine + the socket so a
-    /// screen can request subscriptions without seeing either.
+    /// screen can request subscriptions without seeing either. `Clone` so a caller may KEEP the
+    /// current connection's handle (e.g. `interact.rs` subscribing per dispatched write) — clones
+    /// share the same state machine + socket; a stale clone after a reconnect just sends into a
+    /// closed socket, which the reconnect + re-sync contract already covers.
+    #[derive(Clone)]
     pub struct Handle {
         client: Rc<RefCell<WsClient>>,
         socket: web_sys::WebSocket,
@@ -357,6 +361,12 @@ pub mod browser {
                 let _ = self.socket.send_with_str(&frame);
             }
             id
+        }
+
+        /// Stop one subscription (the driver unsubscribes settled writes).
+        pub fn unsubscribe(&mut self, id: SubId) {
+            let frame = self.client.borrow_mut().unsubscribe(id);
+            let _ = self.socket.send_with_str(&frame);
         }
     }
 

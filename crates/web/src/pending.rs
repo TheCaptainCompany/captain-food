@@ -128,6 +128,23 @@ pub async fn retry(
     dispatch_with_id(transport, write.action, write.input.clone(), write.message_id).await
 }
 
+/// Settle from a PUSHED `Operation` payload (#93: `operationStatusChanged` is the PRIMARY verdict
+/// path; the bounded poll of [`settle`] is the fallback). Interprets the frame with the same
+/// operation→outcome authority as the poll loop; a terminal verdict clears the record,
+/// `Ok(None)` (PENDING / not-yet-readable) leaves it — nothing to await, the next frame or the
+/// fallback poll carries the verdict.
+pub fn settle_from_push(
+    store: &dyn PendingStore,
+    handle: &DispatchHandle,
+    operation: &Value,
+) -> Result<Option<ActionOutcome>, ActionError> {
+    let outcome = crate::actions::outcome_from_operation(handle.message_id, operation)?;
+    if outcome.is_some() {
+        clear(store, handle.message_id);
+    }
+    Ok(outcome)
+}
+
 /// What [`resume_pending`] found for one stored write.
 #[derive(Debug)]
 pub enum ResumedWrite {
@@ -335,6 +352,31 @@ mod tests {
         let remaining = store.load();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].action, ActionKey::PlaceOrder);
+    }
+
+    #[tokio::test]
+    async fn a_pushed_terminal_operation_settles_and_clears_push_first() {
+        // The #93 push path: an operationStatusChanged frame settles the write with NO poll.
+        let store = MemoryPendingStore::default();
+        let fake = FakeTransport::scripted(vec![Ok(acceptance("PENDING", false))]);
+        let handle = dispatch_persisted(&fake, &store, ActionKey::AddToCart, input()).await.unwrap();
+        assert_eq!(store.load().len(), 1);
+
+        // A PENDING frame settles nothing and keeps the record.
+        let pending_frame = json!({ "status": "PENDING", "errorCode": null, "message": null });
+        assert!(settle_from_push(&store, &handle, &pending_frame).unwrap().is_none());
+        assert_eq!(store.load().len(), 1);
+
+        // The terminal frame settles + clears — one frame, zero operationStatus reads.
+        let rejected = json!({ "status": "REJECTED", "errorCode": "OfferOutOfStock", "message": null });
+        match settle_from_push(&store, &handle, &rejected).unwrap() {
+            Some(ActionOutcome::Rejected { error_code, .. }) => {
+                assert_eq!(error_code, "OfferOutOfStock")
+            }
+            other => panic!("expected the pushed rejection, got {other:?}"),
+        }
+        assert!(store.load().is_empty());
+        assert_eq!(fake.call_count(), 1, "push settling must not touch the transport");
     }
 
     #[test]
