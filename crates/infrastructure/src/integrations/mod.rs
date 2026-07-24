@@ -27,5 +27,7 @@ pub mod inbound_drain_worker;
 pub mod payments;
 pub mod retention_sweep_worker;
 pub mod sirene;
+pub mod ovh_sms;
+pub mod supabase_sms_hook;
 pub mod supabase_auth;
 pub mod sync_sirene_worker;

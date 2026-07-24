@@ -3,6 +3,25 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-24. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-07-25 — [#118](https://github.com/TheCaptainCompany/captain-food/issues/118): OVH SMS
+> delivery for phone OTP (PROP-20260724-233605).** The #117 adapter can ask Supabase to send a phone
+> OTP, but Supabase has no SMS transport wired — so phone verification silently never delivered. Now
+> the Supabase Auth **Send-SMS hook** is fulfilled by OVHcloud (ADR-20260722-174500: OVH over Twilio
+> for FR price + EU residency): `OvhSmsClient` (crates/infrastructure/integrations/ovh_sms.rs) signs
+> OVH API v1 requests (`X-Ovh-Signature = "$1$"+sha1_hex(AS+CK+METHOD+URL+BODY+TS)`) and POSTs
+> `/sms/{service}/jobs` with `noStopClause:true` (transactional OTP, no STOP footer); the hook
+> boundary (integrations/supabase_sms_hook.rs) verifies Supabase's **standard-webhooks** signature
+> (`webhook-signature` HMAC-SHA256, ±5-min replay window) and extracts `(phone, otp)`. The server
+> route `POST /auth/sms-hook` (crates/server/auth_routes.rs) wires them: verify → 401 on bad sig,
+> parse → 400, deliver → 204 / 502 on OVH failure, **503 when SMS is unconfigured** (no OVH client /
+> no secret — fail-closed, never a half-open delivery path; the Stripe/identity env-gate pattern).
+> Env: `OVH_APPLICATION_KEY/SECRET`, `OVH_CONSUMER_KEY`, `OVH_SMS_SERVICE_NAME` (+ optional
+> `OVH_ENDPOINT`/`OVH_SMS_SENDER`) + `SUPABASE_SMS_HOOK_SECRET`. 7 unit tests (OVH signature vector +
+> env gating, hook verify/tamper/replay/parse, route fail-closed). **Not verifiable live until an OVH
+> account exists** (user provisions credentials + the Supabase Send-SMS hook URL later; 20 free SMS
+> credits noted); the code/build/deploy-health path is verified. SMS-only for V0 — WhatsApp OTP
+> deferred as a post-V0 UX choice ([#125](https://github.com/TheCaptainCompany/captain-food/issues/125)).
+
 > ✅ **2026-07-24 — #117: the real Supabase Auth adapter — login machinery is functional (PR #124,
 > PROP-20260724-225804).** The only `IdentityService` was the fail-closed stub, so no login worked.
 > New `SupabaseIdentityService` (crates/infrastructure/integrations/supabase_auth.rs, beside the
