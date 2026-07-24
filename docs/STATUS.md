@@ -3,6 +3,25 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #98: tenant root serves the storefront; unclaimed slugs get the join landing
+> (PR #101; production bug found by the owner: `chezmarco.captain.food` answered 404).** The
+> storefront surface has no screen at `/` (the restaurant screen is `/r/:slug`; discovery moved to
+> the marketplace in #75), so every tenant front door was a dead end. (1) **Tenant-root rule** —
+> new `web::router::resolve(host, path)`: on a `{slug}.captain.food` storefront, `/` IS the
+> restaurant screen with the slug taken from the HOST (ADR-0036: the host is the tenant selector);
+> both the SSR entry (`render_path`) and the hydrate entry go through it so the two paths cannot
+> disagree. (2) **Claim landing** — the host fallback now checks a tenant slug against the
+> restaurant read model (`hosts::TenantLookup`, the `restaurants` repo Arc shared into an
+> Extension): registered → storefront; POSITIVELY absent → a claim-your-subdomain landing
+> ("{slug}.captain.food est disponible pour votre restaurant", CTA →
+> https://join.captain.food/#rejoindre — every unclaimed subdomain is an acquisition surface,
+> product-owner directive) served on EVERY path of the host; lookup error or no database →
+> **FAIL OPEN to the storefront shell** (a DB hiccup must never show "available" for a real
+> restaurant). Slug reflection is injection-safe (`is_valid_slug` gates `Tenant()`).
+> Tests: web tenant-root resolution matrix + 3 server tests over a stub read model (registered /
+> unclaimed-on-every-path / fail-open incl. no-DB). 71 web + 21 server-lib tests green; `make rust`
+> 0 errors/no drift. Residual: the storefront root still hydrate-fetches its data (#92 pre-fills).
+
 > ✅ **2026-07-24 — #93: SDUI buttons DISPATCH — action wiring + pending UX + push-first verdicts +
 > boot resume (PR #100; the #17 UX tail + ADR-20260723-172013 residual 3).** The renderer rendered
 > every button's `action.*` props as inert data; now the screens WORK. (1) **`executor.rs`** (pure,

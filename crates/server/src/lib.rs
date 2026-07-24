@@ -158,6 +158,8 @@ pub fn router() -> Router {
     // constructed unconditionally so the schema always carries one.
     let operation_status_bus = infrastructure::OperationStatusBus::default();
     let mut read_deps: Option<ReadDeps> = None;
+    // The host fallback's tenant lookup (#98): decides registered-vs-unclaimed for {slug} hosts.
+    let mut tenant_lookup = hosts::TenantLookup(None);
     let mut write_deps: Option<WriteDeps> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
@@ -202,6 +204,8 @@ pub fn router() -> Router {
                     Arc::new(PgRestaurantRepository::new(pool.clone()));
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = restaurants.clone();
+                // The host fallback shares it too (#98: registered-vs-unclaimed tenant slugs).
+                tenant_lookup = hosts::TenantLookup(Some(restaurants.clone()));
                 let prospection: Arc<dyn ProspectionReadRepository> =
                     Arc::new(PgProspectionRepository::new(pool.clone()));
                 let pricing_policy: Arc<dyn PricingPolicyReadRepository> =
@@ -572,6 +576,9 @@ pub fn router() -> Router {
         // trees, non-app hosts keep plain-text landings. Explicit routes (/health, /ping, /{role}/graphql)
         // win, so Render's health check (internal *.onrender.com host) is unaffected. Covers `/` too.
         .fallback(hosts::host_root)
+        // The fallback's tenant lookup (#98) — None without a database (every slug then serves the
+        // storefront shell; the claim landing needs a POSITIVE not-found).
+        .layer(Extension(tenant_lookup))
         // API auth (ADR-0047): the Supabase-JWT verifier, available to the `/{role}/graphql` handler which
         // gates every non-public path. Shared as an Extension so the JWKS cache is process-wide.
         .layer(Extension(auth::AuthContext::from_env()))
