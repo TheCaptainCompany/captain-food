@@ -579,6 +579,17 @@ pub fn router() -> Router {
             identity_service_impl()
         })
         .expect("identity service binding (services.yaml)"),
+        // The Supabase Send-SMS hook → OVH delivery (#118): both the OVH client and the hook secret
+        // must be configured, else the hook 503s (SMS-less, never half-open).
+        sms: infrastructure::OvhSmsClient::from_env().map(|c| {
+            println!("sms delivery: OvhSmsClient (OVH_* set)");
+            Arc::new(c)
+        }),
+        sms_hook_secret: std::env::var("SUPABASE_SMS_HOOK_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| infrastructure::supabase_sms_hook::decode_hook_secret(&s))
+            .map(Arc::new),
     };
 
     let schema = graphql::schema::build_schema(read_deps, write_deps, Some(event_bus));
