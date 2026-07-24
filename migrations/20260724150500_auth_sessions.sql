@@ -1,22 +1,26 @@
--- Retention sweep for the write-path journals and adapter webhook mirrors
--- (ADR-20260721-025159; issue #18). The ONE place the retention windows live — schedule it from
--- the in-process RetentionSweepWorker (default) or a pg_cron job; either way the policy is here.
+-- Auth-session parking (#112, PROP-20260724-150500): the identity provider issues its session at
+-- VERIFICATION time inside the async VerifyPhone/verify-email handler, but the client only holds
+-- the acceptance messageId — this table bridges the two. Ciphertext (AES-256-GCM under
+-- AUTH_SESSION_KEY), single-read at `POST /auth/session` pickup (row deleted), minutes-scale TTL,
+-- ownership = the journaling X-SESSION-ID must match. Copied from
+-- specs/generated/schema.generated.sql (specs/database/tables/integration_connections.yaml).
 --
--- Scope, per table (aged rows only — the guard columns are the tables' own high-water marks):
---   command_journal            terminal rows (SUCCEEDED/REJECTED/FAILED)  90 days from completed_at
---   inbound_events             DELIVERED rows                             30 days from delivered_at
---   external_stripe_events     processed rows (processed_at set)          90 days from processed_at
---   external_hubrise_callbacks processed rows (processed_at set)          90 days from processed_at
---   external_avelo37_events    processed rows (processed_at set)          90 days from processed_at
---   external_uber_direct_events processed rows (processed_at set)         90 days from processed_at
---
--- NEVER swept, at any age: domain_events / domain_stream (the forever log — deliberately not
--- referenced here; its only trimming is the opt-in per-stream $maxAge/$maxCount machinery),
--- command_journal RECEIVED rows (the stale-RECEIVED sweep marks crashed runs FAILED first),
--- inbound_events FAILED rows (kept until resolved) and RECEIVED rows (pending work),
--- unprocessed mirror rows (processed_at IS NULL), and external_sirene_restaurants (a full
--- mirror — detect-by-absence needs the complete row set, ADR-0045).
-CREATE FUNCTION sweep_retention()
+-- Also replaces sweep_retention() (specs/database/functions/sweep_retention.sql,
+-- ADR-20260721-025159) so abandoned pickup rows join the sweep — body copied VERBATIM from the
+-- source (CREATE → CREATE OR REPLACE), which resolves status predicates via the ref_* lookups.
+
+CREATE TABLE auth_sessions (
+  message_id UUID PRIMARY KEY,
+  session_id UUID NULL,
+  ciphertext BYTEA NOT NULL,
+  nonce BYTEA NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON auth_sessions (session_id);
+CREATE INDEX ON auth_sessions (expires_at);
+
+CREATE OR REPLACE FUNCTION sweep_retention()
 RETURNS TABLE (swept_table TEXT, deleted BIGINT)
 LANGUAGE plpgsql
 AS $$

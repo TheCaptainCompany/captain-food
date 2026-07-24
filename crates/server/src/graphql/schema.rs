@@ -71,6 +71,9 @@ pub struct WriteDeps {
     pub journal: Arc<dyn CommandJournal>,
     /// The in-process journal-transition broadcast feeding `operationStatusChanged`.
     pub status_bus: OperationStatusBus,
+    /// Cookie-pickup parking (#112): VerifyPhone/verify-email park the provider session here for
+    /// `POST /auth/session` to claim. Fail-closed stand-in (refuses) until AUTH_SESSION_KEY + DB.
+    pub auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore>,
 }
 
 /// Build the master schema served under every role path. With `Some(deps)`/`Some(writes)` the
@@ -109,6 +112,7 @@ pub fn build_schema(
         builder = builder.data(w.refund_state);
         builder = builder.data(w.journal);
         builder = builder.data(w.status_bus);
+        builder = builder.data(w.auth_sessions);
     }
     if let Some(bus) = events {
         builder = builder.data(bus);

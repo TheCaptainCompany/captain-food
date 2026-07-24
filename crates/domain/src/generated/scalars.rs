@@ -175,7 +175,7 @@ pub struct DialingCode(pub String);
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NationalPhoneNumber(pub String);
 
-/// One-time SMS code from Supabase Auth (sent via Twilio; a mock provider in dev).
+/// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OtpCode(pub String);
 

@@ -1431,7 +1431,7 @@ async fn test_customer_verify_phone_registers() {
     spec_baseline(&bed).await;
     let before = bed.snapshot();
     let cmd = cmds::VerifyPhone { customer_id: sc::CustomerId(support::uid("cust-1")), dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("612345678".into()), code: sc::OtpCode("123456".into()), session_id: sc::SessionId(support::uid("sess-1")), display_name: Some(sc::CustomerDisplayName("Johnny".into())), locale: Some(sc::Locale("fr-FR".into())), timezone: Some(sc::TimeZone("Europe/Paris".into())) };
-    let result = crate::commands::verify_phone(&bed.store, &bed.identity, &bed.customers, cmd, &support::actor()).await;
+    let result = crate::commands::verify_phone(&bed.store, &bed.identity, &bed.customers, &bed.auth_sessions, cmd, &support::actor()).await;
     let _ = result.expect("TestCustomerVerifyPhoneRegisters: the spec expects acceptance");
     bed.assert_appended("TestCustomerVerifyPhoneRegisters", &before, &[
         (format!("Customer-{}", support::uid("cust-1")), fx_customer_registered()),
@@ -1447,7 +1447,7 @@ async fn test_customer_verify_phone_returning_identifies() {
     bed.seed(&format!("Customer-{}", support::uid("cust-1")), vec![fx_customer_registered()]).await;
     let before = bed.snapshot();
     let cmd = cmds::VerifyPhone { customer_id: sc::CustomerId(support::uid("cust-2")), dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("612345678".into()), code: sc::OtpCode("123456".into()), session_id: sc::SessionId(support::uid("sess-1")), display_name: None, locale: None, timezone: None };
-    let result = crate::commands::verify_phone(&bed.store, &bed.identity, &bed.customers, cmd, &support::actor()).await;
+    let result = crate::commands::verify_phone(&bed.store, &bed.identity, &bed.customers, &bed.auth_sessions, cmd, &support::actor()).await;
     let _ = result.expect("TestCustomerVerifyPhoneReturningIdentifies: the spec expects acceptance");
     bed.assert_appended("TestCustomerVerifyPhoneReturningIdentifies", &before, &[
         (format!("Customer-{}", support::uid("cust-1")), fx_customer_identified()),
@@ -1462,7 +1462,7 @@ async fn test_customer_verify_phone_is_rejected() {
     spec_baseline(&bed).await;
     let before = bed.snapshot();
     let cmd = cmds::VerifyPhone { customer_id: sc::CustomerId(support::uid("cust-1")), dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("612345678".into()), code: sc::OtpCode("000000".into()), session_id: sc::SessionId(support::uid("sess-1")), display_name: None, locale: None, timezone: None };
-    let result = crate::commands::verify_phone(&bed.store, &bed.identity, &bed.customers, cmd, &support::actor()).await;
+    let result = crate::commands::verify_phone(&bed.store, &bed.identity, &bed.customers, &bed.auth_sessions, cmd, &support::actor()).await;
     let err = result.expect_err("TestCustomerVerifyPhoneIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestCustomerVerifyPhoneIsRejected", &err, &["InvalidVerificationCode", "VerificationCodeExpired"]);
     bed.assert_appended("TestCustomerVerifyPhoneIsRejected", &before, &[]);

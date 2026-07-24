@@ -2915,6 +2915,7 @@ fn table_sql_type(ty: &str) -> &'static str {
         "jsonb" => "JSONB",
         "numeric" => "NUMERIC",
         "interval" => "INTERVAL",
+        "bytea" => "BYTEA",   // encrypted-at-rest blobs (auth_sessions ciphertext, #112)
         other => panic!("database/tables.yaml: unknown column type '{}' — extend table_sql_type", other),
     }
 }
@@ -9837,8 +9838,8 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
     // SUCCEEDs.
     if name == "verifyPhone" {
         return Some((
-            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();\n        let auth = ctx.data::<std::sync::Arc<dyn application::generated::services::IdentityService>>()?.clone();\n        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();\n".into(),
-            "application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ())".into(),
+            "        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();\n        let auth = ctx.data::<std::sync::Arc<dyn application::generated::services::IdentityService>>()?.clone();\n        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();\n        let sessions = ctx.data::<std::sync::Arc<dyn application::auth_sessions::AuthSessionStore>>()?.clone();\n".into(),
+            "application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), sessions.as_ref(), cmd, &actor).await.map(|_| ())".into(),
         ));
     }
     // placeOrder needs the CatalogReadRepository (server-side line pricing from the live catalog —
@@ -12266,7 +12267,11 @@ fn bt_command_call(cmd: &str) -> String {
         "RequestPhoneVerification" | "ConfirmEmailVerification" => {
             format!("crate::commands::{}(&bed.store, &bed.identity, cmd, &support::actor()).await", snake)
         }
-        "VerifyPhone" | "RequestEmailVerification" | "RequestPhoneChange" | "ConfirmPhoneChange" => {
+        // VerifyPhone additionally parks the provider session for cookie pickup (#112).
+        "VerifyPhone" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, &bed.customers, &bed.auth_sessions, cmd, &support::actor()).await", snake)
+        }
+        "RequestEmailVerification" | "RequestPhoneChange" | "ConfirmPhoneChange" => {
             format!("crate::commands::{}(&bed.store, &bed.identity, &bed.customers, cmd, &support::actor()).await", snake)
         }
         _ => format!("crate::commands::{}(&bed.store, cmd, &support::actor()).await", snake),

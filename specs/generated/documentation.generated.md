@@ -5332,7 +5332,7 @@ _🧩 aggregate_ — A customer identity, keyed by phone number and linked to th
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `RequestPhoneVerification`](#command-requestphoneverification) | _Delegate to Supabase Auth: send an SMS OTP (Twilio; mock in dev). No event._ | — |
+| [📩 `RequestPhoneVerification`](#command-requestphoneverification) | _Delegate to Supabase Auth: send an SMS OTP (OVHcloud SMS hook; mock in dev). No event._ | — |
 | [📩 `VerifyPhone`](#command-verifyphone) | [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `CustomerIdentified`](#event-customeridentified) | [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired) |
 | [📩 `RequestEmailVerification`](#command-requestemailverification) | _Delegate to Supabase Auth: send an email magic link (localized via the stored locale). No event._ | [⛔ `EmailAlreadyInUse`](#error-emailalreadyinuse) |
 | [📩 `ConfirmEmailVerification`](#command-confirmemailverification) | [⚡ `CustomerEmailVerified`](#event-customeremailverified) | [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired) |
@@ -5408,7 +5408,7 @@ sequenceDiagram
 <a id="command-requestphoneverification"></a>
 #### 📩 Command: `RequestPhoneVerification`
 
-Ask Supabase Auth to send an SMS OTP to a phone (Twilio; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
+Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
 
 - **Dispatched by**: [✏️ `requestPhoneVerification`](#mutation-requestphoneverification) · **handled by** [🎭 `Customer`](#actor-customer)
 - **Emits**: —
@@ -5804,7 +5804,7 @@ Customer set or updated their preferred Stripe payment method.
 | <a id="scalar-paymentmethodid"></a>🔤 `PaymentMethodId` | string | Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'. |
 | <a id="scalar-dialingcode"></a>🔤 `DialingCode` | string `^\+[0-9]{1,4}$` | Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.  |
 | <a id="scalar-nationalphonenumber"></a>🔤 `NationalPhoneNumber` | string | National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'. |
-| <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via Twilio; a mock provider in dev). |
+| <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
 | <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 | <a id="scalar-locale"></a>🔤 `Locale` | string `^[a-z]{2}-[A-Z]{2}$` | i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).  |
 

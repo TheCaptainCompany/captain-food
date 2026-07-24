@@ -160,8 +160,8 @@ impl AuthContext {
                 };
             }
         }
-        let token = bearer(headers).ok_or(AuthError::Unauthorized)?;
-        let claims = self.verify(token).await?;
+        let session_token = token(headers).ok_or(AuthError::Unauthorized)?;
+        let claims = self.verify(session_token).await?;
         let granted = claims
             .app_metadata
             .captain_role
@@ -276,6 +276,28 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .filter(|t| !t.is_empty())
 }
 
+/// The auth cookie name minted by `POST /auth/session` (#112, PROP-20260724-150500) — the httpOnly
+/// carrier of the provider access JWT. MUST stay in sync with the value the auth routes set.
+pub const AUTH_COOKIE: &str = "captain_auth";
+
+/// The verified session token, from the `Authorization: Bearer` header OR the `captain_auth` cookie
+/// (#112). The header wins when both are present (an explicit bearer is a deliberate override); the
+/// cookie is the browser's carrier — same-origin `fetch`, the WS upgrade, and SSR all send it
+/// automatically, which is exactly why one fallback here lights all three (the issue's core move).
+fn token(headers: &HeaderMap) -> Option<&str> {
+    bearer(headers).or_else(|| cookie_value(headers, AUTH_COOKIE))
+}
+
+/// Read one cookie value from the `Cookie` header (`a=1; b=2`). Borrowed slice — no allocation.
+fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok()).and_then(|raw| {
+        raw.split(';').map(str::trim).find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            (k.trim() == name).then(|| v.trim()).filter(|t| !t.is_empty())
+        })
+    })
+}
+
 /// Resolve the algorithm from the matched JWK (falling back to the header only for asymmetric families).
 /// Restricting to asymmetric algorithms defeats `alg`-confusion (no HS* downgrade against a public key).
 fn asymmetric_alg(jwk: &Jwk, header_alg: Algorithm) -> Option<Algorithm> {
@@ -361,6 +383,25 @@ mod tests {
         assert_eq!(bearer(&h), Some("xyz"));
         h.insert(AUTHORIZATION, "Basic zzz".parse().unwrap());
         assert_eq!(bearer(&h), None);
+    }
+
+    #[test]
+    fn token_falls_back_to_the_auth_cookie_and_the_header_wins() {
+        // #112: the cookie carries the session when no bearer is present — the one seam that lights
+        // HTTP, the WS upgrade and SSR (all send cookies automatically).
+        let mut h = HeaderMap::new();
+        h.insert(axum::http::header::COOKIE, "other=1; captain_auth=jwt.from.cookie; x=2".parse().unwrap());
+        assert_eq!(token(&h), Some("jwt.from.cookie"));
+        // An explicit bearer overrides the cookie (deliberate override).
+        h.insert(AUTHORIZATION, "Bearer jwt.from.header".parse().unwrap());
+        assert_eq!(token(&h), Some("jwt.from.header"));
+        // Neither present → none.
+        let empty = HeaderMap::new();
+        assert_eq!(token(&empty), None);
+        // A cookie header without our cookie → none.
+        let mut h2 = HeaderMap::new();
+        h2.insert(axum::http::header::COOKIE, "session=abc".parse().unwrap());
+        assert_eq!(token(&h2), None);
     }
 
     /// A single-key JWKS (dummy RSA material — enough to parse + `find(kid)`, not to verify a signature).

@@ -6,6 +6,7 @@
 //! `infrastructure`, `server`, or `web`: side effects reach it exclusively through the ports below
 //! (Ports & Adapters), injected at the `server` composition root.
 
+pub mod auth_sessions;
 #[cfg(test)]
 pub mod behaviour_support;
 pub mod commands;

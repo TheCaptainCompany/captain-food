@@ -2423,11 +2423,12 @@ pub async fn verify_phone(
     store: &dyn EventStore,
     auth: &dyn IdentityService,
     customers: &dyn CustomerReadRepository,
+    sessions: &dyn crate::auth_sessions::AuthSessionStore,
     cmd: VerifyPhone,
     actor: &Actor,
 ) -> Result<VerifyPhoneOutcome, DomainError> {
     let phone = canonical_phone(&cmd.dialing_code, &cmd.national_number);
-    let auth_ref = auth
+    let verified = auth
         .verify_phone_otp(
             IdentityVerifyPhoneOtpInput {
                 dialing_code: cmd.dialing_code.clone(),
@@ -2436,8 +2437,24 @@ pub async fn verify_phone(
             },
             &ServiceCallMeta::new(actor.correlation_id),
         )
-        .await?
-        .auth_ref;
+        .await?;
+    // Park the provider session for cookie pickup (#112): keyed by the acceptance messageId
+    // (actor.cause_id — the envelope→actor mapping, ADR-0041), owned by the journaling anonymous
+    // session. A parking failure never fails the VERIFICATION — the identity fact stands; the
+    // user's recovery is a fresh OTP. Absent tokens (a provider/mock without sessions) park nothing.
+    if let (Some(access_token), Some(message_id)) = (verified.access_token.clone(), actor.cause_id) {
+        let parked = crate::auth_sessions::ParkedAuthSession {
+            message_id,
+            session_id: Some(cmd.session_id.0),
+            access_token,
+            refresh_token: verified.refresh_token.clone(),
+            expires_in: verified.expires_in,
+        };
+        if let Err(e) = sessions.park(parked).await {
+            eprintln!("auth session parking failed for {message_id}: {e} — verification stands, cookie pickup unavailable");
+        }
+    }
+    let auth_ref = verified.auth_ref;
     if let Some(existing) = customers.by_phone(phone.clone()).await? {
         let (_state, version) = load_customer(store, &existing.customer_id).await?;
         let stream_name = customer_stream(&existing.customer_id);

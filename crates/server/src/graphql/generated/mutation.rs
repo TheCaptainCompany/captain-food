@@ -1613,6 +1613,7 @@ impl MutationRoot {
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
         let auth = ctx.data::<std::sync::Arc<dyn application::generated::services::IdentityService>>()?.clone();
         let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?.clone();
+        let sessions = ctx.data::<std::sync::Arc<dyn application::auth_sessions::AuthSessionStore>>()?.clone();
         let payload_json = command_payload(&input)?;
         let cmd: domain::generated::commands::VerifyPhone = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -1648,7 +1649,7 @@ impl MutationRoot {
         };
         let (message_id, correlation_id) = (env.message_id, env.correlation_id);
         tokio::spawn(async move {
-            let outcome = application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), cmd, &actor).await.map(|_| ());
+            let outcome = application::commands::verify_phone(store.as_ref(), auth.as_ref(), customers.as_ref(), sessions.as_ref(), cmd, &actor).await.map(|_| ());
             complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))

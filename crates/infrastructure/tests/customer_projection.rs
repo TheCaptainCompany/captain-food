@@ -9,7 +9,8 @@ use application::commands::verify_phone;
 use application::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
-    IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
+    IdentityVerifyPhoneOtpOutput, IdentityRefreshSessionInput, IdentityRefreshSessionOutput,
+    ServiceCallMeta,
 };
 use application::ports::Actor;
 use application::queries::CustomerReadRepository;
@@ -93,7 +94,20 @@ impl IdentityService for AlwaysVerifiedAuth {
         _input: IdentityVerifyPhoneOtpInput,
         _meta: &ServiceCallMeta,
     ) -> Result<IdentityVerifyPhoneOtpOutput, DomainError> {
-        Ok(IdentityVerifyPhoneOtpOutput { auth_ref: ExternalReference("auth-supabase-1".into()) })
+        Ok(IdentityVerifyPhoneOtpOutput {
+            auth_ref: ExternalReference("auth-supabase-1".into()),
+            access_token: None,
+            refresh_token: None,
+            expires_in: None,
+        })
+    }
+
+    async fn refresh_session(
+        &self,
+        _input: IdentityRefreshSessionInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<IdentityRefreshSessionOutput, DomainError> {
+        Ok(IdentityRefreshSessionOutput { access_token: "t".into(), refresh_token: None, expires_in: None })
     }
 
     async fn send_email_magic_link(
@@ -146,7 +160,7 @@ async fn registered_customer_is_folded_and_served_by_the_read_repository() {
 
     // 1) First verified phone → the register leg: CustomerRegistered on the new Customer-<id> stream.
     let customer_id = uuid::Uuid::new_v4();
-    let outcome = verify_phone(&store, &AlwaysVerifiedAuth, &repo, verify_phone_cmd(customer_id), &actor)
+    let outcome = verify_phone(&store, &AlwaysVerifiedAuth, &repo, &application::auth_sessions::mem::MemAuthSessionStore::default(), verify_phone_cmd(customer_id), &actor)
         .await
         .expect("verify_phone (register)");
     assert!(outcome.created, "unknown phone registers a new customer");
@@ -185,7 +199,7 @@ async fn registered_customer_is_folded_and_served_by_the_read_repository() {
     // 4) The RETURNING phone resolves through the SAME Pg repository → the identify leg: the
     //    client-proposed id is discarded and CustomerIdentified lands on the EXISTING stream.
     let proposed = uuid::Uuid::new_v4();
-    let outcome = verify_phone(&store, &AlwaysVerifiedAuth, &repo, verify_phone_cmd(proposed), &actor)
+    let outcome = verify_phone(&store, &AlwaysVerifiedAuth, &repo, &application::auth_sessions::mem::MemAuthSessionStore::default(), verify_phone_cmd(proposed), &actor)
         .await
         .expect("verify_phone (identify)");
     assert!(!outcome.created, "known phone identifies, never re-registers");
