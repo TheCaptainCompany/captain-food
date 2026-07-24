@@ -147,7 +147,8 @@ A courier who delivers orders from restaurants to customers.
 
 | Activity | Step | Operation |
 | --- | --- | --- |
-| 🧭 **Deliver** | ViewMyDeliveries | [🔎 `myDeliveries`](#query-mydeliveries) |
+| 🧭 **Deliver** | SetAvailability | [✏️ `changeRiderStatus`](#mutation-changeriderstatus) |
+|  | ViewMyDeliveries | [🔎 `myDeliveries`](#query-mydeliveries) |
 |  | AcceptDelivery | [✏️ `acceptDelivery`](#mutation-acceptdelivery) |
 |  | ConfirmPickup | [✏️ `confirmPickup`](#mutation-confirmpickup) |
 |  | CompleteDelivery | [✏️ `completeDelivery`](#mutation-completedelivery) |
@@ -6154,7 +6155,7 @@ _criticality: **high**_
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
-### 🧰 API operations _(11)_
+### 🧰 API operations _(12)_
 
 <a id="query-delivery"></a>
 #### 🔎 Query: `delivery`
@@ -6183,6 +6184,13 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 - **Input**: 🧩 `DeliveryPartnerAvailabilitiesQueryInput` — `cityId?`: [🔤 `CityId`](#scalar-cityid), `channel?`: [🔤 `DeliveryChannelKey`](#scalar-deliverychannelkey), `status?`: [🔤 `CityAvailabilityStatus`](#scalar-cityavailabilitystatus)
 - **Returns**: [🧩 `DeliveryPartnerAvailability`](#type-deliverypartneravailability) (list) · **reads** [🗄️ `View_DeliveryPartnerAvailability`](#view-view_deliverypartneravailability)
 - **Roles**: EXTERNAL, ADMIN · **slice** V1
+
+<a id="mutation-changeriderstatus"></a>
+#### ✏️ Mutation: `changeRiderStatus`
+
+- **Command**: [📩 `ChangeRiderStatus`](#command-changeriderstatus) → handled by [🎭 `Rider`](#actor-rider)
+- **Roles**: RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="mutation-acceptdelivery"></a>
 #### ✏️ Mutation: `acceptDelivery`
@@ -6797,7 +6805,7 @@ Update editable rider profile fields.
 
 Change a rider's availability/lifecycle status.
 
-- **Dispatched by**: — · **handled by** [🎭 `Rider`](#actor-rider)
+- **Dispatched by**: [✏️ `changeRiderStatus`](#mutation-changeriderstatus) · **handled by** [🎭 `Rider`](#actor-rider)
 - **Emits**: [⚡ `RiderStatusChanged`](#event-riderstatuschanged)
 - **Throws**: [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition)
 
@@ -8630,6 +8638,7 @@ _Surface_ **`rider.yaml`**
 | --- | --- | --- |
 | read | `deliveries.mine` | [🔎 `myDeliveries`](#query-mydeliveries) |
 | write | `accept_delivery` | [✏️ `acceptDelivery`](#mutation-acceptdelivery) |
+| write | `rider_toggle_online` | [✏️ `changeRiderStatus`](#mutation-changeriderstatus) |
 
 <a id="screen-job_detail"></a>
 ### 📱 `job_detail` · `/jobs/:orderId` · 📱 SDUI · 🔒 auth

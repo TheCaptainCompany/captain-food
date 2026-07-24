@@ -1174,6 +1174,11 @@ input DenyRefundInput {
   reason: String!
 }
 
+input ChangeRiderStatusInput {
+  riderId: RiderId!
+  status: RiderStatus!
+}
+
 input AcceptDeliveryInput {
   deliveryJobId: DeliveryJobId!
   riderId: RiderId!
@@ -1544,6 +1549,7 @@ type Mutation {
   requestRefund(input: RequestRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestRefund")
   approveRefund(input: ApproveRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "ApproveRefund")
   denyRefund(input: DenyRefundInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "DenyRefund")
+  changeRiderStatus(input: ChangeRiderStatusInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ChangeRiderStatus")
   acceptDelivery(input: AcceptDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "AcceptDelivery")
   confirmPickup(input: ConfirmPickupInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "ConfirmPickup")
   completeDelivery(input: CompleteDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")

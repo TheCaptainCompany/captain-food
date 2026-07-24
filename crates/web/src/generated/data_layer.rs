@@ -528,7 +528,7 @@ impl ActionKey {
             ActionKey::AcceptDelivery => ActionKind::Mutation,
             ActionKey::ConfirmPickup => ActionKind::Mutation,
             ActionKey::CompleteDelivery => ActionKind::Mutation,
-            ActionKey::RiderToggleOnline => ActionKind::Gap,
+            ActionKey::RiderToggleOnline => ActionKind::Mutation,
         }
     }
 
@@ -575,7 +575,7 @@ impl ActionKey {
             ActionKey::AcceptDelivery => Some("acceptDelivery"),
             ActionKey::ConfirmPickup => Some("confirmPickup"),
             ActionKey::CompleteDelivery => Some("completeDelivery"),
-            ActionKey::RiderToggleOnline => None,
+            ActionKey::RiderToggleOnline => Some("changeRiderStatus"),
         }
     }
 
@@ -624,7 +624,7 @@ impl ActionKey {
             ActionKey::AcceptDelivery => Some("AcceptDeliveryInput"),
             ActionKey::ConfirmPickup => Some("ConfirmPickupInput"),
             ActionKey::CompleteDelivery => Some("CompleteDeliveryInput"),
-            ActionKey::RiderToggleOnline => None,
+            ActionKey::RiderToggleOnline => Some("ChangeRiderStatusInput"),
         }
     }
 
@@ -671,7 +671,7 @@ impl ActionKey {
             ActionKey::AcceptDelivery => None,
             ActionKey::ConfirmPickup => None,
             ActionKey::CompleteDelivery => None,
-            ActionKey::RiderToggleOnline => Some("No rider availability mutation in api.yaml (ChangeRiderStatus is domain-only, not exposed) — the toggle renders disabled until the op exists."),
+            ActionKey::RiderToggleOnline => None,
         }
     }
 }

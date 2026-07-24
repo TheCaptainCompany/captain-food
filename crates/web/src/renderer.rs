@@ -643,11 +643,18 @@ mod tests {
         assert!(html.contains("data-action=\"accept_order\""), "{html}");
         assert!(html.contains("&quot;orderId&quot;:&quot;o-1&quot;"), "resolved vars JSON: {html}");
 
-        // The rider gap toggle renders DISABLED with the spec's note as its tooltip.
+        // The rider toggle is DISPATCHABLE since #95 exposed changeRiderStatus — no disabled gap
+        // control left on the jobs screen.
         let jobs = Surface::Rider.screens().iter().find(|s| s.id == "jobs").unwrap();
         let html = render_tracking_like(jobs);
-        assert!(html.contains("disabled"), "{html}");
-        assert!(html.contains("No rider availability mutation"), "{html}");
+        assert!(html.contains("data-action=\"rider_toggle_online\""), "{html}");
+        assert!(!html.contains("No rider availability mutation"), "{html}");
+
+        // A still-declared gap DOES render disabled with its note (the fail-closed proof moved to
+        // the passkey button, executor tests) — here: the auth sheet's passkey control.
+        let cart = Surface::RestaurantFrontoffice.screens().iter().find(|s| s.id == "cart").unwrap();
+        let html = render_screen_html(cart, Surface::RestaurantFrontoffice.sheets(), ctx());
+        assert!(html.contains("WebAuthn"), "the passkey gap note must surface: {html}");
     }
 
     fn render_tracking_like(screen: &'static crate::generated::screens::Screen) -> String {

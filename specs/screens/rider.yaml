@@ -42,7 +42,7 @@ actions:
   confirm_pickup:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/confirmPickup' } }
   complete_delivery: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/completeDelivery' } }
   mark_order_delivered: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderDelivered' }, note: "Self-dispatch: the restaurant confirms the handover itself." }
-  rider_toggle_online: { kind: gap, gap: "No rider availability mutation in api.yaml (ChangeRiderStatus is domain-only, not exposed) — the toggle renders disabled until the op exists." }
+  rider_toggle_online: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/changeRiderStatus' }, note: "The online/offline availability toggle (#95 closed the gap)." }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GLOBAL CHROME
@@ -75,7 +75,7 @@ screens:
     sdui: true
     requires_auth: true
     data_requirements: [deliveries.mine]
-    actions_used: [accept_delivery]
+    actions_used: [accept_delivery, rider_toggle_online]
     components:
       - { component: rider_topbar }
       - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.jobs.title' } }

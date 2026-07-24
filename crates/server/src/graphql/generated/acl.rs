@@ -119,3 +119,9 @@ pub(crate) const ALLOW_RIDER: &[RequestRole] = &[RequestRole::Rider];
 pub(crate) fn visible_rider(ctx: &async_graphql::Context<'_>) -> bool {
     role_allows(ctx, ALLOW_RIDER)
 }
+
+/// roles: [RIDER, ADMIN]
+pub(crate) const ALLOW_RIDER_ADMIN: &[RequestRole] = &[RequestRole::Rider, RequestRole::Admin];
+pub(crate) fn visible_rider_admin(ctx: &async_graphql::Context<'_>) -> bool {
+    role_allows(ctx, ALLOW_RIDER_ADMIN)
+}

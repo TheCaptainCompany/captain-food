@@ -3,6 +3,24 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #95: rider availability EXPOSED — `changeRiderStatus` closes the
+> `rider_toggle_online` gap (PR #104; plan-approved spec change).** The domain machinery was
+> complete (ChangeRiderStatus command + Rider actor inbox + lifecycle machine (#23) + generated
+> handler + TestRiderStatusChanged/TestRiderStatusChangeIsRejected) — only the API surface was
+> missing. Landed: api.yaml `changeRiderStatus` (roles [RIDER, ADMIN], the rider's own toggle +
+> admin lifecycle), a rider `SetAvailability` story step (op-uncovered-by-story gate), the
+> `rider_toggle_online` gap flipped to a mutation binding in `rider.yaml` (+ `actions_used`), and
+> ONE codegen arm in the generated-handler dispatch table (`changeRiderStatus →
+> change_rider_status`). Regeneration flips `ActionKey::RiderToggleOnline` gap→mutation with
+> `ChangeRiderStatusInput` (#97's generated name), so the rider topbar toggle becomes dispatchable
+> through the #93 wiring with zero client code. **The known-warning baseline drops 26 → 25**: the
+> standing `command-no-mutation commands.yaml/ChangeRiderStatus` warning is RESOLVED by the
+> exposure. Tests updated to the new reality (the gap-disabling proof moved to the auth sheet's
+> passkey button; a new executor test pins the toggle to `changeRiderStatus`/its input type).
+> 77 web + 36 codegen tests, wasm green, `make rust` 0 errors/no drift. `RiderStatusChanged` still
+> feeds no `View_*` (dispatch targeting by availability = the deferred read-model decision, noted
+> in the issue).
+
 > ✅ **2026-07-24 — #92: SSR pages ship LIVE data via an in-process transport + the hydrate-side
 > auth guard (PR #103; ADR-20260723-172013 residuals 1+2).** Split 4 served SSR SHELLS; the screens
 > spec contracts `rendering_strategy: SSR_first` / TTFB <= 500ms. (1) **`SchemaTransport`**
