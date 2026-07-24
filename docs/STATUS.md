@@ -3,6 +3,24 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-24. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #117: the real Supabase Auth adapter — login machinery is functional (PR #123,
+> PROP-20260724-225804).** The only `IdentityService` was the fail-closed stub, so no login worked.
+> New `SupabaseIdentityService` (crates/infrastructure/integrations/supabase_auth.rs, beside the
+> stub) over the Supabase Auth REST API: `send_phone_otp`/`send_email_magic_link` →
+> `POST /auth/v1/otp`, `verify_*` → `POST /auth/v1/verify` (phone: `{type:sms,phone,token}`; email:
+> `{type:email,token_hash}`), `refresh_session` → `POST /auth/v1/token?grant_type=refresh_token`;
+> `authRef` = the Supabase `user.id`, and the verify responses' access/refresh/expires flow into the
+> #112 parked-session trio. Typed rejections mapped from Supabase 4xx (expired→`VerificationCodeExpired`,
+> else `InvalidVerificationCode`/`InvalidVerificationToken`). Env-gated `from_env()` on
+> `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY`; the composition root (`identity_service_impl`) uses it
+> when set, else the fail-closed stand-in — the Stripe pattern; unconfigured = anonymous-only, never
+> half-configured. Project-agnostic (reads `SUPABASE_URL`), so the ADR-20260722-174500 repoint from
+> the DATA project to `captain-identity` is a pure env change (verified finding: it currently points
+> at the data project `zcshlzhiinwmpzujuiep`; repoint deferred to the captain-identity migration). 3
+> adapter unit tests (env gating, 4xx classification, verify-response parsing); wasm + workspace
+> tests green. **Email magic-link is verifiable live now (native Supabase email, no OVH);** phone OTP
+> verify is the same code path, awaiting SMS delivery via [#118](https://github.com/TheCaptainCompany/captain-food/issues/118).
+
 > 🚧 **2026-07-24 — Captain ID: a shared auth SERVICE for all products (new repo
 > [TheCaptainCompany/captain-identity](https://github.com/TheCaptainCompany/captain-identity),
 > product-owner directive).** Auth is company-wide, not per-product — the "Captain ID" concept
