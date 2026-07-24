@@ -65,6 +65,7 @@ use shared_types::HealthDto;
 use graphql::schema::{ReadDeps, WriteDeps};
 
 mod auth;
+mod web_ssr;
 /// The expose-gated `/services/*` surface + module index, GENERATED from specs/services.yaml
 /// (issue #26, ADR-20260719-214500).
 pub mod generated;
@@ -531,11 +532,12 @@ pub fn router() -> Router {
         .route("/saga", get(saga))
         .with_state(AppState { snap, projector_status, saga_status });
 
-    base.merge(graphql::routes::graphql_routes(graphql::schema::build_schema(
-        read_deps,
-        write_deps,
-        Some(event_bus),
-    )))
+    // Built once, shared twice: the HTTP GraphQL routes AND the SSR page renderer (#92 — the
+    // in-process transport executes screens' data_requirements against this same schema).
+    let schema = graphql::schema::build_schema(read_deps, write_deps, Some(event_bus));
+    let ssr_exec = web_ssr::SsrExec { schema: schema.clone() };
+
+    base.merge(graphql::routes::graphql_routes(schema))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))
         // Internal trigger (ADR-20260720-015400): ops ping to wake the inbound-events drain worker.
@@ -579,6 +581,8 @@ pub fn router() -> Router {
         // The fallback's tenant lookup (#98) — None without a database (every slug then serves the
         // storefront shell; the claim landing needs a POSITIVE not-found).
         .layer(Extension(tenant_lookup))
+        // The fallback's SSR executor (#92): pages resolve their data in-process before rendering.
+        .layer(Extension(ssr_exec))
         // API auth (ADR-0047): the Supabase-JWT verifier, available to the `/{role}/graphql` handler which
         // gates every non-public path. Shared as an Extension so the JWKS cache is process-wide.
         .layer(Extension(auth::AuthContext::from_env()))

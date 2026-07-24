@@ -77,6 +77,7 @@ pub fn classify_host(raw_host: &str) -> HostRoute {
 /// host with an unknown path 404s.
 pub async fn host_root(
     Extension(lookup): Extension<TenantLookup>,
+    Extension(ssr): Extension<crate::web_ssr::SsrExec>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
@@ -86,15 +87,27 @@ pub async fn host_root(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     match classify_host(raw) {
-        HostRoute::Tenant(slug) => tenant_page(&lookup, &slug, raw, uri.path()).await,
-        other => render(other, raw, uri.path()),
+        HostRoute::Tenant(slug) => tenant_page(&lookup, &ssr, &slug, raw, uri.path()).await,
+        other => render(other, &ssr, raw, uri.path()).await,
     }
+}
+
+/// SSR one app page with live data (#92): the screen's `data_requirements` resolve through the
+/// in-process transport before rendering.
+async fn app_page(ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str) -> Option<String> {
+    web::router::render_path_with(&ssr.transport(), raw_host, path, web::i18n::DEFAULT_LOCALE).await
 }
 
 /// The tenant branch (#98): registered → storefront; positively-absent → the claim landing;
 /// lookup unavailable or erroring → the storefront shell (FAIL OPEN — a DB hiccup must never show
 /// "this address is available" for a real restaurant).
-async fn tenant_page(lookup: &TenantLookup, slug: &str, raw_host: &str, path: &str) -> Response {
+async fn tenant_page(
+    lookup: &TenantLookup,
+    ssr: &crate::web_ssr::SsrExec,
+    slug: &str,
+    raw_host: &str,
+    path: &str,
+) -> Response {
     let registered = match &lookup.0 {
         Some(repo) => match repo.by_slug(Slug(slug.to_string())).await {
             Ok(found) => found.is_some(),
@@ -103,7 +116,7 @@ async fn tenant_page(lookup: &TenantLookup, slug: &str, raw_host: &str, path: &s
         None => true, // no database (dev): every slug is a storefront
     };
     if registered {
-        return match web::router::render_path(raw_host, path, web::i18n::DEFAULT_LOCALE) {
+        return match app_page(ssr, raw_host, path).await {
             Some(html) => Html(html).into_response(),
             None => (StatusCode::NOT_FOUND, "no such page").into_response(),
         };
@@ -112,12 +125,12 @@ async fn tenant_page(lookup: &TenantLookup, slug: &str, raw_host: &str, path: &s
     Html(claim_landing(slug)).into_response()
 }
 
-fn render(route: HostRoute, raw_host: &str, path: &str) -> Response {
+async fn render(route: HostRoute, ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str) -> Response {
     match route {
-        // The audience SDUI surfaces: SSR the matched screen (web::router mirrors classify_host's
-        // audience mapping — see its module docs).
+        // The audience SDUI surfaces: SSR the matched screen WITH live data (web::router mirrors
+        // classify_host's audience mapping — see its module docs).
         HostRoute::Live | HostRoute::Restos | HostRoute::Riders => {
-            match web::router::render_path(raw_host, path, web::i18n::DEFAULT_LOCALE) {
+            match app_page(ssr, raw_host, path).await {
                 Some(html) => Html(html).into_response(),
                 None => (StatusCode::NOT_FOUND, "no such page").into_response(),
             }
@@ -129,7 +142,7 @@ fn render(route: HostRoute, raw_host: &str, path: &str) -> Response {
         HostRoute::Default => {
             // localhost / *.onrender.com / IPs: serve the marketplace app too — a dev box or the
             // Render health-check host hitting `/` should see the product, not a placeholder.
-            match web::router::render_path(raw_host, path, web::i18n::DEFAULT_LOCALE) {
+            match app_page(ssr, raw_host, path).await {
                 Some(html) => Html(html).into_response(),
                 None => text("Captain.Food server — address a *.captain.food host"),
             }
@@ -221,6 +234,11 @@ mod tests {
         }
     }
 
+    fn ssr() -> crate::web_ssr::SsrExec {
+        // A dep-less schema: PUBLIC reads resolve empty, which is exactly the SSR degrade contract.
+        crate::web_ssr::SsrExec { schema: crate::graphql::schema::build_schema(None, None, None) }
+    }
+
     async fn body_of(response: Response) -> String {
         let bytes = axum::body::to_bytes(response.into_body(), 1 << 20).await.expect("body");
         String::from_utf8_lossy(&bytes).into_owned()
@@ -230,7 +248,7 @@ mod tests {
     async fn registered_tenant_root_serves_its_storefront() {
         let lookup =
             TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: false })));
-        let response = tenant_page(&lookup, "chez-test", "chez-test.captain.food", "/").await;
+        let response = tenant_page(&lookup, &ssr(), "chez-test", "chez-test.captain.food", "/").await;
         let html = body_of(response).await;
         assert!(html.contains("data-hydrate=\"restaurant\""), "{html}");
         assert!(!html.contains("join.captain.food"), "a registered slug must never see the offer");
@@ -241,7 +259,7 @@ mod tests {
         let lookup =
             TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: false })));
         for path in ["/", "/anything"] {
-            let response = tenant_page(&lookup, "chezmarco", "chezmarco.captain.food", path).await;
+            let response = tenant_page(&lookup, &ssr(), "chezmarco", "chezmarco.captain.food", path).await;
             let html = body_of(response).await;
             assert!(html.contains("https://join.captain.food/#rejoindre"), "{path}: {html}");
             assert!(html.contains("chezmarco.captain.food"), "{path}: the offer names the address");
@@ -253,11 +271,11 @@ mod tests {
         // A DB hiccup must not show "this address is available" for a real restaurant.
         let lookup =
             TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: true })));
-        let response = tenant_page(&lookup, "chez-test", "chez-test.captain.food", "/").await;
+        let response = tenant_page(&lookup, &ssr(), "chez-test", "chez-test.captain.food", "/").await;
         let html = body_of(response).await;
         assert!(html.contains("data-hydrate=\"restaurant\""), "{html}");
         // No database at all (dev): same fail-open behaviour.
-        let response = tenant_page(&TenantLookup(None), "any-slug", "any-slug.captain.food", "/").await;
+        let response = tenant_page(&TenantLookup(None), &ssr(), "any-slug", "any-slug.captain.food", "/").await;
         assert!(body_of(response).await.contains("data-hydrate=\"restaurant\""));
     }
 

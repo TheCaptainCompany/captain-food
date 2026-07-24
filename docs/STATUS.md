@@ -3,6 +3,30 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #92: SSR pages ship LIVE data via an in-process transport + the hydrate-side
+> auth guard (PR #103; ADR-20260723-172013 residuals 1+2).** Split 4 served SSR SHELLS; the screens
+> spec contracts `rendering_strategy: SSR_first` / TTFB <= 500ms. (1) **`SchemaTransport`**
+> (`crates/server/src/web_ssr.rs`) — the in-process `Transport` impl the seam was DESIGNED for
+> (graphql.rs: "an in-process transport for SSR could bypass HTTP entirely"): executes resolver
+> documents directly against the role-filtered schema with the PUBLIC role + anonymous Principal +
+> no session — SSR can never see more than an anonymous first request (the per-field ACL applies
+> identically). Schema built once, shared by the GraphQL routes and the host fallback
+> (`SsrExec` Extension). (2) **`render_path_with`** — resolves the matched screen's
+> `data_requirements` (route `:params` feeding args exactly like hydrate; gap resolvers refused
+> before any call; a resolver error degrades that one slot, never 500s) before rendering:
+> marketplace/storefront pages now carry restaurants/catalog in the initial HTML, the #82 pinned
+> arg exercised server-side. `requires_auth` screens SKIP the fetch (a document GET carries no
+> credentials — their session-scoped reads could only answer empty) and ship as shells.
+> (3) **Trait fix en route**: futures holding `&dyn Transport` across awaits weren't `Send` (the
+> axum handler requirement) — new platform-conditional `MaybeSync` supertrait (native transports
+> must be `Sync`; the browser's reqwest client is not and carries no bound). (4) **Auth guard
+> (client-side)** — `requires_auth` screens open the auth sheet OVER the content (the DSL's
+> if_guest pattern) or bounce to the surface root; the DoD's server-side 302 is EXPLICITLY
+> deferred: auth state lives in browser localStorage, no auth cookie exists yet — recorded on the
+> issue as the follow-up landing with the auth-token wiring. 76 web + 23 server-lib tests
+> (in-process introspection, error envelope parity, live-data SSR with call-count + shell-no-fetch
+> assertions); wasm green; `make rust` 0 errors/no drift.
+
 > ✅ **2026-07-24 — #94: bottom sheets — generated sheet trees, the sheet host, form-field bindings
 > + the OTP identity flow (PR #102; ADR-20260723-172013 residual 4 + #17's identity item).** The
 > DSL's `bottom_sheets:` (location picker, auth/OTP, item detail, rating — the #62 survey carrier)

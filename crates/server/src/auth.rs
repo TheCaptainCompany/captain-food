@@ -48,7 +48,10 @@ pub struct Principal {
 }
 
 impl Principal {
-    fn anonymous() -> Self {
+    /// The unauthenticated PUBLIC identity — also what the SSR page renderer executes reads as
+    /// (#92: a document GET carries no credentials, so server-side data resolution is by
+    /// construction the anonymous view).
+    pub(crate) fn anonymous() -> Self {
         Self { user_id: None, role: RequestRole::Public }
     }
 }

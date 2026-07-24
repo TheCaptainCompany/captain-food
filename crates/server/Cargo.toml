@@ -55,6 +55,8 @@ async-stream = "0.3"
 # process-level CryptoProvider"), turning every authenticated request into a 502.
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+# The in-process SSR transport (#92) implements web's object-safe async Transport seam.
+async-trait = { workspace = true }
 
 [dev-dependencies]
 # In-memory read-repository stand-ins for the subscription tests (no DB needed).
