@@ -140,9 +140,12 @@ async fn render(route: HostRoute, ssr: &crate::web_ssr::SsrExec, raw_host: &str,
         HostRoute::System => text("System backoffice"),
         HostRoute::Api => text("Captain.Food API — GraphQL served at /{role}/graphql (see /public/graphql)"),
         HostRoute::Default => {
-            // localhost / *.onrender.com / IPs: serve the marketplace app too — a dev box or the
-            // Render health-check host hitting `/` should see the product, not a placeholder.
-            match app_page(ssr, raw_host, path).await {
+            // localhost / *.onrender.com / IPs: serve the marketplace SHELL — deliberately WITHOUT
+            // data resolution (#107): Render's health probe hits this branch on every deploy check,
+            // and #92's data-resolving SSR here ran the discovery reads per probe and OOM-killed the
+            // 512Mi instance mid-deploy. Probes and dev hosts need a page, not the catalog; the
+            // real product hosts (Live/Restos/Riders/Tenant) keep data-full SSR.
+            match web::router::render_path(raw_host, path, web::i18n::DEFAULT_LOCALE) {
                 Some(html) => Html(html).into_response(),
                 None => text("Captain.Food server — address a *.captain.food host"),
             }
