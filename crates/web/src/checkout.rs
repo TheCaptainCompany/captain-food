@@ -165,7 +165,18 @@ pub async fn submit(
     payment_method_id: &str,
 ) -> Result<PlacedOrder, CheckoutError> {
     let order_id = Uuid::now_v7();
+    let input = place_order_input(ctx, form, payment_method_id, order_id);
+    let handle = dispatch(transport, ActionKey::PlaceOrder, input).await?;
+    Ok(PlacedOrder { order_id, handle })
+}
 
+/// The `PlaceOrder` input per the command spec — shared by [`submit`] and [`submit_persisted`].
+fn place_order_input(
+    ctx: &CheckoutContext,
+    form: &CheckoutForm,
+    payment_method_id: &str,
+    order_id: Uuid,
+) -> Map<String, Value> {
     let mut contact = Map::new();
     contact.insert("displayName".into(), json!(form.full_name));
     contact.insert("phone".into(), json!(form.phone));
@@ -192,8 +203,25 @@ pub async fn submit(
     if let Some(total) = &ctx.expected_total {
         input.insert("expectedTotal".into(), total.clone());
     }
+    input
+}
 
-    let handle = dispatch(transport, ActionKey::PlaceOrder, input).await?;
+/// [`submit`] with the intent PERSISTED first (#17, `pending.rs`): the recorded input carries the
+/// client-minted `orderId`, so after a mid-checkout reload the resume path recovers BOTH the
+/// idempotency id (safe retry, no double order) AND the confirmation route — the full #12
+/// continuity story for the money mutation. Clearing happens via `pending::settle` (or the boot
+/// resume), never implicitly.
+pub async fn submit_persisted(
+    transport: &dyn Transport,
+    store: &dyn crate::pending::PendingStore,
+    ctx: &CheckoutContext,
+    form: &CheckoutForm,
+    payment_method_id: &str,
+) -> Result<PlacedOrder, CheckoutError> {
+    let order_id = Uuid::now_v7();
+    let input = place_order_input(ctx, form, payment_method_id, order_id);
+    let handle =
+        crate::pending::dispatch_persisted(transport, store, ActionKey::PlaceOrder, input).await?;
     Ok(PlacedOrder { order_id, handle })
 }
 
@@ -369,6 +397,40 @@ mod tests {
             ActionOutcome::Rejected { error_code, .. } => assert_eq!(error_code, "PriceMismatch"),
             other => panic!("expected the anticipated rejection, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn persisted_submit_records_the_order_id_so_a_reload_recovers_the_route() {
+        use crate::graphql::TransportError;
+        use crate::pending::{MemoryPendingStore, PendingStore};
+
+        let store = MemoryPendingStore::default();
+        // The worst moment: the radio dies ON the placeOrder send.
+        let fake = FakeTransport::scripted(vec![Err(TransportError::Network("tab killed".into()))]);
+        let err = submit_persisted(&fake, &store, &ctx(), &form(), "pm_123").await.unwrap_err();
+        assert!(matches!(err, CheckoutError::Action(crate::actions::ActionError::Transport(_))));
+
+        // The record alone recovers BOTH halves of #12's continuity story:
+        let write = store.load().remove(0);
+        let order_id = write.input["orderId"].as_str().unwrap().to_string();
+        assert_eq!(format!("/orders/{order_id}/confirmation"), {
+            let id = uuid::Uuid::parse_str(&order_id).unwrap();
+            PlacedOrder {
+                order_id: id,
+                handle: crate::actions::DispatchHandle {
+                    message_id: write.message_id,
+                    duplicate: true,
+                    status_at_acceptance: crate::actions::OperationStatus::Pending,
+                },
+            }
+            .confirmation_route()
+        });
+        // ...and the retry re-sends the SAME messageId with the SAME orderId — no double order.
+        let fake = FakeTransport::scripted(vec![Ok(acceptance("PENDING"))]);
+        crate::pending::retry(&fake, &write).await.unwrap();
+        let sent = fake.call(0).1;
+        assert_eq!(sent["metadata"]["messageId"], serde_json::json!(write.message_id.to_string()));
+        assert_eq!(sent["input"]["orderId"], serde_json::json!(order_id));
     }
 
     #[cfg(feature = "ssr")]

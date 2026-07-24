@@ -21,6 +21,7 @@ pub mod checkout;
 pub mod generated;
 pub mod graphql;
 pub mod i18n;
+pub mod pending;
 pub mod renderer;
 pub mod router;
 pub mod session;
