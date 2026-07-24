@@ -3,6 +3,19 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-24. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #113: first-class pagination on `queries/restaurants` (PR #120,
+> PROP-20260724-164102).** The #107/#108 OOM hotfix's `LIMIT 200` was an invisible adapter guard —
+> the marketplace silently showed ≤200 and couldn't page. Now a contract: new `PageLimit`/
+> `PageOffset` scalars, `restaurants` gains optional `limit`/`offset`, and
+> `PgRestaurantRepository::list()` applies `LIMIT least(limit ?? 24, 200) OFFSET offset` — the 200
+> is a NAMED clamp ceiling (`RESTAURANT_PAGE_MAX`), an over-max request returns the max (never an
+> error, never an unbounded scan), default page 24 (`RESTAURANT_PAGE_DEFAULT`). `RestaurantFilter`
+> carries the two; the generated resolver maps them off the input (the #97 generated-name
+> machinery). No new op ⇒ ADR-0032 unaffected (optional args). Offset/limit chosen over cursor for
+> V0's single-`ORDER BY` read model (cursor kept as the deferred alternative in the proposal). Pg
+> pagination test (clamp/offset/default). `make rust` green, no drift. Follow-up (client): per-rail
+> limits + "load more" offset wiring.
+
 > ✅ **2026-07-24 — #112: client auth-token wiring — the BFF-minted httpOnly session cookie (PR #116,
 > PROP-20260724-150500).** Identity stopped at the server: `VerifyPhone` SUCCEEDed but the client
 > stayed anonymous (CUSTOMER path unreachable, staff surfaces unusable, WS/SSR tokenless,

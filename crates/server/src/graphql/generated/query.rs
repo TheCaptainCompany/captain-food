@@ -120,7 +120,7 @@ impl QueryRoot {
     async fn restaurants(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantsQueryInput>) -> async_graphql::Result<Vec<Restaurant>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
         let filter = input
-            .map(|i| application::queries::RestaurantFilter { search: i.search, orderable_only: i.orderable_only })
+            .map(|i| application::queries::RestaurantFilter { search: i.search, orderable_only: i.orderable_only, limit: i.limit.map(|v| v.0), offset: i.offset.map(|v| v.0) })
             .unwrap_or_default();
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(Restaurant::from).collect())

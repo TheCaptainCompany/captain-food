@@ -29,7 +29,18 @@ pub use crate::generated::rows::RestaurantRow;
 pub struct RestaurantFilter {
     pub search: Option<String>,
     pub orderable_only: Option<bool>,
+    /// Requested page size (#113); the adapter CLAMPS to [`RESTAURANT_PAGE_MAX`] and defaults to
+    /// [`RESTAURANT_PAGE_DEFAULT`] when absent.
+    pub limit: Option<i64>,
+    /// Rows to skip (#113); `None`/negative → 0.
+    pub offset: Option<i64>,
 }
+
+/// Default discovery page size when `limit` is unset — a first screen of cards.
+pub const RESTAURANT_PAGE_DEFAULT: i64 = 24;
+/// Hard ceiling on `restaurants` page size (#113, the #108 OOM guard as a named max): a larger
+/// `limit` is clamped to this, never an error, never an unbounded scan.
+pub const RESTAURANT_PAGE_MAX: i64 = 200;
 
 /// Read port over the `Restaurant` projection table (ADR-0040). Backs the `restaurants`/`restaurant`
 /// GraphQL queries.

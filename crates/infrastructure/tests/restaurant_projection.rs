@@ -219,13 +219,31 @@ async fn restaurant_event_folds_into_the_read_model() {
     let all = repo.list(RestaurantFilter::default()).await.expect("list all");
     assert_eq!(all.len(), 1);
     let orderable = repo
-        .list(RestaurantFilter { search: Some("marco".into()), orderable_only: Some(true) })
+        .list(RestaurantFilter { search: Some("marco".into()), orderable_only: Some(true), ..Default::default() })
         .await
         .expect("list orderable");
     assert_eq!(orderable.len(), 1);
     let none = repo
-        .list(RestaurantFilter { search: Some("zzz".into()), orderable_only: None })
+        .list(RestaurantFilter { search: Some("zzz".into()), orderable_only: None, ..Default::default() })
         .await
         .expect("list no match");
     assert!(none.is_empty());
+
+    // Pagination (#113): limit clamps to the max, offset skips. With one row: limit=1 returns it,
+    // offset=1 skips past it, and an over-max limit is clamped (still returns the single row).
+    let page = repo
+        .list(RestaurantFilter { limit: Some(1), ..Default::default() })
+        .await
+        .expect("first page");
+    assert_eq!(page.len(), 1);
+    let skipped = repo
+        .list(RestaurantFilter { offset: Some(1), ..Default::default() })
+        .await
+        .expect("offset past the only row");
+    assert!(skipped.is_empty());
+    let clamped = repo
+        .list(RestaurantFilter { limit: Some(100_000), ..Default::default() })
+        .await
+        .expect("over-max limit clamps, never errors");
+    assert_eq!(clamped.len(), 1);
 }

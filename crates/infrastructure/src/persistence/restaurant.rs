@@ -89,11 +89,16 @@ impl RestaurantReadRepository for PgRestaurantRepository {
                 .push_bind(OrderAcceptanceMode::PAUSED.to_ord());
         }
         qb.push(" ORDER BY created_at DESC");
-        // Defensive adapter bound (#107): the table is SIRENE-scale (France-wide listings), and an
-        // unbounded fetch OOM-killed the 512Mi instance the moment SSR data resolution (#92) made
-        // this hot on every page GET. 200 comfortably covers a discovery screen; first-class
-        // pagination on `queries/restaurants` is the recorded spec follow-up (#107).
-        qb.push(" LIMIT 200");
+        // First-class pagination (#113): `limit` is CLAMPED to RESTAURANT_PAGE_MAX (the #107/#108
+        // OOM ceiling, now a named contract, never an unbounded scan) and defaults to
+        // RESTAURANT_PAGE_DEFAULT; a negative/absent `offset` is 0.
+        let limit = filter
+            .limit
+            .filter(|l| *l > 0)
+            .unwrap_or(application::queries::RESTAURANT_PAGE_DEFAULT)
+            .min(application::queries::RESTAURANT_PAGE_MAX);
+        let offset = filter.offset.filter(|o| *o >= 0).unwrap_or(0);
+        qb.push(" LIMIT ").push_bind(limit).push(" OFFSET ").push_bind(offset);
         let rows = qb.build().fetch_all(&self.pool).await.map_err(db_err)?;
         rows.iter().map(restaurant_store::decode).collect()
     }
