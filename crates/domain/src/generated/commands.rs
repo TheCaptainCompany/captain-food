@@ -367,7 +367,7 @@ pub struct ChangeCartLineQuantity {
     pub session_id: SessionId,
 }
 
-/// Ask Supabase Auth to send an SMS OTP to a phone (Twilio; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
+/// Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestPhoneVerification {

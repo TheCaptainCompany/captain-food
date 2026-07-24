@@ -519,7 +519,7 @@ pub struct ImportCatalogInput {
     pub option_lists: Vec<OptionListInput>,
 }
 
-/// Ask Supabase Auth to send an SMS OTP to a phone (Twilio; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
+/// Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event. `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestPhoneVerificationInput {

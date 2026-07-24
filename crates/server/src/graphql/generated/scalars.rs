@@ -697,10 +697,10 @@ impl From<NationalPhoneNumber> for ds::NationalPhoneNumber {
     }
 }
 
-/// One-time SMS code from Supabase Auth (sent via Twilio; a mock provider in dev).
+/// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct OtpCode(pub String);
-async_graphql::scalar!(OtpCode, "OtpCode", "One-time SMS code from Supabase Auth (sent via Twilio; a mock provider in dev).");
+async_graphql::scalar!(OtpCode, "OtpCode", "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).");
 impl From<ds::OtpCode> for OtpCode {
     fn from(v: ds::OtpCode) -> Self {
         Self(v.0)

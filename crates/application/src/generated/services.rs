@@ -177,7 +177,7 @@ pub struct IdentityVerifyEmailTokenOutput {
 /// Identity capability — passwordless auth wrapped behind our GraphQL (ADR-0015, Supabase ACL). Consumed by the Customer command handlers (VerifyPhone / email verification), not by a process manager; catalogued so the calling surface is one spec.
 #[async_trait]
 pub trait IdentityService: Send + Sync {
-    /// Send an SMS OTP to this phone (Twilio via the provider; mock in dev), localized.
+    /// Send an SMS OTP to this phone (OVHcloud SMS via the Supabase hook; mock in dev), localized.
     /// Anticipated rejections: none declared.
     async fn send_phone_otp(&self, input: IdentitySendPhoneOtpInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
     /// Verify an SMS OTP with the provider; resolves the provider-side auth user AND its session (#112 — the provider issues tokens at verification; dropping them forced the client to stay anonymous).
