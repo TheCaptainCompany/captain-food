@@ -119,6 +119,9 @@ mutation/query is reached by a story step, and every test↔rule link holds both
   approver's scope choices, status header linking the realizing PR/ADR. Approved proposals are
   historical records: never rewritten to match what was built; divergences go in the realizing
   change. A session-local plan file is NOT a substitute — the rationale must survive the session.
+  **Every proposal has a tracking issue** (ADR-20260724-143000): create it before/with the proposal
+  if missing, name it in the header, keep the two in step — an issue-less proposal is invisible to
+  the prioritised backlog and gets lost.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.

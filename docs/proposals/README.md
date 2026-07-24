@@ -9,13 +9,17 @@ chose what we chose.
 ## Convention
 
 - One file per proposal: `PROP-YYYYMMDD-HHMMSS-<slug>.md` (same collision-safe date-time ids as ADRs).
+- **Every proposal has a tracking issue** (ADR-20260724-143000): create one BEFORE or WITH the
+  proposal if none exists, name it in the header, and keep the two in step (a re-scoped proposal
+  retitles/rescopes its issue). An issue-less proposal is invisible to the prioritised backlog and
+  gets lost — the issue is what carries Value/Effort/Impact/Priority and a place on the board.
 - Header block:
 
   ```markdown
   # PROP-YYYYMMDD-HHMMSS — <title>
   - **Status**: Proposed | Approved | Rejected | Superseded by PROP-…
   - **Date**: YYYY-MM-DD
-  - **Issue**: #NN "<title>"
+  - **Tracking issue**: #NN "<title>" (REQUIRED — create it if missing)
   - **Realized by**: PR #NN / ADR-… (filled at completion)
   ```
 

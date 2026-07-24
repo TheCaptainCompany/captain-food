@@ -1,7 +1,7 @@
 # PROP-20260724-133700 — Live spec editing + per-tenant customizations (ADR-0033 deferred contract)
 - **Status**: Proposed
 - **Date**: 2026-07-24
-- **Issue**: #96 "Runtime SDUI screen delivery: serve screen trees as data (ADR-0033 deferred contract)"
+- **Tracking issue**: #96 "Live spec editing + per-tenant customizations (specs/customizations/) with fail-closed branch publishing" (retitled to this revision's scope on 2026-07-24 — every proposal MUST have one, ADR-20260724-143000)
 - **Realized by**: (pending)
 
 > **Status:** Proposed — plan-mode proposal. **No `specs/**` or code changed yet.** On approval it
