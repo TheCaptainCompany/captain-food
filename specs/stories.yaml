@@ -192,6 +192,7 @@ rider:
     Deliver:
       description: As an independent rider, I pick up assigned deliveries and record hand-over (ADR-0031).
       steps:
+        SetAvailability: { $ref: 'api.yaml#/mutations/changeRiderStatus' }   # go online/offline (#95)
         ViewMyDeliveries: { $ref: 'api.yaml#/queries/myDeliveries' }
         AcceptDelivery: { $ref: 'api.yaml#/mutations/acceptDelivery' }
         ConfirmPickup: { $ref: 'api.yaml#/mutations/confirmPickup' }

@@ -391,28 +391,49 @@ mod tests {
         assert!(bindings.contains("phone_field.value"), "{bindings}");
     }
 
-    #[test]
-    fn gap_and_unknown_actions_disable_with_a_reason() {
-        // The rider online toggle is a declared gap — its note must surface.
-        let rider_top = Surface::Rider.screens().iter().find(|s| s.id == "jobs").unwrap();
-        fn find_gap<'a>(nodes: &'a [Node]) -> Option<&'a Node> {
-            for n in nodes {
-                if matches!(n.prop("action.type"), Some(PropValue::Text("rider_toggle_online"))) {
+    fn find_action<'a>(nodes: &'a [Node], ty: &str) -> Option<&'a Node> {
+        for n in nodes {
+            if let Some(PropValue::Text(t)) = n.prop("action.type") {
+                if t == ty {
                     return Some(n);
                 }
-                if let Some(hit) = find_gap(n.children) {
-                    return Some(hit);
-                }
             }
-            None
+            if let Some(hit) = find_action(n.children, ty) {
+                return Some(hit);
+            }
         }
-        let toggle = find_gap(rider_top.tree).expect("online toggle in the generated tree");
+        None
+    }
+
+    #[test]
+    fn gap_actions_disable_with_their_spec_note() {
+        // `authenticate_passkey` (auth sheet) is a declared gap — its note must surface.
+        let auth = Surface::RestaurantFrontoffice
+            .sheets()
+            .iter()
+            .find(|s| s.id == "auth_sheet")
+            .unwrap();
+        let node = find_action(std::slice::from_ref(&auth.node), "authenticate_passkey")
+            .expect("passkey button in the generated sheet");
+        let spec = ActionSpec::from_node(node, &ctx_with(&[])).unwrap();
+        match &spec.plan {
+            ActionPlan::Disabled { reason } => assert!(reason.contains("WebAuthn"), "{reason}"),
+            other => panic!("a gap must disable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_rider_toggle_is_dispatchable_since_95_closed_its_gap() {
+        let rider_top = Surface::Rider.screens().iter().find(|s| s.id == "jobs").unwrap();
+        let toggle = find_action(rider_top.tree, "rider_toggle_online")
+            .expect("online toggle in the generated tree");
         let spec = ActionSpec::from_node(toggle, &ctx_with(&[])).unwrap();
         match &spec.plan {
-            ActionPlan::Disabled { reason } => {
-                assert!(reason.contains("No rider availability mutation"), "{reason}")
+            ActionPlan::Mutation { key, .. } => {
+                assert_eq!(key.mutation(), Some("changeRiderStatus"));
+                assert_eq!(key.input_type(), Some("ChangeRiderStatusInput"));
             }
-            other => panic!("a gap must disable, got {other:?}"),
+            other => panic!("#95 exposed the mutation — got {other:?}"),
         }
     }
 

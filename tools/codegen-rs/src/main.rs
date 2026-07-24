@@ -10003,6 +10003,7 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
         "requestPhoneChange" => ("RequestPhoneChange", "request_phone_change", Extra::AuthCustomers),
         "confirmPhoneChange" => ("ConfirmPhoneChange", "confirm_phone_change", Extra::AuthCustomers),
         "changeLanguage" => ("ChangeLanguage", "change_language", Extra::None),
+        "changeRiderStatus" => ("ChangeRiderStatus", "change_rider_status", Extra::None),
         "markRestaurantAsFavorite" => {
             ("MarkRestaurantAsFavorite", "mark_restaurant_as_favorite", Extra::Restaurants)
         }

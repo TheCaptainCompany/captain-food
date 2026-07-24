@@ -891,6 +891,16 @@ pub struct DenyRefundInput {
     pub reason: String,
 }
 
+/// Change a rider's availability/lifecycle status.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeRiderStatusInput {
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+    #[graphql(name = "status")]
+    pub status: RiderStatus,
+}
+
 /// An independent Captain rider accepts a pending delivery job.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]

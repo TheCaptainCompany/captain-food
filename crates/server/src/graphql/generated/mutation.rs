@@ -2841,6 +2841,51 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
+    #[graphql(name = "changeRiderStatus", guard = "RoleGuard::new(ALLOW_RIDER_ADMIN)", visible = "visible_rider_admin")]
+    async fn change_rider_status(&self, ctx: &async_graphql::Context<'_>, input: ChangeRiderStatusInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        let cmd: domain::generated::commands::ChangeRiderStatus = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        let entry = application::journal::CommandJournalEntry {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type,
+            channel: domain::generated::scalars::CommandChannel::GRAPHQL,
+            command_type: "ChangeRiderStatus".into(),
+            payload_hash: application::journal::payload_hash(&payload_json),
+            payload: payload_json,
+        };
+        match journal.insert(&entry).await.map_err(domain_error)? {
+            application::journal::JournalInsertOutcome::Duplicate { status, payload_hash } => {
+                if payload_hash != entry.payload_hash {
+                    return Err(conflict_error(env.message_id));
+                }
+                return Ok(acceptance(&env, journal_status_api(status), true));
+            }
+            application::journal::JournalInsertOutcome::Inserted => {}
+        }
+        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        let actor = application::ports::Actor {
+            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
+            user_type: env.user_type,
+            correlation_id: env.correlation_id,
+            cause_id: Some(env.message_id),
+        };
+        let (message_id, correlation_id) = (env.message_id, env.correlation_id);
+        tokio::spawn(async move {
+            let outcome = application::commands::change_rider_status(store.as_ref(), cmd, &actor).await.map(|_| ());
+            complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;
+        });
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+    }
     #[graphql(name = "acceptDelivery", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
     async fn accept_delivery(&self, ctx: &async_graphql::Context<'_>, input: AcceptDeliveryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
