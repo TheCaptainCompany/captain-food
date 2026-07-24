@@ -452,6 +452,18 @@ pub fn SduiScreen(
     }
 }
 
+/// The design system (#115), INLINED into every SSR page's `<head>`: the generated token variables
+/// (`tokens.generated.css`, DSL-derived) followed by the hand-written base component styles
+/// (`app.css`, keyed by the renderer's `data-c` attributes). `include_str!` bakes them at compile
+/// time (drift-gated for the generated half), so pages are styled on first paint AND after
+/// hydration — no external request, no dependency on the assets dir being present.
+#[cfg(feature = "ssr")]
+const STYLE: &str = concat!(
+    include_str!("../assets/tokens.generated.css"),
+    "\n",
+    include_str!("../assets/app.css"),
+);
+
 /// Wrap a rendered screen body in the shared HTML document shell (the `ssr` build). One shell for
 /// every server-rendered page — SDUI screens here, checkout/tracking in their own modules.
 /// `hydrate_script` (the wasm bundle loader) is appended when serving with assets.
@@ -460,7 +472,7 @@ pub(crate) fn page_html(title: &str, body: &str) -> String {
     format!(
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-<title>{title}</title></head><body>{body}</body></html>"
+<title>{title}</title><style>{STYLE}</style></head><body>{body}</body></html>"
     )
 }
 
@@ -677,6 +689,18 @@ mod tests {
         assert!(html.contains("phone_field.value"), "the form-field binding travels: {html}");
         // The field itself carries the id the binding targets.
         assert!(html.contains("id=\"phone_field\""), "{html}");
+    }
+
+    #[test]
+    fn ssr_pages_ship_the_inlined_design_system() {
+        // #115: the token variables (DSL-derived) + the base component styles keyed by data-c are
+        // inlined into every page <head>, so live pages are styled without an external request.
+        let home = Surface::CaptainFrontoffice.screens().iter().find(|s| s.id == "home").unwrap();
+        let html = render_screen_html(home, Surface::CaptainFrontoffice.sheets(), ctx());
+        assert!(html.contains("<style>"), "a style block is inlined");
+        assert!(html.contains("--color-primary: #F97316"), "the generated token var is present");
+        assert!(html.contains("[data-c=\"restaurant_card\"]"), "base component styles are present");
+        assert!(html.contains("var(--color-primary)"), "app.css consumes the token vars");
     }
 
     #[test]
