@@ -1,0 +1,290 @@
+/* Captain.Food base component styles (#115) — HAND-WRITTEN, keyed by the `data-c` attributes the
+   SDUI renderer stamps (crates/web/src/renderer.rs). The renderer's data-c discipline is the
+   styling contract: one rule per ComponentKind, consuming only the design-token variables from
+   tokens.generated.css. Mobile-first (the V0 NFR); tablet/desktop refinements behind --bp-* media
+   queries. Inlined into the SSR <head> alongside the tokens, so pages are styled on first paint
+   and after hydration. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  background: var(--color-surface-muted);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-page-padding-mobile);
+  padding-bottom: 5rem; /* room for the sticky bottom bar / nav */
+}
+
+/* ── chrome ─────────────────────────────────────────────────────────────── */
+[data-c="sticky_header"] {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-card-gap);
+  padding: var(--space-page-padding-mobile);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sticky);
+}
+[data-c="sticky_header"] [data-c="logo"] { height: 1.75rem; margin-right: auto; }
+
+[data-c="page_header"] { margin: var(--space-section-gap) 0 var(--space-card-gap); }
+[data-c="page_header"] h1, [data-c="back_button_header"] h1 {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  margin: 0;
+}
+[data-c="back_button_header"] { padding: var(--space-card-gap) 0; }
+
+[data-c="bottom_navigation"] {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-around;
+  padding: 0.5rem 0;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sticky);
+}
+[data-c="bottom_navigation"] a {
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: var(--text-sm);
+}
+
+[data-c="floating_action_button"] {
+  position: fixed;
+  right: var(--space-page-padding-mobile);
+  bottom: 4.5rem;
+  z-index: 10;
+  border: 0;
+  border-radius: var(--radius-full);
+  padding: 0.875rem 1.25rem;
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: var(--shadow-modal);
+}
+
+/* ── layout ─────────────────────────────────────────────────────────────── */
+[data-c="section"], [data-c="checkout_section"] { margin: var(--space-section-gap) 0; }
+[data-c="section"] > h2, [data-c="checkout_section"] > h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: 0 0 var(--space-card-gap);
+}
+[data-c="tab_bar"] {
+  display: flex;
+  gap: var(--space-card-gap);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-card-gap);
+}
+[data-c="tab_bar"] button {
+  border: 0;
+  background: none;
+  padding: 0.5rem 0.25rem;
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  border-bottom: 2px solid transparent;
+}
+[data-c="sticky_bottom_bar"] {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 9;
+  display: flex;
+  gap: var(--space-card-gap);
+  padding: var(--space-page-padding-mobile);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sticky);
+}
+
+/* ── content ────────────────────────────────────────────────────────────── */
+[data-c="text"] { color: var(--color-text-secondary); }
+[data-c="cta_banner"], [data-c="cta_section"] {
+  display: block;
+  padding: var(--space-section-gap);
+  border-radius: var(--radius-lg);
+  background: var(--color-primary);
+  color: #fff;
+  text-align: center;
+  text-decoration: none;
+}
+[data-c="info_row"], [data-c="opening_hours_row"] {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-card-gap) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+[data-c="rating_badge"] {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-success);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* ── cards / lists ──────────────────────────────────────────────────────── */
+[data-c="restaurant_card_grid"], [data-c="restaurant_card_list"], [data-c="search_results"] {
+  display: grid;
+  gap: var(--space-card-gap);
+  grid-template-columns: 1fr;
+}
+[data-c="restaurant_card"], [data-c="order_card"] {
+  display: block;
+  padding: var(--space-card-gap);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  text-decoration: none;
+  color: inherit;
+}
+[data-c="restaurant_card"] h3 { margin: 0 0 0.25rem; font-size: var(--text-lg); }
+[data-c="restaurant_card"] p { margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+
+[data-c="order_list"] { display: grid; gap: var(--space-card-gap); }
+[data-c="order_list"][data-empty="true"] {
+  padding: var(--space-section-gap);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+[data-c="order_card"] { display: flex; align-items: center; gap: var(--space-card-gap); }
+[data-c="order_card"] strong { margin-left: auto; }
+
+[data-c="status_chip"] {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* ── cart ───────────────────────────────────────────────────────────────── */
+[data-c="cart_line_row"] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-card-gap);
+  padding: var(--space-card-gap) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+[data-c="cart_line_row"] strong { margin-left: auto; }
+[data-c="quantity_stepper"] {
+  min-width: 1.75rem;
+  text-align: center;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-muted);
+}
+[data-c="cart_summary_mini"], [data-c="order_summary_block"] {
+  padding: var(--space-card-gap);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+/* ── inputs ─────────────────────────────────────────────────────────────── */
+[data-c="button"], [data-c="text_button"], [data-c="icon_button"],
+[data-c="sign_out_button"], [data-c="add_button"] {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 1rem;
+  font-size: var(--text-base);
+  font-weight: 600;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+[data-c="button"][data-variant="primary"] {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+[data-c="button"][data-variant="ghost"] { background: none; border-color: transparent; }
+[data-c="button"]:disabled { opacity: 0.5; cursor: not-allowed; }
+[data-c="button"].is-pending { opacity: 0.7; cursor: progress; }
+[data-c="sticky_bottom_bar"] [data-c="button"] { flex: 1; }
+
+label[data-c$="_input"], label[data-c="phone_field"], label[data-c="otp_input"] {
+  display: block;
+  margin: var(--space-card-gap) 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+label[data-c$="_input"] input, label[data-c="phone_field"] input, label[data-c="otp_input"] input {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.625rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+}
+
+/* ── sheets & overlays (#94) ────────────────────────────────────────────── */
+[data-c="bottom_sheet"] {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 20;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--space-section-gap) var(--space-page-padding-mobile);
+  background: var(--color-surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-modal);
+}
+[data-c="bottom_sheet"][hidden] { display: none; }
+[data-c="bottom_sheet"] h2 { margin: 0 0 var(--space-card-gap); font-size: var(--text-xl); }
+
+#captain-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 5.5rem;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: 90%;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--color-text-primary);
+  color: #fff;
+  font-size: var(--text-sm);
+  box-shadow: var(--shadow-modal);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+#captain-toast[data-visible="true"] { opacity: 1; }
+
+/* ── stripe mount ───────────────────────────────────────────────────────── */
+[data-c="stripe_express_checkout_element"] {
+  min-height: 3rem;
+  padding: var(--space-card-gap);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ── responsive (tablet up) ─────────────────────────────────────────────── */
+@media (min-width: 768px) {
+  #app { padding: var(--space-page-padding-desktop); }
+  [data-c="restaurant_card_grid"], [data-c="search_results"] {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (min-width: 1024px) {
+  [data-c="restaurant_card_grid"], [data-c="search_results"] {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  [data-c="bottom_navigation"] { justify-content: center; gap: var(--space-section-gap); }
+}
