@@ -322,6 +322,19 @@ MoneyCents:
   minimum: 0
   description: "Monetary amount in minor units (e.g. cents)."
 
+PageLimit:
+  type: integer
+  minimum: 1
+  description: >
+    Requested page size for a paginated list query (#113). The server CLAMPS it to a per-query
+    maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the
+    query's default page size.
+
+PageOffset:
+  type: integer
+  minimum: 0
+  description: "Rows to skip before the page for a paginated list query (#113). Absent = 0."
+
 TaxRatePercent:
   type: number
   minimum: 0

@@ -220,7 +220,7 @@ _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mo
 Discover: public list of restaurants. All args are optional filters resolved by the read side (Restaurant); the query returns only matching restaurants. `list` selects a curated/ personalized shelf (the read model resolves its members).
 
 
-- **Input**: 🧩 `RestaurantsQueryInput` — `search?`: `string`, `tags?`: [[🔤 `Tag`](#scalar-tag)], `serviceType?`: [🔤 `ServiceType`](#scalar-servicetype), `openNow?`: `boolean`, `city?`: [🔤 `CityName`](#scalar-cityname), `priceRange?`: [🔤 `PriceRange`](#scalar-pricerange), `list?`: [🔤 `RestaurantListKey`](#scalar-restaurantlistkey), `listingStatus?`: [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus), `orderableOnly?`: `boolean`
+- **Input**: 🧩 `RestaurantsQueryInput` — `search?`: `string`, `tags?`: [[🔤 `Tag`](#scalar-tag)], `serviceType?`: [🔤 `ServiceType`](#scalar-servicetype), `openNow?`: `boolean`, `city?`: [🔤 `CityName`](#scalar-cityname), `priceRange?`: [🔤 `PriceRange`](#scalar-pricerange), `list?`: [🔤 `RestaurantListKey`](#scalar-restaurantlistkey), `listingStatus?`: [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus), `orderableOnly?`: `boolean`, `limit?`: [🔤 `PageLimit`](#scalar-pagelimit), `offset?`: [🔤 `PageOffset`](#scalar-pageoffset)
 - **Returns**: [🧩 `Restaurant`](#type-restaurant) (list) · **reads** [🗄️ `Restaurant`](#view-restaurant)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
@@ -1327,7 +1327,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(23)_
+### 🔤 Scalars _(25)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -1341,6 +1341,8 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-weburl"></a>🔤 `WebUrl` | string `^https?://` | An http(s) URL — restaurant website or the Google Business Profile 'Order online' link. |
 | <a id="scalar-restaurantlegalname"></a>🔤 `RestaurantLegalName` | string | Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.  |
 | <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
+| <a id="scalar-pagelimit"></a>🔤 `PageLimit` | integer | Requested page size for a paginated list query (#113). The server CLAMPS it to a per-query maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the query's default page size.  |
+| <a id="scalar-pageoffset"></a>🔤 `PageOffset` | integer | Rows to skip before the page for a paginated list query (#113). Absent = 0. |
 | <a id="scalar-marginpercent"></a>🔤 `MarginPercent` | number | A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.  |
 | <a id="scalar-weekday"></a>🔤 `Weekday` | enum (MONDAY \| TUESDAY \| WEDNESDAY \| THURSDAY \| FRIDAY \| SATURDAY \| SUNDAY) |  |
 | <a id="scalar-timeofday"></a>🔤 `TimeOfDay` | string `^([01][0-9]|2[0-3]):[0-5][0-9]$` | Local time of day, HH:mm (HubRise opening_hours format). |

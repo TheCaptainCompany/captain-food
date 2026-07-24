@@ -1029,6 +1029,10 @@ pub struct RestaurantsQueryInput {
     pub listing_status: Option<RestaurantListingStatus>,
     #[graphql(name = "orderableOnly")]
     pub orderable_only: Option<bool>,
+    #[graphql(name = "limit")]
+    pub limit: Option<PageLimit>,
+    #[graphql(name = "offset")]
+    pub offset: Option<PageOffset>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

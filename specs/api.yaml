@@ -440,6 +440,8 @@ queries:
       list: { $ref: 'scalars.yaml#/RestaurantListKey' }     # curated/personalized shelf (e.g. ORDER_AGAIN)
       listingStatus: { $ref: 'scalars.yaml#/RestaurantListingStatus' }   # filter by partnership funnel
       orderableOnly: { type: boolean }                      # only orderable (active partner) restaurants; non-partner cards show by default
+      limit: { $ref: 'scalars.yaml#/PageLimit' }            # page size; server clamps to 200 (#113)
+      offset: { $ref: 'scalars.yaml#/PageOffset' }          # rows to skip (#113)
     returns: { $ref: '#/types/Restaurant', array: true }
     slice: V0
 

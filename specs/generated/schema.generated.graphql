@@ -66,6 +66,8 @@ scalar TimeZone
 scalar Locale
 scalar CurrencyCode
 scalar MoneyCents
+scalar PageLimit
+scalar PageOffset
 scalar TaxRatePercent
 scalar MarginPercent
 scalar Quantity
@@ -1243,6 +1245,8 @@ input RestaurantsQueryInput {
   list: RestaurantListKey
   listingStatus: RestaurantListingStatus
   orderableOnly: Boolean
+  limit: PageLimit
+  offset: PageOffset
 }
 
 input CatalogQueryInput {
