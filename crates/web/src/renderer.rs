@@ -394,7 +394,27 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
             // The field id is the `{{ <id>.value }}` binding target (#94) — the driver reads the
             // live value by this id at dispatch time, so it must land on the <input> itself.
             let field_id = prop_text(node, "id", ctx);
-            view! { <label data-c=ty>{label}<input id=field_id placeholder=placeholder/></label> }.into_any()
+            // otp_input auto-submits on `on_complete` when it reaches `length` digits (#114): the
+            // trigger action rides `input` (a keystroke), so it lands on the <input> element.
+            let (trig, _) = crate::executor::trigger_attrs(node, ctx, "on_complete", "complete");
+            let g = |k: &str| trig.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone());
+            use crate::executor::attrs;
+            let len = prop_text(node, "length", ctx);
+            view! {
+                <label data-c=ty>
+                    {label}
+                    <input
+                        id=field_id
+                        placeholder=placeholder
+                        data-action=g(attrs::ACTION)
+                        data-vars=g(attrs::VARS)
+                        data-var-bindings=g(attrs::VAR_BINDINGS)
+                        data-trigger=g(attrs::TRIGGER)
+                        data-complete-len={if len.is_empty() { None } else { Some(len) }}
+                    />
+                </label>
+            }
+            .into_any()
         }
         ComponentKind::StatusChip => {
             let status = prop_text(node, "status", ctx);
@@ -403,6 +423,52 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
         }
 
         // ── account ─────────────────────────────────────────────────────────────
+        // A single/multi-select chip group (#114): each option is a chip carrying its value; the
+        // group's `on_change` fires when a chip is picked. The selected value lands in a hidden
+        // input (id = the group's field id), so the driver's existing form-field binding fill
+        // (`{{ <field>.value }}`) reads it with zero new resolution. This is what finally fires the
+        // #62 delivery-satisfaction survey from the UI (the timeliness chips carry
+        // `record_delivery_satisfaction`).
+        ComponentKind::ChipMultiSelect => {
+            let field_id = prop_text(node, "id", ctx);
+            let label = prop_text(node, "label", ctx);
+            let has_label = !label.is_empty();
+            let (trig, _) = crate::executor::trigger_attrs(node, ctx, "on_change", "change");
+            let g = |k: &str| trig.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone());
+            use crate::executor::attrs;
+            // Options flatten to options.N.value / options.N.label (or a bare translation ref).
+            let mut chips: Vec<AnyView> = Vec::new();
+            for i in 0..16 {
+                let value = prop_text(node, &format!("options.{i}.value"), ctx);
+                let opt_label = {
+                    let l = prop_text(node, &format!("options.{i}.label"), ctx);
+                    if l.is_empty() { prop_text(node, &format!("options.{i}"), ctx) } else { l }
+                };
+                if value.is_empty() && opt_label.is_empty() {
+                    break;
+                }
+                let chip_value = if value.is_empty() { opt_label.clone() } else { value };
+                chips.push(view! {
+                    <button type="button" data-c="chip" data-chip-value=chip_value data-chip-group=field_id.clone()>
+                        {opt_label}
+                    </button>
+                }.into_any());
+            }
+            view! {
+                <fieldset
+                    data-c=ty
+                    data-action=g(attrs::ACTION)
+                    data-vars=g(attrs::VARS)
+                    data-var-bindings=g(attrs::VAR_BINDINGS)
+                    data-trigger=g(attrs::TRIGGER)
+                >
+                    {has_label.then(|| view! { <legend>{label.clone()}</legend> })}
+                    <input type="hidden" id=field_id/>
+                    {chips}
+                </fieldset>
+            }
+            .into_any()
+        }
         ComponentKind::MenuSection => {
             let title = prop_text(node, "title", ctx);
             let mut items: Vec<AnyView> = Vec::new();
