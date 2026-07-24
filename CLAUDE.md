@@ -113,6 +113,12 @@ mutation/query is reached by a story step, and every test↔rule link holds both
 - DSL source files (`specs/**`) are **never** modified by autonomous/execution loops — only plan mode
   proposes DSL changes, with approval. C4 (`specs/architecture/*.yaml`) and observability contracts
   (`specs/observability.yaml`) are **source** DSL, not generated.
+- **Proposals are committed to the repo** (ADR-20260724-135945, product-owner directive): every
+  proposal presented for approval lands in [docs/proposals/](docs/proposals/) as
+  `PROP-YYYYMMDD-HHMMSS-<slug>.md` — the proposal as presented, alternatives considered, the
+  approver's scope choices, status header linking the realizing PR/ADR. Approved proposals are
+  historical records: never rewritten to match what was built; divergences go in the realizing
+  change. A session-local plan file is NOT a substitute — the rationale must survive the session.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
