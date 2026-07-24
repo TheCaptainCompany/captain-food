@@ -3,7 +3,7 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-24. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> ✅ **2026-07-24 — #117: the real Supabase Auth adapter — login machinery is functional (PR #123,
+> ✅ **2026-07-24 — #117: the real Supabase Auth adapter — login machinery is functional (PR #124,
 > PROP-20260724-225804).** The only `IdentityService` was the fail-closed stub, so no login worked.
 > New `SupabaseIdentityService` (crates/infrastructure/integrations/supabase_auth.rs, beside the
 > stub) over the Supabase Auth REST API: `send_phone_otp`/`send_email_magic_link` →
