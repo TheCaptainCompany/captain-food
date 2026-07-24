@@ -174,6 +174,17 @@ CREATE TABLE domain_stream (
   max_count INTEGER NULL
 );
 
+CREATE TABLE auth_sessions (
+  message_id UUID PRIMARY KEY,
+  session_id UUID NULL,
+  ciphertext BYTEA NOT NULL,
+  nonce BYTEA NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON auth_sessions (session_id);
+CREATE INDEX ON auth_sessions (expires_at);
+
 CREATE TABLE hubrise_connections (
   restaurant_account_id UUID PRIMARY KEY,
   hubrise_account_id TEXT NOT NULL UNIQUE,
@@ -665,6 +676,13 @@ BEGIN
      AND processed_at < now() - INTERVAL '90 days';
   GET DIAGNOSTICS n = ROW_COUNT;
   swept_table := 'external_uber_direct_events'; deleted := n; RETURN NEXT;
+
+  -- auth_sessions (#112): unclaimed cookie-pickup rows past their minutes-scale deadline. Claimed
+  -- rows are deleted at pickup (single-read); this sweeps only the abandoned ones.
+  DELETE FROM auth_sessions
+   WHERE expires_at < now();
+  GET DIAGNOSTICS n = ROW_COUNT;
+  swept_table := 'auth_sessions'; deleted := n; RETURN NEXT;
 END;
 $$;
 

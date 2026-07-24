@@ -1,7 +1,33 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-24. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-24 — #112: client auth-token wiring — the BFF-minted httpOnly session cookie (PR #116,
+> PROP-20260724-150500).** Identity stopped at the server: `VerifyPhone` SUCCEEDed but the client
+> stayed anonymous (CUSTOMER path unreachable, staff surfaces unusable, WS/SSR tokenless,
+> `sign_out` dead). Fixed WITHOUT ever exposing a token to JS. (1) **Spec**: `identity.verify_phone_otp`
+> + `verify_email_token` outputs gain `accessToken`/`refreshToken`/`expiresIn` (the #50
+> output-extension precedent) + a new `refresh_session` op; new `auth_sessions` transport table
+> (integration_connections.yaml — never event-sourced/api.yaml/projected), migration `20260724150500`
+> + `sweep_retention()` extension, `REQUIRED_SCHEMA_VERSION` bumped; the codegen `table_sql_type`
+> learned `bytea`. (2) **Park**: `application::auth_sessions` port (+ mem/noop doubles); the async
+> `verify_phone` handler parks the provider session keyed by the acceptance messageId
+> (`actor.cause_id`), owned by the journaling `session_id` — a parking failure never fails the
+> verification. (3) **Encrypt at rest**: `PgAuthSessionStore` (aes-gcm) — AES-256-GCM under
+> `AUTH_SESSION_KEY`, `claim` is a single-read `DELETE…RETURNING` scoped by owner + unexpired
+> (NULL-safe), no oracle. (4) **Exchange**: `POST /auth/session { messageId }` + matching
+> `X-SESSION-ID` → `Set-Cookie: captain_auth` (httpOnly/Secure/SameSite=Lax) + `/auth`-scoped
+> refresh; `/auth/refresh`, `/auth/logout`. (5) **The one seam**: `AuthContext` gained a cookie
+> fallback beside the `Authorization` header — lighting authenticated HTTP, the WS handshake
+> (browsers send cookies on upgrade), and #92's SSR 302 in a single change. (6) **Web**:
+> `verify_otp` surfaces the messageId; `pickup_session` POSTs it credentials-included. Fail-closed:
+> no key/DB ⇒ noop store ⇒ anonymous still works, no plaintext ever. Tokens never in GraphQL, the
+> event log, the journal, or client storage. 231 application + 24 server + web/infra tests; wasm
+> green. Twilio→OVHcloud SMS spec wording corrected (the launch decision, ADR-20260722-174500).
+> **Follow-up [#117](https://github.com/TheCaptainCompany/captain-food/issues/117)**: the real
+> Supabase Auth adapter (only the fail-closed `IdentityService` stand-in exists — the machinery is
+> built against the port, verify responses will carry the real session then).
 
 > ✅ **2026-07-24 — #95: rider availability EXPOSED — `changeRiderStatus` closes the
 > `rider_toggle_online` gap (PR #104; plan-approved spec change).** The domain machinery was

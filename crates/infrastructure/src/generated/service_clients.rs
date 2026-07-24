@@ -166,6 +166,9 @@ impl IdentityService for HttpIdentityService {
     async fn verify_phone_otp(&self, input: IdentityVerifyPhoneOtpInput, meta: &ServiceCallMeta) -> Result<IdentityVerifyPhoneOtpOutput, DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/verify-phone-otp", input, meta).await
     }
+    async fn refresh_session(&self, input: IdentityRefreshSessionInput, meta: &ServiceCallMeta) -> Result<IdentityRefreshSessionOutput, DomainError> {
+        post_call(&self.http, &self.base_url, "/services/identity/refresh-session", input, meta).await
+    }
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/send-email-magic-link", input, meta).await
     }

@@ -14,7 +14,8 @@ use application::commands::canonical_phone;
 use application::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
-    IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
+    IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentityVerifyPhoneOtpOutput,
+    ServiceCallMeta,
 };
 use async_trait::async_trait;
 use domain::shared::errors::DomainError;
@@ -53,6 +54,15 @@ impl IdentityService for FailClosedIdentityService {
             "InvalidVerificationCode",
             json!({ "phone": canonical_phone(&input.dialing_code, &input.national_number) }),
         ))
+    }
+
+    async fn refresh_session(
+        &self,
+        _input: IdentityRefreshSessionInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<IdentityRefreshSessionOutput, DomainError> {
+        // TODO(#117): rotate the session with Supabase Auth (grant_type=refresh_token).
+        Err(not_configured("session refresh"))
     }
 
     async fn send_email_magic_link(

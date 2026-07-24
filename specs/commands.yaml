@@ -702,7 +702,7 @@ ChangeCartLineQuantity:
 
 RequestPhoneVerification:
   description: >
-    Ask Supabase Auth to send an SMS OTP to a phone (Twilio; a mock provider in dev). Emits no event.
+    Ask Supabase Auth to send an SMS OTP to a phone (OVHcloud SMS via the Supabase send-SMS hook; a mock provider in dev). Emits no event.
     `locale` localizes the message; when absent it defaults from the dialing code (e.g. '+33' → fr-FR).
   type: object
   properties:

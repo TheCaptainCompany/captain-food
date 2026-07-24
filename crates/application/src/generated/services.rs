@@ -127,6 +127,25 @@ pub struct IdentityVerifyPhoneOtpInput {
 #[serde(rename_all = "camelCase")]
 pub struct IdentityVerifyPhoneOtpOutput {
     pub auth_ref: ExternalReference,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<i64>,
+}
+
+/// Input of `identity.refresh_session`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityRefreshSessionInput {
+    pub refresh_token: String,
+}
+
+/// Output of `identity.refresh_session`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityRefreshSessionOutput {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<i64>,
 }
 
 /// Input of `identity.send_email_magic_link`.
@@ -150,6 +169,9 @@ pub struct IdentityVerifyEmailTokenInput {
 pub struct IdentityVerifyEmailTokenOutput {
     pub auth_ref: ExternalReference,
     pub email: EmailAddress,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<i64>,
 }
 
 /// Identity capability — passwordless auth wrapped behind our GraphQL (ADR-0015, Supabase ACL). Consumed by the Customer command handlers (VerifyPhone / email verification), not by a process manager; catalogued so the calling surface is one spec.
@@ -158,9 +180,12 @@ pub trait IdentityService: Send + Sync {
     /// Send an SMS OTP to this phone (Twilio via the provider; mock in dev), localized.
     /// Anticipated rejections: none declared.
     async fn send_phone_otp(&self, input: IdentitySendPhoneOtpInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
-    /// Verify an SMS OTP with the provider; resolves the provider-side auth user.
+    /// Verify an SMS OTP with the provider; resolves the provider-side auth user AND its session (#112 — the provider issues tokens at verification; dropping them forced the client to stay anonymous).
     /// Anticipated rejections: `errors.yaml#/InvalidVerificationCode`, `errors.yaml#/VerificationCodeExpired`.
     async fn verify_phone_otp(&self, input: IdentityVerifyPhoneOtpInput, meta: &ServiceCallMeta) -> Result<IdentityVerifyPhoneOtpOutput, DomainError>;
+    /// Rotate a provider session from its refresh token (#112 — backs POST /auth/refresh; the fail-closed stand-in 503s until the supabase-acl adapter lands).
+    /// Anticipated rejections: `errors.yaml#/InvalidVerificationToken`.
+    async fn refresh_session(&self, input: IdentityRefreshSessionInput, meta: &ServiceCallMeta) -> Result<IdentityRefreshSessionOutput, DomainError>;
     /// Email a magic link to verify/link this address, localized by the stored locale.
     /// Anticipated rejections: none declared.
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;

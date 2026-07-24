@@ -33,7 +33,9 @@ pub struct PhoneParts {
 #[derive(Debug)]
 pub enum VerifyResult {
     /// Verified: the customer exists (created or resolved server-side) and `me` answered.
-    SignedIn { profile: Value },
+    /// `message_id` is the acceptance handle — the pickup key for the httpOnly session cookie
+    /// (#112: `pickup_session` POSTs it to `/auth/session`; the browser stores the Set-Cookie).
+    SignedIn { message_id: uuid::Uuid, profile: Value },
     /// The anticipated business rejection (wrong/expired code…) — normal UX flow: show the
     /// message, offer resend.
     Rejected { error_code: String, message: Option<String> },
@@ -86,17 +88,44 @@ pub async fn verify_otp(
     input.insert("sessionId".into(), json!(session.as_uuid()));
 
     let handle = dispatch_persisted(transport, store, ActionKey::VerifyOtp, input).await?;
+    let message_id = handle.message_id;
     match settle_with(transport, store, &handle, max_attempts, interval).await? {
         ActionOutcome::Succeeded { .. } => {
-            // The proof is the read: `me` resolves the (new or returning) customer.
+            // The proof is the read: `me` resolves the (new or returning) customer. The session
+            // cookie is picked up separately (pickup_session) — the identity read confirms
+            // sign-in regardless.
             let profile = execute_resolver(transport, ResolverKey::MeProfile, Map::new()).await?;
-            Ok(VerifyResult::SignedIn { profile })
+            Ok(VerifyResult::SignedIn { message_id, profile })
         }
         ActionOutcome::Rejected { error_code, message, .. } => {
             Ok(VerifyResult::Rejected { error_code, message })
         }
         ActionOutcome::Failed { message, .. } => Ok(VerifyResult::Failed { message }),
     }
+}
+
+/// Pick up the httpOnly session cookie after a `SignedIn` (#112, `hydrate` path): POST the
+/// acceptance `messageId` to `/auth/session` with the same `X-SESSION-ID` that journaled the
+/// verify — the server matches ownership, claims the parked session, and answers `Set-Cookie`
+/// (`captain_auth`, httpOnly) which the browser stores. The JS never sees the token. Best-effort:
+/// a failure leaves the customer identified-but-cookieless (they re-verify); it never unwinds the
+/// sign-in.
+#[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
+pub async fn pickup_session(origin: &str, message_id: uuid::Uuid, session: SessionId) -> bool {
+    let url = format!("{}/auth/session", origin.trim_end_matches('/'));
+    let body = serde_json::json!({ "messageId": message_id }).to_string();
+    let client = reqwest::Client::new();
+    matches!(
+        client
+            .post(&url)
+            .header(crate::session::SESSION_HEADER, session.to_string())
+            .header("content-type", "application/json")
+            .fetch_credentials_include()
+            .body(body)
+            .send()
+            .await,
+        Ok(resp) if resp.status().is_success()
+    )
 }
 
 #[cfg(test)]
@@ -153,7 +182,7 @@ mod tests {
 
         let result =
             verify_otp(&fake, &store, &phone(), "123456", session, 5, Duration::ZERO).await.unwrap();
-        let VerifyResult::SignedIn { profile } = result else { panic!("expected sign-in") };
+        let VerifyResult::SignedIn { profile, .. } = result else { panic!("expected sign-in") };
         assert_eq!(profile["customerId"], "c-1");
 
         // VerifyPhone carried the minted customerId + THE session (the cart-binding contract).

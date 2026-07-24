@@ -125,23 +125,39 @@ identity:
     manager; catalogued so the calling surface is one spec.
   operations:
     send_phone_otp:
-      description: "Send an SMS OTP to this phone (Twilio via the provider; mock in dev), localized."
+      description: "Send an SMS OTP to this phone (OVHcloud SMS via the Supabase hook; mock in dev), localized."
       input:
         dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
         nationalNumber: { $ref: 'scalars.yaml#/NationalPhoneNumber' }
         locale: { $ref: 'scalars.yaml#/Locale', nullable: true, description: "Absent pre-identification (no stored locale yet) — the provider falls back to its default localization." }
       errors: []
     verify_phone_otp:
-      description: "Verify an SMS OTP with the provider; resolves the provider-side auth user."
+      description: "Verify an SMS OTP with the provider; resolves the provider-side auth user AND its session (#112 — the provider issues tokens at verification; dropping them forced the client to stay anonymous)."
       input:
         dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
         nationalNumber: { $ref: 'scalars.yaml#/NationalPhoneNumber' }
         code: { $ref: 'scalars.yaml#/OtpCode' }
       output:
         authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+        # The provider session (PROP-20260724-150500): parked encrypted by the handler, delivered as
+        # an httpOnly cookie by POST /auth/session — NEVER in GraphQL, the event log, or the journal.
+        # Nullable: a provider/mock without sessions degrades to verification-only.
+        accessToken:  { type: string, maxLength: 4096, nullable: true, description: "Provider JWT for the verified user (Supabase access_token)." }
+        refreshToken: { type: string, maxLength: 1024, nullable: true, description: "Provider refresh token (rotated via POST /auth/refresh)." }
+        expiresIn:    { type: integer, nullable: true, description: "Access-token lifetime in seconds, as reported by the provider." }
       errors:
         - { $ref: 'errors.yaml#/InvalidVerificationCode' }
         - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+    refresh_session:
+      description: "Rotate a provider session from its refresh token (#112 — backs POST /auth/refresh; the fail-closed stand-in 503s until the supabase-acl adapter lands)."
+      input:
+        refreshToken: { type: string, maxLength: 1024 }
+      output:
+        accessToken:  { type: string, maxLength: 4096, description: "The rotated provider JWT." }
+        refreshToken: { type: string, maxLength: 1024, nullable: true, description: "The rotated refresh token (providers may reuse)." }
+        expiresIn:    { type: integer, nullable: true }
+      errors:
+        - { $ref: 'errors.yaml#/InvalidVerificationToken' }
     send_email_magic_link:
       description: "Email a magic link to verify/link this address, localized by the stored locale."
       input:
@@ -155,6 +171,10 @@ identity:
       output:
         authRef: { $ref: 'scalars.yaml#/ExternalReference' }
         email: { $ref: 'scalars.yaml#/EmailAddress', description: "The address the token PROVES — the linked email is recorded from this, never from client input." }
+        # Same provider-session trio as verify_phone_otp (#112) — the staff magic-link login rides it.
+        accessToken:  { type: string, maxLength: 4096, nullable: true, description: "Provider JWT for the verified user (Supabase access_token)." }
+        refreshToken: { type: string, maxLength: 1024, nullable: true, description: "Provider refresh token (rotated via POST /auth/refresh)." }
+        expiresIn:    { type: integer, nullable: true, description: "Access-token lifetime in seconds, as reported by the provider." }
       errors:
         - { $ref: 'errors.yaml#/InvalidVerificationToken' }
         - { $ref: 'errors.yaml#/VerificationCodeExpired' }

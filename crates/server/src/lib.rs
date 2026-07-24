@@ -65,6 +65,7 @@ use shared_types::HealthDto;
 use graphql::schema::{ReadDeps, WriteDeps};
 
 mod auth;
+mod auth_routes;
 mod web_ssr;
 /// The expose-gated `/services/*` surface + module index, GENERATED from specs/services.yaml
 /// (issue #26, ADR-20260719-214500).
@@ -96,7 +97,7 @@ pub fn wire() -> HealthDto {
 /// writes `command_journal` at acceptance, so the app cannot serve writes without it.
 /// `20260721150000` = the Uber Direct webhook mirror (external_uber_direct_events, #57): the adapter's
 /// inbound ingestor stages verified facts into it, so the app must not serve without the table.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260722000000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260724150500;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -161,6 +162,10 @@ pub fn router() -> Router {
     let mut read_deps: Option<ReadDeps> = None;
     // The host fallback's tenant lookup (#98): decides registered-vs-unclaimed for {slug} hosts.
     let mut tenant_lookup = hosts::TenantLookup(None);
+    // Cookie-pickup parking (#112): the real Pg store when DB + AUTH_SESSION_KEY are set, else the
+    // fail-closed no-op (parking succeeds, claiming yields nothing → no cookie, anonymous still works).
+    let mut auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore> =
+        Arc::new(application::auth_sessions::NoopAuthSessionStore);
     let mut write_deps: Option<WriteDeps> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
@@ -294,6 +299,21 @@ pub fn router() -> Router {
                     // journal + the journal-transition broadcast behind operationStatus(+Changed).
                     journal: Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
                     status_bus: operation_status_bus.clone(),
+                    auth_sessions: {
+                        // Encrypted parking store when AUTH_SESSION_KEY is set; else stays the no-op
+                        // (fail-closed: no key ⇒ no session cookies, never plaintext at rest).
+                        match infrastructure::PgAuthSessionStore::from_env(pool.clone()) {
+                            Some(store) => {
+                                auth_sessions = Arc::new(store);
+                                println!("auth sessions: encrypted Pg store (AUTH_SESSION_KEY set)");
+                                auth_sessions.clone()
+                            }
+                            None => {
+                                eprintln!("AUTH_SESSION_KEY not set — session cookies unavailable (auth stays anonymous-only)");
+                                auth_sessions.clone()
+                            }
+                        }
+                    },
                 });
 
                 // In-process projection worker (ADR-0040). RUN_PROJECTOR=false hands it to a dedicated worker.
@@ -534,6 +554,16 @@ pub fn router() -> Router {
 
     // Built once, shared twice: the HTTP GraphQL routes AND the SSR page renderer (#92 — the
     // in-process transport executes screens' data_requirements against this same schema).
+    // Session-cookie transport (#112): the identity service (for /auth/refresh) + the parking store
+    // (for /auth/session pickup). Identity resolves through the same generated binding as WriteDeps.
+    let auth_routes_state = auth_routes::AuthRoutesState {
+        sessions: Some(auth_sessions.clone()),
+        identity: infrastructure::generated::service_bindings::identity_service(|| {
+            Arc::new(FailClosedIdentityService)
+        })
+        .expect("identity service binding (services.yaml)"),
+    };
+
     let schema = graphql::schema::build_schema(read_deps, write_deps, Some(event_bus));
     let ssr_exec = web_ssr::SsrExec { schema: schema.clone() };
 
@@ -561,6 +591,8 @@ pub fn router() -> Router {
             webhook_secret: uber_direct_config.map(|c| Arc::new(c.webhook_secret)),
         }))
         .merge(hubrise_adapter::routes(hubrise_state))
+        // Session-cookie endpoints (#112): POST /auth/{session,refresh,logout}.
+        .merge(auth_routes::auth_routes(auth_routes_state))
         // The DERIVED `/services/<service>/<op>` surface (issue #26): emitted per the spec's
         // `expose` flags — empty while every service declares `expose: false` (V0).
         .merge(generated::services_routes::services_router())

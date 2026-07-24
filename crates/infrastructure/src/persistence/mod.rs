@@ -2,6 +2,7 @@
 //! tables (ADR-0040) plus the shared row↔SQL mapping helpers they and the projection worker reuse.
 
 pub mod cart;
+pub mod auth_sessions;
 pub mod cart_store;
 pub mod catalog;
 pub mod catalog_store;
@@ -25,6 +26,7 @@ pub mod restaurant;
 pub mod restaurant_store;
 pub mod status_bus;
 
+pub use auth_sessions::PgAuthSessionStore;
 pub use cart::PgCartRepository;
 pub use catalog::PgCatalogRepository;
 pub use command_journal::PgCommandJournal;

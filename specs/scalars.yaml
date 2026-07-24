@@ -265,7 +265,7 @@ NationalPhoneNumber:
 OtpCode:
   type: string
   pattern: "^[0-9]{4,8}$"
-  description: "One-time SMS code from Supabase Auth (sent via Twilio; a mock provider in dev)."
+  description: "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev)."
 
 EmailVerificationToken:
   type: string

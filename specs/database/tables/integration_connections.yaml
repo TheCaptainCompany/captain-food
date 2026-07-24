@@ -12,6 +12,28 @@
 # api.yaml (no GraphQL type reads them, so no navigation edge can ever surface a token), never
 # projected. Re-connecting the same account UPSERTs (token refresh + location catch-up).
 
+# Auth-session parking (#112, PROP-20260724-150500): the identity provider issues its session at
+# VERIFICATION time (inside the async VerifyPhone/verify-email handler), but the client only holds
+# the acceptance messageId — this table bridges the two. The handler parks the session ENCRYPTED
+# (AES-256-GCM under AUTH_SESSION_KEY); `POST /auth/session { messageId }` + the MATCHING journaling
+# X-SESSION-ID (the operationStatus ownership rule) exchanges it for the httpOnly cookie and DELETES
+# the row (single-read). Short TTL — an unclaimed session expires in minutes and is swept.
+auth_sessions:
+  description: >
+    One row per just-verified identity awaiting cookie pickup: the provider session ciphertext,
+    keyed by the acceptance messageId, owned by the journaling anonymous session. Single-read,
+    minutes-lived, encrypted at rest. Adapter/transport-owned — never event-sourced, never in
+    api.yaml, never projected (see the file header's credentials-at-rest stance).
+  columns:
+    message_id:  { type: uuid, pk: true }                       # the VerifyPhone/verify-email acceptance handle
+    session_id:  { type: uuid, nullable: true, index: true }    # the journaling X-SESSION-ID; pickup requires a match
+    ciphertext:  { type: bytea }                                # AES-256-GCM(access+refresh+expiry JSON) under AUTH_SESSION_KEY
+    nonce:       { type: bytea }                                # per-row GCM nonce
+    expires_at:  { type: timestamptz, index: true }             # pickup deadline (minutes); swept after
+    created_at:  { type: timestamptz }
+  retention:
+    policy: "expired rows swept by sweep_retention() (any row past expires_at); claimed rows are deleted at pickup."
+
 hubrise_connections:
   description: >
     One row per connected HubRise Account: the account-scoped, non-expiring OAuth access token,

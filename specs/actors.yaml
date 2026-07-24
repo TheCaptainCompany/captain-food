@@ -292,7 +292,7 @@ Customer:
     - message: { $ref: 'commands.yaml#/RequestPhoneVerification' }
       emits: []
       throws: []
-      effect: "Delegate to Supabase Auth: send an SMS OTP (Twilio; mock in dev). No event."
+      effect: "Delegate to Supabase Auth: send an SMS OTP (OVHcloud SMS hook; mock in dev). No event."
     - message: { $ref: 'commands.yaml#/VerifyPhone' }
       emits:
         - { $ref: 'events.yaml#/CustomerRegistered' }

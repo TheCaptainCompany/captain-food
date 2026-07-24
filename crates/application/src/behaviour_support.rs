@@ -108,6 +108,8 @@ pub struct TestBed {
     pub identity: FakeIdentity,
     pub ownership: FakeOwnership,
     pub probe: FakeProbe,
+    /// Cookie-pickup parking (#112) — VerifyPhone parks the provider session here.
+    pub auth_sessions: crate::auth_sessions::mem::MemAuthSessionStore,
 }
 
 /// Stream lengths before the WHEN — the diff baseline.
@@ -931,7 +933,24 @@ impl IdentityService for FakeIdentity {
         if input.code.0 == "000000" {
             return Err(DomainError::rejected("InvalidVerificationCode", serde_json::json!({})));
         }
-        Ok(IdentityVerifyPhoneOtpOutput { auth_ref: ExternalReference("auth-supabase-1".into()) })
+        Ok(IdentityVerifyPhoneOtpOutput {
+            auth_ref: ExternalReference("auth-supabase-1".into()),
+            // The provider session (#112) — a fake token trio; the handler parks it.
+            access_token: Some("fake.access.jwt".into()),
+            refresh_token: Some("fake.refresh".into()),
+            expires_in: Some(3600),
+        })
+    }
+    async fn refresh_session(
+        &self,
+        _input: crate::generated::services::IdentityRefreshSessionInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<crate::generated::services::IdentityRefreshSessionOutput, DomainError> {
+        Ok(crate::generated::services::IdentityRefreshSessionOutput {
+            access_token: "fake.rotated.jwt".into(),
+            refresh_token: Some("fake.refresh.2".into()),
+            expires_in: Some(3600),
+        })
     }
     async fn send_email_magic_link(
         &self,
@@ -951,6 +970,9 @@ impl IdentityService for FakeIdentity {
         Ok(IdentityVerifyEmailTokenOutput {
             auth_ref: ExternalReference("auth-supabase-1".into()),
             email: EmailAddress("johnny@example.com".into()),
+            access_token: Some("fake.access.jwt".into()),
+            refresh_token: Some("fake.refresh".into()),
+            expires_in: Some(3600),
         })
     }
 }

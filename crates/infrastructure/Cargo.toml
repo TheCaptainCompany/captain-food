@@ -36,3 +36,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "nat
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
+# Auth-session encryption at rest (#112): AES-256-GCM over the parked provider tokens, under the
+# AUTH_SESSION_KEY env secret. RustCrypto, same family as hmac/sha2 above.
+aes-gcm = "0.10"
