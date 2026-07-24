@@ -3,6 +3,33 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #93: SDUI buttons DISPATCH — action wiring + pending UX + push-first verdicts +
+> boot resume (PR #100; the #17 UX tail + ADR-20260723-172013 residual 3).** The renderer rendered
+> every button's `action.*` props as inert data; now the screens WORK. (1) **`executor.rs`** (pure,
+> native-tested against the REAL generated trees): `ActionSpec::from_node` parses a node's dotted
+> `action.*` props, resolving `{{ … }}` variable bindings against the screen data AT RENDER TIME
+> (what the user saw is what dispatches; unresolved bindings travel as null — the server judges);
+> `ActionPlan` = Mutation (key + resolved input) | Client(`ClientEffect`) | Disabled(reason) —
+> gap/unknown/unwired actions render DISABLED with the reason as tooltip, never a silent no-op;
+> `on_success.route` substitutes `{{ variables.* }}` from the resolved input (the checkout
+> confirmation pattern). (2) **DOM contract**: `button_attrs` stamps the plan onto data attributes
+> (`data-action`/`data-vars` JSON/`data-loading`/`data-on-success`/route/sheet/number) — SSR'd and
+> hydrated DOM identical, so ONE delegated listener drives every button, zero per-button closures.
+> (3) **`interact.rs`** (hydrate-only glue): the delegated click listener; mutation clicks freeze
+> the button (loading label + `data-busy` double-tap guard) → `pending::dispatch_persisted` →
+> **push-first verdict** (`operationStatusChanged` on a shared reconnecting socket, interpreted by
+> the SAME pure operation→outcome authority as the poll — extracted `outcome_from_operation`, used
+> by `pending::settle_from_push` which clears the record on a terminal frame with zero reads) with
+> the bounded poll as fallback after a 2 s push head-start; REJECTED/FAILED → toast
+> (server-localized message, errors.yaml code fallback); pre-acceptance transport failure stamps
+> `data-retry` = the persisted messageId so the NEXT click goes through `pending::retry` (same id —
+> duplicate-proof); boot runs `pending::resume_pending` and toasts settled intents.
+> `navigate`/`phone_call` execute; sheet/clipboard/share re-emit as a `captain:action` CustomEvent
+> for the #94 sheet host (inspectable, not swallowed). WS `Handle` became Clone + `unsubscribe`.
+> 70 web tests (7 new — executor specs against the generated backoffice accept button and the rider
+> gap toggle, push-settle, SSR DOM-contract) + wasm32 green; `make rust` 0 errors/no drift.
+> Residual to #94: sheet host, auth actions, authenticated WS (staff surfaces' push needs the JWT).
+
 > ✅ **2026-07-24 — #97: GraphQL input-type names are GENERATED, not convention-derived (PR #99;
 > closes the #80 honesty residual; prioritized ahead of #93 by product-owner directive).** The
 > client built documents with convention-derived input types (`<Pascal>QueryInput`,

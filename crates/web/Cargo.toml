@@ -45,8 +45,13 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen-futures = "0.4"    # spawn_local: the WS reconnect loop + Stripe promise adapters
 js-sys = "0.3"                  # Object/Reflect/Promise: the Stripe.js interop surface (stripe.rs)
-# WebSocket + events: the graphql-transport-ws browser driver (subscriptions.rs, split 3).
-web-sys = { version = "0.3", features = ["Window", "Storage", "Location", "WebSocket", "MessageEvent", "CloseEvent"] }
+# WebSocket + events: the graphql-transport-ws browser driver (subscriptions.rs, split 3) + the
+# delegated-click interaction driver + toast host (interact.rs, #93).
+web-sys = { version = "0.3", features = [
+    "Window", "Storage", "Location", "WebSocket", "MessageEvent", "CloseEvent",
+    "Document", "Element", "HtmlElement", "MouseEvent", "Event", "EventTarget",
+    "CustomEvent", "CustomEventInit", "Node",
+] }
 
 [features]
 default = ["ssr"]

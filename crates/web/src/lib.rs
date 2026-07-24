@@ -18,9 +18,12 @@ use shared_types::HealthDto;
 
 pub mod actions;
 pub mod checkout;
+pub mod executor;
 pub mod generated;
 pub mod graphql;
 pub mod i18n;
+#[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
+pub mod interact;
 pub mod pending;
 pub mod renderer;
 pub mod router;

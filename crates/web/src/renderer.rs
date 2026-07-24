@@ -69,6 +69,12 @@ impl RenderContext {
         }
     }
 
+    /// A binding's raw JSON value (filters stripped) — the ACTION-VARIABLE resolution path
+    /// (`executor.rs`): `{{ order.id }}` must travel as the value, not display text.
+    pub(crate) fn binding_json(&self, raw: &str) -> Option<Value> {
+        self.lookup(raw.split('|').next().unwrap_or(raw).trim()).cloned()
+    }
+
     /// Dotted-path walk into the data map (`order.status` → data["order"]["status"]).
     fn lookup(&self, path: &str) -> Option<&Value> {
         let mut segs = path.split('.');
@@ -322,8 +328,34 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
         ComponentKind::Button | ComponentKind::TextButton | ComponentKind::IconButton | ComponentKind::SignOutButton | ComponentKind::AddButton => {
             let label = prop_text(node, "label", ctx);
             let variant = prop_text(node, "variant", ctx);
-            let action = prop_text(node, "action.type", ctx);
-            view! { <button data-c=ty data-variant=variant data-action=action>{label}</button> }.into_any()
+            // The action DOM contract (#93): the button's parsed plan travels as data attributes
+            // (key + render-time-resolved variables + loading label + on-success route), so the
+            // SSR'd and hydrated DOM are identical and ONE delegated listener (`interact.rs`)
+            // drives every button. A gap/unwired action renders disabled with its reason.
+            let (action_attrs, disabled_reason) = crate::executor::button_attrs(node, ctx);
+            let get = |k: &str| {
+                action_attrs.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone())
+            };
+            use crate::executor::attrs;
+            let disabled = disabled_reason.is_some();
+            view! {
+                <button
+                    data-c=ty
+                    data-variant=variant
+                    data-action=get(attrs::ACTION)
+                    data-vars=get(attrs::VARS)
+                    data-loading=get(attrs::LOADING)
+                    data-on-success=get(attrs::ON_SUCCESS)
+                    data-route=get(attrs::ROUTE)
+                    data-sheet=get(attrs::SHEET)
+                    data-number=get(attrs::NUMBER)
+                    disabled=disabled
+                    title=disabled_reason
+                >
+                    {label}
+                </button>
+            }
+            .into_any()
         }
         ComponentKind::TextInput | ComponentKind::PhoneInput | ComponentKind::EmailInput | ComponentKind::SearchInput | ComponentKind::PhoneField | ComponentKind::OtpInput => {
             let label = prop_text(node, "label", ctx);
@@ -420,6 +452,9 @@ pub fn hydrate() {
     let session = crate::session::SessionId::load_or_mint();
     let origin = location.origin().unwrap_or_default();
     let transport = crate::graphql::HttpTransport::new(&origin, surface.role(), session);
+
+    // The interaction layer (#93): delegated button dispatch + push socket + boot pending-resume.
+    crate::interact::install(&origin, surface.role(), session);
 
     wasm_bindgen_futures::spawn_local(async move {
         let mut ctx = RenderContext::new(i18n::DEFAULT_LOCALE);
@@ -524,6 +559,33 @@ mod tests {
         let html = render_screen_html(home, c);
         assert!(html.contains("Chez Test"), "{html}");
         assert!(html.contains("data-slug=\"chez-test\""));
+    }
+
+    #[test]
+    fn buttons_stamp_the_action_dom_contract_in_ssr_html() {
+        // The backoffice accept button carries its key + render-time-resolved variables (#93) —
+        // the SSR'd DOM is everything the delegated click driver needs.
+        let screen = Surface::RestaurantBackoffice
+            .screens()
+            .iter()
+            .find(|s| s.id == "orders_queue")
+            .unwrap();
+        let mut c = ctx();
+        c.insert_resolved("order", json!({ "id": "o-1" }));
+        c.insert_resolved("restaurant", json!({ "id": "r-1" }));
+        let html = render_screen_html(screen, c);
+        assert!(html.contains("data-action=\"accept_order\""), "{html}");
+        assert!(html.contains("&quot;orderId&quot;:&quot;o-1&quot;"), "resolved vars JSON: {html}");
+
+        // The rider gap toggle renders DISABLED with the spec's note as its tooltip.
+        let jobs = Surface::Rider.screens().iter().find(|s| s.id == "jobs").unwrap();
+        let html = render_tracking_like(jobs);
+        assert!(html.contains("disabled"), "{html}");
+        assert!(html.contains("No rider availability mutation"), "{html}");
+    }
+
+    fn render_tracking_like(screen: &'static crate::generated::screens::Screen) -> String {
+        render_screen_html(screen, ctx())
     }
 
     #[test]
