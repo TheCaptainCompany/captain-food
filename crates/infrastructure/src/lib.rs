@@ -17,7 +17,7 @@ pub mod projection;
 pub use integrations::google::{FailClosedGoogleOwnershipVerifier, UnverifiedGbpOrderLinkProbe};
 // Stripe/HubRise webhook adapters moved to their own crates (`crates/adapters/*`, ADR-20260718-213352).
 pub use integrations::payments::FailClosedPaymentGateway;
-pub use integrations::supabase_auth::FailClosedIdentityService;
+pub use integrations::supabase_auth::{FailClosedIdentityService, SupabaseIdentityService};
 pub use integrations::inbound_drain_worker::{InboundDrainSummary, InboundEventsDrainWorker};
 pub use integrations::delivery_gateway::CompositeDeliveryGateway;
 pub use integrations::delivery_offer_timeout_worker::DeliveryOfferTimeoutWorker;

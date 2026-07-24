@@ -148,6 +148,23 @@ pub struct AppState {
 /// Build the Axum router: `/ping`, `/health`, `/projector`, and the role-as-path GraphQL routes. Reads
 /// `DATABASE_URL`; when present it opens a lazy pool used by the heartbeat, the read-model repo (injected
 /// into GraphQL), and the in-process projection worker.
+/// Resolve the `identity` service impl (#117): the real Supabase adapter when configured
+/// (`SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY`), else the fail-closed stand-in — the same
+/// env-gate + fallback pattern as the Stripe payment binding. Used for BOTH the GraphQL write-side
+/// `auth_provider` and the `/auth/refresh` route.
+fn identity_service_impl() -> Arc<dyn application::generated::services::IdentityService> {
+    match infrastructure::SupabaseIdentityService::from_env() {
+        Some(adapter) => {
+            println!("identity service: SupabaseIdentityService (SUPABASE_URL set)");
+            Arc::new(adapter)
+        }
+        None => {
+            eprintln!("SUPABASE_URL/PUBLISHABLE_KEY unset — identity fail-closed (auth anonymous-only)");
+            Arc::new(FailClosedIdentityService)
+        }
+    }
+}
+
 pub fn router() -> Router {
     let snap = Arc::new(Mutex::new(Snapshot::default()));
     // In-process appended-event bus: every event-store append in THIS process (GraphQL mutations,
@@ -259,11 +276,11 @@ pub fn router() -> Router {
                     event_store: Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
                     ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
                     gbp_probe: Arc::new(UnverifiedGbpOrderLinkProbe),
-                    // The `identity` service resolved through the GENERATED topology binding
-                    // (services.yaml `binding: local`, issue #50): fail-closed stand-in until the
-                    // real Supabase ACL adapter lands.
+                    // The `identity` service (services.yaml `binding: local`, #50): the REAL Supabase
+                    // ACL adapter (#117) when SUPABASE_URL + PUBLISHABLE_KEY are set, else the
+                    // fail-closed stand-in (auth stays anonymous-only — the Stripe env-gate pattern).
                     auth_provider: infrastructure::generated::service_bindings::identity_service(
-                        || Arc::new(FailClosedIdentityService),
+                        || identity_service_impl(),
                     )
                     .expect("identity service binding (services.yaml)"),
                     // The `payment` service resolved through the GENERATED topology binding
@@ -559,7 +576,7 @@ pub fn router() -> Router {
     let auth_routes_state = auth_routes::AuthRoutesState {
         sessions: Some(auth_sessions.clone()),
         identity: infrastructure::generated::service_bindings::identity_service(|| {
-            Arc::new(FailClosedIdentityService)
+            identity_service_impl()
         })
         .expect("identity service binding (services.yaml)"),
     };
