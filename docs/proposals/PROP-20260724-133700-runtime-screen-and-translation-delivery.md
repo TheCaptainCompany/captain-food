@@ -3,6 +3,7 @@
 - **Date**: 2026-07-24
 - **Tracking issue**: [#96 "Live spec editing + per-tenant customizations (specs/customizations/) with fail-closed branch publishing"](https://github.com/TheCaptainCompany/captain-food/issues/96) (retitled to this proposal's scope on 2026-07-24 — every proposal MUST have one, ADR-20260724-143000; always the full clickable link, never a bare number)
 - **Realized by**: (pending)
+- **Related (deliberately separate)**: [PROP-20260724-144500 "App flag `ADMIN`: display translation keys on screen"](PROP-20260724-144500-admin-flag-translation-keys.md) ([#111](https://github.com/TheCaptainCompany/captain-food/issues/111)) — owns the key-DISPLAY mode; meets this proposal only at the on-screen-edit seam (its §4 → this §3 publishing flow).
 
 > **Status:** Proposed — plan-mode proposal. **No `specs/**` or code changed yet.** On approval it
 > becomes an ADR that lands with the implementation.
