@@ -167,6 +167,8 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             refund_state,
             journal,
             status_bus: infrastructure::OperationStatusBus::default(),
+            // #112: no session storage needed for the write-path test — the noop store.
+            auth_sessions: std::sync::Arc::new(application::auth_sessions::NoopAuthSessionStore),
         }),
         // No event bus: this test exercises the POST write path, not the domain-fact subscriptions.
         None,
