@@ -155,6 +155,37 @@ impl ResolverKey {
         }
     }
 
+    /// The SDL name of the bound query's input type (#97) — `None` for `gap` bindings and
+    /// argless queries (which take no input at all). READ from the schema emitter's own
+    /// naming, never re-derived by convention.
+    pub fn input_type(&self) -> Option<&'static str> {
+        match self {
+            ResolverKey::RestaurantsFeatured => Some("RestaurantsQueryInput"),
+            ResolverKey::RestaurantsAll => Some("RestaurantsQueryInput"),
+            ResolverKey::RestaurantsSearch => Some("RestaurantsQueryInput"),
+            ResolverKey::CategoriesAll => Some("CategoriesQueryInput"),
+            ResolverKey::PromotionsActive => None,
+            ResolverKey::DishesSearch => None,
+            ResolverKey::OrdersByRestaurant => Some("OrdersQueryInput"),
+            ResolverKey::DeliveriesByRestaurant => Some("RestaurantDeliveriesQueryInput"),
+            ResolverKey::RefundsPending => Some("PendingRefundsQueryInput"),
+            ResolverKey::SatisfactionByRestaurant => Some("RestaurantDeliverySatisfactionQueryInput"),
+            ResolverKey::RestaurantBySlug => Some("RestaurantQueryInput"),
+            ResolverKey::CatalogByRestaurant => Some("CatalogQueryInput"),
+            ResolverKey::CartCurrent => Some("CartQueryInput"),
+            ResolverKey::CartsMine => Some("CartsQueryInput"),
+            ResolverKey::OrderById => Some("OrderQueryInput"),
+            ResolverKey::OrdersMine => Some("OrdersQueryInput"),
+            ResolverKey::MeProfile => None,
+            ResolverKey::FavoritesMine => Some("FavoriteRestaurantsQueryInput"),
+            ResolverKey::OperationStatusByMessage => Some("OperationStatusQueryInput"),
+            ResolverKey::PaymentStatusByOrder => Some("PaymentStatusQueryInput"),
+            ResolverKey::RewardsBalance => None,
+            ResolverKey::DeliveriesMine => Some("MyDeliveriesQueryInput"),
+            ResolverKey::DeliveryByOrder => Some("DeliveryQueryInput"),
+        }
+    }
+
     /// The GraphQL selection set for the bound query's return type, EXPANDED from the
     /// api.yaml type registry (depth-bounded and cycle-guarded in the codegen) — `None`
     /// only for `gap` bindings and scalar-returning queries, which need no selection set.
@@ -548,6 +579,55 @@ impl ActionKey {
         }
     }
 
+    /// The SDL name of the bound mutation's input type (#97) — named after its COMMAND
+    /// (`<Command>Input`), which only COINCIDES with `<PascalMutation>Input` for most ops.
+    /// `None` for client/auth/gap kinds. READ from the schema emitter's own naming.
+    pub fn input_type(&self) -> Option<&'static str> {
+        match self {
+            ActionKey::Navigate => None,
+            ActionKey::OpenBottomSheet => None,
+            ActionKey::CloseSheet => None,
+            ActionKey::Conditional => None,
+            ActionKey::SetDeliveryAddress => None,
+            ActionKey::UseGeolocation => None,
+            ActionKey::SendOtp => Some("RequestPhoneVerificationInput"),
+            ActionKey::VerifyOtp => Some("VerifyPhoneInput"),
+            ActionKey::ResendOtp => Some("RequestPhoneVerificationInput"),
+            ActionKey::AuthenticatePasskey => None,
+            ActionKey::PhoneCall => None,
+            ActionKey::AcceptOrder => Some("AcceptOrderInput"),
+            ActionKey::RejectOrder => Some("RejectOrderInput"),
+            ActionKey::StartPreparation => Some("StartPreparationInput"),
+            ActionKey::MarkOrderReady => Some("MarkOrderReadyInput"),
+            ActionKey::CancelOrderByRestaurant => Some("CancelOrderByRestaurantInput"),
+            ActionKey::ChangeOrderAcceptance => Some("ChangeOrderAcceptanceModeInput"),
+            ActionKey::MarkOrderDelivered => Some("MarkOrderDeliveredInput"),
+            ActionKey::EscalateDelivery => Some("EscalateDeliveryInput"),
+            ActionKey::ApproveRefund => Some("ApproveRefundInput"),
+            ActionKey::DenyRefund => Some("DenyRefundInput"),
+            ActionKey::CopyToClipboard => None,
+            ActionKey::Share => None,
+            ActionKey::SignOut => None,
+            ActionKey::AddToCart => Some("AddCartLineInput"),
+            ActionKey::ChangeCartLineQuantity => Some("ChangeCartLineQuantityInput"),
+            ActionKey::RemoveCartLine => Some("RemoveCartLineInput"),
+            ActionKey::ToggleFavorite => Some("MarkRestaurantAsFavoriteInput"),
+            ActionKey::SetDeliveryAddressSaved => Some("SetCustomerAddressInput"),
+            ActionKey::PlaceOrder => Some("PlaceOrderInput"),
+            ActionKey::RateOrder => Some("RateOrderInput"),
+            ActionKey::RecordDeliverySatisfaction => Some("RecordDeliverySatisfactionInput"),
+            ActionKey::TipOrder => Some("TipOrderInput"),
+            ActionKey::ApplyPromoCode => None,
+            ActionKey::SetDeliveryMode => None,
+            ActionKey::Reorder => None,
+            ActionKey::OpenIntercom => None,
+            ActionKey::AcceptDelivery => Some("AcceptDeliveryInput"),
+            ActionKey::ConfirmPickup => Some("ConfirmPickupInput"),
+            ActionKey::CompleteDelivery => Some("CompleteDeliveryInput"),
+            ActionKey::RiderToggleOnline => None,
+        }
+    }
+
     /// The spec `gap` note when the UI wants a write the API does not model yet, else `None`.
     pub fn gap(&self) -> Option<&'static str> {
         match self {
@@ -593,5 +673,16 @@ impl ActionKey {
             ActionKey::CompleteDelivery => None,
             ActionKey::RiderToggleOnline => Some("No rider availability mutation in api.yaml (ChangeRiderStatus is domain-only, not exposed) — the toggle renders disabled until the op exists."),
         }
+    }
+}
+
+/// The SDL name of a subscription's input type (#97) — `None` for an unknown operation
+/// or an argless subscription. READ from the schema emitter's own naming.
+pub fn subscription_input_type(operation: &str) -> Option<&'static str> {
+    match operation {
+        "operationStatusChanged" => Some("OperationStatusChangedSubscriptionInput"),
+        "paymentStatusChanged" => Some("PaymentStatusChangedSubscriptionInput"),
+        "orderStatusChanged" => Some("OrderStatusChangedSubscriptionInput"),
+        _ => None,
     }
 }

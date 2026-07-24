@@ -25,7 +25,7 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::generated::data_layer::{ActionKey, ActionKind, ResolverKey};
-use crate::graphql::{execute_resolver, pascal, ResolverError, Transport, TransportError};
+use crate::graphql::{execute_resolver, ResolverError, Transport, TransportError};
 
 /// Upper bound on `operationStatus` reads before giving up. 30 × [`POLL_INTERVAL`] ≈ a 30 s
 /// ceiling: command handling is a single in-process journal write (typically sub-second), so a
@@ -174,8 +174,13 @@ pub async fn dispatch_with_id(
         ActionKind::Mutation => {}
     }
     let mutation = key.mutation().ok_or(ActionError::UnboundMutation(key.as_str()))?;
+    // The SDL's own input-type name (#97): a mutation's input is named after its COMMAND
+    // (`PlaceOrderInput`), which only coincides with the mutation name for most ops — read it,
+    // never derive it. Absent for a `mutation` kind = the same broken-allowlist invariant as an
+    // unbound mutation.
+    let input_type = key.input_type().ok_or(ActionError::UnboundMutation(key.as_str()))?;
 
-    let document = mutation_document(mutation);
+    let document = mutation_document(mutation, input_type);
     // Only messageId goes in metadata here: correlationId/causeId are server-computed defaults
     // (MetadataInput allows them, but this client has no causality chain to assert yet), and
     // sessionId/traceId travel as headers by contract — MetadataInput refuses them.
@@ -284,14 +289,13 @@ impl DispatchHandle {
     }
 }
 
-/// The mutation document: convention-derived input type (`<PascalMutation>Input!`) + the uniform
-/// `MutationAcceptance` selection — the ONE selection set known by contract for every mutation.
-fn mutation_document(mutation: &str) -> String {
+/// The mutation document: the GENERATED input-type name (#97) + the uniform `MutationAcceptance`
+/// selection — the ONE selection set known by contract for every mutation.
+fn mutation_document(mutation: &str, input_type: &str) -> String {
     format!(
-        "mutation Dispatch($input: {}Input!, $metadata: MetadataInput) \
+        "mutation Dispatch($input: {input_type}!, $metadata: MetadataInput) \
 {{ {mutation}(input: $input, metadata: $metadata) \
-{{ messageId correlationId causeId sessionId traceId operationStatus duplicate }} }}",
-        pascal(mutation)
+{{ messageId correlationId causeId sessionId traceId operationStatus duplicate }} }}"
     )
 }
 

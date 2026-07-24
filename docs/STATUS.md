@@ -3,6 +3,23 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-23. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-24 — #97: GraphQL input-type names are GENERATED, not convention-derived (PR #99;
+> closes the #80 honesty residual; prioritized ahead of #93 by product-owner directive).** The
+> client built documents with convention-derived input types (`<Pascal>QueryInput`,
+> `<PascalMutation>Input`, `<Pascal>SubscriptionInput`). The convention was WRONG for mutations: the
+> SDL names a mutation's input after its **COMMAND** (`<Command>Input`), which only coincides with
+> the mutation name for most ops — `configureGbpOrderLink` →
+> `ConfigureGoogleBusinessProfileOrderLinkInput` and `verifyGbpOrderLink` are live divergences
+> (outside today's allowlist, so nothing had broken YET). Now the data-layer emitter also emits
+> `ResolverKey::input_type()` (Some iff the bound query takes args), `ActionKey::input_type()`
+> (the command-derived name for mutation kinds) and `subscription_input_type(op)`; the web document
+> builders (`query_document`/`mutation_document`/`SubscriptionKey::document`) READ them —
+> `pascal()` derivation deleted from the crate. Same lesson as #82, one level up: a name the client
+> sends is read from the source of truth, never re-derived. Documents byte-identical (existing
+> string assertions prove parity); new codegen divergence test + a web totality test (every
+> mutation-kind action has an input type, gaps never do). codegen 35 tests, web 63, wasm green,
+> `make rust` 0 errors/no drift.
+
 > ✅ **2026-07-24 — #17: two-step writes survive reloads — persisted pending-operation store +
 > same-messageId retry (PR #91; realizes ADR-20260720-015500's client rule).** Splits 2-4 of #21
 > built the dispatcher/checkout/subscriptions, but the contract's durability half — **persist the

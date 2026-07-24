@@ -164,10 +164,10 @@ pub enum ResolverError {
 /// purpose). Everything lands under the single `$input` variable per the api.yaml convention
 /// (`<Query>QueryInput` — args are never inlined on the field).
 ///
-/// HONESTY NOTE on the document (do not mistake this for full schema-derivation): the OPERATION
-/// SHAPE is still naming-CONVENTION-derived — operation `restaurants` takes
-/// `input: RestaurantsQueryInput` because api.yaml freezes that convention, not because the SDL was
-/// read. The SELECTION SET however is GENERATED per resolver from the api.yaml type registry
+/// The document is fully GENERATED-name-driven (#97 closed the last convention gap): the input
+/// TYPE comes from [`ResolverKey::input_type`] — emitted by the same codegen that emits the SDL,
+/// so the name the client sends is read from the source of truth, never re-derived — and the
+/// SELECTION SET is GENERATED per resolver from the api.yaml type registry
 /// ([`ResolverKey::selection`]): every query-bound resolver expands its return type's full field
 /// tree (depth-bounded and cycle-guarded in the codegen; FK navigation edges are not selected), so
 /// every one of them builds a VALID document and can run against the live server. The only
@@ -195,8 +195,12 @@ pub async fn execute_resolver(
     }
     input.extend(extra_variables);
 
-    let document = query_document(operation, !input.is_empty(), key.selection());
-    let variables = if input.is_empty() { json!({}) } else { json!({ "input": input }) };
+    // Input is bound only when there is something to send AND the SDL declares an input type for
+    // this query (#97: `input_type()` is generated FROM the schema emitter — an argless query has
+    // no input type, so caller-supplied variables for one are unsendable by construction).
+    let input_type = key.input_type().filter(|_| !input.is_empty());
+    let document = query_document(operation, input_type, key.selection());
+    let variables = if input_type.is_some() { json!({ "input": input }) } else { json!({}) };
 
     let data = transport.execute(&document, variables).await?;
     match data.get(operation) {
@@ -205,27 +209,16 @@ pub async fn execute_resolver(
     }
 }
 
-/// Build the query document from the api.yaml conventions (single `input` arg named
-/// `<PascalOperation>QueryInput`). `$input` is declared non-null — we only bind it when we actually
-/// have variables, and a non-null variable is accepted at both nullable and non-null arg positions.
-fn query_document(operation: &str, with_input: bool, selection: Option<&str>) -> String {
+/// Build the query document. `input_type` is the SDL's OWN input-type name (generated,
+/// `ResolverKey::input_type`, #97) — never re-derived from the operation name here. `$input` is
+/// declared non-null — a non-null variable is accepted at both nullable and non-null arg positions.
+fn query_document(operation: &str, input_type: Option<&str>, selection: Option<&str>) -> String {
     let selection = selection.map(|s| format!(" {s}")).unwrap_or_default();
-    if with_input {
-        format!(
-            "query Resolver($input: {}QueryInput!) {{ {operation}(input: $input){selection} }}",
-            pascal(operation)
-        )
-    } else {
-        format!("query Resolver {{ {operation}{selection} }}")
-    }
-}
-
-/// camelCase operation name → the PascalCase prefix of its generated input type.
-pub(crate) fn pascal(operation: &str) -> String {
-    let mut chars = operation.chars();
-    match chars.next() {
-        Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-        None => String::new(),
+    match input_type {
+        Some(ty) => format!(
+            "query Resolver($input: {ty}!) {{ {operation}(input: $input){selection} }}"
+        ),
+        None => format!("query Resolver {{ {operation}{selection} }}"),
     }
 }
 
@@ -274,6 +267,32 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::FakeTransport;
     use super::*;
+
+    #[test]
+    fn generated_input_types_are_total_over_the_allowlists() {
+        use crate::generated::data_layer::{subscription_input_type, ActionKey, ActionKind};
+        // Every mutation-kind action carries its SDL input-type name; every other kind carries none
+        // — the invariant `dispatch` leans on (#97).
+        for key in ActionKey::ALL {
+            match key.kind() {
+                ActionKind::Mutation => {
+                    assert!(key.input_type().is_some(), "{} lacks an input type", key.as_str())
+                }
+                _ => assert!(key.input_type().is_none(), "{} must not have one", key.as_str()),
+            }
+        }
+        // A resolver has an input type exactly when its bound query takes args (gap ⇒ none).
+        for key in ResolverKey::ALL {
+            if key.query().is_none() {
+                assert!(key.input_type().is_none(), "{} is a gap", key.as_str());
+            }
+        }
+        // The three allowlisted subscriptions all resolve; unknown operations never do.
+        for op in ["orderStatusChanged", "paymentStatusChanged", "operationStatusChanged"] {
+            assert!(subscription_input_type(op).is_some(), "{op}");
+        }
+        assert_eq!(subscription_input_type("notASubscription"), None);
+    }
 
     #[tokio::test]
     async fn gap_bound_resolver_is_refused_before_any_network() {

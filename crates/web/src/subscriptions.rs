@@ -26,8 +26,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 
-use crate::generated::data_layer::ResolverKey;
-use crate::graphql::pascal;
+use crate::generated::data_layer::{subscription_input_type, ResolverKey};
 use crate::session::SessionId;
 
 /// The allowlisted subscriptions — hand-written (the screens DSL binds subscriptions per screen via
@@ -66,14 +65,15 @@ impl SubscriptionKey {
         key.selection().expect("subscription-backing resolvers always select an object type")
     }
 
-    /// The subscription document, following the same api.yaml conventions as reads/writes: a single
-    /// `input` variable typed `<PascalOperation>SubscriptionInput!` (mirrors the server's generated
-    /// `subscription.rs` signatures).
+    /// The subscription document: a single `input` variable whose type name is READ from the
+    /// generated data layer (#97, `subscription_input_type` — the schema emitter's own naming),
+    /// never re-derived by convention.
     pub fn document(&self) -> String {
         let operation = self.operation();
+        let input_type = subscription_input_type(operation)
+            .expect("every allowlisted subscription takes a required-args input");
         format!(
-            "subscription Subscribe($input: {}SubscriptionInput!) {{ {operation}(input: $input) {} }}",
-            pascal(operation),
+            "subscription Subscribe($input: {input_type}!) {{ {operation}(input: $input) {} }}",
             self.selection()
         )
     }
