@@ -84,6 +84,8 @@ scalar DeliveryPartnerName
 scalar ConversationMessageId
 scalar MessageBody
 scalar AttachmentRef
+scalar MuteReason
+scalar EscalationReason
 
 # ==============================================================================
 # Enums
@@ -512,6 +514,12 @@ type ConversationMessage {
   attachmentRefs: [AttachmentRef!]
 }
 
+type MutedParticipant {
+  role: ConversationAuthorRole!
+  reason: MuteReason!
+  until: DateTime
+}
+
 type Restaurant {
   id: RestaurantId!
   accountId: RestaurantAccountId
@@ -787,6 +795,8 @@ type OrderConversation {
 type ConversationInternalNotes {
   orderId: OrderId!
   notes: [ConversationMessage!]!
+  adminInvited: Boolean!
+  mutedParticipants: [MutedParticipant!]!
 }
 
 # ==============================================================================
@@ -1278,6 +1288,23 @@ input PostMessageInput {
   attachmentRefs: [AttachmentRef!]
 }
 
+input EscalateToAdminInput {
+  orderId: OrderId!
+  reason: EscalationReason!
+}
+
+input MuteParticipantInput {
+  orderId: OrderId!
+  mutedRole: ConversationAuthorRole!
+  reason: MuteReason
+  until: DateTime
+}
+
+input UnmuteParticipantInput {
+  orderId: OrderId!
+  mutedRole: ConversationAuthorRole!
+}
+
 input OperationStatusQueryInput {
   messageId: MessageId!
 }
@@ -1629,6 +1656,9 @@ type Mutation {
   revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")
   openConversation(input: OpenConversationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "OpenConversation")
   postMessage(input: PostMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "PostMessage")
+  escalateToAdmin(input: EscalateToAdminInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "EscalateToAdmin")
+  muteParticipant(input: MuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "MuteParticipant")
+  unmuteParticipant(input: UnmuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "UnmuteParticipant")
 }
 
 # ==============================================================================

@@ -360,3 +360,12 @@ pub struct ConversationMessage {
     #[serde(default)]
     pub attachment_refs: Vec<AttachmentRef>,
 }
+
+/// A role currently muted in an order conversation (read-model array element; #129). `reason` is the recorded justification (mutes require one, rules.yaml#/MuteRequiresAReason); `until` bounds the mute in time, or is null for an indefinite mute.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutedParticipant {
+    pub role: ConversationAuthorRole,
+    pub reason: MuteReason,
+    pub until: Option<String>,
+}

@@ -709,3 +709,17 @@ Conversation:
         - { $ref: 'errors.yaml#/ConversationNotFound' }
         - { $ref: 'errors.yaml#/CustomerChatDisabled' }
         - { $ref: 'errors.yaml#/MessageAlreadyPosted' }
+    - message: { $ref: 'commands.yaml#/EscalateToAdmin' }
+      emits: [{ $ref: 'events.yaml#/AdminInvitedToConversation' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+    - message: { $ref: 'commands.yaml#/MuteParticipant' }
+      emits: [{ $ref: 'events.yaml#/ParticipantMuted' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/MuteReasonRequired' }
+    - message: { $ref: 'commands.yaml#/UnmuteParticipant' }
+      emits: [{ $ref: 'events.yaml#/ParticipantUnmuted' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/ParticipantNotMuted' }

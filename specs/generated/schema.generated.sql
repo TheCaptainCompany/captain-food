@@ -578,6 +578,9 @@ CREATE TABLE OrderConversation (
   messages JSONB NOT NULL,
   internal_notes JSONB NOT NULL,
   opened_at TIMESTAMPTZ NOT NULL,
+  admin_invited BOOLEAN NOT NULL,
+  escalation_reason TEXT,
+  muted JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );

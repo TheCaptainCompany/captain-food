@@ -772,3 +772,20 @@ ConversationMessage:
         $ref: 'scalars.yaml#/AttachmentRef'
       nullable: true
   required: [messageId, authorRole, visibility, body, originalLocale, postedAt]
+
+MutedParticipant:
+  type: object
+  description: >
+    A role currently muted in an order conversation (read-model array element; #129). `reason` is the
+    recorded justification (mutes require one, rules.yaml#/MuteRequiresAReason); `until` bounds the mute
+    in time, or is null for an indefinite mute.
+  properties:
+    role:
+      $ref: 'scalars.yaml#/ConversationAuthorRole'
+    reason:
+      $ref: 'scalars.yaml#/MuteReason'
+    until:
+      type: string
+      format: date-time
+      nullable: true
+  required: [role, reason]

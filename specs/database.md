@@ -378,7 +378,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `OrderConversation` · 🛶 V0 · source aggregate `Conversation`
 
-- **Fed by**: `ConversationOpened`, `MessagePosted`, `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`
+- **Fed by**: `ConversationOpened`, `MessagePosted`, `AdminInvitedToConversation`, `ParticipantMuted`, `ParticipantUnmuted`, `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`
 - **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes).
 
 
@@ -391,6 +391,9 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `messages` | `jsonb` | `JSONB` | — | PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector. |
 | `internal_notes` | `jsonb` | `JSONB` | — | INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector. |
 | `opened_at` | `timestamptz` | `TIMESTAMPTZ` | — |  |
+| `admin_invited` | `boolean` | `BOOLEAN` | — | True once an admin was pulled in by a reasoned escalation (#129). |
+| `escalation_reason` | `EscalationReason` | `TEXT` | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
+| `muted` | `jsonb` | `JSONB` | — | current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector. |
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 

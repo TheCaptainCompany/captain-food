@@ -759,3 +759,24 @@ MessageAlreadyPosted:
   messages:
     en: "This message has already been posted."
     fr: "Ce message a déjà été envoyé."
+
+MuteReasonRequired:
+  description: >
+    A participant was muted without a justification reason; a mute must record why
+    (rules.yaml#/MuteRequiresAReason) (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "A reason is required to mute a participant."
+    fr: "Un motif est requis pour rendre un participant muet."
+
+ParticipantNotMuted:
+  description: >
+    An unmute targeted a role that is not currently muted in the order's conversation
+    (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+  messages:
+    en: "This participant is not currently muted."
+    fr: "Ce participant n'est pas actuellement muet."

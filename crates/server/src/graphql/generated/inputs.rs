@@ -1019,6 +1019,40 @@ pub struct PostMessageInput {
     pub attachment_refs: Option<Vec<AttachmentRef>>,
 }
 
+/// Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct EscalateToAdminInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "reason")]
+    pub reason: EscalationReason,
+}
+
+/// Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct MuteParticipantInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "mutedRole")]
+    pub muted_role: ConversationAuthorRole,
+    #[graphql(name = "reason")]
+    pub reason: Option<MuteReason>,
+    #[graphql(name = "until")]
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmuteParticipantInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "mutedRole")]
+    pub muted_role: ConversationAuthorRole,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationStatusQueryInput {

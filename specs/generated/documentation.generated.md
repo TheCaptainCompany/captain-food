@@ -144,6 +144,9 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 |  | ReviewDeliverySatisfaction | [🔎 `restaurantDeliverySatisfaction`](#query-restaurantdeliverysatisfaction) |
 | 🧭 **HandleOrderConversation** | ReplyToCustomer | [✏️ `postMessage`](#mutation-postmessage) |
 |  | ReadInternalNotes | [🔎 `orderConversationInternalNotes`](#query-orderconversationinternalnotes) |
+|  | EscalateToAdmin | [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) |
+|  | MuteParticipant | [✏️ `muteParticipant`](#mutation-muteparticipant) |
+|  | UnmuteParticipant | [✏️ `unmuteParticipant`](#mutation-unmuteparticipant) |
 
 <a id="story-rider"></a>
 ### 🎬 `rider` · 🛵 `RIDER` · 🗣️ `fr-FR`
@@ -2890,7 +2893,7 @@ _Rejects importing into a missing catalog, on a translation failure, or with a m
 
 _Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)._
 
-### 🧰 API operations _(26)_
+### 🧰 API operations _(29)_
 
 <a id="query-cart"></a>
 #### 🔎 Query: `cart`
@@ -3080,6 +3083,27 @@ The INTERNAL staff notes on one order's conversation — staff/rider/admin only,
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-escalatetoadmin"></a>
+#### ✏️ Mutation: `escalateToAdmin`
+
+- **Command**: [📩 `EscalateToAdmin`](#command-escalatetoadmin) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-muteparticipant"></a>
+#### ✏️ Mutation: `muteParticipant`
+
+- **Command**: [📩 `MuteParticipant`](#command-muteparticipant) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-unmuteparticipant"></a>
+#### ✏️ Mutation: `unmuteParticipant`
+
+- **Command**: [📩 `UnmuteParticipant`](#command-unmuteparticipant) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 <a id="subscription-orderstatuschanged"></a>
 #### 🔔 Subscription: [`orderStatusChanged`](#subscription-orderstatuschanged)
 
@@ -3212,6 +3236,8 @@ The INTERNAL (staff-only) notes on an order's conversation — deliberately a SE
 | --- | --- | --- |
 | <a id="type-conversationinternalnotes--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
 | <a id="type-conversationinternalnotes--notes"></a>`notes` | [[📦 `ConversationMessage`](#entity-conversationmessage)] | ✅ |
+| <a id="type-conversationinternalnotes--admininvited"></a>`adminInvited` | `boolean` | ✅ |
+| <a id="type-conversationinternalnotes--mutedparticipants"></a>`mutedParticipants` | [[📦 `MutedParticipant`](#entity-mutedparticipant)] | ✅ |
 
 ### 🎭 Actors _(6)_
 
@@ -3316,6 +3342,9 @@ _🧩 aggregate_ — Per-order in-app message thread; id = orderId (a conversati
 | --- | --- | --- |
 | [📩 `OpenConversation`](#command-openconversation) | [⚡ `ConversationOpened`](#event-conversationopened) | [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen) |
 | [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
+| [📩 `EscalateToAdmin`](#command-escalatetoadmin) | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | [⛔ `ConversationNotFound`](#error-conversationnotfound) |
+| [📩 `MuteParticipant`](#command-muteparticipant) | [⚡ `ParticipantMuted`](#event-participantmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired) |
+| [📩 `UnmuteParticipant`](#command-unmuteparticipant) | [⚡ `ParticipantUnmuted`](#event-participantunmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `ParticipantNotMuted`](#error-participantnotmuted) |
 
 <a id="actor-placeorderprocess"></a>
 #### 🎭 Actor: `PlaceOrderProcess`
@@ -3576,7 +3605,7 @@ sequenceDiagram
 
 - **Source**: [🎭 `Conversation`](#actor-conversation) · 🛶 V0
 - **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes). 
-- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
+- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation), [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -3587,10 +3616,13 @@ sequenceDiagram
 | `messages` | `jsonb` | [⚡ `MessagePosted`](#event-messageposted) | — | PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector. |
 | `internal_notes` | `jsonb` | [⚡ `MessagePosted`](#event-messageposted) | — | INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector. |
 | `opened_at` | `timestamptz` | [⚡ `ConversationOpened`](#event-conversationopened) | — |  |
+| `admin_invited` | `boolean` | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | — | True once an admin was pulled in by a reasoned escalation (#129). |
+| `escalation_reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | [⚡ `AdminInvitedToConversation`.`reason`](#event-admininvitedtoconversation--reason) | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
+| `muted` | `jsonb` | [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted) | — | current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(21)_
+### 📩 Commands _(24)_
 
 <a id="command-addcartline"></a>
 #### 📩 Command: `AddCartLine`
@@ -3918,7 +3950,51 @@ Post a message to an order's conversation — PUBLIC (customer-visible) or INTER
 | <a id="command-postmessage--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
 | <a id="command-postmessage--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
 
-### ⚡ Events _(28)_
+<a id="command-escalatetoadmin"></a>
+#### 📩 Command: `EscalateToAdmin`
+
+Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
+
+- **Dispatched by**: [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-escalatetoadmin--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-escalatetoadmin--reason"></a>`reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | ✅ |  |
+
+<a id="command-muteparticipant"></a>
+#### 📩 Command: `MuteParticipant`
+
+Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
+
+- **Dispatched by**: [✏️ `muteParticipant`](#mutation-muteparticipant) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `ParticipantMuted`](#event-participantmuted)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-muteparticipant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-muteparticipant--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="command-muteparticipant--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ⬜ |  |
+| <a id="command-muteparticipant--until"></a>`until` | `string` _date-time_ | ⬜ |  |
+
+<a id="command-unmuteparticipant"></a>
+#### 📩 Command: `UnmuteParticipant`
+
+Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
+
+- **Dispatched by**: [✏️ `unmuteParticipant`](#mutation-unmuteparticipant) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `ParticipantUnmuted`](#event-participantunmuted)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `ParticipantNotMuted`](#error-participantnotmuted)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-unmuteparticipant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-unmuteparticipant--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+
+### ⚡ Events _(31)_
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -4361,7 +4437,51 @@ A message was appended to an order's conversation. `visibility` splits customer-
 | <a id="event-messageposted--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
 | <a id="event-messageposted--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
 
-### 📦 Entities _(12)_
+<a id="event-admininvitedtoconversation"></a>
+#### ⚡ Event: `AdminInvitedToConversation`
+
+An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-admininvitedtoconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-admininvitedtoconversation--reason"></a>`reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | ✅ |  |
+
+<a id="event-participantmuted"></a>
+#### ⚡ Event: `ParticipantMuted`
+
+A participant role was muted in an order's conversation, with a recorded justification (rules.yaml#/MuteRequiresAReason). `until` bounds the mute in time; absent = indefinite (#129).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-participantmuted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-participantmuted--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="event-participantmuted--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ✅ |  |
+| <a id="event-participantmuted--until"></a>`until` | `string` _date-time_ | ⬜ |  |
+
+<a id="event-participantunmuted"></a>
+#### ⚡ Event: `ParticipantUnmuted`
+
+A previously muted participant role was unmuted in an order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-participantunmuted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-participantunmuted--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+
+### 📦 Entities _(13)_
 
 <a id="entity-money"></a>
 #### 📦 Entity: `Money`
@@ -4526,7 +4646,18 @@ One message in an order's in-app conversation (read-model array element; #129). 
 | <a id="entity-conversationmessage--postedat"></a>`postedAt` | `string` _date-time_ | ✅ |  |
 | <a id="entity-conversationmessage--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
 
-### 🔤 Scalars _(24)_
+<a id="entity-mutedparticipant"></a>
+#### 📦 Entity: `MutedParticipant`
+
+A role currently muted in an order conversation (read-model array element; #129). `reason` is the recorded justification (mutes require one, rules.yaml#/MuteRequiresAReason); `until` bounds the mute in time, or is null for an indefinite mute.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-mutedparticipant--role"></a>`role` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="entity-mutedparticipant--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ✅ |  |
+| <a id="entity-mutedparticipant--until"></a>`until` | `string` _date-time_ | ⬜ |  |
+
+### 🔤 Scalars _(26)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -4554,8 +4685,10 @@ One message in an order's in-app conversation (read-model array element; #129). 
 | <a id="scalar-conversationauthorrole"></a>🔤 `ConversationAuthorRole` | enum (CUSTOMER \| RESTAURANT \| RIDER \| ADMIN) | Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).  |
 | <a id="scalar-messagebody"></a>🔤 `MessageBody` | string | Free-text body of a conversation message (#129). |
 | <a id="scalar-attachmentref"></a>🔤 `AttachmentRef` | string | Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).  |
+| <a id="scalar-mutereason"></a>🔤 `MuteReason` | string | The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).  |
+| <a id="scalar-escalationreason"></a>🔤 `EscalationReason` | string | Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).  |
 
-### ⛔ Errors _(27)_
+### ⛔ Errors _(29)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -4583,11 +4716,13 @@ One message in an order's in-app conversation (read-model array element; #129). 
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-conversationalreadyopen"></a>⛔ `ConversationAlreadyOpen` | OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).  | 🇬🇧 A conversation is already open for this order. | 🇫🇷 Une conversation est déjà ouverte pour cette commande. | [📩 `OpenConversation`](#command-openconversation) |
-| <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage), [📩 `EscalateToAdmin`](#command-escalatetoadmin), [📩 `MuteParticipant`](#command-muteparticipant), [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
 | <a id="error-customerchatdisabled"></a>⛔ `CustomerChatDisabled` | A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).  | 🇬🇧 Customer messaging is disabled for this order. | 🇫🇷 La messagerie client est désactivée pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
 | <a id="error-messagealreadyposted"></a>⛔ `MessageAlreadyPosted` | A message with this client-generated messageId was already posted to the conversation; the re-post is a duplicate and is rejected (idempotency; #129).  | 🇬🇧 This message has already been posted. | 🇫🇷 Ce message a déjà été envoyé. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-mutereasonrequired"></a>⛔ `MuteReasonRequired` | A participant was muted without a justification reason; a mute must record why (rules.yaml#/MuteRequiresAReason) (#129).  | 🇬🇧 A reason is required to mute a participant. | 🇫🇷 Un motif est requis pour rendre un participant muet. | [📩 `MuteParticipant`](#command-muteparticipant) |
+| <a id="error-participantnotmuted"></a>⛔ `ParticipantNotMuted` | An unmute targeted a role that is not currently muted in the order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).  | 🇬🇧 This participant is not currently muted. | 🇫🇷 Ce participant n'est pas actuellement muet. | [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
 
-### 📐 Business rules _(25)_
+### 📐 Business rules _(28)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -4763,6 +4898,27 @@ _Every conversation message is either PUBLIC (customer-visible) or INTERNAL (sta
 _Re-posting a message with an already-seen client-generated messageId is rejected (idempotent posting; #129)._
 
 - **Verified by**: [🧪 `TestDuplicateMessageRejected`](#test-testduplicatemessagerejected)
+
+<a id="rule-muterequiresareason"></a>
+#### 📐 Rule: `MuteRequiresAReason`
+
+_Muting a participant in an order conversation requires a justification reason; a mute without one is rejected (#129)._
+
+- **Verified by**: [🧪 `TestParticipantMuted`](#test-testparticipantmuted), [🧪 `TestMuteWithoutReasonRejected`](#test-testmutewithoutreasonrejected)
+
+<a id="rule-adminjoinsbyreasonedescalation"></a>
+#### 📐 Rule: `AdminJoinsByReasonedEscalation`
+
+_An admin is added to a conversation only through a reasoned escalation by the restaurant or rider (#129)._
+
+- **Verified by**: [🧪 `TestAdminEscalated`](#test-testadminescalated), [🧪 `TestEscalateUnopenedRejected`](#test-testescalateunopenedrejected)
+
+<a id="rule-onlymutedparticipantscanbeunmuted"></a>
+#### 📐 Rule: `OnlyMutedParticipantsCanBeUnmuted`
+
+_Unmuting a role that is not currently muted is rejected (#129)._
+
+- **Verified by**: [🧪 `TestParticipantUnmuted`](#test-testparticipantunmuted), [🧪 `TestUnmuteNotMutedRejected`](#test-testunmutenotmutedrejected)
 
 ### 🧪 Tests _(6)_
 
@@ -5203,6 +5359,66 @@ _Re-posting a message with an already-seen messageId is rejected (idempotency)_
 - **When**: [📩 `PostMessage`](#command-postmessage)
 - **Thrown**: [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
 - **Verifies**: [📐 `MessagePostingIsIdempotent`](#rule-messagepostingisidempotent)
+
+<a id="test-testadminescalated"></a>
+#### 🧪 Test: `TestAdminEscalated`
+
+_The restaurant escalates the conversation to an admin with a reason_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `EscalateToAdmin`](#command-escalatetoadmin)
+- **Then**: [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation)
+- **Verifies**: [📐 `AdminJoinsByReasonedEscalation`](#rule-adminjoinsbyreasonedescalation)
+
+<a id="test-testescalateunopenedrejected"></a>
+#### 🧪 Test: `TestEscalateUnopenedRejected`
+
+_Escalating a conversation that was never opened is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `EscalateToAdmin`](#command-escalatetoadmin)
+- **Thrown**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
+- **Verifies**: [📐 `AdminJoinsByReasonedEscalation`](#rule-adminjoinsbyreasonedescalation)
+
+<a id="test-testparticipantmuted"></a>
+#### 🧪 Test: `TestParticipantMuted`
+
+_A participant is muted with a recorded reason_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `MuteParticipant`](#command-muteparticipant)
+- **Then**: [⚡ `ParticipantMuted`](#event-participantmuted)
+- **Verifies**: [📐 `MuteRequiresAReason`](#rule-muterequiresareason)
+
+<a id="test-testmutewithoutreasonrejected"></a>
+#### 🧪 Test: `TestMuteWithoutReasonRejected`
+
+_Muting a participant without a reason is rejected_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `MuteParticipant`](#command-muteparticipant)
+- **Thrown**: [⛔ `MuteReasonRequired`](#error-mutereasonrequired)
+- **Verifies**: [📐 `MuteRequiresAReason`](#rule-muterequiresareason)
+
+<a id="test-testparticipantunmuted"></a>
+#### 🧪 Test: `TestParticipantUnmuted`
+
+_A currently muted participant is unmuted_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `ParticipantMuted`](#event-participantmuted)
+- **When**: [📩 `UnmuteParticipant`](#command-unmuteparticipant)
+- **Then**: [⚡ `ParticipantUnmuted`](#event-participantunmuted)
+- **Verifies**: [📐 `OnlyMutedParticipantsCanBeUnmuted`](#rule-onlymutedparticipantscanbeunmuted)
+
+<a id="test-testunmutenotmutedrejected"></a>
+#### 🧪 Test: `TestUnmuteNotMutedRejected`
+
+_Unmuting a role that is not currently muted is rejected_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `UnmuteParticipant`](#command-unmuteparticipant)
+- **Thrown**: [⛔ `ParticipantNotMuted`](#error-participantnotmuted)
+- **Verifies**: [📐 `OnlyMutedParticipantsCanBeUnmuted`](#rule-onlymutedparticipantscanbeunmuted)
 
 **[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
 

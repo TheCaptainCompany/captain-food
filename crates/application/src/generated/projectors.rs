@@ -342,6 +342,8 @@ pub trait OrderConversationCompute {
     fn status(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> OrderStatus;
     fn messages(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> serde_json::Value;
     fn internal_notes(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> serde_json::Value;
+    fn admin_invited(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> bool;
+    fn muted(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> serde_json::Value;
 }
 
 pub fn project_order_conversation<C: OrderConversationCompute>(c: &C, state: Option<OrderConversationRow>, env: &Envelope) -> Option<OrderConversationRow> {
@@ -355,10 +357,16 @@ pub fn project_order_conversation<C: OrderConversationCompute>(c: &C, state: Opt
             messages: c.messages(None, env),
             internal_notes: c.internal_notes(None, env),
             opened_at: env.occurred_at,
+            admin_invited: c.admin_invited(None, env),
+            escalation_reason: None,
+            muted: c.muted(None, env),
             created_at: env.occurred_at,
             updated_at: env.occurred_at,
         }),
         DomainEvent::MessagePosted(_) => { let mut row = state?; let v = c.messages(Some(&row), env); row.messages = v; let v = c.internal_notes(Some(&row), env); row.internal_notes = v; Some(row) },
+        DomainEvent::AdminInvitedToConversation(e) => { let mut row = state?; row.escalation_reason = Some(e.reason.clone()); let v = c.admin_invited(Some(&row), env); row.admin_invited = v; Some(row) },
+        DomainEvent::ParticipantMuted(_) => { let mut row = state?; let v = c.muted(Some(&row), env); row.muted = v; Some(row) },
+        DomainEvent::ParticipantUnmuted(_) => { let mut row = state?; let v = c.muted(Some(&row), env); row.muted = v; Some(row) },
         DomainEvent::OrderPlaced(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::OrderAcceptedByRestaurant(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::OrderPreparationStarted(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },

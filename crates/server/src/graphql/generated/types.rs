@@ -344,6 +344,18 @@ pub struct ConversationMessage {
     pub attachment_refs: Option<Vec<AttachmentRef>>,
 }
 
+/// A role currently muted in an order conversation (read-model array element; #129). `reason` is the recorded justification (mutes require one, rules.yaml#/MuteRequiresAReason); `until` bounds the mute in time, or is null for an indefinite mute.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct MutedParticipant {
+    #[graphql(name = "role")]
+    pub role: ConversationAuthorRole,
+    #[graphql(name = "reason")]
+    pub reason: MuteReason,
+    #[graphql(name = "until")]
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// A restaurant (public discovery + single-restaurant header). Navigates to its catalogs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -920,6 +932,11 @@ pub struct ConversationInternalNotes {
     #[graphql(name = "notes")]
     #[serde(default)]
     pub notes: Vec<ConversationMessage>,
+    #[graphql(name = "adminInvited")]
+    pub admin_invited: bool,
+    #[graphql(name = "mutedParticipants")]
+    #[serde(default)]
+    pub muted_participants: Vec<MutedParticipant>,
 }
 
 /// Read-model row → API type (Stage 1a worked example). jsonb columns deserialize into the typed

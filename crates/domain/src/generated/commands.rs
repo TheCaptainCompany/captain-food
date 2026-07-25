@@ -818,3 +818,29 @@ pub struct PostMessage {
     #[serde(default)]
     pub attachment_refs: Vec<AttachmentRef>,
 }
+
+/// Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EscalateToAdmin {
+    pub order_id: OrderId,
+    pub reason: EscalationReason,
+}
+
+/// Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in time; absent = indefinite. The conversation must exist (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MuteParticipant {
+    pub order_id: OrderId,
+    pub muted_role: ConversationAuthorRole,
+    pub reason: Option<MuteReason>,
+    pub until: Option<String>,
+}
+
+/// Unmute a previously muted participant role in an order's conversation. The conversation must exist and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmuteParticipant {
+    pub order_id: OrderId,
+    pub muted_role: ConversationAuthorRole,
+}

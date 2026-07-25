@@ -1670,3 +1670,38 @@ MessagePosted:
       items: { $ref: 'scalars.yaml#/AttachmentRef' }
       nullable: true
   required: [orderId, messageId, authorRole, visibility, body, originalLocale]
+
+AdminInvitedToConversation:
+  description: >
+    An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or
+    rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason: { $ref: 'scalars.yaml#/EscalationReason' }
+  required: [orderId, reason]
+
+ParticipantMuted:
+  description: >
+    A participant role was muted in an order's conversation, with a recorded justification
+    (rules.yaml#/MuteRequiresAReason). `until` bounds the mute in time; absent = indefinite (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+    reason: { $ref: 'scalars.yaml#/MuteReason' }
+    until:
+      type: string
+      format: date-time
+      nullable: true
+  required: [orderId, mutedRole, reason]
+
+ParticipantUnmuted:
+  description: >
+    A previously muted participant role was unmuted in an order's conversation
+    (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+  required: [orderId, mutedRole]

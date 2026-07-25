@@ -109,8 +109,13 @@ use domain::generated::scalars::{CityAvailabilityStatus, DeliveryPartnerRegistra
 
 // In-app order conversations (#129) — the Conversation aggregate (id = orderId).
 use domain::conversation::ConversationState;
-use domain::generated::commands::{OpenConversation, PostMessage};
-use domain::generated::events::{ConversationOpened, MessagePosted};
+use domain::generated::commands::{
+    EscalateToAdmin, MuteParticipant, OpenConversation, PostMessage, UnmuteParticipant,
+};
+use domain::generated::events::{
+    AdminInvitedToConversation, ConversationOpened, MessagePosted, ParticipantMuted,
+    ParticipantUnmuted,
+};
 use domain::generated::scalars::ConversationAuthorRole;
 
 use crate::generated::services::{
@@ -1691,6 +1696,84 @@ pub async fn post_message(
         body: cmd.body,
         original_locale: cmd.original_locale,
         attachment_refs: cmd.attachment_refs,
+    });
+    let stream = conversation_stream(&cmd.order_id);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// A `errors.yaml#/ConversationNotFound` rejection for the order whose conversation was never opened.
+fn conversation_not_found(order_id: &OrderId) -> DomainError {
+    reject("ConversationNotFound", json!({ "orderId": order_id }))
+}
+
+/// Handle `commands.yaml#/EscalateToAdmin` → emit `events.yaml#/AdminInvitedToConversation` on the
+/// order's conversation stream. Requires an opened conversation
+/// (`errors.yaml#/ConversationNotFound`); the escalation carries a reason
+/// (rules.yaml#/AdminJoinsByReasonedEscalation).
+pub async fn escalate_to_admin(
+    store: &dyn EventStore,
+    cmd: EscalateToAdmin,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = Repository::new(store)
+        .require::<ConversationState>(cmd.order_id, || conversation_not_found(&cmd.order_id))
+        .await?;
+    let event = DomainEvent::AdminInvitedToConversation(AdminInvitedToConversation {
+        order_id: cmd.order_id,
+        reason: cmd.reason,
+    });
+    let stream = conversation_stream(&cmd.order_id);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/MuteParticipant` → emit `events.yaml#/ParticipantMuted` on the order's
+/// conversation stream. Requires an opened conversation (`errors.yaml#/ConversationNotFound`), and a
+/// NON-EMPTY justification `reason` — a mute without one is rejected
+/// (`errors.yaml#/MuteReasonRequired`, rules.yaml#/MuteRequiresAReason): the schema leaves `reason`
+/// optional on purpose, so the "justified" invariant lives here in the write model.
+pub async fn mute_participant(
+    store: &dyn EventStore,
+    cmd: MuteParticipant,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (_state, version) = Repository::new(store)
+        .require::<ConversationState>(cmd.order_id, || conversation_not_found(&cmd.order_id))
+        .await?;
+    let reason = match cmd.reason {
+        Some(reason) if !reason.0.trim().is_empty() => reason,
+        _ => return Err(reject("MuteReasonRequired", json!({ "orderId": cmd.order_id }))),
+    };
+    let event = DomainEvent::ParticipantMuted(ParticipantMuted {
+        order_id: cmd.order_id,
+        muted_role: cmd.muted_role,
+        reason,
+        until: cmd.until,
+    });
+    let stream = conversation_stream(&cmd.order_id);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/UnmuteParticipant` → emit `events.yaml#/ParticipantUnmuted` on the order's
+/// conversation stream. Requires an opened conversation (`errors.yaml#/ConversationNotFound`) and a
+/// role that is CURRENTLY muted — unmuting a role that is not muted is rejected
+/// (`errors.yaml#/ParticipantNotMuted`, rules.yaml#/OnlyMutedParticipantsCanBeUnmuted).
+pub async fn unmute_participant(
+    store: &dyn EventStore,
+    cmd: UnmuteParticipant,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<ConversationState>(cmd.order_id, || conversation_not_found(&cmd.order_id))
+        .await?;
+    if !state.muted_roles.contains(&cmd.muted_role) {
+        return Err(reject(
+            "ParticipantNotMuted",
+            json!({ "orderId": cmd.order_id, "mutedRole": cmd.muted_role }),
+        ));
+    }
+    let event = DomainEvent::ParticipantUnmuted(ParticipantUnmuted {
+        order_id: cmd.order_id,
+        muted_role: cmd.muted_role,
     });
     let stream = conversation_stream(&cmd.order_id);
     Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())

@@ -552,6 +552,21 @@ fn fx_message_posted_internal() -> DomainEvent {
     DomainEvent::MessagePosted(evs::MessagePosted { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-2")), author_role: sc::ConversationAuthorRole::RESTAURANT, visibility: sc::MessageVisibility::INTERNAL, body: sc::MessageBody("Customer asked about ETA; kitchen backed up.".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() })
 }
 
+/// tests.yaml#/fixtures/adminInvitedToConversation — events.yaml#/AdminInvitedToConversation
+fn fx_admin_invited_to_conversation() -> DomainEvent {
+    DomainEvent::AdminInvitedToConversation(evs::AdminInvitedToConversation { order_id: sc::OrderId(support::uid("order-1")), reason: sc::EscalationReason("Customer and rider disagree on the drop-off; need arbitration.".into()) })
+}
+
+/// tests.yaml#/fixtures/participantMuted — events.yaml#/ParticipantMuted
+fn fx_participant_muted() -> DomainEvent {
+    DomainEvent::ParticipantMuted(evs::ParticipantMuted { order_id: sc::OrderId(support::uid("order-1")), muted_role: sc::ConversationAuthorRole::RIDER, reason: sc::MuteReason("Repeated off-topic messages on the thread.".into()), until: None })
+}
+
+/// tests.yaml#/fixtures/participantUnmuted — events.yaml#/ParticipantUnmuted
+fn fx_participant_unmuted() -> DomainEvent {
+    DomainEvent::ParticipantUnmuted(evs::ParticipantUnmuted { order_id: sc::OrderId(support::uid("order-1")), muted_role: sc::ConversationAuthorRole::RIDER })
+}
+
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
 /// the canonical OrderTracking rows the saga legs read (`read_order`) — state the spec's
 /// GIVEN (an event list) cannot express but its cases assume.
@@ -3375,5 +3390,97 @@ async fn test_duplicate_message_rejected() {
     let err = result.expect_err("TestDuplicateMessageRejected: the spec expects a typed rejection");
     support::assert_thrown("TestDuplicateMessageRejected", &err, &["MessageAlreadyPosted"]);
     bed.assert_appended("TestDuplicateMessageRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestAdminEscalated — "The restaurant escalates the conversation to an admin with a reason"
+/// rules: AdminJoinsByReasonedEscalation
+#[tokio::test]
+async fn test_admin_escalated() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::EscalateToAdmin { order_id: sc::OrderId(support::uid("order-1")), reason: sc::EscalationReason("Customer and rider disagree on the drop-off; need arbitration.".into()) };
+    let result = crate::commands::escalate_to_admin(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestAdminEscalated: the spec expects acceptance");
+    bed.assert_appended("TestAdminEscalated", &before, &[
+        (format!("Conversation-{}", support::uid("order-1")), fx_admin_invited_to_conversation()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestEscalateUnopenedRejected — "Escalating a conversation that was never opened is rejected"
+/// rules: AdminJoinsByReasonedEscalation
+#[tokio::test]
+async fn test_escalate_unopened_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::EscalateToAdmin { order_id: sc::OrderId(support::uid("order-1")), reason: sc::EscalationReason("Customer and rider disagree on the drop-off; need arbitration.".into()) };
+    let result = crate::commands::escalate_to_admin(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestEscalateUnopenedRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestEscalateUnopenedRejected", &err, &["ConversationNotFound"]);
+    bed.assert_appended("TestEscalateUnopenedRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestParticipantMuted — "A participant is muted with a recorded reason"
+/// rules: MuteRequiresAReason
+#[tokio::test]
+async fn test_participant_muted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::MuteParticipant { order_id: sc::OrderId(support::uid("order-1")), muted_role: sc::ConversationAuthorRole::RIDER, reason: Some(sc::MuteReason("Repeated off-topic messages on the thread.".into())), until: None };
+    let result = crate::commands::mute_participant(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestParticipantMuted: the spec expects acceptance");
+    bed.assert_appended("TestParticipantMuted", &before, &[
+        (format!("Conversation-{}", support::uid("order-1")), fx_participant_muted()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestMuteWithoutReasonRejected — "Muting a participant without a reason is rejected"
+/// rules: MuteRequiresAReason
+#[tokio::test]
+async fn test_mute_without_reason_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::MuteParticipant { order_id: sc::OrderId(support::uid("order-1")), muted_role: sc::ConversationAuthorRole::RIDER, reason: None, until: None };
+    let result = crate::commands::mute_participant(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestMuteWithoutReasonRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestMuteWithoutReasonRejected", &err, &["MuteReasonRequired"]);
+    bed.assert_appended("TestMuteWithoutReasonRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestParticipantUnmuted — "A currently muted participant is unmuted"
+/// rules: OnlyMutedParticipantsCanBeUnmuted
+#[tokio::test]
+async fn test_participant_unmuted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened(), fx_participant_muted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::UnmuteParticipant { order_id: sc::OrderId(support::uid("order-1")), muted_role: sc::ConversationAuthorRole::RIDER };
+    let result = crate::commands::unmute_participant(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestParticipantUnmuted: the spec expects acceptance");
+    bed.assert_appended("TestParticipantUnmuted", &before, &[
+        (format!("Conversation-{}", support::uid("order-1")), fx_participant_unmuted()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestUnmuteNotMutedRejected — "Unmuting a role that is not currently muted is rejected"
+/// rules: OnlyMutedParticipantsCanBeUnmuted
+#[tokio::test]
+async fn test_unmute_not_muted_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::UnmuteParticipant { order_id: sc::OrderId(support::uid("order-1")), muted_role: sc::ConversationAuthorRole::RIDER };
+    let result = crate::commands::unmute_participant(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestUnmuteNotMutedRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestUnmuteNotMutedRejected", &err, &["ParticipantNotMuted"]);
+    bed.assert_appended("TestUnmuteNotMutedRejected", &before, &[]);
 }
 

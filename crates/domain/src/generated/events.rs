@@ -914,6 +914,32 @@ pub struct MessagePosted {
     pub attachment_refs: Vec<AttachmentRef>,
 }
 
+/// An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminInvitedToConversation {
+    pub order_id: OrderId,
+    pub reason: EscalationReason,
+}
+
+/// A participant role was muted in an order's conversation, with a recorded justification (rules.yaml#/MuteRequiresAReason). `until` bounds the mute in time; absent = indefinite (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantMuted {
+    pub order_id: OrderId,
+    pub muted_role: ConversationAuthorRole,
+    pub reason: MuteReason,
+    pub until: Option<String>,
+}
+
+/// A previously muted participant role was unmuted in an order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantUnmuted {
+    pub order_id: OrderId,
+    pub muted_role: ConversationAuthorRole,
+}
+
 /// Every business event as a typed, adjacently-tagged union: `{ "eventType": <name>, "payload": { … } }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "eventType", content = "payload")]
@@ -1012,4 +1038,7 @@ pub enum DomainEvent {
     RefundDenied(RefundDenied),
     ConversationOpened(ConversationOpened),
     MessagePosted(MessagePosted),
+    AdminInvitedToConversation(AdminInvitedToConversation),
+    ParticipantMuted(ParticipantMuted),
+    ParticipantUnmuted(ParticipantUnmuted),
 }

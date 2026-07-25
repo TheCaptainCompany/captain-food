@@ -3214,6 +3214,18 @@ impl MutationRoot {
     async fn post_message(&self, input: PostMessageInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    #[graphql(name = "escalateToAdmin", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_restaurant_account_restaurant_rider_admin")]
+    async fn escalate_to_admin(&self, input: EscalateToAdminInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        Err(async_graphql::Error::new("not implemented"))
+    }
+    #[graphql(name = "muteParticipant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    async fn mute_participant(&self, input: MuteParticipantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        Err(async_graphql::Error::new("not implemented"))
+    }
+    #[graphql(name = "unmuteParticipant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    async fn unmute_participant(&self, input: UnmuteParticipantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        Err(async_graphql::Error::new("not implemented"))
+    }
 }
 
 /// The stripped serde wire shape of the GraphQL input — both the journal `payload` column and the
