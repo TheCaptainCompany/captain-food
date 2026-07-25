@@ -97,7 +97,9 @@ pub fn wire() -> HealthDto {
 /// writes `command_journal` at acceptance, so the app cannot serve writes without it.
 /// `20260721150000` = the Uber Direct webhook mirror (external_uber_direct_events, #57): the adapter's
 /// inbound ingestor stages verified facts into it, so the app must not serve without the table.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260724150500;
+/// `20260725000000` = the `orderconversation` projection table (#131, epic #129): the projection worker
+/// upserts folded conversation rows into it, so the app must not serve without the table.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260725000000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -243,6 +245,8 @@ pub fn router() -> Router {
                     Arc::new(PgCartRepository::new(pool.clone()));
                 let orders: Arc<dyn OrderReadRepository> =
                     Arc::new(PgOrderRepository::new(pool.clone()));
+                let order_conversations: Arc<dyn application::queries::OrderConversationReadRepository> =
+                    Arc::new(infrastructure::PgOrderConversationRepository::new(pool.clone()));
                 let customers: Arc<dyn CustomerReadRepository> =
                     Arc::new(PgCustomerRepository::new(pool.clone()));
                 let deliveries: Arc<dyn DeliveryReadRepository> =
@@ -262,6 +266,7 @@ pub fn router() -> Router {
                     catalogs,
                     carts,
                     orders,
+                    order_conversations,
                     customers,
                     deliveries,
                     refunds,

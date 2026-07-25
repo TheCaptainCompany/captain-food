@@ -326,13 +326,17 @@ impl QueryRoot {
     }
     /// The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
     #[graphql(name = "orderConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
-    async fn order_conversation(&self, input: OrderConversationQueryInput) -> async_graphql::Result<Option<OrderConversation>> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn order_conversation(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationQueryInput) -> async_graphql::Result<Option<OrderConversation>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
+        let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(row.map(OrderConversation::from))
     }
     /// The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the conversation has not been opened.
     #[graphql(name = "orderConversationInternalNotes", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_restaurant_account_restaurant_rider_admin")]
-    async fn order_conversation_internal_notes(&self, input: OrderConversationInternalNotesQueryInput) -> async_graphql::Result<Option<ConversationInternalNotes>> {
-        Err(async_graphql::Error::new("not implemented"))
+    async fn order_conversation_internal_notes(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationInternalNotesQueryInput) -> async_graphql::Result<Option<ConversationInternalNotes>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
+        let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(row.map(ConversationInternalNotes::from))
     }
     /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). The restaurant sees its own orders' refunds (restaurant-scoped, ownership enforced server-side); an admin arbitrates across restaurants.
     #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]

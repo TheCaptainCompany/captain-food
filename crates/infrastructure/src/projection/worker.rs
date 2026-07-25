@@ -20,12 +20,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use application::projections::{
-    project_cart, project_catalog, project_customer, project_order_tracking,
-    project_prospection_pipeline, project_restaurant, Envelope,
+    project_cart, project_catalog, project_customer, project_order_conversation,
+    project_order_tracking, project_prospection_pipeline, project_restaurant, Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
 use application::projectors::customer::CustomerProjector;
+use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
@@ -36,8 +37,8 @@ use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 
 use crate::persistence::{
-    cart_store, catalog_store, customer_store, db_err, order_tracking_store, prospection_store,
-    restaurant_store,
+    cart_store, catalog_store, customer_store, db_err, order_conversation_store,
+    order_tracking_store, prospection_store, restaurant_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -58,6 +59,7 @@ enum ReadModelProjector {
     Catalog,
     Cart,
     OrderTracking,
+    OrderConversation,
 }
 
 impl ReadModelProjector {
@@ -124,6 +126,32 @@ impl ReadModelProjector {
                     order_tracking_store::upsert(pool, &next).await?;
                 }
             }
+            Self::OrderConversation => {
+                // Cross-stream feed: the conversation's own events live on `Conversation-{orderId}`
+                // (the aggregate is keyed by order_id), while the folded order STATUS arrives on the
+                // `Order-{orderId}` stream — same checkpoint, so the two categories fold in global
+                // `position` order. Both key the row from the order id: the stream uuid for
+                // Conversation-%, the payload's `orderId` for the Order-% status events.
+                let uuid = if env.stream_name.starts_with("Conversation-") {
+                    aggregate_uuid_of(env, "Conversation-", "orderId")?
+                } else {
+                    match payload_uuid_of(env, "orderId") {
+                        Some(uuid) => uuid,
+                        None => {
+                            eprintln!(
+                                "projection[OrderConversation]: no orderId in payload for stream {} at position {} — skipped",
+                                env.stream_name, env.position
+                            );
+                            return Ok(());
+                        }
+                    }
+                };
+                let id = OrderId(uuid);
+                let state = order_conversation_store::load(pool, id).await?;
+                if let Some(next) = project_order_conversation(&OrderConversationProjector, state, env) {
+                    order_conversation_store::upsert(pool, &next).await?;
+                }
+            }
         }
         Ok(())
     }
@@ -172,6 +200,16 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "Order",
         stream_prefixes: &["Order-", "Payment-"],
         projectors: &[ReadModelProjector::OrderTracking],
+    },
+    // The OrderConversation read model (#131, epic #129) folds BOTH the conversation's own messaging
+    // events (`Conversation-{orderId}` streams) AND the order status lifecycle (`Order-%`), so the
+    // group slices both categories under one checkpoint — keeping the message timeline and the folded
+    // status ordered by global `position`. The row is keyed by order_id (the Conversation aggregate
+    // id and the Order events' payload `orderId`).
+    ProjectorGroup {
+        checkpoint: "OrderConversation",
+        stream_prefixes: &["Conversation-", "Order-"],
+        projectors: &[ReadModelProjector::OrderConversation],
     },
 ];
 

@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
-use application::projections::{CartRow, CatalogRow, CustomerRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
+use application::projections::{CartRow, CatalogRow, CustomerRow, OrderConversationRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
 use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
@@ -1140,6 +1140,37 @@ impl From<(OrderTrackingRow, RestaurantRow)> for Order {
             rated_at: row.rated_at,
             delivery_jobs: Vec::new(),
             restaurant: restaurant.into(),
+        }
+    }
+}
+
+/// Read-model row → API type: the OrderConversation projection row → the PUBLIC thread
+/// (#131, epic #129). The customer-visible `messages` jsonb deserializes into the typed
+/// ConversationMessage list; the folded order `status` and `customer_chat_enabled` ride along. The
+/// INTERNAL notes stay in the separate `ConversationInternalNotes` type (the visibility guarantee).
+impl From<OrderConversationRow> for OrderConversation {
+    fn from(row: OrderConversationRow) -> Self {
+        Self {
+            order_id: row.order_id.into(),
+            restaurant_id: row.restaurant_id.into(),
+            status: row.status.into(),
+            customer_chat_enabled: row.customer_chat_enabled,
+            opened_at: row.opened_at,
+            messages: serde_json::from_value(row.messages).unwrap_or_default(),
+        }
+    }
+}
+
+/// Read-model row → API type: the OrderConversation projection row → the INTERNAL staff notes
+/// (#131, epic #129). The staff-only `internal_notes` jsonb deserializes into the typed
+/// ConversationMessage list; `adminInvited` and the current `mutedParticipants` set ride along.
+impl From<OrderConversationRow> for ConversationInternalNotes {
+    fn from(row: OrderConversationRow) -> Self {
+        Self {
+            order_id: row.order_id.into(),
+            notes: serde_json::from_value(row.internal_notes).unwrap_or_default(),
+            admin_invited: row.admin_invited,
+            muted_participants: serde_json::from_value(row.muted).unwrap_or_default(),
         }
     }
 }

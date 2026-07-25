@@ -152,6 +152,15 @@ impl application::queries::DeliveryReadRepository for Empty {
 }
 
 #[async_trait]
+impl application::queries::OrderConversationReadRepository for Empty {
+    async fn by_order(
+        &self,
+        _o: ds::OrderId,
+    ) -> Result<Option<application::queries::OrderConversationRow>, DomainError> {
+        Ok(None)
+    }
+}
+#[async_trait]
 impl application::queries::RefundReadRepository for Empty {
     async fn list(
         &self,
@@ -275,6 +284,7 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
             catalogs: Arc::new(Empty),
             carts: Arc::new(Empty),
             orders: Arc::new(orders),
+            order_conversations: Arc::new(Empty),
             customers: Arc::new(Empty),
             deliveries: Arc::new(Empty),
             refunds: Arc::new(Empty),
