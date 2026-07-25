@@ -156,7 +156,7 @@ api.yaml already owns the role ACL, so the instance binding belongs beside it �
 *which roles* and *on which instance*:
 
 ```yaml
-# specs/api.yaml
+# specs/api.yaml — the BINDING: which instance, and which roles may ask at all
 orderConversation:
   roles: [CUSTOMER, RESTAURANT, RIDER, ADMIN]      # existing: the @auth ACL
   scope: { type: ORDER, from: arg.orderId }        # NEW: the instance binding
@@ -164,6 +164,40 @@ orderConversation:
 
 `from: arg.orderId` names the argument carrying the scope id, so the guard stays generic — it never
 knows what an order is.
+
+**Note what is deliberately absent: the principal.** The binding says *which order*; it never says how
+the caller links to it. That link is **role-dependent**, so it belongs in the resolution table
+(§3.3.4), keyed by `(scope_type, role)`:
+
+```yaml
+# specs/database/scope_membership.yaml — the RESOLUTION: how each role links to the scope
+ORDER:
+  resolvers:
+    ADMIN:      { always: true }
+    CUSTOMER:   { table: OrderTracking,    scope_column: order_id, principal_column: customer_id }
+    RESTAURANT: { table: OrderTracking,    scope_column: order_id, principal_column: restaurant_id }
+    RIDER:      { table: View_DeliveryJob, scope_column: order_id, principal_column: rider_id }
+```
+
+`principal_column` **is** the link. The three parameters of the check come from three different places,
+which is what makes one function serve every surface:
+
+| parameter | from |
+|---|---|
+| `scope_id` | the **binding** (api.yaml `from:`, or the `files` row) |
+| principal id | the **`ReadScope`** resolved once per request (§3.1) |
+| `table` / `scope_column` / `principal_column` | the **resolution**, keyed by `(scope_type, role)` |
+
+Worked example — `order(orderId: ord_7)` called by `ReadScope::Customer(cust_42)`:
+
+1. binding → `(ORDER, ord_7)`
+2. resolution `[ORDER][CUSTOMER]` → `OrderTracking` · `order_id` · `customer_id`
+3. `SELECT EXISTS(SELECT 1 FROM "OrderTracking" WHERE order_id = ord_7 AND customer_id = cust_42)`
+
+The same call by `ReadScope::Rider(rider_9)` resolves to `View_DeliveryJob` / `rider_id` instead — same
+binding, same operation, different link, **zero per-operation configuration**. Putting
+`principal_column` on the operation would have forced one column onto an operation that serves four
+roles.
 
 **`/files` has no api.yaml entry, and that is exactly the case you flagged.** It is one route serving
 any object, so its binding cannot be declared per operation — it comes from the **`FilesRow`**:
@@ -197,12 +231,20 @@ guard, and no amount of middleware changes that.
 So api.yaml declares which of the two applies:
 
 ```yaml
-order:   { scope: { type: ORDER, from: arg.orderId } }   # by-id  -> guard checks
-orders:  { scope: { type: ORDER, filter: customer_id } } # list   -> repository filters
+order:   { scope: { type: ORDER, from: arg.orderId } }   # by-id -> guard checks
+orders:  { scope: { type: ORDER, mode: filter } }        # list  -> repository filters
 ```
 
-Stating it explicitly because the failure is silent: mount the guard, see it pass on every by-id query,
-and assume lists are covered — while `orders` happily returns every customer's history.
+⚠️ **`mode: filter` names no column, and that is the point.** An earlier draft of this proposal wrote
+`filter: customer_id`, which was **wrong**: `orders` serves four roles, and a RESTAURANT calling it must
+be filtered on `restaurant_id`, a RIDER through `View_DeliveryJob.rider_id`. Naming one column on the
+operation silently hardcodes the customer's view for everyone. The filter column comes from the **same
+`principal_column` resolution** the guard uses (§3.3.1) — so the two paths cannot drift, and neither
+form of the binding ever mentions the principal.
+
+Stating the guard/filter split explicitly because the failure is silent: mount the guard, see it pass on
+every by-id query, and assume lists are covered — while `orders` happily returns every customer's
+history.
 
 #### 3.3.4 Resolution
 
@@ -324,7 +366,7 @@ spread across feature work where a missed call site hides in a diff about someth
 | **D3** | Scope for `Public` reads — confirm which projections are legitimately unrestricted (restaurant discovery, catalog, referential policies) | as listed; anything else defaults to scoped |
 | **D5** | Membership resolution as **DSL + codegen** (§3.3.4) vs hand-written per scope type | DSL — hand-writing is N×M statements in a security-critical path, and a new scope type should be a data change, not a code change |
 | **D6** | Scope **binding** declared per operation in **api.yaml** (`scope: { type, from }`), beside the existing `roles` ACL (§3.3.1) | yes — api.yaml already owns *which roles*; *which instance* belongs in the same place, and `/files` supplies the same binding from its row |
-| **D7** | List queries are **filtered by the repository**, not guarded (§3.3.3) — the guard cannot authorize a query with no scope-id argument | confirm; api.yaml marks each op `from:` (guard) or `filter:` (repository) so the gap cannot be assumed away |
+| **D7** | List queries are **filtered by the repository**, not guarded (§3.3.3) — the guard cannot authorize a query with no scope-id argument | confirm; api.yaml marks each op `from:` (guard) or `mode: filter` (repository) so the gap cannot be assumed away; neither form names a principal column — that always comes from the resolution table |
 | **D4** | Land as one focused change vs incrementally per repository | one change (§4) — a missed call site is invisible inside unrelated feature diffs |
 
 ## 7. Completeness obligations (ADR-0032)
@@ -333,7 +375,7 @@ spread across feature work where a missed call site hides in a diff about someth
 - **Validator gates** — a missing rule fails `make validate`, never degrades to a silent deny in prod:
   - every role reachable in an `audience` has a declared resolver for that `scope_type` (§3.3.4);
   - **every api.yaml operation returning tenant data declares a `scope:`** — either `from:` (guarded)
-    or `filter:` (repository-enforced). An operation with neither is a hole, and the validator is the
+    or `mode: filter` (repository-enforced). An operation with neither is a hole, and the validator is the
     only thing that can see it, since both failure modes are silent at runtime (§3.3.3).
 - **Behaviour tests** per role, and the **negatives are the point**: customer → another customer's order;
   restaurant → another restaurant's order; rider → an unassigned job. A test that only proves the happy
