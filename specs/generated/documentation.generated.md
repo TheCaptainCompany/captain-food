@@ -9198,6 +9198,30 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | --- | --- | --- |
 | read | `orders.mine` | [🔎 `orders`](#query-orders) |
 
+<a id="screen-order_conversation"></a>
+### 📱 `order_conversation` · `/orders/:orderId/chat` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Order chat                               │
+├──────────────────────────────────────────┤
+│ back_button_header — Order chat          │
+│ status_chip                              │
+│ message_bubble                           │
+│ quick_reply_chips                        │
+│ row                                      │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `conversation.byOrder` | [🔎 `orderConversation`](#query-orderconversation) |
+| write | `post_message` | [✏️ `postMessage`](#mutation-postmessage) |
+
+**Gaps**
+- ⚠️ `post_message` messageId (the client idempotency key) is not yet minted client-side: the generic SDUI executor resolves variables from bindings/literals only and does not mint business UUIDs (the checkout `place_order` orderId is minted by the bespoke checkout.rs flow). The compose row renders and dispatches, but the client-minted messageId injection is a follow-up (#145).
+
 <a id="screen-account"></a>
 ### 📱 `account` · `/account` · 📱 SDUI · 🔒 auth
 
@@ -9439,6 +9463,14 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-order-empty-title"></a>`order.empty.title` | — | No orders yet | Aucune commande |
 | <a id="translation-order-empty-body"></a>`order.empty.body` | — | Your order history will appear here. | Votre historique de commandes apparaîtra ici. |
 | <a id="translation-order-empty-cta"></a>`order.empty.cta` | — | Order now | Commander |
+| <a id="translation-conversation-title"></a>`conversation.title` | — | Order chat | Discussion |
+| <a id="translation-conversation-compose_placeholder"></a>`conversation.compose_placeholder` | — | Write a message… | Écrire un message… |
+| <a id="translation-conversation-send"></a>`conversation.send` | — | Send | Envoyer |
+| <a id="translation-conversation-quick_thanks"></a>`conversation.quick_thanks` | — | Thanks! | Merci ! |
+| <a id="translation-conversation-quick_where"></a>`conversation.quick_where` | — | Where is my order? | Où en est ma commande ? |
+| <a id="translation-conversation-empty-title"></a>`conversation.empty.title` | — | No messages yet | Aucun message |
+| <a id="translation-conversation-empty-body"></a>`conversation.empty.body` | — | Start the conversation about your order. | Démarrez la discussion au sujet de votre commande. |
+| <a id="translation-conversation-translated"></a>`conversation.translated` | — | Translated | Traduit |
 | <a id="translation-account-default_name"></a>`account.default_name` | — | Captain | Captain |
 | <a id="translation-account-section-my_account"></a>`account.section.my_account` | — | My account | Mon compte |
 | <a id="translation-account-saved_addresses"></a>`account.saved_addresses` | — | Saved addresses | Adresses enregistrées |

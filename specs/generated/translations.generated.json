@@ -383,6 +383,38 @@
     "en": "Search",
     "fr": "Recherche"
   },
+  "conversation.compose_placeholder": {
+    "en": "Write a message…",
+    "fr": "Écrire un message…"
+  },
+  "conversation.empty.body": {
+    "en": "Start the conversation about your order.",
+    "fr": "Démarrez la discussion au sujet de votre commande."
+  },
+  "conversation.empty.title": {
+    "en": "No messages yet",
+    "fr": "Aucun message"
+  },
+  "conversation.quick_thanks": {
+    "en": "Thanks!",
+    "fr": "Merci !"
+  },
+  "conversation.quick_where": {
+    "en": "Where is my order?",
+    "fr": "Où en est ma commande ?"
+  },
+  "conversation.send": {
+    "en": "Send",
+    "fr": "Envoyer"
+  },
+  "conversation.title": {
+    "en": "Order chat",
+    "fr": "Discussion"
+  },
+  "conversation.translated": {
+    "en": "Translated",
+    "fr": "Traduit"
+  },
   "home.all_restaurants": {
     "en": "All restaurants",
     "fr": "Tous les restaurants"

@@ -253,7 +253,7 @@ pub mod restaurant_backoffice {
     ];
 }
 
-/// `specs/screens/restaurant_frontoffice.yaml` — 6 screen(s).
+/// `specs/screens/restaurant_frontoffice.yaml` — 7 screen(s).
 pub mod restaurant_frontoffice {
     use super::*;
 
@@ -335,6 +335,25 @@ pub mod restaurant_frontoffice {
             Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("order.history_title"))], children: &[] },
             Node { kind: ComponentKind::TabBar, props: &[("id", PropValue::Text("order_tabs")), ("tabs.0.id", PropValue::Text("active")), ("tabs.0.label", PropValue::I18n("order.tab.active")), ("tabs.1.id", PropValue::Text("past")), ("tabs.1.label", PropValue::I18n("order.tab.past"))], children: &[] },
             Node { kind: ComponentKind::OrderList, props: &[("items", PropValue::Binding("orders")), ("item_type", PropValue::Text("order_card")), ("line_summary", PropValue::I18n("order.count_total")), ("empty_state.icon", PropValue::Text("receipt")), ("empty_state.title", PropValue::I18n("order.empty.title")), ("empty_state.body", PropValue::I18n("order.empty.body")), ("empty_state.action.label", PropValue::I18n("order.empty.cta")), ("empty_state.action.route", PropValue::Text("/"))], children: &[] },
+            Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("bottom_nav")), ("visible_on.0", PropValue::Text("mobile")), ("items.0.id", PropValue::Text("home")), ("items.0.label", PropValue::I18n("common.nav.home")), ("items.0.icon", PropValue::Text("home")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("search")), ("items.1.label", PropValue::I18n("common.nav.search")), ("items.1.icon", PropValue::Text("search")), ("items.1.route", PropValue::Text("/search")), ("items.2.id", PropValue::Text("orders")), ("items.2.label", PropValue::I18n("common.nav.orders")), ("items.2.icon", PropValue::Text("receipt")), ("items.2.route", PropValue::Text("/orders")), ("items.2.requires_auth", PropValue::Text("true")), ("items.3.id", PropValue::Text("account")), ("items.3.label", PropValue::I18n("common.nav.account")), ("items.3.icon", PropValue::Text("user")), ("items.3.route", PropValue::Text("/account"))], children: &[] }
+        ],
+        },
+        Screen {
+            id: "order_conversation",
+            route: "/orders/:orderId/chat",
+            roles: &["CUSTOMER"],
+            requires_auth: true,
+            sdui: true,
+            data_requirements: &[ResolverKey::ConversationByOrder],
+            tree: &[
+            Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("conversation.title")), ("sticky", PropValue::Text("true"))], children: &[] },
+            Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("conversation.status"))], children: &[] },
+            Node { kind: ComponentKind::MessageBubble, props: &[("items", PropValue::Binding("conversation.messages")), ("item_type", PropValue::Text("message_bubble")), ("translated_label", PropValue::I18n("conversation.translated")), ("empty_state.title", PropValue::I18n("conversation.empty.title")), ("empty_state.body", PropValue::I18n("conversation.empty.body"))], children: &[] },
+            Node { kind: ComponentKind::QuickReplyChips, props: &[("chips.0.label", PropValue::I18n("conversation.quick_thanks")), ("chips.1.label", PropValue::I18n("conversation.quick_where"))], children: &[] },
+            Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("compose"))], children: &[
+                Node { kind: ComponentKind::TextInput, props: &[("id", PropValue::Text("body")), ("placeholder", PropValue::I18n("conversation.compose_placeholder"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("send_btn")), ("label", PropValue::I18n("conversation.send")), ("variant", PropValue::Text("primary")), ("action.type", PropValue::Text("post_message")), ("action.variables.orderId", PropValue::Binding("conversation.orderId")), ("action.variables.body", PropValue::Binding("body.value")), ("action.variables.visibility", PropValue::Text("PUBLIC")), ("action.variables.authorRole", PropValue::Text("CUSTOMER")), ("action.variables.messageId", PropValue::Binding("messageId"))], children: &[] }
+            ] },
             Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("bottom_nav")), ("visible_on.0", PropValue::Text("mobile")), ("items.0.id", PropValue::Text("home")), ("items.0.label", PropValue::I18n("common.nav.home")), ("items.0.icon", PropValue::Text("home")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("search")), ("items.1.label", PropValue::I18n("common.nav.search")), ("items.1.icon", PropValue::Text("search")), ("items.1.route", PropValue::Text("/search")), ("items.2.id", PropValue::Text("orders")), ("items.2.label", PropValue::I18n("common.nav.orders")), ("items.2.icon", PropValue::Text("receipt")), ("items.2.route", PropValue::Text("/orders")), ("items.2.requires_auth", PropValue::Text("true")), ("items.3.id", PropValue::Text("account")), ("items.3.label", PropValue::I18n("common.nav.account")), ("items.3.icon", PropValue::Text("user")), ("items.3.route", PropValue::Text("/account"))], children: &[] }
         ],
         },

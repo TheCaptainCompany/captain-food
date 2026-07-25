@@ -77,6 +77,7 @@ resolvers:
   favorites.mine:       { query: { $ref: 'api.yaml#/queries/favoriteRestaurants' } }
   operationStatus.byMessage: { query: { $ref: 'api.yaml#/queries/operationStatus' } }
   paymentStatus.byOrder:     { query: { $ref: 'api.yaml#/queries/paymentStatus' } }
+  conversation.byOrder:      { query: { $ref: 'api.yaml#/queries/orderConversation' } }   # #145 — the order's PUBLIC chat thread; arg `orderId` from the route `:orderId` (same-name convention)
   # ── GAPS — UI data needs with no backing API query yet ──
   promotions.active: { gap: "No promotions/deals query — HubRise deals not modelled in V0 (home promo banners)." }
   dishes.search:     { gap: "No dish/product search query — only restaurant search (queries/restaurants) exists." }
@@ -109,6 +110,7 @@ actions:
   rate_order:  { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/rateOrder' } }
   record_delivery_satisfaction: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/recordDeliverySatisfaction' } }   # #62 delay survey
   tip_order:   { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/tipOrder' }, note: "Post-delivery tip to the courier (recipient RIDER, or RESTAURANT for self-dispatch); à la Uber Eats/Deliveroo." }
+  post_message: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/postMessage' }, note: "#145 — customer posts a PUBLIC message to the order thread. The idempotency key `messageId` is a client-minted UUIDv7; the generic SDUI executor does not mint business ids yet (see the order_conversation screen gap)." }
   # ── GAPS — UI actions with no backing API mutation yet ──
   apply_promo_code: { kind: gap, gap: "No applyPromoCode mutation — promo codes / cart discount not modelled." }
   set_delivery_mode: { kind: gap, gap: "Cart-level delivery-mode toggle not modelled — serviceType is chosen at placeOrder." }
@@ -132,7 +134,7 @@ component_registry:
   catalog: [sticky_category_nav, catalog_sections, catalog_item_row, item_thumbnail, add_button, item_header, option_groups, quantity_selector]
   cart: [cart_lines, cart_line_row, quantity_stepper, promo_code_input, delivery_mode_toggle, order_summary_block, minimum_order_warning, cart_summary_mini]
   checkout: [checkout_section, address_selector, form, text_input, phone_input, email_input, text_area, stripe_express_checkout_element]
-  order: [order_status_hero, eta_bar, order_timeline, restaurant_contact_row, order_items_summary, order_id_row, order_list, order_card, status_chip]
+  order: [order_status_hero, eta_bar, order_timeline, restaurant_contact_row, order_items_summary, order_id_row, order_list, order_card, status_chip, message_bubble, quick_reply_chips]   # message_bubble + quick_reply_chips (#145): the per-order in-app conversation timeline + quick replies
   account: [account_header, menu_section, sign_out_button]
   inputs: [button, text_button, icon_button, avatar_button, logo, location_pill, search_input, phone_field, otp_input, inline_error, countdown, star_rating, chip_multi_select, tip_amount_selector]
 
@@ -475,6 +477,52 @@ screens:
         item_type: order_card
         line_summary: { $ref: 'restaurant_frontoffice.translations.yaml#/order.count_total' }   # params: { count, total }
         empty_state: { icon: receipt, title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.body' }, action: { label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.empty.cta' }, route: "/" } }
+      - { component: bottom_nav }
+
+  # SCREEN 5b — Order conversation (in-app chat, #145)
+  - id: order_conversation
+    roles: [CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
+    route: "/orders/:orderId/chat"
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [conversation.byOrder]
+    actions_used: [post_message]
+    gaps:
+      - "`post_message` messageId (the client idempotency key) is not yet minted client-side: the generic SDUI executor resolves variables from bindings/literals only and does not mint business UUIDs (the checkout `place_order` orderId is minted by the bespoke checkout.rs flow). The compose row renders and dispatches, but the client-minted messageId injection is a follow-up (#145)."
+    components:
+      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.title' }, sticky: true }
+      - { type: status_chip, status: "{{ conversation.status }}" }
+      - type: message_bubble
+        items: "{{ conversation.messages }}"
+        item_type: message_bubble
+        translated_label: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.translated' }
+        empty_state:
+          title: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.empty.title' }
+          body: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.empty.body' }
+      - type: quick_reply_chips
+        chips:
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.quick_thanks' } }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.quick_where' } }
+      - type: row
+        id: compose
+        content:
+          - { type: text_input, id: body, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.compose_placeholder' } }
+          - type: button
+            id: send_btn
+            label: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.send' }
+            variant: primary
+            action:
+              type: post_message
+              # orderId mirrors the rider job_detail pattern (`{{ delivery.orderId }}`): the route `:orderId`
+              # feeds the resolver, whose result carries `orderId` back for the write. visibility/authorRole
+              # are static enum literals; messageId is the client idempotency key (screen gap above).
+              variables:
+                orderId: "{{ conversation.orderId }}"
+                body: "{{ body.value }}"
+                visibility: "PUBLIC"
+                authorRole: "CUSTOMER"
+                messageId: "{{ messageId }}"
       - { component: bottom_nav }
 
   # SCREEN 6 — Account
