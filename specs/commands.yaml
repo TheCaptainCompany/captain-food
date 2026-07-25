@@ -1431,6 +1431,43 @@ PostMessage:
       nullable: true
   required: [orderId, messageId, authorRole, visibility, body, originalLocale]
 
+EscalateToAdmin:
+  description: >
+    Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The
+    conversation must exist. Emits AdminInvitedToConversation (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    reason: { $ref: 'scalars.yaml#/EscalationReason' }
+  required: [orderId, reason]
+
+MuteParticipant:
+  description: >
+    Mute a participant role in an order's conversation. A justification `reason` is REQUIRED, but is left
+    OUT of `required` on purpose: the "justified" invariant is enforced by the write model as an
+    anticipated error (errors.yaml#/MuteReasonRequired), not by the schema. `until` bounds the mute in
+    time; absent = indefinite. The conversation must exist (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+    reason: { $ref: 'scalars.yaml#/MuteReason' }
+    until:
+      type: string
+      format: date-time
+      nullable: true
+  required: [orderId, mutedRole]
+
+UnmuteParticipant:
+  description: >
+    Unmute a previously muted participant role in an order's conversation. The conversation must exist
+    and the role must currently be muted (errors.yaml#/ParticipantNotMuted) (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+  required: [orderId, mutedRole]
+
 # =====================================================================
 # Where the rest lives
 # =====================================================================

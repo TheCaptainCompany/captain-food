@@ -657,6 +657,9 @@ OrderConversation:
   fedBy:
     - { $ref: 'events.yaml#/ConversationOpened' }
     - { $ref: 'events.yaml#/MessagePosted' }
+    - { $ref: 'events.yaml#/AdminInvitedToConversation' }
+    - { $ref: 'events.yaml#/ParticipantMuted' }
+    - { $ref: 'events.yaml#/ParticipantUnmuted' }
     - { $ref: 'events.yaml#/OrderPlaced' }
     - { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }
     - { $ref: 'events.yaml#/OrderPreparationStarted' }
@@ -698,3 +701,18 @@ OrderConversation:
     opened_at:
       type: timestamptz
       from: [{ $ref: 'events.yaml#/ConversationOpened' }]
+    admin_invited:
+      type: boolean
+      from: [{ $ref: 'events.yaml#/AdminInvitedToConversation' }]
+      note: "True once an admin was pulled in by a reasoned escalation (#129)."
+    escalation_reason:
+      type: { $ref: 'scalars.yaml#/EscalationReason' }
+      nullable: true
+      from: [{ $ref: 'events.yaml#/AdminInvitedToConversation/properties/reason' }]
+      note: "The reason recorded on the latest escalation; null until an admin is invited."
+    muted:
+      type: jsonb
+      from:
+        - { $ref: 'events.yaml#/ParticipantMuted' }
+        - { $ref: 'events.yaml#/ParticipantUnmuted' }
+      note: "current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector."

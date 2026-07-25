@@ -2339,3 +2339,33 @@ impl From<AttachmentRef> for ds::AttachmentRef {
         Self(v.0)
     }
 }
+
+/// The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct MuteReason(pub String);
+async_graphql::scalar!(MuteReason, "MuteReason", "The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).");
+impl From<ds::MuteReason> for MuteReason {
+    fn from(v: ds::MuteReason) -> Self {
+        Self(v.0)
+    }
+}
+impl From<MuteReason> for ds::MuteReason {
+    fn from(v: MuteReason) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct EscalationReason(pub String);
+async_graphql::scalar!(EscalationReason, "EscalationReason", "Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).");
+impl From<ds::EscalationReason> for EscalationReason {
+    fn from(v: ds::EscalationReason) -> Self {
+        Self(v.0)
+    }
+}
+impl From<EscalationReason> for ds::EscalationReason {
+    fn from(v: EscalationReason) -> Self {
+        Self(v.0)
+    }
+}

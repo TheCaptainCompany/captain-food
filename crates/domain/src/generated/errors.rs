@@ -650,6 +650,22 @@ pub const MESSAGE_ALREADY_POSTED: ErrorDef = ErrorDef {
     message_fr: "Ce message a déjà été envoyé.",
 };
 
+/// A participant was muted without a justification reason; a mute must record why (rules.yaml#/MuteRequiresAReason) (#129).
+/// Context: `orderId`.
+pub const MUTE_REASON_REQUIRED: ErrorDef = ErrorDef {
+    code: "MuteReasonRequired",
+    message_en: "A reason is required to mute a participant.",
+    message_fr: "Un motif est requis pour rendre un participant muet.",
+};
+
+/// An unmute targeted a role that is not currently muted in the order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).
+/// Context: `orderId`, `mutedRole`.
+pub const PARTICIPANT_NOT_MUTED: ErrorDef = ErrorDef {
+    code: "ParticipantNotMuted",
+    message_en: "This participant is not currently muted.",
+    message_fr: "Ce participant n'est pas actuellement muet.",
+};
+
 /// Every anticipated error, in errors.yaml order.
 pub const ERRORS: &[ErrorDef] = &[
     UNAUTHORIZED,
@@ -733,6 +749,8 @@ pub const ERRORS: &[ErrorDef] = &[
     CONVERSATION_NOT_FOUND,
     CUSTOMER_CHAT_DISABLED,
     MESSAGE_ALREADY_POSTED,
+    MUTE_REASON_REQUIRED,
+    PARTICIPANT_NOT_MUTED,
 ];
 
 /// Look up an anticipated error by its stable PascalCase code.

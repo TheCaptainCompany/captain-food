@@ -184,10 +184,13 @@ restaurant_manager:
         EscalateDelivery: { $ref: 'api.yaml#/mutations/escalateDelivery' }   # skip the current channel, advance the ranked dispatch walk (#60)
         ReviewDeliverySatisfaction: { $ref: 'api.yaml#/queries/restaurantDeliverySatisfaction' }   # #62 customers' delay verdicts → self-dispatch-vs-Captain decision
     HandleOrderConversation:
-      description: As a manager, I reply on my orders' conversations and keep internal staff notes (#129).
+      description: As a manager, I reply on my orders' conversations, keep internal staff notes, and moderate the thread (#129).
       steps:
         ReplyToCustomer: { $ref: 'api.yaml#/mutations/postMessage' }
         ReadInternalNotes: { $ref: 'api.yaml#/queries/orderConversationInternalNotes' }
+        EscalateToAdmin: { $ref: 'api.yaml#/mutations/escalateToAdmin' }   # pull an admin in with a reason (#129)
+        MuteParticipant: { $ref: 'api.yaml#/mutations/muteParticipant' }   # mute a disruptive role, reason required (#129)
+        UnmuteParticipant: { $ref: 'api.yaml#/mutations/unmuteParticipant' }
 
 rider:
   description: A courier who delivers orders from restaurants to customers.

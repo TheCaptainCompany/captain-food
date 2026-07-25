@@ -7,7 +7,7 @@
 //! (`CustomerChatDisabled`) and the set of already-posted message ids (`MessageAlreadyPosted`). No I/O.
 
 use crate::generated::events::DomainEvent;
-use crate::generated::scalars::ConversationMessageId;
+use crate::generated::scalars::{ConversationAuthorRole, ConversationMessageId};
 
 /// What the Conversation command handlers need to accept or reject a command. `None` (from [`fold`])
 /// means no `ConversationOpened` yet — the conversation does not exist.
@@ -17,6 +17,11 @@ pub struct ConversationState {
     pub customer_chat_enabled: bool,
     /// Message ids already appended — the idempotency guard for `PostMessage`.
     pub message_ids: Vec<ConversationMessageId>,
+    /// Whether an admin was pulled into the thread by a reasoned escalation (#129).
+    pub admin_invited: bool,
+    /// The participant roles currently muted — the set `MuteParticipant`/`UnmuteParticipant` read
+    /// (`ParticipantNotMuted`; #129).
+    pub muted_roles: Vec<ConversationAuthorRole>,
 }
 
 /// Fold a Conversation stream (events in version order) into its current state. `None` ⇔ the stream
@@ -32,11 +37,33 @@ fn apply(state: Option<ConversationState>, event: &DomainEvent) -> Option<Conver
         DomainEvent::ConversationOpened(e) => Some(ConversationState {
             customer_chat_enabled: e.customer_chat_enabled,
             message_ids: Vec::new(),
+            admin_invited: false,
+            muted_roles: Vec::new(),
         }),
         // Append the message id (idempotency guard); a MessagePosted without a birth is impossible.
         DomainEvent::MessagePosted(e) => {
             let mut s = state?;
             s.message_ids.push(e.message_id);
+            Some(s)
+        }
+        // An admin was pulled in by a reasoned escalation (#129).
+        DomainEvent::AdminInvitedToConversation(_) => {
+            let mut s = state?;
+            s.admin_invited = true;
+            Some(s)
+        }
+        // Mute a role: add it to the current set (idempotent — never duplicated).
+        DomainEvent::ParticipantMuted(e) => {
+            let mut s = state?;
+            if !s.muted_roles.contains(&e.muted_role) {
+                s.muted_roles.push(e.muted_role);
+            }
+            Some(s)
+        }
+        // Unmute a role: drop it from the current set.
+        DomainEvent::ParticipantUnmuted(e) => {
+            let mut s = state?;
+            s.muted_roles.retain(|role| *role != e.muted_role);
             Some(s)
         }
         _ => state,
@@ -47,9 +74,13 @@ fn apply(state: Option<ConversationState>, event: &DomainEvent) -> Option<Conver
 mod tests {
     use super::*;
     use crate::aggregate::Aggregate;
-    use crate::generated::events::{ConversationOpened, MessagePosted};
+    use crate::generated::events::{
+        AdminInvitedToConversation, ConversationOpened, MessagePosted, ParticipantMuted,
+        ParticipantUnmuted,
+    };
     use crate::generated::scalars::{
-        ConversationAuthorRole, Locale, MessageBody, MessageVisibility, OrderId, RestaurantId,
+        ConversationAuthorRole, EscalationReason, Locale, MessageBody, MessageVisibility, MuteReason,
+        OrderId, RestaurantId,
     };
 
     fn opened(customer_chat_enabled: bool) -> DomainEvent {
@@ -90,6 +121,47 @@ mod tests {
         let m2 = uuid::Uuid::from_u128(2);
         let s = fold(&[opened(true), posted(m1), posted(m2)]).unwrap();
         assert_eq!(s.message_ids, vec![ConversationMessageId(m1), ConversationMessageId(m2)]);
+    }
+
+    fn escalated() -> DomainEvent {
+        DomainEvent::AdminInvitedToConversation(AdminInvitedToConversation {
+            order_id: OrderId(uuid::Uuid::nil()),
+            reason: EscalationReason("need arbitration".into()),
+        })
+    }
+    fn muted(role: ConversationAuthorRole) -> DomainEvent {
+        DomainEvent::ParticipantMuted(ParticipantMuted {
+            order_id: OrderId(uuid::Uuid::nil()),
+            muted_role: role,
+            reason: MuteReason("off-topic".into()),
+            until: None,
+        })
+    }
+    fn unmuted(role: ConversationAuthorRole) -> DomainEvent {
+        DomainEvent::ParticipantUnmuted(ParticipantUnmuted {
+            order_id: OrderId(uuid::Uuid::nil()),
+            muted_role: role,
+        })
+    }
+
+    #[test]
+    fn escalation_marks_the_admin_invited() {
+        assert!(!fold(&[opened(true)]).unwrap().admin_invited);
+        assert!(fold(&[opened(true), escalated()]).unwrap().admin_invited);
+    }
+
+    #[test]
+    fn mute_then_unmute_tracks_the_current_muted_set() {
+        let s = fold(&[opened(true), muted(ConversationAuthorRole::RIDER)]).unwrap();
+        assert_eq!(s.muted_roles, vec![ConversationAuthorRole::RIDER]);
+        // Muting an already-muted role never duplicates it.
+        let s = fold(&[opened(true), muted(ConversationAuthorRole::RIDER), muted(ConversationAuthorRole::RIDER)])
+            .unwrap();
+        assert_eq!(s.muted_roles, vec![ConversationAuthorRole::RIDER]);
+        // Unmuting removes it again.
+        let s = fold(&[opened(true), muted(ConversationAuthorRole::RIDER), unmuted(ConversationAuthorRole::RIDER)])
+            .unwrap();
+        assert!(s.muted_roles.is_empty());
     }
 
     #[test]

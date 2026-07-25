@@ -378,6 +378,8 @@ types:
     properties:
       orderId: { $ref: 'scalars.yaml#/OrderId' }
       notes: { $ref: 'entities.yaml#/ConversationMessage', array: true }   # INTERNAL staff notes
+      adminInvited: { type: boolean }   # an admin was pulled in by a reasoned escalation (#129)
+      mutedParticipants: { $ref: 'entities.yaml#/MutedParticipant', array: true }   # roles currently muted
 
 # --- Generator-injected inputs (not command payloads) ---------------------------------------------
 inputs:
@@ -962,6 +964,18 @@ mutations:
   postMessage:
     command: { $ref: 'commands.yaml#/PostMessage' }
     roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+  escalateToAdmin:
+    command: { $ref: 'commands.yaml#/EscalateToAdmin' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
+  muteParticipant:
+    command: { $ref: 'commands.yaml#/MuteParticipant' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V0
+  unmuteParticipant:
+    command: { $ref: 'commands.yaml#/UnmuteParticipant' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
     slice: V0
 
 

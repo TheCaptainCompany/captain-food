@@ -197,3 +197,9 @@ MessagesCarryVisibility:
   description: "Every conversation message is either PUBLIC (customer-visible) or INTERNAL (staff-only); restaurant/rider/admin may post INTERNAL staff notes that never surface to the customer (#129)."
 MessagePostingIsIdempotent:
   description: "Re-posting a message with an already-seen client-generated messageId is rejected (idempotent posting; #129)."
+MuteRequiresAReason:
+  description: "Muting a participant in an order conversation requires a justification reason; a mute without one is rejected (#129)."
+AdminJoinsByReasonedEscalation:
+  description: "An admin is added to a conversation only through a reasoned escalation by the restaurant or rider (#129)."
+OnlyMutedParticipantsCanBeUnmuted:
+  description: "Unmuting a role that is not currently muted is rejected (#129)."
