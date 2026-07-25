@@ -66,14 +66,19 @@ The product owner directed "do this completely" (2026-07-25). Adopting the propo
 | 4 | Mute authorization matrix | restaurant → (customer, rider); admin → anyone; customer → none. |
 | 6 | Phasing | **Post-V0**, and **land the reserve slice now** (this ADR). |
 
-Two decisions are **left open** and carried to their implementing slice, because the proposal offers no
-single recommendation and they should not be fabricated while unconfirmed:
+Two decisions were **left open** in the initial version; the product owner resolved both (2026-07-25),
+recorded in the addendum below.
 
-- **#2 Image retention window (GDPR)** for `DELIVERY_PROOF` / `RECLAMATION`, and whether the first
-  image slice ships at all — to be set alongside the journals/mirror retention policy
-  ([#18](https://github.com/TheCaptainCompany/captain-food/issues/18)) when the attachments slice is picked up.
-- **#5 Rider participation default** (always a participant once assigned, vs. pulled in on demand) —
-  proposed default *"participant once assigned"*, to confirm when the text-conversation slice is built.
+### Decision addendum (2026-07-25, product owner)
+
+Answering the two open items plus one the proposal left implicit, and setting execution scope:
+
+| Item | Resolution |
+|---|---|
+| **#5 Rider participation default** | **Auto-participant once assigned** — the assigned rider can post proof-of-delivery + private notes without being pulled in (matches the rider mockup). |
+| **#2 Images (GDPR retention)** | **Handled generically by the framework**, not modelled bespoke in this epic. The `Conversation` aggregate references attachments as opaque `attachmentId`/`storageRef` hooks; the storage/moderation/retention/erasure pipeline is a cross-cutting framework capability (the reserved `captain-framework` extraction), not a custom image path here. #134 is re-scoped to *consume* that generic mechanism. |
+| **`customerChatEnabled` default** (proposal §2.4 left it implicit) | **Default ON (opt-out)** — customer↔restaurant chat is enabled by default; a restaurant turns it off if it doesn't want a chat desk. |
+| **Execution scope** | Build **everything spec-able** now (all slices except push/#132 — needs #127 — and bespoke images/#134): #130 text + ACL, #131 status-fold, #133 in-thread refund binding, #135 translation cache, #136 escalation + mute, #137 quick replies. Each lands as a green spec-only slice with its full ADR-0032 completeness set. |
 
 ## Alternatives considered
 
