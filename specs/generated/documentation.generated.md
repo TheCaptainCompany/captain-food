@@ -9219,9 +9219,6 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | read | `conversation.byOrder` | [🔎 `orderConversation`](#query-orderconversation) |
 | write | `post_message` | [✏️ `postMessage`](#mutation-postmessage) |
 
-**Gaps**
-- ⚠️ `post_message` messageId (the client idempotency key) is not yet minted client-side: the generic SDUI executor resolves variables from bindings/literals only and does not mint business UUIDs (the checkout `place_order` orderId is minted by the bespoke checkout.rs flow). The compose row renders and dispatches, but the client-minted messageId injection is a follow-up (#145).
-
 <a id="screen-account"></a>
 ### 📱 `account` · `/account` · 📱 SDUI · 🔒 auth
 
