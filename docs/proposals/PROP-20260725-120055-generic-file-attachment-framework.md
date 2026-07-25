@@ -253,6 +253,90 @@ choke point for byte-level auditing, at the cost of egress + CPU on every image 
 Given the content (order photos, doorstep photos), the 60-second window is an acceptable trade — but it
 **is** a privacy trade, so it is decision **D1** in §9 rather than an assumption.
 
+### 4.5 Where the scope check lives, and the prerequisite it exposes
+
+Step 6 of §4.2 ("is this principal a member of `scope_id`?") is the question that makes the whole ACL
+real, and answering it turned up a gap that is **wider than this proposal**.
+
+#### 4.5.1 The layer: the read repository *port*, not the resolver
+
+On the **write** side the aggregate is the choke point — every mutation funnels through it, so it is the
+natural place for a business security check, and that is where these checks belong (product-owner
+position, 2026-07-25). On the **read** side there is no aggregate: queries go straight from the resolver
+to a read model (projection-on-read, ADR-0035). So the choke point must be somewhere else, and the only
+place every read funnels through is the **read repository trait in `crates/application/src/queries.rs`**.
+
+| layer | verdict |
+|---|---|
+| `domain` | **No.** No aggregate on the read side, and domain must not know auth subjects (ADR-0041 keeps the acting user in the envelope). Row ownership is not a business invariant. |
+| `server` (resolver, `/files` route) | **Supplies** the verified `Principal`; must not **own** the rule — otherwise every transport (GraphQL, `/files`, SSR, later the mobile shells) reimplements it. |
+| **`application` (the read ports)** | **Yes.** "A customer reads their own order" is a use-case rule. |
+| `infrastructure` (`Pg*Repository`) | Where the predicate **executes** (the SQL `WHERE`), not where the decision **lives**. |
+| Postgres RLS | No — forks the ACL into a second engine (§8f). |
+
+**Make it structural, not procedural.** Today the ports are unscoped *by signature*:
+
+```rust
+// crates/application/src/queries.rs:252 — anyone who may call the query gets any order
+async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError>;
+```
+
+An unscoped read is *expressible*, so correctness depends on every caller remembering. The fix is to
+make it inexpressible:
+
+```rust
+async fn by_id(&self, id: OrderId, scope: &ReadScope) -> Result<Option<OrderTrackingRow>, DomainError>;
+
+enum ReadScope { Public, Customer(CustomerId), Restaurant(RestaurantId), Rider(RiderId), Admin }
+//   constructible ONLY from a verified Principal
+```
+
+Each `Pg*Repository` turns the scope into a predicate (`AND customer_id = $2`, `AND restaurant_id = $2`,
+a join to `View_DeliveryJob` for rider, nothing for admin). **Filter, don't check**: pushing it into the
+`WHERE` makes list queries correct by construction, leaks no existence on collections, and costs one
+round trip instead of two. A review rule catches this most of the time; a type signature catches it
+every time.
+
+**Two distinct gates, both required** — `@auth`/`@public` (api.yaml, at the role path) answers *may this
+**role** call this operation?*; `ReadScope` answers *may this **principal** see this row?* The former
+structurally cannot express the latter: the schema does not know which order is being asked for.
+
+`/files` uses the same application-layer port rather than its own logic — which is why `ScopeMembership`
+belongs in `crates/application/ports`: one implementation, two transports. It is the direct-fetch case,
+so it returns a status rather than filtering; **403, not 404**, because the id is an unguessable UUIDv7
+only obtainable from a thread the caller already had access to (negligible existence leak), and
+collapsing both cases to 404 would destroy the probing signal of §7.
+
+#### 4.5.2 The prerequisite: two of four roles cannot be resolved today
+
+| role | resolution | status |
+|---|---|---|
+| ADMIN | role alone, no lookup | ✅ |
+| CUSTOMER | `sub` → `Customer.auth_ref` → `customer_id` = `OrderTracking.customer_id` | ✅ both columns exist |
+| RIDER | `sub` → `riderId` = `View_DeliveryJob.rider_id WHERE order_id = $scope` | ⚠️ `RiderRegistered.authRef` exists (`events.yaml`) but is **projected nowhere** |
+| RESTAURANT | `sub` → `restaurant_id` = `OrderTracking.restaurant_id` | ❌ **no auth bridge exists at all** |
+
+Only `Customer` has an `auth_ref` bridge. Nothing maps an auth subject to a restaurant, and no read
+model projects the rider's. This is **not** a files-specific gap: ADR-0047 gates the *role path* but
+explicitly defers per-field `@auth`, and the resolvers are thin read models, so nothing has yet had to
+enforce *which* restaurant a staff user belongs to. `/files` is simply the first surface that does,
+because it is the first one serving personal data outside the GraphQL ACL.
+
+> ⚠️ **Do not resolve the restaurant from the `Host` header.** The tenant middleware maps
+> `{slug}.captain.food` → restaurant, and reusing it here looks free — but it identifies the storefront
+> being *viewed*, not the restaurant the user *works for*. Staff visiting a competitor's subdomain would
+> authorize as that competitor's staff. Host is tenant routing, never authorization.
+
+**Consequence for this proposal:** cross-cutting read authorization (`ReadScope` + the identity bridges)
+is a **blocking prerequisite**, tracked separately because the whole back office needs it, not just
+attachments. Shipping `/files` with CUSTOMER + ADMIN only and failing RESTAURANT/RIDER closed was
+considered and rejected: it would 403 the restaurant on the order photo it had just uploaded.
+
+**Caching:** memoize membership per `(sub, scope_id)` in request extensions — a thread rendering 5
+images then costs 1 check, not 5. Beyond the request, cache **negatives** freely but **positives**
+briefly or not at all: the point of §3.3 is that reassignment revokes instantly, and a 60-second
+positive cache hands the previous rider a 60-second window after they are off the job.
+
 ## 5. Upload
 
 `POST /files` (multipart) through the BFF — one place for the size limit, the type allowlist, the
@@ -350,6 +434,10 @@ erased" record. Expiry and erasure are therefore not the same operation on the r
 3. An expired or purged file returns 410 and never bytes.
 4. Domain events never carry file bytes — only refs.
 5. An attachment ref whose extension does not match the stored file is not served.
+6. A read never returns a row outside the caller's `ReadScope` — a customer cannot read another
+   customer's order, a restaurant cannot read another restaurant's, a rider cannot read a job they are
+   not assigned to (§4.5.1; product-owner position, 2026-07-25). This one is **cross-cutting**, not
+   files-specific, and lands with the prerequisite issue.
 
 **Observability contracts** (`specs/observability.yaml`): upload outcome + size distribution;
 **403 rate on `/files` as an operator signal** (a spike is id-probing, not user error); redirect/stream
@@ -395,8 +483,12 @@ latency; sweep deletions per kind; bucket bytes per tenant (cost).
 
 ## 10. Scope of the implementation slice
 
-**In:** `specs/database/tables/files.yaml` + the three scalar enums · the `FileRetentionWorker` +
-`sweep_retention()` tombstone clause · `POST /files` + `GET /files/<uuid7>.<ext>` in `crates/server` ·
+**Blocked on:** cross-cutting read authorization — `ReadScope` on the read ports + the RESTAURANT/RIDER
+identity bridges + the `ScopeMembership` port (§4.5). Tracked separately; `/files` cannot enforce §3.3
+for two of its four roles until it lands.
+
+**In:** `specs/database/tables/files.yaml` + the three scalar enums · the `FileRetentionWorker` (daily,
+object-only) · `POST /files` + `GET /files/<uuid7>.<ext>` in `crates/server` ·
 the `PostMessage` audience-narrowing step (§3.4) · rules + behaviour tests + observability contracts.
 
 **Out (unchanged, deliberately):** `AttachmentRef`, `MessagePosted`, the `Conversation` aggregate and
