@@ -169,6 +169,62 @@ fn resolved_variables(
     (input, unresolved_bindings)
 }
 
+/// The client-mint sentinel (#147): an action variable bound to `{{ $uuid }}` is NOT a screen
+/// binding — no resolver datum can satisfy it (the `$` prefix is reserved for a *synthesized*
+/// value; screen data paths never start with `$`), so `resolved_variables` reports it as an
+/// unresolved binding, exactly like a `{{ <field>.value }}` form reference. The dispatch layer then
+/// mints a fresh UUIDv7 for it via [`fill_mint_tokens`]. This is how `order_conversation`'s
+/// `post_message.messageId` (a client-minted idempotency key, required by the command spec) is
+/// produced without a bespoke flow like checkout's orderId.
+pub const MINT_UUID: &str = "$uuid";
+
+/// Fill any client-mint tokens ([`MINT_UUID`]) in a mutation's resolved variables, minting one
+/// fresh value per token from `mint`. Called at DISPATCH time (once per user action), NOT at render
+/// time — so the id is minted the moment the write is dispatched and then PERSISTED with the pending
+/// write. A same-operation retry re-sends the stored input (`pending::retry`), keeping the original
+/// id (idempotency); a brand-new user action mints a new one.
+///
+/// It reads the same `unresolved_bindings` list the driver uses to fill `{{ <field>.value }}` form
+/// references and acts ONLY on `$uuid` entries — the two seams never overlap (a form binding ends in
+/// `.value`, never equals `$uuid`). Pure and seam-injected (`mint`) so the mint is unit-testable
+/// off-wasm; the wasm driver passes `uuid::Uuid::now_v7`.
+pub fn fill_mint_tokens(
+    input: &mut Map<String, Value>,
+    unresolved_bindings: &[(String, String)],
+    mut mint: impl FnMut() -> uuid::Uuid,
+) {
+    for (name, binding) in unresolved_bindings {
+        if binding == MINT_UUID {
+            input.insert(name.clone(), Value::String(mint().to_string()));
+        }
+    }
+}
+
+/// The client-locale sentinel (#147): an action variable bound to `{{ $locale }}` is filled at
+/// DISPATCH time with the client's current UI locale — the same resolved locale #110 stamps on
+/// `<html lang>` (the hydrate driver reads it back from the DOM). Like [`MINT_UUID`], the `$` prefix
+/// marks a synthesized value, so `resolved_variables` reports it as an unresolved binding and the
+/// dispatch layer supplies it via [`fill_locale_tokens`]. This is how `post_message.originalLocale`
+/// (required by the command spec) travels without the screen having to bind a data path for it.
+pub const LOCALE_TOKEN: &str = "$locale";
+
+/// Fill any client-locale tokens ([`LOCALE_TOKEN`]) in a mutation's resolved variables with
+/// `locale`. Sibling of [`fill_mint_tokens`]: same seam (the reported `unresolved_bindings`), same
+/// dispatch-time timing, acts ONLY on `$locale` entries so it never collides with `$uuid` tokens or
+/// `{{ <field>.value }}` form references. Pure and value-injected so it is unit-testable off-wasm;
+/// the wasm driver passes the DOM `<html lang>` (defaulting to the supported default locale).
+pub fn fill_locale_tokens(
+    input: &mut Map<String, Value>,
+    unresolved_bindings: &[(String, String)],
+    locale: &str,
+) {
+    for (name, binding) in unresolved_bindings {
+        if binding == LOCALE_TOKEN {
+            input.insert(name.clone(), Value::String(locale.to_string()));
+        }
+    }
+}
+
 /// `{{ variables.<name> }}` templates inside a route, substituted from the resolved input — the
 /// checkout `on_success` route carries the client-minted orderId this way.
 fn substitute_variables(route: &str, input: Option<&Map<String, Value>>) -> String {
@@ -526,6 +582,129 @@ mod tests {
         assert_eq!(get(attrs::ACTION).as_deref(), Some("accept_order"));
         let vars: Value = serde_json::from_str(&get(attrs::VARS).unwrap()).unwrap();
         assert_eq!(vars["orderId"], json!("o-1"));
+    }
+
+    #[test]
+    fn the_uuid_mint_token_produces_a_fresh_v7_id_at_dispatch_time() {
+        // #147: the order_conversation compose send button, straight from the GENERATED tree — its
+        // `messageId` variable is `{{ $uuid }}`, a client-mint token (not a screen binding).
+        let convo = Surface::RestaurantFrontoffice
+            .screens()
+            .iter()
+            .find(|s| s.id == "order_conversation")
+            .expect("order_conversation screen");
+        let send = find_action(convo.tree, "post_message").expect("post_message send button");
+
+        let ctx = ctx_with(&[("conversation", json!({ "orderId": "o-9" }))]);
+        let spec = ActionSpec::from_node(send, &ctx).expect("an action");
+        let ActionPlan::Mutation { input, unresolved_bindings, .. } = &spec.plan else {
+            panic!("post_message is a mutation kind")
+        };
+        // The static/screen-bound variables resolve exactly as before (no regression) …
+        assert_eq!(input["orderId"], json!("o-9"), "screen binding still resolves");
+        assert_eq!(input["visibility"], json!("PUBLIC"), "literal still passes through");
+        assert_eq!(input["authorRole"], json!("CUSTOMER"));
+        // … and the mint token is reported unresolved (value null), like a form-field binding.
+        assert_eq!(input["messageId"], Value::Null, "unminted at parse time");
+        assert!(
+            unresolved_bindings.iter().any(|(n, b)| n == "messageId" && b == MINT_UUID),
+            "the $uuid token must be reported for the dispatch-time mint: {unresolved_bindings:?}"
+        );
+        // `body` is a live form-field binding, reported too — filled from the DOM, not by the mint.
+        assert!(unresolved_bindings.iter().any(|(n, b)| n == "body" && b == "body.value"));
+
+        // (a) The token resolves to a valid UUIDv7 string at dispatch time.
+        let mut first = input.clone();
+        fill_mint_tokens(&mut first, unresolved_bindings, uuid::Uuid::now_v7);
+        let id = first["messageId"].as_str().expect("messageId is a string after minting");
+        assert_eq!(
+            uuid::Uuid::parse_str(id).expect("a valid UUID").get_version_num(),
+            7,
+            "a client-minted UUIDv7 idempotency key"
+        );
+        // The mint pass touches ONLY the token — the form-field binding and screen data are intact.
+        assert_eq!(first["body"], Value::Null, "the $uuid pass never fills form fields");
+        assert_eq!(first["orderId"], json!("o-9"));
+
+        // (b) Two dispatches mint DIFFERENT ids (a fresh id per user action).
+        let mut second = input.clone();
+        fill_mint_tokens(&mut second, unresolved_bindings, uuid::Uuid::now_v7);
+        assert_ne!(first["messageId"], second["messageId"], "a fresh id per dispatch");
+    }
+
+    #[test]
+    fn the_locale_token_fills_the_client_locale_and_leaves_other_entries_untouched() {
+        // #147: `{{ $locale }}` resolves to the provided UI locale at dispatch time; a literal, a
+        // form-field binding, and the `$uuid` token slot are all left for their own passes.
+        let mut input = Map::new();
+        input.insert("visibility".into(), json!("PUBLIC")); // literal
+        input.insert("body".into(), Value::Null); // form-field binding
+        input.insert("messageId".into(), Value::Null); // $uuid token slot
+        input.insert("originalLocale".into(), Value::Null); // $locale token slot
+        let bindings = vec![
+            ("body".to_string(), "body.value".to_string()),
+            ("messageId".to_string(), MINT_UUID.to_string()),
+            ("originalLocale".to_string(), LOCALE_TOKEN.to_string()),
+        ];
+        fill_locale_tokens(&mut input, &bindings, "fr");
+        assert_eq!(input["originalLocale"], json!("fr"), "the token takes the provided locale");
+        assert_eq!(input["visibility"], json!("PUBLIC"), "literal unchanged");
+        assert_eq!(input["body"], Value::Null, "form-field binding not touched");
+        assert_eq!(input["messageId"], Value::Null, "the $uuid slot is another pass");
+    }
+
+    #[test]
+    fn a_dispatched_post_message_carries_every_required_field() {
+        // The whole point of #147: after the dispatch-time fills, the compose send input satisfies
+        // EVERY required PostMessage field — a real send is server-acceptable (no missing field).
+        let convo = Surface::RestaurantFrontoffice
+            .screens()
+            .iter()
+            .find(|s| s.id == "order_conversation")
+            .expect("order_conversation screen");
+        let send = find_action(convo.tree, "post_message").expect("post_message send button");
+        let ctx = ctx_with(&[("conversation", json!({ "orderId": "o-9" }))]);
+        let ActionPlan::Mutation { input, unresolved_bindings, .. } =
+            ActionSpec::from_node(send, &ctx).expect("an action").plan
+        else {
+            panic!("post_message is a mutation kind")
+        };
+
+        // Reproduce the driver's dispatch-time fills, in order:
+        let mut input = input;
+        fill_mint_tokens(&mut input, &unresolved_bindings, uuid::Uuid::now_v7); // {{ $uuid }}
+        fill_locale_tokens(&mut input, &unresolved_bindings, "fr"); // {{ $locale }}
+        input.insert("body".into(), json!("merci !")); // {{ body.value }} — live input (DOM in prod)
+
+        // Every required field of commands.yaml#/PostMessage, non-null.
+        for field in ["orderId", "messageId", "authorRole", "visibility", "body", "originalLocale"] {
+            assert!(
+                input.get(field).is_some_and(|v| !v.is_null()),
+                "required PostMessage field `{field}` must be non-null after dispatch: {input:?}"
+            );
+        }
+        assert_eq!(input["originalLocale"], json!("fr"));
+        assert_eq!(input["authorRole"], json!("CUSTOMER"));
+        assert_eq!(input["visibility"], json!("PUBLIC"));
+        assert_eq!(input["orderId"], json!("o-9"));
+    }
+
+    #[test]
+    fn fill_mint_tokens_leaves_literals_and_form_bindings_untouched() {
+        // (c) No regression: only `$uuid` entries are minted; a `.value` form binding and an
+        // already-resolved literal in the input are left exactly as they were.
+        let mut input = Map::new();
+        input.insert("visibility".into(), json!("PUBLIC")); // a resolved literal
+        input.insert("body".into(), Value::Null); // an unresolved form-field binding
+        input.insert("messageId".into(), Value::Null); // the mint token slot
+        let bindings = vec![
+            ("body".to_string(), "body.value".to_string()),
+            ("messageId".to_string(), MINT_UUID.to_string()),
+        ];
+        fill_mint_tokens(&mut input, &bindings, uuid::Uuid::now_v7);
+        assert_eq!(input["visibility"], json!("PUBLIC"), "literal unchanged");
+        assert_eq!(input["body"], Value::Null, "form-field binding not minted");
+        assert!(input["messageId"].as_str().is_some(), "only the token is minted");
     }
 
     #[test]

@@ -229,12 +229,26 @@ impl Driver {
             .get_attribute(attrs::VARS)
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
-        // Form-field bindings (#94): a var whose `{{ <field>.value }}` binding had no screen data
-        // is filled from the LIVE input by its element id at dispatch time.
+        // Unresolved variables (`data-var-bindings`) are filled here, at dispatch time — two seams
+        // over the same list:
         if let Some(bindings) = el
             .get_attribute(attrs::VAR_BINDINGS)
             .and_then(|raw| serde_json::from_str::<Map<String, Value>>(&raw).ok())
         {
+            // #147: dispatch-time synthesized tokens, over the reported unresolved bindings. Both
+            // are persisted with the pending write below; a same-op retry re-sends the stored input
+            // (keeping the values), a new user action synthesizes fresh ones.
+            let synth_tokens: Vec<(String, String)> = bindings
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect();
+            // `{{ $uuid }}` -> a fresh UUIDv7 idempotency key.
+            crate::executor::fill_mint_tokens(&mut vars, &synth_tokens, Uuid::now_v7);
+            // `{{ $locale }}` -> the client's current UI locale (the #110 `<html lang>`).
+            crate::executor::fill_locale_tokens(&mut vars, &synth_tokens, &current_locale());
+            // Form-field bindings (#94): a var whose `{{ <field>.value }}` binding had no screen
+            // data is filled from the LIVE input by its element id. (`$uuid` tokens don't end in
+            // `.value`, so this pass skips them — the two seams never overlap.)
             for (name, binding) in bindings {
                 let Some(field_id) = binding.as_str().and_then(|b| b.strip_suffix(".value")) else {
                     continue;
@@ -342,6 +356,18 @@ impl Driver {
             Err(_) => {}    // malformed push — the poll fallback owns the verdict
         }
     }
+}
+
+/// The client's current UI locale, read from the shell's `<html lang>` (#110 stamps the resolved
+/// locale there; the hydrate re-render reads it back the same way). Empty/absent falls back to the
+/// supported default locale — the `{{ $locale }}` token always resolves to a valid supported tag.
+fn current_locale() -> String {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.document_element())
+        .and_then(|e| e.get_attribute("lang"))
+        .filter(|l| !l.is_empty())
+        .unwrap_or_else(|| crate::i18n::DEFAULT_LOCALE.to_string())
 }
 
 /// The live value of a form field by element id (`{{ <id>.value }}` bindings).

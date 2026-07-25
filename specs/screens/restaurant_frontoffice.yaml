@@ -110,7 +110,7 @@ actions:
   rate_order:  { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/rateOrder' } }
   record_delivery_satisfaction: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/recordDeliverySatisfaction' } }   # #62 delay survey
   tip_order:   { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/tipOrder' }, note: "Post-delivery tip to the courier (recipient RIDER, or RESTAURANT for self-dispatch); à la Uber Eats/Deliveroo." }
-  post_message: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/postMessage' }, note: "#145 — customer posts a PUBLIC message to the order thread. The idempotency key `messageId` is a client-minted UUIDv7; the generic SDUI executor does not mint business ids yet (see the order_conversation screen gap)." }
+  post_message: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/postMessage' }, note: "#145 — customer posts a PUBLIC message to the order thread. The idempotency key `messageId` is a client-minted UUIDv7: the compose binds it to the `{{ $uuid }}` mint token, which the SDUI executor resolves to a fresh UUIDv7 at dispatch time and persists with the pending write (#147, executor::fill_mint_tokens)." }
   # ── GAPS — UI actions with no backing API mutation yet ──
   apply_promo_code: { kind: gap, gap: "No applyPromoCode mutation — promo codes / cart discount not modelled." }
   set_delivery_mode: { kind: gap, gap: "Cart-level delivery-mode toggle not modelled — serviceType is chosen at placeOrder." }
@@ -488,8 +488,6 @@ screens:
     requires_auth: true
     data_requirements: [conversation.byOrder]
     actions_used: [post_message]
-    gaps:
-      - "`post_message` messageId (the client idempotency key) is not yet minted client-side: the generic SDUI executor resolves variables from bindings/literals only and does not mint business UUIDs (the checkout `place_order` orderId is minted by the bespoke checkout.rs flow). The compose row renders and dispatches, but the client-minted messageId injection is a follow-up (#145)."
     components:
       - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/conversation.title' }, sticky: true }
       - { type: status_chip, status: "{{ conversation.status }}" }
@@ -516,13 +514,17 @@ screens:
               type: post_message
               # orderId mirrors the rider job_detail pattern (`{{ delivery.orderId }}`): the route `:orderId`
               # feeds the resolver, whose result carries `orderId` back for the write. visibility/authorRole
-              # are static enum literals; messageId is the client idempotency key (screen gap above).
+              # are static enum literals; messageId and originalLocale are dispatch-time synthesized tokens
+              # (executor::fill_mint_tokens / fill_locale_tokens, #147): messageId is a fresh client-minted
+              # UUIDv7 idempotency key, originalLocale the client's current UI locale (the #110 `<html lang>`).
+              # These six cover every required PostMessage field, so a real send is server-acceptable.
               variables:
                 orderId: "{{ conversation.orderId }}"
                 body: "{{ body.value }}"
                 visibility: "PUBLIC"
                 authorRole: "CUSTOMER"
-                messageId: "{{ messageId }}"
+                messageId: "{{ $uuid }}"
+                originalLocale: "{{ $locale }}"
       - { component: bottom_nav }
 
   # SCREEN 6 — Account
