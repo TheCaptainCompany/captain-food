@@ -534,9 +534,11 @@ const STYLE: &str = concat!(
 /// every server-rendered page — SDUI screens here, checkout/tracking in their own modules.
 /// `hydrate_script` (the wasm bundle loader) is appended when serving with assets.
 #[cfg(feature = "ssr")]
-pub(crate) fn page_html(title: &str, body: &str) -> String {
+pub(crate) fn page_html(title: &str, lang: &str, body: &str) -> String {
+    // `<html lang>` reflects the resolved locale (#110): SSR's source of truth for the page's
+    // language, which hydrate reads back from the DOM so the re-render can't disagree with the shell.
     format!(
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+        "<!DOCTYPE html><html lang=\"{lang}\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <title>{title}</title><style>{STYLE}</style></head><body>{body}</body></html>"
     )
@@ -549,8 +551,9 @@ pub fn render_screen_html(
     sheets: &'static [crate::generated::screens::Sheet],
     ctx: RenderContext,
 ) -> String {
+    let lang = crate::i18n::normalize_locale(&ctx.locale).unwrap_or(crate::i18n::DEFAULT_LOCALE);
     let body = SduiScreen(SduiScreenProps { screen, sheets, ctx }).to_html();
-    page_html("Captain.Food", &body)
+    page_html("Captain.Food", lang, &body)
 }
 
 /// Client hydration entry (the `hydrate` build, wasm32): resolve the surface + screen from the
@@ -564,6 +567,13 @@ pub fn hydrate() {
     let location = window.location();
     let host = location.host().unwrap_or_default();
     let path = location.pathname().unwrap_or_else(|_| "/".into());
+    // Locale parity (#110): the shell's `<html lang>` is what SSR resolved through the chain; read it
+    // back so the hydrate re-render can't disagree with the server's language (no flash, no re-resolve).
+    let locale = window
+        .document()
+        .and_then(|d| d.document_element())
+        .and_then(|e| e.get_attribute("lang"))
+        .unwrap_or_else(|| i18n::DEFAULT_LOCALE.to_string());
     // Shared host+path resolution incl. the tenant-root rule (#98) — same authority as SSR.
     let (surface, matched) = router::resolve(&host, &path);
     let Some(matched) = matched else { return };
@@ -582,7 +592,7 @@ pub fn hydrate() {
 
     let sheets = surface.sheets();
     wasm_bindgen_futures::spawn_local(async move {
-        let mut ctx = RenderContext::new(i18n::DEFAULT_LOCALE);
+        let mut ctx = RenderContext::new(&locale);
         for resolver in screen.data_requirements {
             let mut vars = serde_json::Map::new();
             for (k, v) in matched.param_args(*resolver) {

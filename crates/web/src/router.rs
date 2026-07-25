@@ -222,23 +222,25 @@ fn render_matched(
     locale: &str,
 ) -> String {
     use crate::renderer::{render_screen_html, RenderContext};
-    let _ = locale;
     let html = if matched.screen.sdui {
         render_screen_html(matched.screen, surface.sheets(), ctx)
     } else {
         match matched.screen.id {
-            "checkout" => crate::checkout::render_checkout_html(crate::checkout::CheckoutViewState {
-                restaurant_name: String::new(),
-                cart_line_count: 0,
-                formatted_total: String::new(),
-                is_delivery: true,
-            }),
+            "checkout" => crate::checkout::render_checkout_html(
+                crate::checkout::CheckoutViewState {
+                    restaurant_name: String::new(),
+                    cart_line_count: 0,
+                    formatted_total: String::new(),
+                    is_delivery: true,
+                },
+                locale,
+            ),
             "order_tracking" => {
                 let order_id = matched
                     .param("orderId")
                     .and_then(|v| uuid::Uuid::parse_str(v).ok())
                     .unwrap_or_else(uuid::Uuid::nil);
-                crate::tracking::render_tracking_html(crate::tracking::TrackingState::new(order_id))
+                crate::tracking::render_tracking_html(crate::tracking::TrackingState::new(order_id), locale)
             }
             // A future sdui:false screen without a hand-written shell: an empty SDUI shell.
             _ => render_screen_html(matched.screen, surface.sheets(), RenderContext::new(locale)),
@@ -250,6 +252,19 @@ fn render_matched(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn ssr_html_lang_reflects_the_resolved_locale() {
+        // #110: the SSR shell's `<html lang>` carries the resolved locale (hydrate reads it back).
+        let en = render_path("live.captain.food", "/", "en").expect("home renders");
+        assert!(en.contains("<html lang=\"en\">"), "en shell should tag lang=en");
+        let fr = render_path("live.captain.food", "/", "fr").expect("home renders");
+        assert!(fr.contains("<html lang=\"fr\">"), "fr shell should tag lang=fr");
+        // An unsupported/full tag normalizes to the platform default (fr) — never a bad lang attr.
+        let de = render_path("live.captain.food", "/", "de-DE").expect("home renders");
+        assert!(de.contains("<html lang=\"fr\">"), "unsupported locale falls back to fr");
+    }
 
     #[test]
     fn hosts_route_to_their_surfaces() {

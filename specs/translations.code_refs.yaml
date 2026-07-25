@@ -1,0 +1,20 @@
+version: 1
+description: >
+  Translation keys consumed by HAND-WRITTEN Rust, not referenced from any screens/*.yaml (#110,
+  PROP-20260724-133700 §1c). The `translation-key-unused` validator rule treats keys matched here as
+  USED (so they are not flagged for deletion), and a companion codegen test greps crates/**/*.rs so a
+  stale entry — one that matches no code — is itself caught. Each entry is an exact key or a
+  `prefix.*` wildcard; every entry must match >=1 catalog key (`translation-code-ref-unknown`).
+  Keep this list minimal: prefer a screens `$ref` over a code_ref whenever the string is on an SDUI
+  screen — a code_ref is only for the non-SDUI, hand-written render paths.
+code_refs:
+  # The order-tracking page (crates/web/src/tracking.rs) is a non-SDUI, hand-written render path
+  # (Stripe/subscription flow, #86): its status hero + chrome resolve these keys as `&'static str`
+  # literals, not through a screen tree. (order.tracking_title is NOT here — it is screen-$ref'd from
+  # restaurant_frontoffice.yaml, so the screen already marks it used.)
+  - key: order.status.*
+    used_by: crates/web/src/tracking.rs
+  - key: order.not_found
+    used_by: crates/web/src/tracking.rs
+  - key: order.rate
+    used_by: crates/web/src/tracking.rs

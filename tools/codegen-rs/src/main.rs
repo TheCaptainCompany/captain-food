@@ -30,10 +30,19 @@ const SOURCE_FILES: &[&str] = &[
     "rules.yaml",
     "tests.yaml",
     "translations.yaml",
+    // Translation keys consumed by hand-written Rust, not referenced from any screen (#110): the
+    // `translation-key-unused` gate treats these as USED, and a companion codegen test greps the
+    // crates so a stale entry (matching no code) is itself caught.
+    "translations.code_refs.yaml",
     "observability.yaml",
     "architecture/c4-l2.yaml",
     "architecture/c4-l3.yaml",
 ];
+
+/// The supported UI locales (#110). The single source of truth for translation-hygiene coverage:
+/// every catalog key must carry a message in each (`translation-locale-missing`). Adding a locale =
+/// add it here, then the gate forces every key to gain that message before anything ships.
+const SUPPORTED_LOCALES: &[&str] = &["en", "fr"];
 
 /// The loaded model: each source file parsed into its YAML `Value` (the full top-level mapping).
 struct Model {
@@ -1957,60 +1966,11 @@ fn validate(model: &Model) -> Report {
         }
     }
 
-    // --- 10. Translations (translations.yaml + screens/*.translations.yaml sidecars) ------------
-    // Merged across all sources (ADR-20260722-101500); keys must be globally unique across files.
-    {
-        let mut seen: BTreeMap<String, String> = BTreeMap::new(); // key -> first file it was defined in
-        for (file, key, t) in translation_entries(model) {
-            let at = format!("{}/{}", file, key);
-            if let Some(prev) = seen.insert(key.clone(), file.clone()) {
-                issues.push(err(
-                    "translation-duplicate-key",
-                    at.clone(),
-                    format!("translation key '{}' is defined in both '{}' and '{}' — keys must be unique across all translation files.", key, prev, file),
-                ));
-            }
-            cov.translations += 1;
-            let messages = t.get("messages");
-            for loc in ["en", "fr"] {
-                let ok = messages
-                    .and_then(|m| m.get(loc))
-                    .and_then(|v| v.as_str())
-                    .map(|s| !s.is_empty())
-                    .unwrap_or(false);
-                if !ok {
-                    issues.push(err(
-                        "translation-missing-locale",
-                        at.clone(),
-                        format!("translation '{}' has no '{}' message (both en and fr are required).", key, loc),
-                    ));
-                }
-            }
-            let params: BTreeSet<String> = t.get("params").and_then(|p| p.as_mapping()).map(map_of_keys).unwrap_or_default();
-            for loc in ["en", "fr"] {
-                for ph in placeholders(messages.and_then(|m| m.get(loc))) {
-                    if !params.contains(&ph) {
-                        issues.push(err(
-                            "translation-param-mismatch",
-                            at.clone(),
-                            format!("'{}' message uses {{{}}} but it is not declared in `params`.", loc, ph),
-                        ));
-                    }
-                }
-            }
-            let mut used: BTreeSet<String> = placeholders(messages.and_then(|m| m.get("en")));
-            used.extend(placeholders(messages.and_then(|m| m.get("fr"))));
-            for p in &params {
-                if !used.contains(p) {
-                    issues.push(err(
-                        "translation-param-mismatch",
-                        at.clone(),
-                        format!("declared param '{}' is used by no message.", p),
-                    ));
-                }
-            }
-        }
-    }
+    // --- 10 (+10b). Translation hygiene (#110): uniqueness, full locale coverage, param match, and the
+    // unused-key + code_refs gates. Extracted to a standalone fn (like `validate_ref_kinds`) so tests can
+    // exercise it on minimal fixtures without running the whole validator.
+    cov.translations += translation_entries(model).len();
+    validate_translations(model, &mut issues);
 
     // --- 11. SDUI screens (screens/*.yaml, one file per app/audience): each app's spec is bound to the
     // API (ADR-0033/0037). Generic over all screens files — no hard-coded screens filename. Each screen
@@ -2232,6 +2192,129 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
 /// plus every per-surface `screens/*.translations.yaml` sidecar. Returns `(fileKey, entryKey, node)` per
 /// real entry (skips file-level meta — only nodes carrying `messages`), file-sorted then file-order, so
 /// output is deterministic. Keys must be unique across files (the §10 validator enforces it).
+/// Translation hygiene (#110, PROP-20260724-133700 §1c) — the §10/§10b rules, standalone so tests can
+/// run them on a minimal fixture. Emits: `translation-duplicate-key`, `translation-locale-missing`
+/// (full SUPPORTED_LOCALES coverage), `translation-param-mismatch`, `translation-key-unused` (a key no
+/// screen and no `code_refs` entry references), and `translation-code-ref-unknown` (a stale manifest
+/// entry). Does not touch coverage — the caller counts entries.
+fn validate_translations(model: &Model, issues: &mut Vec<Issue>) {
+    // §10 — per-entry: uniqueness across files, locale coverage, param declaration/usage.
+    let mut seen: BTreeMap<String, String> = BTreeMap::new(); // key -> first file it was defined in
+    for (file, key, t) in translation_entries(model) {
+        let at = format!("{}/{}", file, key);
+        if let Some(prev) = seen.insert(key.clone(), file.clone()) {
+            issues.push(err(
+                "translation-duplicate-key",
+                at.clone(),
+                format!("translation key '{}' is defined in both '{}' and '{}' — keys must be unique across all translation files.", key, prev, file),
+            ));
+        }
+        let messages = t.get("messages");
+        // Full locale coverage is a HARD error: every key carries every SUPPORTED_LOCALES message —
+        // a new `en` string without its `fr` cannot ship.
+        for loc in SUPPORTED_LOCALES {
+            let ok = messages
+                .and_then(|m| m.get(loc))
+                .and_then(|v| v.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            if !ok {
+                issues.push(err(
+                    "translation-locale-missing",
+                    at.clone(),
+                    format!("translation '{}' has no '{}' message (every supported locale [{}] is required).", key, loc, SUPPORTED_LOCALES.join(", ")),
+                ));
+            }
+        }
+        let params: BTreeSet<String> = t.get("params").and_then(|p| p.as_mapping()).map(map_of_keys).unwrap_or_default();
+        for loc in SUPPORTED_LOCALES {
+            for ph in placeholders(messages.and_then(|m| m.get(loc))) {
+                if !params.contains(&ph) {
+                    issues.push(err(
+                        "translation-param-mismatch",
+                        at.clone(),
+                        format!("'{}' message uses {{{}}} but it is not declared in `params`.", loc, ph),
+                    ));
+                }
+            }
+        }
+        let mut used_params: BTreeSet<String> = BTreeSet::new();
+        for loc in SUPPORTED_LOCALES {
+            used_params.extend(placeholders(messages.and_then(|m| m.get(loc))));
+        }
+        for p in &params {
+            if !used_params.contains(p) {
+                issues.push(err(
+                    "translation-param-mismatch",
+                    at.clone(),
+                    format!("declared param '{}' is used by no message.", p),
+                ));
+            }
+        }
+    }
+
+    // §10b — every key is USED, or it must be DELETED. Used = referenced by a screen `$ref` OR matched
+    // by a `code_refs` manifest entry (keys consumed by hand-written Rust, e.g. `order.status.*`).
+    let defined: Vec<(String, String)> =
+        translation_entries(model).into_iter().map(|(f, k, _)| (f, k)).collect();
+
+    // Used-by-screen: every content `$ref` across every screens/*.yaml that targets a translation file
+    // (resolvers/actions target api.yaml, so they fall out). The used key is the ref's pointer.
+    let mut used: BTreeSet<String> = BTreeSet::new();
+    for (fkey, doc) in model.defs.iter().filter(|(k, _)| k.starts_with("screens/")) {
+        let mut refs: Vec<(String, String)> = Vec::new();
+        collect_refs(doc, fkey, &mut refs);
+        for (_loc, rf) in &refs {
+            let target = ref_target_file(rf, fkey);
+            if matches!(target.as_deref(), Some(f) if f == "translations.yaml" || f.ends_with(".translations.yaml")) {
+                if let Some(k) = ref_name(rf) {
+                    used.insert(k);
+                }
+            }
+        }
+    }
+
+    // Used-by-code: the code_refs manifest. An entry is an exact key or a `prefix.*` wildcard; each entry
+    // must match >=1 defined key (else it is stale — `translation-code-ref-unknown`).
+    let code_refs = model
+        .defs
+        .get("translations.code_refs.yaml")
+        .and_then(|v| v.get("code_refs"))
+        .and_then(|v| v.as_sequence())
+        .cloned()
+        .unwrap_or_default();
+    let defined_keys: BTreeSet<&str> = defined.iter().map(|(_, k)| k.as_str()).collect();
+    for entry in &code_refs {
+        let Some(pat) = entry.get("key").and_then(|v| v.as_str()) else { continue };
+        let matched: Vec<&str> = if let Some(prefix) = pat.strip_suffix(".*") {
+            let p = format!("{prefix}.");
+            defined_keys.iter().copied().filter(|k| k.starts_with(&p)).collect()
+        } else {
+            defined_keys.iter().copied().filter(|k| *k == pat).collect()
+        };
+        if matched.is_empty() {
+            issues.push(err(
+                "translation-code-ref-unknown",
+                format!("translations.code_refs.yaml/{}", pat),
+                format!("code_refs entry '{}' matches no translation key — remove it or fix the key.", pat),
+            ));
+        }
+        for k in matched {
+            used.insert(k.to_string());
+        }
+    }
+
+    for (file, key) in &defined {
+        if !used.contains(key) {
+            issues.push(err(
+                "translation-key-unused",
+                format!("{}/{}", file, key),
+                format!("translation key '{}' is referenced by no screen and no code_refs entry — delete it, or if hand-written Rust consumes it, declare it in translations.code_refs.yaml.", key),
+            ));
+        }
+    }
+}
+
 fn translation_entries(model: &Model) -> Vec<(String, String, &Value)> {
     let mut files: Vec<&String> = model
         .defs
@@ -14347,6 +14430,124 @@ bottom_sheets:
             defs.insert(path.to_string(), strip_meta(parsed));
         }
         Model { defs }
+    }
+
+    // #110 — translation hygiene gates. All run `validate_translations` on a minimal fixture.
+    fn translation_rules(files: &[(&str, &str)]) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_translations(&inline_model(files), &mut issues);
+        issues
+    }
+
+    #[test]
+    fn translation_locale_missing_flags_a_key_without_all_locales() {
+        // A key with only `en` (no `fr`) is a hard error — full coverage across SUPPORTED_LOCALES.
+        let issues = translation_rules(&[(
+            "translations.yaml",
+            "common.hi: { messages: { en: \"Hi\" } }",
+        )]);
+        let f = issues.iter().find(|i| i.rule == "translation-locale-missing").expect("locale-missing");
+        assert!(f.message.contains("fr"), "names the missing locale: {}", f.message);
+    }
+
+    #[test]
+    fn translation_key_unused_flags_a_key_no_screen_or_code_ref_references() {
+        // `common.orphan` is referenced by no screen and no code_refs → unused (must be deleted).
+        let issues = translation_rules(&[(
+            "translations.yaml",
+            "common.orphan: { messages: { en: \"x\", fr: \"x\" } }",
+        )]);
+        assert!(
+            issues.iter().any(|i| i.rule == "translation-key-unused" && i.location.ends_with("common.orphan")),
+            "orphan key should be flagged unused"
+        );
+    }
+
+    #[test]
+    fn translation_key_used_by_a_screen_ref_is_not_flagged_unused() {
+        // Same key, now referenced by a screen `$ref` → not unused.
+        let issues = translation_rules(&[
+            ("translations.yaml", "common.hi: { messages: { en: \"Hi\", fr: \"Salut\" } }"),
+            (
+                "screens/x.yaml",
+                "screens:\n  - id: s\n    title: { $ref: 'translations.yaml#/common.hi' }\n",
+            ),
+        ]);
+        assert!(
+            !issues.iter().any(|i| i.rule == "translation-key-unused"),
+            "screen-referenced key must not be unused: {:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn translation_key_covered_by_a_code_ref_wildcard_is_not_flagged_unused() {
+        // A `prefix.*` code_ref marks matching keys used (the hand-written-Rust escape hatch).
+        let issues = translation_rules(&[
+            (
+                "translations.yaml",
+                "order.status.placed.title: { messages: { en: \"Placed\", fr: \"Reçue\" } }",
+            ),
+            ("translations.code_refs.yaml", "code_refs:\n  - key: order.status.*\n"),
+        ]);
+        assert!(!issues.iter().any(|i| i.rule == "translation-key-unused"), "code_ref-covered key not unused");
+        assert!(!issues.iter().any(|i| i.rule == "translation-code-ref-unknown"), "wildcard matches a key");
+    }
+
+    #[test]
+    fn translation_code_ref_unknown_flags_a_stale_manifest_entry() {
+        // A code_refs entry matching no catalog key is stale.
+        let issues = translation_rules(&[
+            ("translations.yaml", "common.hi: { messages: { en: \"Hi\", fr: \"Salut\" } }"),
+            ("translations.code_refs.yaml", "code_refs:\n  - key: order.ghost\n"),
+        ]);
+        assert!(
+            issues.iter().any(|i| i.rule == "translation-code-ref-unknown" && i.location.ends_with("order.ghost")),
+            "stale code_ref should be flagged"
+        );
+    }
+
+    #[test]
+    fn code_refs_manifest_has_no_stale_entries_against_the_real_crates() {
+        // Companion to `translation-code-ref-unknown`: every code_refs entry must actually appear in
+        // hand-written Rust, else the manifest is lying. Grep crates/**/*.rs for each entry's literal
+        // (the `prefix` for a wildcard). Runs from tools/codegen-rs, so specs/crates are two levels up.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let manifest = std::fs::read_to_string(root.join("specs/translations.code_refs.yaml"))
+            .expect("read translations.code_refs.yaml");
+        let doc: Value = serde_yaml::from_str(&manifest).expect("parse manifest");
+        let entries = doc.get("code_refs").and_then(|v| v.as_sequence()).cloned().unwrap_or_default();
+        assert!(!entries.is_empty(), "manifest should declare at least the tracking.rs keys");
+
+        // Collect all Rust source under crates/ once.
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            if let Ok(rd) = std::fs::read_dir(dir) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        rs_files(&p, out);
+                    } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                        out.push(p);
+                    }
+                }
+            }
+        }
+        let mut files = Vec::new();
+        rs_files(&root.join("crates"), &mut files);
+        let haystack: String = files
+            .iter()
+            .filter_map(|p| std::fs::read_to_string(p).ok())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for entry in &entries {
+            let pat = entry.get("key").and_then(|v| v.as_str()).expect("code_ref key");
+            let needle = pat.strip_suffix(".*").map(|p| format!("{p}.")).unwrap_or_else(|| pat.to_string());
+            assert!(
+                haystack.contains(&needle),
+                "code_refs entry '{pat}' matches no literal in crates/**/*.rs — stale manifest entry (remove it)."
+            );
+        }
     }
 
     const SVC_HTTP_EXPOSED: &str = r#"

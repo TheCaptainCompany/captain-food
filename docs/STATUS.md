@@ -1,7 +1,27 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-24. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-25. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-25 — [#110](https://github.com/TheCaptainCompany/captain-food/issues/110): translation
+> hygiene gates + the runtime locale-resolution chain (PROP-20260724-133700 §1c,
+> ADR-20260725-013315).** The catalog had no gate against rot and the runtime hard-coded `fr`. Now two
+> blocking `make validate` rules — **`translation-locale-missing`** (every key carries every
+> `SUPPORTED_LOCALES` message; one centralized locale list replaces three hard-coded `["en","fr"]`)
+> and **`translation-key-unused`** (a key referenced by no screen `$ref` and no `code_refs` entry is a
+> hard error) — plus **`specs/translations.code_refs.yaml`**, the declared manifest of keys consumed
+> by hand-written Rust (`order.status.*` via tracking.rs), guarded by `translation-code-ref-unknown`
+> and a companion codegen test that greps `crates/**/*.rs` so a stale entry is itself caught. The
+> gates caught two real drifts on landing (`order.not_found` referenced by tracking.rs but absent from
+> the catalog — added; `order.tracking_title` over-declared in code_refs when it is screen-`$ref`'d —
+> removed). **Runtime:** `resolve_locale(Customer.locale → cookie → Accept-Language/device → fr)` with
+> `normalize_locale` reducing `fr-FR`/`EN`/`en_US` to a bare SUPPORTED tag; SSR (`hosts.rs`) reads the
+> `captain_locale` cookie + `Accept-Language` and threads the resolved locale through every render
+> site — no more hard-coded `fr`; `<html lang>` carries it and hydrate reads it back from the DOM so
+> the client can't disagree with the shell. Follow-ups (noted): a visible language switcher
+> (`changeLanguage` is unreferenced by any screen today — cookie contract + SSR read are in place) and
+> a per-request JWT→`Customer.locale` SSR read. 49 codegen tests + web/server suites green; wasm
+> hydrate compiles.
 
 > 🚧 **2026-07-25 — [#118](https://github.com/TheCaptainCompany/captain-food/issues/118): OVH SMS
 > delivery for phone OTP (PROP-20260724-233605).** The #117 adapter can ask Supabase to send a phone
