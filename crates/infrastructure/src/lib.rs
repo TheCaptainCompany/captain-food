@@ -29,7 +29,8 @@ pub use persistence::{
     AppendedEvent, EventBus, OperationStatusBus, OperationUpdate, PgCartRepository,
     PgAuthSessionStore, PgCatalogRepository, PgCommandJournal, PgCustomerRepository,
     PgDeliveryPartnerAvailabilityRepository, PgDeliveryRepository, PgDeliverySatisfactionRepository,
-    PgEventStore, PgInboundEvents, PgOrderRepository, PgPricingPolicyRepository,
+    PgEventStore, PgInboundEvents, PgOrderConversationRepository, PgOrderRepository,
+    PgPricingPolicyRepository,
     PgProspectionRepository, PgRefundQueueRepository, PgRestaurantRepository,
     PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
 };

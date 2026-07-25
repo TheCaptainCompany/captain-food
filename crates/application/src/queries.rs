@@ -19,6 +19,7 @@ use domain::shared::errors::DomainError;
 pub use crate::generated::rows::CartRow;
 pub use crate::generated::rows::CatalogRow;
 pub use crate::generated::rows::CustomerRow;
+pub use crate::generated::rows::OrderConversationRow;
 pub use crate::generated::rows::OrderTrackingRow;
 pub use crate::generated::rows::ProspectionPipelineRow;
 pub use crate::generated::rows::RestaurantRow;
@@ -250,6 +251,15 @@ pub trait OrderReadRepository: Send + Sync {
     async fn list(&self, filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError>;
     /// A single order by id (tracking), or `None` if absent.
     async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError>;
+}
+
+/// Read port over the `OrderConversation` projection table (ADR-0040; #131, epic #129). Backs the
+/// `orderConversation` (PUBLIC thread) and `orderConversationInternalNotes` (staff-only) GraphQL
+/// queries — both read the one per-order conversation row (the visibility split is a column split).
+#[async_trait]
+pub trait OrderConversationReadRepository: Send + Sync {
+    /// The conversation for one order, or `None` before it has been opened.
+    async fn by_order(&self, order_id: OrderId) -> Result<Option<OrderConversationRow>, DomainError>;
 }
 
 /// One `View_DeliveryJob` row (ADR-0031/0039) — hand-written: this read model is a SQL VIEW

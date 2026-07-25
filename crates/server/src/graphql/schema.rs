@@ -16,9 +16,9 @@ use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier}
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
-    DeliveryReadRepository, OrderReadRepository, PricingPolicyReadRepository,
-    ProspectionReadRepository, RefundReadRepository, RestaurantReadRepository,
-    UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
+    DeliveryReadRepository, OrderConversationReadRepository, OrderReadRepository,
+    PricingPolicyReadRepository, ProspectionReadRepository, RefundReadRepository,
+    RestaurantReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
 
 use infrastructure::{EventBus, OperationStatusBus};
@@ -40,6 +40,7 @@ pub struct ReadDeps {
     pub catalogs: Arc<dyn CatalogReadRepository>,
     pub carts: Arc<dyn CartReadRepository>,
     pub orders: Arc<dyn OrderReadRepository>,
+    pub order_conversations: Arc<dyn OrderConversationReadRepository>,
     pub customers: Arc<dyn CustomerReadRepository>,
     pub deliveries: Arc<dyn DeliveryReadRepository>,
     pub refunds: Arc<dyn RefundReadRepository>,
@@ -96,6 +97,7 @@ pub fn build_schema(
         builder = builder.data(d.catalogs);
         builder = builder.data(d.carts);
         builder = builder.data(d.orders);
+        builder = builder.data(d.order_conversations);
         builder = builder.data(d.customers);
         builder = builder.data(d.deliveries);
         builder = builder.data(d.refunds);

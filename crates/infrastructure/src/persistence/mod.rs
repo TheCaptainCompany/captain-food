@@ -17,6 +17,8 @@ pub mod event_bus;
 pub mod event_store;
 pub mod inbound_events;
 pub mod order;
+pub mod order_conversation;
+pub mod order_conversation_store;
 pub mod order_tracking_store;
 pub mod prospection;
 pub mod prospection_store;
@@ -37,6 +39,7 @@ pub use event_bus::{AppendedEvent, EventBus};
 pub use event_store::PgEventStore;
 pub use inbound_events::PgInboundEvents;
 pub use order::PgOrderRepository;
+pub use order_conversation::PgOrderConversationRepository;
 // The Postgres PM state stores are GENERATED from specs/database/tables/process_managers.yaml
 // (issue #27); re-exported here so the stable `persistence::Pg…State` paths survive the move.
 pub use crate::generated::pm_state::{

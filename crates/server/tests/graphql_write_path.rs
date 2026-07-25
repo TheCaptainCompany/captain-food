@@ -130,6 +130,8 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
         Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
     let delivery_partner_availabilities: Arc<dyn application::queries::DeliveryPartnerAvailabilityReadRepository> =
         Arc::new(infrastructure::PgDeliveryPartnerAvailabilityRepository::new(pool.clone()));
+    let order_conversations: Arc<dyn application::queries::OrderConversationReadRepository> =
+        Arc::new(infrastructure::PgOrderConversationRepository::new(pool.clone()));
     let event_store: Arc<dyn EventStore> = Arc::new(PgEventStore::new(pool.clone()));
     let ownership: Arc<dyn GoogleOwnershipVerifier> = Arc::new(FailClosedGoogleOwnershipVerifier);
     let gbp_probe: Arc<dyn GbpOrderLinkProbe> = Arc::new(UnverifiedGbpOrderLinkProbe);
@@ -151,6 +153,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             catalogs,
             carts,
             orders,
+            order_conversations,
             customers,
             deliveries,
             refunds,
