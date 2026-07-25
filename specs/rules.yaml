@@ -203,3 +203,7 @@ AdminJoinsByReasonedEscalation:
   description: "An admin is added to a conversation only through a reasoned escalation by the restaurant or rider (#129)."
 OnlyMutedParticipantsCanBeUnmuted:
   description: "Unmuting a role that is not currently muted is rejected (#129)."
+TranslationsAreCachedOncePerLocale:
+  description: "A message is translated at most once per target locale; re-recording an existing (message, locale) translation is rejected (translate once, reuse; #129)."
+TranslationTargetsAPostedMessage:
+  description: "A translation can only be recorded for a message that was actually posted to the conversation (#129)."

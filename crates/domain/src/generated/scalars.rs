@@ -660,3 +660,7 @@ pub struct MuteReason(pub String);
 /// Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EscalationReason(pub String);
+
+/// A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TranslatedText(pub String);

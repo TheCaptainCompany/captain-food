@@ -650,6 +650,22 @@ pub const MESSAGE_ALREADY_POSTED: ErrorDef = ErrorDef {
     message_fr: "Ce message a déjà été envoyé.",
 };
 
+/// A translation targeted a message that was never posted to the conversation; a translation can only be recorded for an actually-posted message (rules.yaml#/TranslationTargetsAPostedMessage) (#129).
+/// Context: `orderId`, `messageId`.
+pub const MESSAGE_NOT_FOUND_IN_CONVERSATION: ErrorDef = ErrorDef {
+    code: "MessageNotFoundInConversation",
+    message_en: "No such message exists in this conversation.",
+    message_fr: "Ce message n'existe pas dans cette conversation.",
+};
+
+/// A translation for this message and target locale is already cached; the re-record is idempotent and rejected (translate once, reuse; rules.yaml#/TranslationsAreCachedOncePerLocale) (#129).
+/// Context: `orderId`, `messageId`, `locale`.
+pub const TRANSLATION_ALREADY_RECORDED: ErrorDef = ErrorDef {
+    code: "TranslationAlreadyRecorded",
+    message_en: "This message is already translated into this language.",
+    message_fr: "Ce message est déjà traduit dans cette langue.",
+};
+
 /// A participant was muted without a justification reason; a mute must record why (rules.yaml#/MuteRequiresAReason) (#129).
 /// Context: `orderId`.
 pub const MUTE_REASON_REQUIRED: ErrorDef = ErrorDef {
@@ -749,6 +765,8 @@ pub const ERRORS: &[ErrorDef] = &[
     CONVERSATION_NOT_FOUND,
     CUSTOMER_CHAT_DISABLED,
     MESSAGE_ALREADY_POSTED,
+    MESSAGE_NOT_FOUND_IN_CONVERSATION,
+    TRANSLATION_ALREADY_RECORDED,
     MUTE_REASON_REQUIRED,
     PARTICIPANT_NOT_MUTED,
 ];

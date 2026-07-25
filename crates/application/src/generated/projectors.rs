@@ -364,6 +364,7 @@ pub fn project_order_conversation<C: OrderConversationCompute>(c: &C, state: Opt
             updated_at: env.occurred_at,
         }),
         DomainEvent::MessagePosted(_) => { let mut row = state?; let v = c.messages(Some(&row), env); row.messages = v; let v = c.internal_notes(Some(&row), env); row.internal_notes = v; Some(row) },
+        DomainEvent::MessageTranslationAdded(_) => { let mut row = state?; let v = c.messages(Some(&row), env); row.messages = v; let v = c.internal_notes(Some(&row), env); row.internal_notes = v; Some(row) },
         DomainEvent::AdminInvitedToConversation(e) => { let mut row = state?; row.escalation_reason = Some(e.reason.clone()); let v = c.admin_invited(Some(&row), env); row.admin_invited = v; Some(row) },
         DomainEvent::ParticipantMuted(_) => { let mut row = state?; let v = c.muted(Some(&row), env); row.muted = v; Some(row) },
         DomainEvent::ParticipantUnmuted(_) => { let mut row = state?; let v = c.muted(Some(&row), env); row.muted = v; Some(row) },

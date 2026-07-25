@@ -771,7 +771,25 @@ ConversationMessage:
       items:
         $ref: 'scalars.yaml#/AttachmentRef'
       nullable: true
+    translations:
+      type: array
+      items:
+        $ref: '#/MessageTranslation'
+      nullable: true
   required: [messageId, authorRole, visibility, body, originalLocale, postedAt]
+
+MessageTranslation:
+  type: object
+  description: >
+    The cached translation of a conversation message into one target locale — persisted once and reused
+    across readers (translate once, reuse; #129). Rides along with each ConversationMessage in the read
+    model via its `translations` array.
+  properties:
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+    text:
+      $ref: 'scalars.yaml#/TranslatedText'
+  required: [locale, text]
 
 MutedParticipant:
   type: object

@@ -3214,6 +3214,10 @@ impl MutationRoot {
     async fn post_message(&self, input: PostMessageInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    #[graphql(name = "recordMessageTranslation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    async fn record_message_translation(&self, input: RecordMessageTranslationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        Err(async_graphql::Error::new("not implemented"))
+    }
     #[graphql(name = "escalateToAdmin", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_restaurant_account_restaurant_rider_admin")]
     async fn escalate_to_admin(&self, input: EscalateToAdminInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         Err(async_graphql::Error::new("not implemented"))

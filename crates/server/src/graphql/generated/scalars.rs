@@ -2369,3 +2369,18 @@ impl From<EscalationReason> for ds::EscalationReason {
         Self(v.0)
     }
 }
+
+/// A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TranslatedText(pub String);
+async_graphql::scalar!(TranslatedText, "TranslatedText", "A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).");
+impl From<ds::TranslatedText> for TranslatedText {
+    fn from(v: ds::TranslatedText) -> Self {
+        Self(v.0)
+    }
+}
+impl From<TranslatedText> for ds::TranslatedText {
+    fn from(v: TranslatedText) -> Self {
+        Self(v.0)
+    }
+}

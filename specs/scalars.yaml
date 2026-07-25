@@ -793,3 +793,10 @@ EscalationReason:
   description: >
     Why an admin was pulled into an order conversation — the reason recorded when the restaurant or
     rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
+
+TranslatedText:
+  type: string
+  maxLength: 2000
+  description: >
+    A conversation message body translated into one target locale — the cached (persisted) translation
+    reused across readers (translate once, reuse; #129).

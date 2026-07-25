@@ -110,11 +110,12 @@ use domain::generated::scalars::{CityAvailabilityStatus, DeliveryPartnerRegistra
 // In-app order conversations (#129) — the Conversation aggregate (id = orderId).
 use domain::conversation::ConversationState;
 use domain::generated::commands::{
-    EscalateToAdmin, MuteParticipant, OpenConversation, PostMessage, UnmuteParticipant,
+    EscalateToAdmin, MuteParticipant, OpenConversation, PostMessage, RecordMessageTranslation,
+    UnmuteParticipant,
 };
 use domain::generated::events::{
-    AdminInvitedToConversation, ConversationOpened, MessagePosted, ParticipantMuted,
-    ParticipantUnmuted,
+    AdminInvitedToConversation, ConversationOpened, MessagePosted, MessageTranslationAdded,
+    ParticipantMuted, ParticipantUnmuted,
 };
 use domain::generated::scalars::ConversationAuthorRole;
 
@@ -1704,6 +1705,42 @@ pub async fn post_message(
 /// A `errors.yaml#/ConversationNotFound` rejection for the order whose conversation was never opened.
 fn conversation_not_found(order_id: &OrderId) -> DomainError {
     reject("ConversationNotFound", json!({ "orderId": order_id }))
+}
+
+/// Handle `commands.yaml#/RecordMessageTranslation` → emit `events.yaml#/MessageTranslationAdded` on the
+/// order's conversation stream (translate once, reuse; #129). Requires an opened conversation
+/// (`errors.yaml#/ConversationNotFound`), a message that was actually posted
+/// (`errors.yaml#/MessageNotFoundInConversation`, rules.yaml#/TranslationTargetsAPostedMessage), and a
+/// (message, locale) pair not already cached — a re-record is rejected as a duplicate
+/// (`errors.yaml#/TranslationAlreadyRecorded`, rules.yaml#/TranslationsAreCachedOncePerLocale).
+pub async fn record_message_translation(
+    store: &dyn EventStore,
+    cmd: RecordMessageTranslation,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<ConversationState>(cmd.order_id, || conversation_not_found(&cmd.order_id))
+        .await?;
+    if !state.message_ids.contains(&cmd.message_id) {
+        return Err(reject(
+            "MessageNotFoundInConversation",
+            json!({ "orderId": cmd.order_id, "messageId": cmd.message_id }),
+        ));
+    }
+    if state.translations.iter().any(|(id, locale)| *id == cmd.message_id && *locale == cmd.locale) {
+        return Err(reject(
+            "TranslationAlreadyRecorded",
+            json!({ "orderId": cmd.order_id, "messageId": cmd.message_id, "locale": cmd.locale }),
+        ));
+    }
+    let event = DomainEvent::MessageTranslationAdded(MessageTranslationAdded {
+        order_id: cmd.order_id,
+        message_id: cmd.message_id,
+        locale: cmd.locale,
+        text: cmd.text,
+    });
+    let stream = conversation_stream(&cmd.order_id);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
 }
 
 /// Handle `commands.yaml#/EscalateToAdmin` → emit `events.yaml#/AdminInvitedToConversation` on the

@@ -483,6 +483,9 @@ fixtures:
   participantUnmuted:
     type: { $ref: 'events.yaml#/ParticipantUnmuted' }
     data: { orderId: "order-1", mutedRole: "RIDER" }
+  messageTranslationAdded:
+    type: { $ref: 'events.yaml#/MessageTranslationAdded' }
+    data: { orderId: "order-1", messageId: "msg-1", locale: "en-US", text: "Hi, any update on my order?" }
 
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
@@ -2945,6 +2948,45 @@ tests:
       data: { orderId: "order-1", messageId: "msg-1", authorRole: "CUSTOMER", visibility: "PUBLIC", body: "Hi, any update on my order?", originalLocale: "fr-FR" }
     thrown:
       - { $ref: 'errors.yaml#/MessageAlreadyPosted' }
+
+  TestMessageTranslationRecorded:
+    name: "A posted message is translated into a target locale and the translation is cached"
+    rules: [{ $ref: 'rules.yaml#/TranslationsAreCachedOncePerLocale' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpened' }
+      - { $ref: '#/fixtures/messagePostedPublic' }
+    when:
+      type: { $ref: 'commands.yaml#/RecordMessageTranslation' }
+      data: { orderId: "order-1", messageId: "msg-1", locale: "en-US", text: "Hi, any update on my order?" }
+    then:
+      - { $ref: '#/fixtures/messageTranslationAdded' }
+
+  TestTranslateUnknownMessageRejected:
+    name: "Translating a message that was never posted is rejected"
+    rules: [{ $ref: 'rules.yaml#/TranslationTargetsAPostedMessage' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/RecordMessageTranslation' }
+      data: { orderId: "order-1", messageId: "msg-1", locale: "en-US", text: "Hi, any update on my order?" }
+    thrown:
+      - { $ref: 'errors.yaml#/MessageNotFoundInConversation' }
+
+  TestTranslationAlreadyRecordedRejected:
+    name: "Re-recording an existing (message, locale) translation is rejected (idempotency)"
+    rules: [{ $ref: 'rules.yaml#/TranslationsAreCachedOncePerLocale' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpened' }
+      - { $ref: '#/fixtures/messagePostedPublic' }
+      - { $ref: '#/fixtures/messageTranslationAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/RecordMessageTranslation' }
+      data: { orderId: "order-1", messageId: "msg-1", locale: "en-US", text: "Hi, any update on my order?" }
+    thrown:
+      - { $ref: 'errors.yaml#/TranslationAlreadyRecorded' }
 
   TestAdminEscalated:
     name: "The restaurant escalates the conversation to an admin with a reason"

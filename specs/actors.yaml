@@ -709,6 +709,12 @@ Conversation:
         - { $ref: 'errors.yaml#/ConversationNotFound' }
         - { $ref: 'errors.yaml#/CustomerChatDisabled' }
         - { $ref: 'errors.yaml#/MessageAlreadyPosted' }
+    - message: { $ref: 'commands.yaml#/RecordMessageTranslation' }
+      emits: [{ $ref: 'events.yaml#/MessageTranslationAdded' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/MessageNotFoundInConversation' }
+        - { $ref: 'errors.yaml#/TranslationAlreadyRecorded' }
     - message: { $ref: 'commands.yaml#/EscalateToAdmin' }
       emits: [{ $ref: 'events.yaml#/AdminInvitedToConversation' }]
       throws:

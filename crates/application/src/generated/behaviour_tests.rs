@@ -567,6 +567,11 @@ fn fx_participant_unmuted() -> DomainEvent {
     DomainEvent::ParticipantUnmuted(evs::ParticipantUnmuted { order_id: sc::OrderId(support::uid("order-1")), muted_role: sc::ConversationAuthorRole::RIDER })
 }
 
+/// tests.yaml#/fixtures/messageTranslationAdded — events.yaml#/MessageTranslationAdded
+fn fx_message_translation_added() -> DomainEvent {
+    DomainEvent::MessageTranslationAdded(evs::MessageTranslationAdded { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), locale: sc::Locale("en-US".into()), text: sc::TranslatedText("Hi, any update on my order?".into()) })
+}
+
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
 /// the canonical OrderTracking rows the saga legs read (`read_order`) — state the spec's
 /// GIVEN (an event list) cannot express but its cases assume.
@@ -3390,6 +3395,52 @@ async fn test_duplicate_message_rejected() {
     let err = result.expect_err("TestDuplicateMessageRejected: the spec expects a typed rejection");
     support::assert_thrown("TestDuplicateMessageRejected", &err, &["MessageAlreadyPosted"]);
     bed.assert_appended("TestDuplicateMessageRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMessageTranslationRecorded — "A posted message is translated into a target locale and the translation is cached"
+/// rules: TranslationsAreCachedOncePerLocale
+#[tokio::test]
+async fn test_message_translation_recorded() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened(), fx_message_posted_public()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RecordMessageTranslation { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), locale: sc::Locale("en-US".into()), text: sc::TranslatedText("Hi, any update on my order?".into()) };
+    let result = crate::commands::record_message_translation(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestMessageTranslationRecorded: the spec expects acceptance");
+    bed.assert_appended("TestMessageTranslationRecorded", &before, &[
+        (format!("Conversation-{}", support::uid("order-1")), fx_message_translation_added()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestTranslateUnknownMessageRejected — "Translating a message that was never posted is rejected"
+/// rules: TranslationTargetsAPostedMessage
+#[tokio::test]
+async fn test_translate_unknown_message_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RecordMessageTranslation { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), locale: sc::Locale("en-US".into()), text: sc::TranslatedText("Hi, any update on my order?".into()) };
+    let result = crate::commands::record_message_translation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestTranslateUnknownMessageRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestTranslateUnknownMessageRejected", &err, &["MessageNotFoundInConversation"]);
+    bed.assert_appended("TestTranslateUnknownMessageRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestTranslationAlreadyRecordedRejected — "Re-recording an existing (message, locale) translation is rejected (idempotency)"
+/// rules: TranslationsAreCachedOncePerLocale
+#[tokio::test]
+async fn test_translation_already_recorded_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened(), fx_message_posted_public(), fx_message_translation_added()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RecordMessageTranslation { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), locale: sc::Locale("en-US".into()), text: sc::TranslatedText("Hi, any update on my order?".into()) };
+    let result = crate::commands::record_message_translation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestTranslationAlreadyRecordedRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestTranslationAlreadyRecordedRejected", &err, &["TranslationAlreadyRecorded"]);
+    bed.assert_appended("TestTranslationAlreadyRecordedRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestAdminEscalated — "The restaurant escalates the conversation to an admin with a reason"

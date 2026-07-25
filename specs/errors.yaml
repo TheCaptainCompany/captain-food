@@ -760,6 +760,29 @@ MessageAlreadyPosted:
     en: "This message has already been posted."
     fr: "Ce message a déjà été envoyé."
 
+MessageNotFoundInConversation:
+  description: >
+    A translation targeted a message that was never posted to the conversation; a translation can only be
+    recorded for an actually-posted message (rules.yaml#/TranslationTargetsAPostedMessage) (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+  messages:
+    en: "No such message exists in this conversation."
+    fr: "Ce message n'existe pas dans cette conversation."
+
+TranslationAlreadyRecorded:
+  description: >
+    A translation for this message and target locale is already cached; the re-record is idempotent and
+    rejected (translate once, reuse; rules.yaml#/TranslationsAreCachedOncePerLocale) (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+    locale: { $ref: 'scalars.yaml#/Locale' }
+  messages:
+    en: "This message is already translated into this language."
+    fr: "Ce message est déjà traduit dans cette langue."
+
 MuteReasonRequired:
   description: >
     A participant was muted without a justification reason; a mute must record why

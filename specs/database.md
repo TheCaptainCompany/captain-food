@@ -378,7 +378,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `OrderConversation` · 🛶 V0 · source aggregate `Conversation`
 
-- **Fed by**: `ConversationOpened`, `MessagePosted`, `AdminInvitedToConversation`, `ParticipantMuted`, `ParticipantUnmuted`, `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`
+- **Fed by**: `ConversationOpened`, `MessagePosted`, `MessageTranslationAdded`, `AdminInvitedToConversation`, `ParticipantMuted`, `ParticipantUnmuted`, `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`
 - **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes).
 
 
@@ -388,8 +388,8 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `restaurant_id` | `RestaurantId` | `UUID` | index |  |
 | `customer_chat_enabled` | `boolean` | `BOOLEAN` | — |  |
 | `status` | `OrderStatus` | `INTEGER` | — | Derived from the latest order lifecycle event type (cross-aggregate fold, correlated by order_id). |
-| `messages` | `jsonb` | `JSONB` | — | PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector. |
-| `internal_notes` | `jsonb` | `JSONB` | — | INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector. |
+| `messages` | `jsonb` | `JSONB` | — | PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector; MessageTranslationAdded is folded into the targeted message's per-message `translations` array (translate once, reuse; #129). |
+| `internal_notes` | `jsonb` | `JSONB` | — | INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector; MessageTranslationAdded is folded into the targeted note's per-message `translations` array (#129). |
 | `opened_at` | `timestamptz` | `TIMESTAMPTZ` | — |  |
 | `admin_invited` | `boolean` | `BOOLEAN` | — | True once an admin was pulled in by a reasoned escalation (#129). |
 | `escalation_reason` | `EscalationReason` | `TEXT` | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
