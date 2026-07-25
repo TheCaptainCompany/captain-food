@@ -8825,6 +8825,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-order-rate"></a>`order.rate` | — | Rate your order | Évaluer la commande |
 | <a id="translation-order-reorder"></a>`order.reorder` | — | Reorder | Recommander |
 | <a id="translation-order-help"></a>`order.help` | — | Get help | Obtenir de l'aide |
+| <a id="translation-order-not_found"></a>`order.not_found` | — | Order not found | Commande introuvable |
 | <a id="translation-order-history_title"></a>`order.history_title` | — | Your orders | Vos commandes |
 | <a id="translation-order-tab-active"></a>`order.tab.active` | — | Active | En cours |
 | <a id="translation-order-tab-past"></a>`order.tab.past` | — | Past | Passées |

@@ -139,6 +139,7 @@ order.id_label:   { messages: { en: "Order ID", fr: "N° de commande" } }
 order.rate:       { messages: { en: "Rate your order", fr: "Évaluer la commande" } }
 order.reorder:    { messages: { en: "Reorder", fr: "Recommander" } }
 order.help:       { messages: { en: "Get help", fr: "Obtenir de l'aide" } }
+order.not_found:  { messages: { en: "Order not found", fr: "Commande introuvable" } }
 order.history_title: { messages: { en: "Your orders", fr: "Vos commandes" } }
 order.tab.active: { messages: { en: "Active", fr: "En cours" } }
 order.tab.past:   { messages: { en: "Past", fr: "Passées" } }

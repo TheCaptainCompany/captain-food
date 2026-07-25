@@ -507,6 +507,10 @@
     "en": "Order ID",
     "fr": "N° de commande"
   },
+  "order.not_found": {
+    "en": "Order not found",
+    "fr": "Commande introuvable"
+  },
   "order.rate": {
     "en": "Rate your order",
     "fr": "Évaluer la commande"
