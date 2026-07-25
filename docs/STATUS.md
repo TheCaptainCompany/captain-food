@@ -3,6 +3,38 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-25. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging is
+> now REAL end-to-end (runtime + UI over the domain slices).** On top of the three domain slices
+> (below), the runtime + a customer UI landed as three more green PRs, so a conversation now works
+> through the live stack. **[#141](https://github.com/TheCaptainCompany/captain-food/issues/141)
+> (PR #142) — write path live:** the 6 conversation mutations were auto-stubbed; adding them to the
+> codegen `wired_mutation_dispatch` allowlist (all `Extra::None`) makes the regenerated resolvers
+> journal (acceptance-first) + spawn the real handlers, so commands are accepted and events land in
+> `domain_events`. **[#131](https://github.com/TheCaptainCompany/captain-food/issues/131) (PR #143) —
+> read path live:** the full `OrderConversation` projection-table pipeline mirroring `OrderTracking` —
+> a forward migration (`20260725000000`, `REQUIRED_SCHEMA_VERSION` bumped, **applied cleanly on `main`
+> — `db-migrate` green**), the hand `OrderConversationProjector` (PUBLIC/INTERNAL split, translation
+> merge, cross-aggregate order-status fold, admin/mute state), the Pg store + read repo, a projection-
+> worker group slicing **both** `Conversation-` and `Order-` streams (keyed by orderId), schema
+> injection, and the wired query bodies + emitted `From<OrderConversationRow>` — so `orderConversation`
+> / `orderConversationInternalNotes` return live data. **[#145](https://github.com/TheCaptainCompany/captain-food/issues/145)
+> (PR #146) — customer chat screen:** a `sdui` `order_conversation` screen (`/orders/:orderId/chat`)
+> rendering the PUBLIC timeline bound to the live query with the order status woven in, `message_bubble`
+> + `quick_reply_chips` component kinds (bespoke renderer arms), and a compose row. Each PR green
+> (`make rust` / web 84 tests / wasm / `check-drift`), supervised auto-merge. **The one remaining gap
+> to a working customer SEND:** `postMessage`'s client-minted `messageId` idempotency key isn't
+> injected yet (the generic SDUI executor doesn't mint business UUIDs — only the bespoke checkout
+> `place_order` flow does); a `checkout.rs`-style driver hook is the top follow-up (documented as a
+> screen `gap` on #145). **Cross-cutting dependency:** per-instance read authorization (a customer may
+> read only their own order's thread) is the parallel-track concern in
+> [#144](https://github.com/TheCaptainCompany/captain-food/issues/144) / PROP-20260725-185140 — the
+> conversation queries' "ownership enforced server-side" note relies on it. Still deferred: restaurant/
+> rider thread screens; [#133](https://github.com/TheCaptainCompany/captain-food/issues/133) in-thread
+> refund binding + [#137](https://github.com/TheCaptainCompany/captain-food/issues/137) quick-reply
+> catalog (need the screens); [#132](https://github.com/TheCaptainCompany/captain-food/issues/132) push
+> (needs [#127](https://github.com/TheCaptainCompany/captain-food/issues/127));
+> [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) attachments (framework).
+
 > ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging epic:
 > the three spec-able DOMAIN slices are built + merged (`Conversation` aggregate).** After the epic
 > approval (below), the whole spec-able domain surface landed as three green PRs, each with its full
