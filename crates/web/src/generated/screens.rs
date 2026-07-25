@@ -153,7 +153,7 @@ pub mod captain_frontoffice {
     ];
 }
 
-/// `specs/screens/restaurant_backoffice.yaml` — 4 screen(s).
+/// `specs/screens/restaurant_backoffice.yaml` — 5 screen(s).
 pub mod restaurant_backoffice {
     use super::*;
 
@@ -244,6 +244,47 @@ pub mod restaurant_backoffice {
             Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("back.satisfaction.title"))], children: &[] },
             Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.satisfaction.explainer"))], children: &[] },
             Node { kind: ComponentKind::OrderList, props: &[("items", PropValue::Binding("satisfaction")), ("item_type", PropValue::Text("info_row")), ("empty_state.icon", PropValue::Text("star")), ("empty_state.title", PropValue::I18n("back.satisfaction.empty.title")), ("empty_state.body", PropValue::I18n("back.satisfaction.empty.body"))], children: &[] },
+            Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("staff_nav")), ("items.0.id", PropValue::Text("orders")), ("items.0.label", PropValue::I18n("back.nav.orders")), ("items.0.icon", PropValue::Text("receipt")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("deliveries")), ("items.1.label", PropValue::I18n("back.nav.deliveries")), ("items.1.icon", PropValue::Text("truck")), ("items.1.route", PropValue::Text("/deliveries")), ("items.2.id", PropValue::Text("refunds")), ("items.2.label", PropValue::I18n("back.nav.refunds")), ("items.2.icon", PropValue::Text("coin")), ("items.2.route", PropValue::Text("/refunds")), ("items.3.id", PropValue::Text("satisfaction")), ("items.3.label", PropValue::I18n("back.nav.satisfaction")), ("items.3.icon", PropValue::Text("star")), ("items.3.route", PropValue::Text("/satisfaction"))], children: &[] }
+        ],
+        },
+        Screen {
+            id: "order_conversation",
+            route: "/orders/:orderId/chat",
+            roles: &["RESTAURANT", "RESTAURANT_ACCOUNT"],
+            requires_auth: true,
+            sdui: true,
+            data_requirements: &[ResolverKey::ConversationByOrder, ResolverKey::ConversationInternalNotes],
+            tree: &[
+            Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
+                Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.title"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("acceptance_toggle")), ("label", PropValue::I18n("back.pause_orders")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("change_order_acceptance"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("back.chat.title"))], children: &[] },
+            Node { kind: ComponentKind::InfoRow, props: &[("label", PropValue::I18n("back.chat.order_ref")), ("value", PropValue::Binding("conversation.orderId"))], children: &[] },
+            Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("conversation.status"))], children: &[] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("moderation_banner"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.chat.admin_invited")), ("visible_when", PropValue::Text("conversation.adminInvited"))], children: &[] },
+                Node { kind: ComponentKind::List, props: &[("title", PropValue::I18n("back.chat.muted.title")), ("items", PropValue::Binding("conversation.mutedParticipants"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.chat.public.label"))], children: &[] },
+            Node { kind: ComponentKind::MessageBubble, props: &[("items", PropValue::Binding("conversation.messages")), ("item_type", PropValue::Text("message_bubble")), ("translated_label", PropValue::I18n("back.chat.translated")), ("empty_state.title", PropValue::I18n("back.chat.public.empty.title")), ("empty_state.body", PropValue::I18n("back.chat.public.empty.body"))], children: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.chat.internal.label"))], children: &[] },
+            Node { kind: ComponentKind::MessageBubble, props: &[("items", PropValue::Binding("conversation.notes")), ("item_type", PropValue::Text("message_bubble")), ("translated_label", PropValue::I18n("back.chat.translated")), ("empty_state.title", PropValue::I18n("back.chat.internal.empty.title")), ("empty_state.body", PropValue::I18n("back.chat.internal.empty.body"))], children: &[] },
+            Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("visibility")), ("label", PropValue::I18n("back.chat.visibility.label")), ("single_select", PropValue::Text("true")), ("options.0.value", PropValue::Text("PUBLIC")), ("options.0.label", PropValue::I18n("back.chat.visibility.public")), ("options.1.value", PropValue::Text("INTERNAL")), ("options.1.label", PropValue::I18n("back.chat.visibility.internal"))], children: &[] },
+            Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("compose"))], children: &[
+                Node { kind: ComponentKind::TextInput, props: &[("id", PropValue::Text("body")), ("placeholder", PropValue::I18n("back.chat.compose_placeholder"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("send_btn")), ("label", PropValue::I18n("back.chat.send")), ("variant", PropValue::Text("primary")), ("action.type", PropValue::Text("post_message")), ("action.variables.orderId", PropValue::Binding("conversation.orderId")), ("action.variables.body", PropValue::Binding("body.value")), ("action.variables.visibility", PropValue::Binding("visibility.value")), ("action.variables.authorRole", PropValue::Text("RESTAURANT")), ("action.variables.messageId", PropValue::Binding("$uuid")), ("action.variables.originalLocale", PropValue::Binding("$locale"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("escalate")), ("title", PropValue::I18n("back.chat.escalate.label"))], children: &[
+                Node { kind: ComponentKind::TextInput, props: &[("id", PropValue::Text("escalation_reason")), ("placeholder", PropValue::I18n("back.chat.escalate.reason_ph"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("escalate_btn")), ("label", PropValue::I18n("back.chat.escalate.label")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("escalate_to_admin")), ("action.variables.orderId", PropValue::Binding("conversation.orderId")), ("action.variables.reason", PropValue::Binding("escalation_reason.value"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("mute")), ("title", PropValue::I18n("back.chat.mute.label"))], children: &[
+                Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("mute_role")), ("label", PropValue::I18n("back.chat.mute.role_label")), ("single_select", PropValue::Text("true")), ("options.0.value", PropValue::Text("CUSTOMER")), ("options.0.label", PropValue::I18n("back.chat.mute.role.customer")), ("options.1.value", PropValue::Text("RIDER")), ("options.1.label", PropValue::I18n("back.chat.mute.role.rider"))], children: &[] },
+                Node { kind: ComponentKind::TextInput, props: &[("id", PropValue::Text("mute_reason")), ("placeholder", PropValue::I18n("back.chat.mute.reason_ph"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("mute_btn")), ("label", PropValue::I18n("back.chat.mute.label")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("mute_participant")), ("action.variables.orderId", PropValue::Binding("conversation.orderId")), ("action.variables.mutedRole", PropValue::Binding("mute_role.value")), ("action.variables.reason", PropValue::Binding("mute_reason.value"))], children: &[] }
+            ] },
             Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("staff_nav")), ("items.0.id", PropValue::Text("orders")), ("items.0.label", PropValue::I18n("back.nav.orders")), ("items.0.icon", PropValue::Text("receipt")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("deliveries")), ("items.1.label", PropValue::I18n("back.nav.deliveries")), ("items.1.icon", PropValue::Text("truck")), ("items.1.route", PropValue::Text("/deliveries")), ("items.2.id", PropValue::Text("refunds")), ("items.2.label", PropValue::I18n("back.nav.refunds")), ("items.2.icon", PropValue::Text("coin")), ("items.2.route", PropValue::Text("/refunds")), ("items.3.id", PropValue::Text("satisfaction")), ("items.3.label", PropValue::I18n("back.nav.satisfaction")), ("items.3.icon", PropValue::Text("star")), ("items.3.route", PropValue::Text("/satisfaction"))], children: &[] }
         ],
         },

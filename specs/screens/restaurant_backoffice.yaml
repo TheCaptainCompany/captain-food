@@ -35,6 +35,11 @@ resolvers:
   deliveries.byRestaurant:   { query: { $ref: 'api.yaml#/queries/restaurantDeliveries' } }
   refunds.pending:           { query: { $ref: 'api.yaml#/queries/pendingRefunds' } }
   satisfaction.byRestaurant: { query: { $ref: 'api.yaml#/queries/restaurantDeliverySatisfaction' } }
+  # #129 — the per-order staff conversation: BOTH the PUBLIC thread and the INTERNAL notes. Staff read
+  # the full picture. `orderId` comes from the route `:orderId` (same-name convention). Both resolvers
+  # share the `conversation` data namespace (first segment), so their fields merge under `{{ conversation.* }}`.
+  conversation.byOrder:       { query: { $ref: 'api.yaml#/queries/orderConversation' } }
+  conversation.internalNotes: { query: { $ref: 'api.yaml#/queries/orderConversationInternalNotes' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATA LAYER — ACTIONS (writes + client behaviours). All mutations exist in api.yaml already.
@@ -53,6 +58,11 @@ actions:
   escalate_delivery:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/escalateDelivery' }, note: "Skip the current channel and advance the ranked dispatch walk (#60)." }
   approve_refund: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/approveRefund' } }
   deny_refund:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/denyRefund' } }
+  # #129 — order conversation writes. post_message serves BOTH visibilities (PUBLIC reply / INTERNAL note),
+  # the visibility toggle picks which. escalate_to_admin / mute_participant are the staff-only moderation moves.
+  post_message:      { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/postMessage' } }
+  escalate_to_admin: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/escalateToAdmin' } }
+  mute_participant:  { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/muteParticipant' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GLOBAL CHROME — the staff top bar (shared across the four screens).
@@ -179,4 +189,130 @@ screens:
         items: "{{ satisfaction }}"
         item_type: info_row
         empty_state: { icon: star, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.empty.title' }, body: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.empty.body' } }
+      - { component: staff_nav }
+
+  # SCREEN 5 — Order conversation (#129): the STAFF side of the per-order chat. Unlike the customer's
+  # single PUBLIC thread (restaurant_frontoffice `order_conversation`), staff read the FULL picture —
+  # the PUBLIC timeline AND the INTERNAL staff notes — and can post to either visibility, pull in an
+  # admin (escalate) or mute a disruptive role. Two resolvers (byOrder + internalNotes) merge under the
+  # `conversation` namespace; `orderId` flows from the route `:orderId`.
+  #
+  # Follow-up (nicety, not blocking): the mute control omits the optional `until` duration — every mute
+  # is indefinite for now; a duration picker (bounded mute) is a later addition. The muted-participants
+  # banner binds `conversation.mutedParticipants` through the generic `list` component, which renders one
+  # row per entry; a bespoke role+reason row is a renderer follow-up.
+  - id: order_conversation
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    route: "/orders/:orderId/chat"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [conversation.byOrder, conversation.internalNotes]
+    actions_used: [post_message, escalate_to_admin, mute_participant]
+    components:
+      - { component: staff_topbar }
+      # Header — order ref + live status chip.
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.title' } }
+      - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.order_ref' }, value: "{{ conversation.orderId }}" }
+      - { type: status_chip, status: "{{ conversation.status }}" }
+
+      # Escalation / mute banner — shown when an admin was pulled in; lists any muted participants.
+      - type: section
+        id: moderation_banner
+        content:
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.admin_invited' }, visible_when: "conversation.adminInvited" }
+          - type: list
+            title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.muted.title' }
+            items: "{{ conversation.mutedParticipants }}"
+
+      # PUBLIC timeline (customer-visible).
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.public.label' } }
+      - type: message_bubble
+        items: "{{ conversation.messages }}"
+        item_type: message_bubble
+        translated_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.translated' }
+        empty_state:
+          title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.public.empty.title' }
+          body: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.public.empty.body' }
+
+      # INTERNAL staff notes (lock affordance in the label — staff-only).
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.internal.label' } }
+      - type: message_bubble
+        items: "{{ conversation.notes }}"
+        item_type: message_bubble
+        translated_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.translated' }
+        empty_state:
+          title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.internal.empty.title' }
+          body: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.internal.empty.body' }
+
+      # Compose — body + visibility toggle (PUBLIC/INTERNAL) + send. The toggle is a single-select chip
+      # group whose selected value lands in a hidden input `id=visibility`; the send action reads it as
+      # `{{ visibility.value }}` (the #114 chip→form-field binding). messageId/originalLocale are the #147
+      # dispatch-time mint tokens — the six fields cover every required PostMessage field.
+      - type: chip_multi_select
+        id: visibility
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.visibility.label' }
+        single_select: true
+        options:
+          - { value: PUBLIC,   label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.visibility.public' } }
+          - { value: INTERNAL, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.visibility.internal' } }
+      - type: row
+        id: compose
+        content:
+          - { type: text_input, id: body, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.compose_placeholder' } }
+          - type: button
+            id: send_btn
+            label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.send' }
+            variant: primary
+            action:
+              type: post_message
+              variables:
+                orderId: "{{ conversation.orderId }}"
+                body: "{{ body.value }}"
+                visibility: "{{ visibility.value }}"
+                authorRole: "RESTAURANT"
+                messageId: "{{ $uuid }}"
+                originalLocale: "{{ $locale }}"
+
+      # Escalate to admin — a reason + a button.
+      - type: section
+        id: escalate
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.escalate.label' }
+        content:
+          - { type: text_input, id: escalation_reason, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.escalate.reason_ph' } }
+          - type: button
+            id: escalate_btn
+            label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.escalate.label' }
+            variant: outline
+            action:
+              type: escalate_to_admin
+              variables:
+                orderId: "{{ conversation.orderId }}"
+                reason: "{{ escalation_reason.value }}"
+
+      # Mute a participant — target role (CUSTOMER/RIDER) + a REQUIRED reason (the domain rejects an
+      # empty reason via MuteReasonRequired) + a button. `until` (bounded mute) is omitted for now.
+      - type: section
+        id: mute
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.mute.label' }
+        content:
+          - type: chip_multi_select
+            id: mute_role
+            label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.mute.role_label' }
+            single_select: true
+            options:
+              - { value: CUSTOMER, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.mute.role.customer' } }
+              - { value: RIDER,    label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.mute.role.rider' } }
+          - { type: text_input, id: mute_reason, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.mute.reason_ph' } }
+          - type: button
+            id: mute_btn
+            label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.mute.label' }
+            variant: outline
+            action:
+              type: mute_participant
+              variables:
+                orderId: "{{ conversation.orderId }}"
+                mutedRole: "{{ mute_role.value }}"
+                reason: "{{ mute_reason.value }}"
+
       - { component: staff_nav }

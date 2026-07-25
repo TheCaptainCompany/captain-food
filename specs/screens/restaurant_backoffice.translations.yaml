@@ -44,3 +44,28 @@ back.satisfaction.title:       { messages: { en: "Delivery satisfaction", fr: "S
 back.satisfaction.explainer:   { messages: { en: "How customers judged the timeliness of your deliveries — the signal for choosing self-dispatch or Captain routing.", fr: "Comment vos clients ont jugé la ponctualité de vos livraisons — le signal pour choisir entre livraison en propre et Captain." } }
 back.satisfaction.empty.title: { messages: { en: "No answers yet", fr: "Pas encore de réponses" } }
 back.satisfaction.empty.body:  { messages: { en: "Post-delivery survey answers show up here.", fr: "Les réponses au sondage post-livraison s'affichent ici." } }
+
+# ── order conversation (#129) ──────────────────────────────────────────────────
+back.chat.title:     { messages: { en: "Order conversation", fr: "Conversation de la commande" } }
+back.chat.order_ref: { messages: { en: "Order", fr: "Commande" } }
+back.chat.translated: { messages: { en: "Translated", fr: "Traduit" } }
+back.chat.admin_invited: { messages: { en: "An admin has been invited to this conversation.", fr: "Un administrateur a été invité dans cette conversation." } }
+back.chat.muted.title:   { messages: { en: "Muted participants", fr: "Participants réduits au silence" } }
+back.chat.public.label: { messages: { en: "Public thread (customer-visible)", fr: "Fil public (visible par le client)" } }
+back.chat.public.empty.title: { messages: { en: "No messages yet", fr: "Aucun message pour le moment" } }
+back.chat.public.empty.body:  { messages: { en: "Messages exchanged with the customer appear here.", fr: "Les messages échangés avec le client apparaissent ici." } }
+back.chat.internal.label: { messages: { en: "Internal notes (staff-only, locked)", fr: "Notes internes (personnel uniquement, verrouillées)" } }
+back.chat.internal.empty.title: { messages: { en: "No internal notes yet", fr: "Aucune note interne pour le moment" } }
+back.chat.internal.empty.body:  { messages: { en: "Notes visible only to your team appear here.", fr: "Les notes visibles uniquement par votre équipe apparaissent ici." } }
+back.chat.visibility.label:    { messages: { en: "Post as", fr: "Publier en tant que" } }
+back.chat.visibility.public:   { messages: { en: "Public reply", fr: "Réponse publique" } }
+back.chat.visibility.internal: { messages: { en: "Internal note", fr: "Note interne" } }
+back.chat.compose_placeholder: { messages: { en: "Write a message…", fr: "Écrire un message…" } }
+back.chat.send: { messages: { en: "Send", fr: "Envoyer" } }
+back.chat.escalate.label:     { messages: { en: "Escalate to admin", fr: "Escalader à un administrateur" } }
+back.chat.escalate.reason_ph: { messages: { en: "Why are you escalating?", fr: "Pourquoi escaladez-vous ?" } }
+back.chat.mute.label:         { messages: { en: "Mute participant", fr: "Réduire un participant au silence" } }
+back.chat.mute.role_label:    { messages: { en: "Who to mute", fr: "Qui réduire au silence" } }
+back.chat.mute.role.customer: { messages: { en: "Customer", fr: "Client" } }
+back.chat.mute.role.rider:    { messages: { en: "Rider", fr: "Livreur" } }
+back.chat.mute.reason_ph:     { messages: { en: "Reason (required)", fr: "Motif (obligatoire)" } }

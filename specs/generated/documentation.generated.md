@@ -9070,6 +9070,38 @@ _Surface_ **`restaurant_backoffice.yaml`**
 | --- | --- | --- |
 | read | `satisfaction.byRestaurant` | [🔎 `restaurantDeliverySatisfaction`](#query-restaurantdeliverysatisfaction) |
 
+<a id="screen-order_conversation"></a>
+### 📱 `order_conversation` · `/orders/:orderId/chat` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Order conversation                       │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Order conversation         │
+│ info_row — Order                         │
+│ status_chip                              │
+│ section                                  │
+│ text                                     │
+│ message_bubble                           │
+│ text                                     │
+│ message_bubble                           │
+│ chip_multi_select — Post as              │
+│ row                                      │
+│ section — Escalate to admin              │
+│ section — Mute participant               │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `conversation.byOrder` | [🔎 `orderConversation`](#query-orderconversation) |
+| read | `conversation.internalNotes` | [🔎 `orderConversationInternalNotes`](#query-orderconversationinternalnotes) |
+| write | `post_message` | [✏️ `postMessage`](#mutation-postmessage) |
+| write | `escalate_to_admin` | [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) |
+| write | `mute_participant` | [✏️ `muteParticipant`](#mutation-muteparticipant) |
+
 _Surface_ **`restaurant_frontoffice.yaml`**
 
 <a id="screen-restaurant"></a>
@@ -9362,6 +9394,29 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-satisfaction-explainer"></a>`back.satisfaction.explainer` | — | How customers judged the timeliness of your deliveries — the signal for choosing self-dispatch or Captain routing. | Comment vos clients ont jugé la ponctualité de vos livraisons — le signal pour choisir entre livraison en propre et Captain. |
 | <a id="translation-back-satisfaction-empty-title"></a>`back.satisfaction.empty.title` | — | No answers yet | Pas encore de réponses |
 | <a id="translation-back-satisfaction-empty-body"></a>`back.satisfaction.empty.body` | — | Post-delivery survey answers show up here. | Les réponses au sondage post-livraison s'affichent ici. |
+| <a id="translation-back-chat-title"></a>`back.chat.title` | — | Order conversation | Conversation de la commande |
+| <a id="translation-back-chat-order_ref"></a>`back.chat.order_ref` | — | Order | Commande |
+| <a id="translation-back-chat-translated"></a>`back.chat.translated` | — | Translated | Traduit |
+| <a id="translation-back-chat-admin_invited"></a>`back.chat.admin_invited` | — | An admin has been invited to this conversation. | Un administrateur a été invité dans cette conversation. |
+| <a id="translation-back-chat-muted-title"></a>`back.chat.muted.title` | — | Muted participants | Participants réduits au silence |
+| <a id="translation-back-chat-public-label"></a>`back.chat.public.label` | — | Public thread (customer-visible) | Fil public (visible par le client) |
+| <a id="translation-back-chat-public-empty-title"></a>`back.chat.public.empty.title` | — | No messages yet | Aucun message pour le moment |
+| <a id="translation-back-chat-public-empty-body"></a>`back.chat.public.empty.body` | — | Messages exchanged with the customer appear here. | Les messages échangés avec le client apparaissent ici. |
+| <a id="translation-back-chat-internal-label"></a>`back.chat.internal.label` | — | Internal notes (staff-only, locked) | Notes internes (personnel uniquement, verrouillées) |
+| <a id="translation-back-chat-internal-empty-title"></a>`back.chat.internal.empty.title` | — | No internal notes yet | Aucune note interne pour le moment |
+| <a id="translation-back-chat-internal-empty-body"></a>`back.chat.internal.empty.body` | — | Notes visible only to your team appear here. | Les notes visibles uniquement par votre équipe apparaissent ici. |
+| <a id="translation-back-chat-visibility-label"></a>`back.chat.visibility.label` | — | Post as | Publier en tant que |
+| <a id="translation-back-chat-visibility-public"></a>`back.chat.visibility.public` | — | Public reply | Réponse publique |
+| <a id="translation-back-chat-visibility-internal"></a>`back.chat.visibility.internal` | — | Internal note | Note interne |
+| <a id="translation-back-chat-compose_placeholder"></a>`back.chat.compose_placeholder` | — | Write a message… | Écrire un message… |
+| <a id="translation-back-chat-send"></a>`back.chat.send` | — | Send | Envoyer |
+| <a id="translation-back-chat-escalate-label"></a>`back.chat.escalate.label` | — | Escalate to admin | Escalader à un administrateur |
+| <a id="translation-back-chat-escalate-reason_ph"></a>`back.chat.escalate.reason_ph` | — | Why are you escalating? | Pourquoi escaladez-vous ? |
+| <a id="translation-back-chat-mute-label"></a>`back.chat.mute.label` | — | Mute participant | Réduire un participant au silence |
+| <a id="translation-back-chat-mute-role_label"></a>`back.chat.mute.role_label` | — | Who to mute | Qui réduire au silence |
+| <a id="translation-back-chat-mute-role-customer"></a>`back.chat.mute.role.customer` | — | Customer | Client |
+| <a id="translation-back-chat-mute-role-rider"></a>`back.chat.mute.role.rider` | — | Rider | Livreur |
+| <a id="translation-back-chat-mute-reason_ph"></a>`back.chat.mute.reason_ph` | — | Reason (required) | Motif (obligatoire) |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |
