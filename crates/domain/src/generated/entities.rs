@@ -359,6 +359,16 @@ pub struct ConversationMessage {
     pub posted_at: String,
     #[serde(default)]
     pub attachment_refs: Vec<AttachmentRef>,
+    #[serde(default)]
+    pub translations: Vec<MessageTranslation>,
+}
+
+/// The cached translation of a conversation message into one target locale — persisted once and reused across readers (translate once, reuse; #129). Rides along with each ConversationMessage in the read model via its `translations` array.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageTranslation {
+    pub locale: Locale,
+    pub text: TranslatedText,
 }
 
 /// A role currently muted in an order conversation (read-model array element; #129). `reason` is the recorded justification (mutes require one, rules.yaml#/MuteRequiresAReason); `until` bounds the mute in time, or is null for an indefinite mute.

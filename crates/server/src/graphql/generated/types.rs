@@ -342,6 +342,18 @@ pub struct ConversationMessage {
     pub posted_at: chrono::DateTime<chrono::Utc>,
     #[graphql(name = "attachmentRefs")]
     pub attachment_refs: Option<Vec<AttachmentRef>>,
+    #[graphql(name = "translations")]
+    pub translations: Option<Vec<MessageTranslation>>,
+}
+
+/// The cached translation of a conversation message into one target locale — persisted once and reused across readers (translate once, reuse; #129). Rides along with each ConversationMessage in the read model via its `translations` array.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageTranslation {
+    #[graphql(name = "locale")]
+    pub locale: Locale,
+    #[graphql(name = "text")]
+    pub text: TranslatedText,
 }
 
 /// A role currently muted in an order conversation (read-model array element; #129). `reason` is the recorded justification (mutes require one, rules.yaml#/MuteRequiresAReason); `until` bounds the mute in time, or is null for an indefinite mute.

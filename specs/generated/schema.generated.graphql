@@ -86,6 +86,7 @@ scalar MessageBody
 scalar AttachmentRef
 scalar MuteReason
 scalar EscalationReason
+scalar TranslatedText
 
 # ==============================================================================
 # Enums
@@ -512,6 +513,12 @@ type ConversationMessage {
   originalLocale: Locale!
   postedAt: DateTime!
   attachmentRefs: [AttachmentRef!]
+  translations: [MessageTranslation!]
+}
+
+type MessageTranslation {
+  locale: Locale!
+  text: TranslatedText!
 }
 
 type MutedParticipant {
@@ -1288,6 +1295,13 @@ input PostMessageInput {
   attachmentRefs: [AttachmentRef!]
 }
 
+input RecordMessageTranslationInput {
+  orderId: OrderId!
+  messageId: ConversationMessageId!
+  locale: Locale!
+  text: TranslatedText!
+}
+
 input EscalateToAdminInput {
   orderId: OrderId!
   reason: EscalationReason!
@@ -1656,6 +1670,7 @@ type Mutation {
   revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")
   openConversation(input: OpenConversationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "OpenConversation")
   postMessage(input: PostMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "PostMessage")
+  recordMessageTranslation(input: RecordMessageTranslationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "RecordMessageTranslation")
   escalateToAdmin(input: EscalateToAdminInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "EscalateToAdmin")
   muteParticipant(input: MuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "MuteParticipant")
   unmuteParticipant(input: UnmuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "UnmuteParticipant")

@@ -914,6 +914,16 @@ pub struct MessagePosted {
     pub attachment_refs: Vec<AttachmentRef>,
 }
 
+/// A posted conversation message was translated into a target locale and the result cached (persisted) for reuse (translate once, reuse; #129). Idempotent per (message, locale).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageTranslationAdded {
+    pub order_id: OrderId,
+    pub message_id: ConversationMessageId,
+    pub locale: Locale,
+    pub text: TranslatedText,
+}
+
 /// An admin was pulled into an order's conversation through a reasoned escalation by the restaurant or rider (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1038,6 +1048,7 @@ pub enum DomainEvent {
     RefundDenied(RefundDenied),
     ConversationOpened(ConversationOpened),
     MessagePosted(MessagePosted),
+    MessageTranslationAdded(MessageTranslationAdded),
     AdminInvitedToConversation(AdminInvitedToConversation),
     ParticipantMuted(ParticipantMuted),
     ParticipantUnmuted(ParticipantUnmuted),

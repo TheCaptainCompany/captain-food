@@ -657,6 +657,7 @@ OrderConversation:
   fedBy:
     - { $ref: 'events.yaml#/ConversationOpened' }
     - { $ref: 'events.yaml#/MessagePosted' }
+    - { $ref: 'events.yaml#/MessageTranslationAdded' }
     - { $ref: 'events.yaml#/AdminInvitedToConversation' }
     - { $ref: 'events.yaml#/ParticipantMuted' }
     - { $ref: 'events.yaml#/ParticipantUnmuted' }
@@ -692,12 +693,16 @@ OrderConversation:
       note: "Derived from the latest order lifecycle event type (cross-aggregate fold, correlated by order_id)."
     messages:
       type: jsonb
-      from: [{ $ref: 'events.yaml#/MessagePosted' }]
-      note: "PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector."
+      from:
+        - { $ref: 'events.yaml#/MessagePosted' }
+        - { $ref: 'events.yaml#/MessageTranslationAdded' }
+      note: "PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector; MessageTranslationAdded is folded into the targeted message's per-message `translations` array (translate once, reuse; #129)."
     internal_notes:
       type: jsonb
-      from: [{ $ref: 'events.yaml#/MessagePosted' }]
-      note: "INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector."
+      from:
+        - { $ref: 'events.yaml#/MessagePosted' }
+        - { $ref: 'events.yaml#/MessageTranslationAdded' }
+      note: "INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector; MessageTranslationAdded is folded into the targeted note's per-message `translations` array (#129)."
     opened_at:
       type: timestamptz
       from: [{ $ref: 'events.yaml#/ConversationOpened' }]

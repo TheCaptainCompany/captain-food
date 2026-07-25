@@ -965,6 +965,10 @@ mutations:
     command: { $ref: 'commands.yaml#/PostMessage' }
     roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
     slice: V0
+  recordMessageTranslation:
+    command: { $ref: 'commands.yaml#/RecordMessageTranslation' }
+    roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    slice: V0
   escalateToAdmin:
     command: { $ref: 'commands.yaml#/EscalateToAdmin' }
     roles: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]

@@ -1431,6 +1431,18 @@ PostMessage:
       nullable: true
   required: [orderId, messageId, authorRole, visibility, body, originalLocale]
 
+RecordMessageTranslation:
+  description: >
+    Record (cache) a translation of a posted message into a target locale; idempotent per (message,
+    locale). The conversation and the message must exist. Translate once, reuse (#129).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+    locale: { $ref: 'scalars.yaml#/Locale' }
+    text: { $ref: 'scalars.yaml#/TranslatedText' }
+  required: [orderId, messageId, locale, text]
+
 EscalateToAdmin:
   description: >
     Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The

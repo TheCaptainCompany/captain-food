@@ -7,7 +7,7 @@
 //! (`CustomerChatDisabled`) and the set of already-posted message ids (`MessageAlreadyPosted`). No I/O.
 
 use crate::generated::events::DomainEvent;
-use crate::generated::scalars::{ConversationAuthorRole, ConversationMessageId};
+use crate::generated::scalars::{ConversationAuthorRole, ConversationMessageId, Locale};
 
 /// What the Conversation command handlers need to accept or reject a command. `None` (from [`fold`])
 /// means no `ConversationOpened` yet — the conversation does not exist.
@@ -22,6 +22,9 @@ pub struct ConversationState {
     /// The participant roles currently muted — the set `MuteParticipant`/`UnmuteParticipant` read
     /// (`ParticipantNotMuted`; #129).
     pub muted_roles: Vec<ConversationAuthorRole>,
+    /// The (message, locale) pairs already translated — the idempotency guard for
+    /// `RecordMessageTranslation` (`TranslationAlreadyRecorded`; #129).
+    pub translations: Vec<(ConversationMessageId, Locale)>,
 }
 
 /// Fold a Conversation stream (events in version order) into its current state. `None` ⇔ the stream
@@ -39,11 +42,22 @@ fn apply(state: Option<ConversationState>, event: &DomainEvent) -> Option<Conver
             message_ids: Vec::new(),
             admin_invited: false,
             muted_roles: Vec::new(),
+            translations: Vec::new(),
         }),
         // Append the message id (idempotency guard); a MessagePosted without a birth is impossible.
         DomainEvent::MessagePosted(e) => {
             let mut s = state?;
             s.message_ids.push(e.message_id);
+            Some(s)
+        }
+        // Cache a message translation: record the (message, locale) pair if not already present
+        // (idempotency guard for RecordMessageTranslation; #129).
+        DomainEvent::MessageTranslationAdded(e) => {
+            let mut s = state?;
+            let pair = (e.message_id, e.locale.clone());
+            if !s.translations.contains(&pair) {
+                s.translations.push(pair);
+            }
             Some(s)
         }
         // An admin was pulled in by a reasoned escalation (#129).
@@ -75,12 +89,12 @@ mod tests {
     use super::*;
     use crate::aggregate::Aggregate;
     use crate::generated::events::{
-        AdminInvitedToConversation, ConversationOpened, MessagePosted, ParticipantMuted,
-        ParticipantUnmuted,
+        AdminInvitedToConversation, ConversationOpened, MessagePosted, MessageTranslationAdded,
+        ParticipantMuted, ParticipantUnmuted,
     };
     use crate::generated::scalars::{
         ConversationAuthorRole, EscalationReason, Locale, MessageBody, MessageVisibility, MuteReason,
-        OrderId, RestaurantId,
+        OrderId, RestaurantId, TranslatedText,
     };
 
     fn opened(customer_chat_enabled: bool) -> DomainEvent {
@@ -162,6 +176,37 @@ mod tests {
         let s = fold(&[opened(true), muted(ConversationAuthorRole::RIDER), unmuted(ConversationAuthorRole::RIDER)])
             .unwrap();
         assert!(s.muted_roles.is_empty());
+    }
+
+    fn translated(message: uuid::Uuid, locale: &str) -> DomainEvent {
+        DomainEvent::MessageTranslationAdded(MessageTranslationAdded {
+            order_id: OrderId(uuid::Uuid::nil()),
+            message_id: ConversationMessageId(message),
+            locale: Locale(locale.into()),
+            text: TranslatedText("hello".into()),
+        })
+    }
+
+    #[test]
+    fn translations_accumulate_once_per_message_locale() {
+        let m1 = uuid::Uuid::from_u128(1);
+        // A translation is tracked as a (message, locale) pair.
+        let s = fold(&[opened(true), posted(m1), translated(m1, "en-US")]).unwrap();
+        assert_eq!(s.translations, vec![(ConversationMessageId(m1), Locale("en-US".into()))]);
+        // Re-recording the same (message, locale) never duplicates it.
+        let s = fold(&[opened(true), posted(m1), translated(m1, "en-US"), translated(m1, "en-US")])
+            .unwrap();
+        assert_eq!(s.translations, vec![(ConversationMessageId(m1), Locale("en-US".into()))]);
+        // A different locale for the same message is a distinct pair.
+        let s = fold(&[opened(true), posted(m1), translated(m1, "en-US"), translated(m1, "es-ES")])
+            .unwrap();
+        assert_eq!(
+            s.translations,
+            vec![
+                (ConversationMessageId(m1), Locale("en-US".into())),
+                (ConversationMessageId(m1), Locale("es-ES".into())),
+            ]
+        );
     }
 
     #[test]

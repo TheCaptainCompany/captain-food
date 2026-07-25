@@ -1019,6 +1019,20 @@ pub struct PostMessageInput {
     pub attachment_refs: Option<Vec<AttachmentRef>>,
 }
 
+/// Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordMessageTranslationInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "messageId")]
+    pub message_id: ConversationMessageId,
+    #[graphql(name = "locale")]
+    pub locale: Locale,
+    #[graphql(name = "text")]
+    pub text: TranslatedText,
+}
+
 /// Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]

@@ -80,6 +80,7 @@ An authenticated person who orders food via Captain.Food.
 |  | SetPaymentMethod | [✏️ `setCustomerPaymentMethod`](#mutation-setcustomerpaymentmethod) |
 | 🧭 **MessageAboutMyOrder** | OpenThread | [✏️ `openConversation`](#mutation-openconversation) |
 |  | SendMessage | [✏️ `postMessage`](#mutation-postmessage) |
+|  | TranslateMessage | [✏️ `recordMessageTranslation`](#mutation-recordmessagetranslation) |
 |  | ReadThread | [🔎 `orderConversation`](#query-orderconversation) |
 
 <a id="story-restaurant_owner"></a>
@@ -2893,7 +2894,7 @@ _Rejects importing into a missing catalog, on a translation failure, or with a m
 
 _Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)._
 
-### 🧰 API operations _(29)_
+### 🧰 API operations _(30)_
 
 <a id="query-cart"></a>
 #### 🔎 Query: `cart`
@@ -3080,6 +3081,13 @@ The INTERNAL staff notes on one order's conversation — staff/rider/admin only,
 #### ✏️ Mutation: `postMessage`
 
 - **Command**: [📩 `PostMessage`](#command-postmessage) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-recordmessagetranslation"></a>
+#### ✏️ Mutation: `recordMessageTranslation`
+
+- **Command**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) → handled by [🎭 `Conversation`](#actor-conversation)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
@@ -3342,6 +3350,7 @@ _🧩 aggregate_ — Per-order in-app message thread; id = orderId (a conversati
 | --- | --- | --- |
 | [📩 `OpenConversation`](#command-openconversation) | [⚡ `ConversationOpened`](#event-conversationopened) | [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen) |
 | [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
+| [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) | [⚡ `MessageTranslationAdded`](#event-messagetranslationadded) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation), [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded) |
 | [📩 `EscalateToAdmin`](#command-escalatetoadmin) | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | [⛔ `ConversationNotFound`](#error-conversationnotfound) |
 | [📩 `MuteParticipant`](#command-muteparticipant) | [⚡ `ParticipantMuted`](#event-participantmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired) |
 | [📩 `UnmuteParticipant`](#command-unmuteparticipant) | [⚡ `ParticipantUnmuted`](#event-participantunmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `ParticipantNotMuted`](#error-participantnotmuted) |
@@ -3605,7 +3614,7 @@ sequenceDiagram
 
 - **Source**: [🎭 `Conversation`](#actor-conversation) · 🛶 V0
 - **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes). 
-- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation), [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
+- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded), [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation), [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -3613,8 +3622,8 @@ sequenceDiagram
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ | [⚡ `ConversationOpened`.`restaurantId`](#event-conversationopened--restaurantid) | index |  |
 | `customer_chat_enabled` | `boolean` | [⚡ `ConversationOpened`.`customerChatEnabled`](#event-conversationopened--customerchatenabled) | — |  |
 | `status` | [🔤 `OrderStatus`](#scalar-orderstatus) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | — | Derived from the latest order lifecycle event type (cross-aggregate fold, correlated by order_id). |
-| `messages` | `jsonb` | [⚡ `MessagePosted`](#event-messageposted) | — | PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector. |
-| `internal_notes` | `jsonb` | [⚡ `MessagePosted`](#event-messageposted) | — | INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector. |
+| `messages` | `jsonb` | [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded) | — | PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector; MessageTranslationAdded is folded into the targeted message's per-message `translations` array (translate once, reuse; #129). |
+| `internal_notes` | `jsonb` | [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded) | — | INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector; MessageTranslationAdded is folded into the targeted note's per-message `translations` array (#129). |
 | `opened_at` | `timestamptz` | [⚡ `ConversationOpened`](#event-conversationopened) | — |  |
 | `admin_invited` | `boolean` | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | — | True once an admin was pulled in by a reasoned escalation (#129). |
 | `escalation_reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | [⚡ `AdminInvitedToConversation`.`reason`](#event-admininvitedtoconversation--reason) | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
@@ -3622,7 +3631,7 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(24)_
+### 📩 Commands _(25)_
 
 <a id="command-addcartline"></a>
 #### 📩 Command: `AddCartLine`
@@ -3950,6 +3959,22 @@ Post a message to an order's conversation — PUBLIC (customer-visible) or INTER
 | <a id="command-postmessage--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
 | <a id="command-postmessage--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
 
+<a id="command-recordmessagetranslation"></a>
+#### 📩 Command: `RecordMessageTranslation`
+
+Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
+
+- **Dispatched by**: [✏️ `recordMessageTranslation`](#mutation-recordmessagetranslation) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation), [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-recordmessagetranslation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-recordmessagetranslation--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="command-recordmessagetranslation--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="command-recordmessagetranslation--text"></a>`text` | [🔤 `TranslatedText`](#scalar-translatedtext) | ✅ |  |
+
 <a id="command-escalatetoadmin"></a>
 #### 📩 Command: `EscalateToAdmin`
 
@@ -3994,7 +4019,7 @@ Unmute a previously muted participant role in an order's conversation. The conve
 | <a id="command-unmuteparticipant--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="command-unmuteparticipant--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
 
-### ⚡ Events _(31)_
+### ⚡ Events _(32)_
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -4437,6 +4462,22 @@ A message was appended to an order's conversation. `visibility` splits customer-
 | <a id="event-messageposted--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
 | <a id="event-messageposted--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
 
+<a id="event-messagetranslationadded"></a>
+#### ⚡ Event: `MessageTranslationAdded`
+
+A posted conversation message was translated into a target locale and the result cached (persisted) for reuse (translate once, reuse; #129). Idempotent per (message, locale).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-messagetranslationadded--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-messagetranslationadded--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="event-messagetranslationadded--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="event-messagetranslationadded--text"></a>`text` | [🔤 `TranslatedText`](#scalar-translatedtext) | ✅ |  |
+
 <a id="event-admininvitedtoconversation"></a>
 #### ⚡ Event: `AdminInvitedToConversation`
 
@@ -4481,7 +4522,7 @@ A previously muted participant role was unmuted in an order's conversation (rule
 | <a id="event-participantunmuted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-participantunmuted--mutedrole"></a>`mutedRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
 
-### 📦 Entities _(13)_
+### 📦 Entities _(14)_
 
 <a id="entity-money"></a>
 #### 📦 Entity: `Money`
@@ -4645,6 +4686,17 @@ One message in an order's in-app conversation (read-model array element; #129). 
 | <a id="entity-conversationmessage--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
 | <a id="entity-conversationmessage--postedat"></a>`postedAt` | `string` _date-time_ | ✅ |  |
 | <a id="entity-conversationmessage--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
+| <a id="entity-conversationmessage--translations"></a>`translations` | [[📦 `MessageTranslation`](#entity-messagetranslation)] | ⬜ |  |
+
+<a id="entity-messagetranslation"></a>
+#### 📦 Entity: `MessageTranslation`
+
+The cached translation of a conversation message into one target locale — persisted once and reused across readers (translate once, reuse; #129). Rides along with each ConversationMessage in the read model via its `translations` array.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-messagetranslation--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="entity-messagetranslation--text"></a>`text` | [🔤 `TranslatedText`](#scalar-translatedtext) | ✅ |  |
 
 <a id="entity-mutedparticipant"></a>
 #### 📦 Entity: `MutedParticipant`
@@ -4657,7 +4709,7 @@ A role currently muted in an order conversation (read-model array element; #129)
 | <a id="entity-mutedparticipant--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ✅ |  |
 | <a id="entity-mutedparticipant--until"></a>`until` | `string` _date-time_ | ⬜ |  |
 
-### 🔤 Scalars _(26)_
+### 🔤 Scalars _(27)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -4687,8 +4739,9 @@ A role currently muted in an order conversation (read-model array element; #129)
 | <a id="scalar-attachmentref"></a>🔤 `AttachmentRef` | string | Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).  |
 | <a id="scalar-mutereason"></a>🔤 `MuteReason` | string | The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).  |
 | <a id="scalar-escalationreason"></a>🔤 `EscalationReason` | string | Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).  |
+| <a id="scalar-translatedtext"></a>🔤 `TranslatedText` | string | A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).  |
 
-### ⛔ Errors _(29)_
+### ⛔ Errors _(31)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -4716,13 +4769,15 @@ A role currently muted in an order conversation (read-model array element; #129)
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-conversationalreadyopen"></a>⛔ `ConversationAlreadyOpen` | OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).  | 🇬🇧 A conversation is already open for this order. | 🇫🇷 Une conversation est déjà ouverte pour cette commande. | [📩 `OpenConversation`](#command-openconversation) |
-| <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage), [📩 `EscalateToAdmin`](#command-escalatetoadmin), [📩 `MuteParticipant`](#command-muteparticipant), [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
+| <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage), [📩 `RecordMessageTranslation`](#command-recordmessagetranslation), [📩 `EscalateToAdmin`](#command-escalatetoadmin), [📩 `MuteParticipant`](#command-muteparticipant), [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
 | <a id="error-customerchatdisabled"></a>⛔ `CustomerChatDisabled` | A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).  | 🇬🇧 Customer messaging is disabled for this order. | 🇫🇷 La messagerie client est désactivée pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
 | <a id="error-messagealreadyposted"></a>⛔ `MessageAlreadyPosted` | A message with this client-generated messageId was already posted to the conversation; the re-post is a duplicate and is rejected (idempotency; #129).  | 🇬🇧 This message has already been posted. | 🇫🇷 Ce message a déjà été envoyé. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-messagenotfoundinconversation"></a>⛔ `MessageNotFoundInConversation` | A translation targeted a message that was never posted to the conversation; a translation can only be recorded for an actually-posted message (rules.yaml#/TranslationTargetsAPostedMessage) (#129).  | 🇬🇧 No such message exists in this conversation. | 🇫🇷 Ce message n'existe pas dans cette conversation. | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) |
+| <a id="error-translationalreadyrecorded"></a>⛔ `TranslationAlreadyRecorded` | A translation for this message and target locale is already cached; the re-record is idempotent and rejected (translate once, reuse; rules.yaml#/TranslationsAreCachedOncePerLocale) (#129).  | 🇬🇧 This message is already translated into this language. | 🇫🇷 Ce message est déjà traduit dans cette langue. | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) |
 | <a id="error-mutereasonrequired"></a>⛔ `MuteReasonRequired` | A participant was muted without a justification reason; a mute must record why (rules.yaml#/MuteRequiresAReason) (#129).  | 🇬🇧 A reason is required to mute a participant. | 🇫🇷 Un motif est requis pour rendre un participant muet. | [📩 `MuteParticipant`](#command-muteparticipant) |
 | <a id="error-participantnotmuted"></a>⛔ `ParticipantNotMuted` | An unmute targeted a role that is not currently muted in the order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).  | 🇬🇧 This participant is not currently muted. | 🇫🇷 Ce participant n'est pas actuellement muet. | [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
 
-### 📐 Business rules _(28)_
+### 📐 Business rules _(30)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -4919,6 +4974,20 @@ _An admin is added to a conversation only through a reasoned escalation by the r
 _Unmuting a role that is not currently muted is rejected (#129)._
 
 - **Verified by**: [🧪 `TestParticipantUnmuted`](#test-testparticipantunmuted), [🧪 `TestUnmuteNotMutedRejected`](#test-testunmutenotmutedrejected)
+
+<a id="rule-translationsarecachedonceperlocale"></a>
+#### 📐 Rule: `TranslationsAreCachedOncePerLocale`
+
+_A message is translated at most once per target locale; re-recording an existing (message, locale) translation is rejected (translate once, reuse; #129)._
+
+- **Verified by**: [🧪 `TestMessageTranslationRecorded`](#test-testmessagetranslationrecorded), [🧪 `TestTranslationAlreadyRecordedRejected`](#test-testtranslationalreadyrecordedrejected)
+
+<a id="rule-translationtargetsapostedmessage"></a>
+#### 📐 Rule: `TranslationTargetsAPostedMessage`
+
+_A translation can only be recorded for a message that was actually posted to the conversation (#129)._
+
+- **Verified by**: [🧪 `TestTranslateUnknownMessageRejected`](#test-testtranslateunknownmessagerejected)
 
 ### 🧪 Tests _(6)_
 
@@ -5359,6 +5428,36 @@ _Re-posting a message with an already-seen messageId is rejected (idempotency)_
 - **When**: [📩 `PostMessage`](#command-postmessage)
 - **Thrown**: [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
 - **Verifies**: [📐 `MessagePostingIsIdempotent`](#rule-messagepostingisidempotent)
+
+<a id="test-testmessagetranslationrecorded"></a>
+#### 🧪 Test: `TestMessageTranslationRecorded`
+
+_A posted message is translated into a target locale and the translation is cached_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted)
+- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
+- **Then**: [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
+- **Verifies**: [📐 `TranslationsAreCachedOncePerLocale`](#rule-translationsarecachedonceperlocale)
+
+<a id="test-testtranslateunknownmessagerejected"></a>
+#### 🧪 Test: `TestTranslateUnknownMessageRejected`
+
+_Translating a message that was never posted is rejected_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
+- **Thrown**: [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation)
+- **Verifies**: [📐 `TranslationTargetsAPostedMessage`](#rule-translationtargetsapostedmessage)
+
+<a id="test-testtranslationalreadyrecordedrejected"></a>
+#### 🧪 Test: `TestTranslationAlreadyRecordedRejected`
+
+_Re-recording an existing (message, locale) translation is rejected (idempotency)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded)
+- **When**: [📩 `RecordMessageTranslation`](#command-recordmessagetranslation)
+- **Thrown**: [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded)
+- **Verifies**: [📐 `TranslationsAreCachedOncePerLocale`](#rule-translationsarecachedonceperlocale)
 
 <a id="test-testadminescalated"></a>
 #### 🧪 Test: `TestAdminEscalated`

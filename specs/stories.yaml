@@ -93,6 +93,7 @@ customer:
       steps:
         OpenThread: { $ref: 'api.yaml#/mutations/openConversation' }
         SendMessage: { $ref: 'api.yaml#/mutations/postMessage' }
+        TranslateMessage: { $ref: 'api.yaml#/mutations/recordMessageTranslation' }
         ReadThread: { $ref: 'api.yaml#/queries/orderConversation' }
 
 restaurant_owner:

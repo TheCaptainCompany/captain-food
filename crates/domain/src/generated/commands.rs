@@ -819,6 +819,16 @@ pub struct PostMessage {
     pub attachment_refs: Vec<AttachmentRef>,
 }
 
+/// Record (cache) a translation of a posted message into a target locale; idempotent per (message, locale). The conversation and the message must exist. Translate once, reuse (#129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordMessageTranslation {
+    pub order_id: OrderId,
+    pub message_id: ConversationMessageId,
+    pub locale: Locale,
+    pub text: TranslatedText,
+}
+
 /// Pull an admin into an order's conversation through a reasoned escalation (restaurant or rider). The conversation must exist. Emits AdminInvitedToConversation (#129).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
