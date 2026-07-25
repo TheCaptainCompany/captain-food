@@ -3,6 +3,24 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-25. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging:
+> functional customer send + the restaurant staff screen.** Two more green PRs finish the usable loop.
+> **[#147](https://github.com/TheCaptainCompany/captain-food/issues/147) (PR #148) — functional send:**
+> the customer compose couldn't produce a valid `postMessage` (missing the client-minted `messageId`
+> and `originalLocale`). Added two **dispatch-time synthesized tokens** to the SDUI executor —
+> `{{ $uuid }}` (a fresh UUIDv7 minted at dispatch, `executor::fill_mint_tokens`, persisted with the
+> pending write so a retry reuses it — idempotent, like checkout's `orderId`) and `{{ $locale }}` (the
+> client locale from the #110 `<html lang>`, `fill_locale_tokens`). The compose now sends all six
+> required fields; a native completeness test proves it. **[#149](https://github.com/TheCaptainCompany/captain-food/issues/149)
+> (PR #150) — restaurant back-office thread screen:** staff read BOTH the PUBLIC timeline and the
+> INTERNAL notes (two resolvers merged under `conversation`), post to either visibility (a PUBLIC/
+> INTERNAL `chip_multi_select` toggle → `postMessage`), and moderate — `escalateToAdmin` (reason) and
+> `muteParticipant` (target role + required reason). No new component kinds/story steps. Both PRs: web
+> 88 tests, wasm compiles, validate 0 errors, `check-drift` clean. **Messaging is now usable end to end
+> on the customer + restaurant surfaces.** Remaining niceties: mute-duration picker, richer muted-list
+> row, rider thread screen; and #133 refund-binding / #137 quick-reply catalog (now unblocked by the
+> screens).
+
 > ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging is
 > now REAL end-to-end (runtime + UI over the domain slices).** On top of the three domain slices
 > (below), the runtime + a customer UI landed as three more green PRs, so a conversation now works
