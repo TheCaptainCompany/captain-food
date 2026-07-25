@@ -219,8 +219,11 @@ exactly the kind that photographs someone's front door.
 3. Extension in the path ≠ stored `extension` ⇒ **404**.
 4. `deleted_at IS NOT NULL` **or** `expires_at < now()` ⇒ **410 Gone** (§6.3).
 5. `principal.role ∉ audience` ⇒ **403**.
-6. `principal.user_id` is not a member of `scope_id` ⇒ **403**.
+6. `principal` is not a member of `(scope_type, scope_id)` ⇒ **403**.
    *(member of an ORDER = its customer · staff of its restaurant · its assigned rider · any ADMIN.)*
+   Resolved **generically from `scope_type`**, not hard-coded to ORDER: the rules are declared in
+   `specs/database/scope_membership.yaml` and compiled to static queries (PROP-20260725-185140 §3.3),
+   so a new `FileScopeType` is a data change, not new code in the guard.
 7. Serve (§4.4).
 
 ### 4.3 Response hardening — where user-supplied bytes bite

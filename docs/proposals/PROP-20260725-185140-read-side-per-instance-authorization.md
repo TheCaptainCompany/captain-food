@@ -131,17 +131,83 @@ Only `Customer` has an `auth_ref`. Needed:
 > authorize as that competitor's staff. Host is tenant **routing**, never authorization. Recording this
 > explicitly because the shortcut is available, tempting, and silently catastrophic.
 
-### 3.3 The `ScopeMembership` port
+### 3.3 The `ScopeMembership` port — resolution declared in the DSL, not hand-written per scope
 
-A port in `crates/application/ports` answering `is_member(principal, scope_type, scope_id) -> bool`, so
+A port in `crates/application/ports` answering `is_member(scope_type, scope_id, scope) -> bool`, so
 `/files` — which is not a GraphQL resolver — shares one implementation with the resolvers instead of
 growing its own copy.
 
-**Caching:** memoize per `(sub, scope_id)` in request extensions — a conversation thread rendering 5
-images then costs 1 membership check, not 5. Beyond the request: cache **negatives** freely, but
-**positives** briefly or not at all. Instant revocation on rider reassignment is the entire point of the
-`audience` × `scope` design (PROP-20260725-120055 §3.3), and a 60-second positive cache hands the
-previous rider a 60-second window after they are off the job.
+**Resolution must be generic over `scope_type`.** `scope_type` is a configured column on the `files`
+row, so hand-writing one SQL statement per (scope type × role) is a combinatorial trap: it is N×M
+statements, and adding a scope type means editing code in a security-critical path. That defeats the
+point of making the scope configurable at all.
+
+Instead, membership resolution is **declared as DSL** — consistent with ADR-0001 (the YAML DSL is the
+source of truth) and ADR-0037 (schema-driven codegen). Every membership rule is the same 3-tuple:
+*which table, which column holds the scope key, which column holds the principal.*
+
+```yaml
+# specs/database/scope_membership.yaml
+ORDER:
+  description: "Membership in one order."
+  resolvers:
+    ADMIN:      { always: true }
+    CUSTOMER:   { table: OrderTracking,    scope_column: order_id, principal_column: customer_id }
+    RESTAURANT: { table: OrderTracking,    scope_column: order_id, principal_column: restaurant_id }
+    RIDER:      { table: View_DeliveryJob, scope_column: order_id, principal_column: rider_id }
+
+RESTAURANT:
+  description: "Membership in one restaurant (KYC documents, cover photos)."
+  resolvers:
+    ADMIN:      { always: true }
+    RESTAURANT: { identity: true }   # the principal id IS the scope id — no query at all
+```
+
+Three forms cover every case: `always` (admin), `identity` (the principal *is* the scope — a pure
+comparison, zero queries), and the table/column triple (one indexed `EXISTS`). Adding a scope type
+becomes a **data change plus a regenerate**, not new code in the guard.
+
+**Generic in the spec, static in the binary.** The codegen emits a `match` with one `sqlx::query_scalar!`
+per arm and the identifiers baked in as **literals** — it does **not** build SQL strings at runtime:
+
+```rust
+// GENERATED — no runtime SQL construction, no dynamic identifiers
+match (scope_type, scope) {
+    (_, ReadScope::Admin) => true,
+    (ScopeType::Order, ReadScope::Customer(id)) => sqlx::query_scalar!(
+        r#"SELECT EXISTS(SELECT 1 FROM "OrderTracking" WHERE order_id=$1 AND customer_id=$2)"#,
+        scope_id, id.0).fetch_one(pool).await?.unwrap_or(false),
+    // … one arm per declared resolver …
+    (ScopeType::Restaurant, ReadScope::Restaurant(id)) => id.0 == scope_id,   // identity
+    _ => false,                                                               // deny by default
+}
+```
+
+This is the load-bearing detail. Interpolating a table name from a runtime string would (a) reintroduce
+SQL injection into the one code path that must not have it, and (b) forfeit SQLx's **compile-time
+checking** (CLAUDE.md), so a renamed column would fail in production instead of at build. Generating the
+arms keeps both properties while the *authoring* stays declarative.
+
+**Deny by default, but never silently.** An unmatched `(scope_type, role)` pair returns `false` at
+runtime, and the validator **rejects the spec at build time** if any role reachable in a `FileKind`'s
+`audience` lacks a resolver for that scope type. Silent denial is a confusing outage; silent permission
+is a breach. Neither is acceptable, so the gap is caught by `make validate` (ADR-0032 completeness,
+the bidirectional style already used for rules↔tests).
+
+**Caching:** memoize per `(scope_type, scope_id)` in request extensions — a conversation thread
+rendering 5 images then costs 1 membership check, not 5. Beyond the request the two halves have
+*opposite* volatility and must be cached differently:
+
+- **`sub` → domain id** (§3.1, one bridge lookup per request): **immutable** — an auth subject's
+  `customerId` never changes — so cache it hard and long.
+- **`is_member`**: **volatile** — cache negatives freely, positives briefly or not at all. Instant
+  revocation on rider reassignment is the entire point of the `audience` × `scope` design
+  (PROP-20260725-120055 §3.3), and a 60-second positive cache hands the previous rider a 60-second
+  window after they are off the job.
+
+Resolving the principal to a domain id **once per request** is what keeps step 2 join-free: the
+membership check compares two ids against an index, rather than re-joining `Customer.auth_ref` on every
+file in the thread.
 
 ## 4. Blast radius
 
@@ -187,11 +253,14 @@ spread across feature work where a missed call site hides in a diff about someth
 | **D1** | Priority relative to [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) — this is filed as a *blocker* for attachments, but on its own terms it is a live cross-tenant read exposure | treat as **higher** priority than the epic it blocks; re-prioritising is a product-owner call made in the project, so this is a recommendation only |
 | **D2** | **Restaurant staff membership model**: single `authRef` per restaurant (simplest) vs a staff↔restaurant membership table (multi-staff, future roles-within-a-restaurant) | membership table — the single-`authRef` shortcut is a retrofit the first time a restaurant has two employees |
 | **D3** | Scope for `Public` reads — confirm which projections are legitimately unrestricted (restaurant discovery, catalog, referential policies) | as listed; anything else defaults to scoped |
+| **D5** | Membership resolution as **DSL + codegen** (§3.3) vs hand-written per scope type | DSL — hand-writing is N×M statements in a security-critical path, and a new scope type should be a data change, not a code change |
 | **D4** | Land as one focused change vs incrementally per repository | one change (§4) — a missed call site is invisible inside unrelated feature diffs |
 
 ## 7. Completeness obligations (ADR-0032)
 
 - **Rule** in `rules.yaml`: *a read never returns a row outside the caller's scope*.
+- **Validator gate**: every role reachable in an `audience` has a declared resolver for that
+  `scope_type` (§3.3) — a missing rule fails `make validate`, never degrades to a silent deny in prod.
 - **Behaviour tests** per role, and the **negatives are the point**: customer → another customer's order;
   restaurant → another restaurant's order; rider → an unassigned job. A test that only proves the happy
   path proves nothing here.
