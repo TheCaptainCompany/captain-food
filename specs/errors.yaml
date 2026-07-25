@@ -717,3 +717,45 @@ CannotOrderTestRestaurant:
   messages:
     en: "This restaurant is not available."
     fr: "Ce restaurant n'est pas disponible."
+
+# --- Order conversations / messaging (#129) ---
+
+ConversationAlreadyOpen:
+  description: >
+    OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is
+    idempotent-guarded, so a second open is rejected (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "A conversation is already open for this order."
+    fr: "Une conversation est déjà ouverte pour cette commande."
+
+ConversationNotFound:
+  description: >
+    PostMessage targeted an order whose conversation was never opened; a message cannot be posted before
+    the conversation exists (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "No conversation exists for this order."
+    fr: "Aucune conversation n'existe pour cette commande."
+
+CustomerChatDisabled:
+  description: >
+    A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only
+    staff may post on that thread (#129).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "Customer messaging is disabled for this order."
+    fr: "La messagerie client est désactivée pour cette commande."
+
+MessageAlreadyPosted:
+  description: >
+    A message with this client-generated messageId was already posted to the conversation; the re-post
+    is a duplicate and is rejected (idempotency; #129).
+  context:
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+  messages:
+    en: "This message has already been posted."
+    fr: "Ce message a déjà été envoyé."

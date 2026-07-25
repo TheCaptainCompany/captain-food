@@ -3206,6 +3206,14 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
+    #[graphql(name = "openConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    async fn open_conversation(&self, input: OpenConversationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        Err(async_graphql::Error::new("not implemented"))
+    }
+    #[graphql(name = "postMessage", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    async fn post_message(&self, input: PostMessageInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        Err(async_graphql::Error::new("not implemented"))
+    }
 }
 
 /// The stripped serde wire shape of the GraphQL input — both the journal `payload` column and the

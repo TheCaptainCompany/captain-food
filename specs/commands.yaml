@@ -1398,6 +1398,40 @@ DenyRefund:
   required: [orderId, reason]
 
 # =====================================================================
+# Order conversations / messaging (Conversation aggregate, #129)
+# =====================================================================
+
+OpenConversation:
+  description: >
+    Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether
+    customer<->restaurant direct chat is enabled (default true). orderId is the client-generated,
+    idempotent key.
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    customerChatEnabled: { type: boolean }
+  required: [orderId, restaurantId, customerChatEnabled]
+
+PostMessage:
+  description: >
+    Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note).
+    The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+    authorRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+    visibility: { $ref: 'scalars.yaml#/MessageVisibility' }
+    body: { $ref: 'scalars.yaml#/MessageBody' }
+    originalLocale: { $ref: 'scalars.yaml#/Locale' }
+    attachmentRefs:
+      type: array
+      items: { $ref: 'scalars.yaml#/AttachmentRef' }
+      nullable: true
+  required: [orderId, messageId, authorRole, visibility, body, originalLocale]
+
+# =====================================================================
 # Where the rest lives
 # =====================================================================
 # - Which events each command emits / the saga reacts to:  actors.yaml (`receives` → `emits`).

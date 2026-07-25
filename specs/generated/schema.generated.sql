@@ -148,6 +148,14 @@ INSERT INTO ref_mode (value, sort_order) VALUES ('LIVE',0),('TEST',1);
 CREATE TABLE ref_user_type(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_user_type (value, sort_order) VALUES ('PUBLIC',0),('CUSTOMER',1),('RESTAURANT_ACCOUNT',2),('RESTAURANT',3),('RIDER',4),('ADMIN',5),('EXTERNAL',6);
 
+-- MessageVisibility
+CREATE TABLE ref_message_visibility(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_message_visibility (value, sort_order) VALUES ('PUBLIC',0),('INTERNAL',1);
+
+-- ConversationAuthorRole
+CREATE TABLE ref_conversation_author_role(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_conversation_author_role (value, sort_order) VALUES ('CUSTOMER',0),('RESTAURANT',1),('RIDER',2),('ADMIN',3);
+
 CREATE TABLE domain_events (
   position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   id UUID NOT NULL UNIQUE,
@@ -561,6 +569,19 @@ CREATE TABLE OrderTracking (
 );
 CREATE INDEX ON OrderTracking (customer_id);
 CREATE INDEX ON OrderTracking (restaurant_id, status, placed_at);
+
+CREATE TABLE OrderConversation (
+  order_id UUID PRIMARY KEY,
+  restaurant_id UUID NOT NULL,
+  customer_chat_enabled BOOLEAN NOT NULL,
+  status INTEGER NOT NULL,
+  messages JSONB NOT NULL,
+  internal_notes JSONB NOT NULL,
+  opened_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON OrderConversation (restaurant_id);
 
 -- all_events(): the entire log in global order — the SQL equivalent of EventStoreDB's $all stream.
 -- Inspection/replay only (projections track a checkpoint on position); never a read path.

@@ -12096,6 +12096,7 @@ const BT_AGGREGATES: &[(&str, &str, bool)] = &[
     ("DeliveryJob", "deliveryJobId", true),
     ("Rider", "riderId", true),
     ("DeliveryPartnerRegistration", "registrationId", true),
+    ("Conversation", "orderId", true),   // id = orderId (a conversation's identity IS its order; #129)
 ];
 
 fn bt_agg(actor: &str) -> Option<(&'static str, &'static str, bool)> {

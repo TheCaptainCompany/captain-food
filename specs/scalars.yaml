@@ -741,3 +741,41 @@ UserType:
     - RIDER              # delivery partner / courier              -> /rider/graphql   (mostly post-V0)
     - ADMIN              # platform operator                       -> /admin/graphql
     - EXTERNAL           # third-party ACL (Stripe/HubRise/Avelo37) -> /external/graphql
+
+# --- Order conversations / messaging (#129) ---
+# In-app per-order message thread (aggregate `Conversation`, id = orderId; ADR-20260725-015921).
+
+ConversationMessageId:
+  type: string
+  format: uuid
+  description: >
+    Client-generated id of one posted conversation message — the idempotency key for PostMessage
+    (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId`
+    (the command_journal submission id); this identifies the business message itself (#129).
+
+MessageVisibility:
+  type: string
+  enum: [PUBLIC, INTERNAL]
+  description: >
+    Audience of a conversation message: PUBLIC = visible to the customer in the order thread;
+    INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).
+
+ConversationAuthorRole:
+  type: string
+  enum: [CUSTOMER, RESTAURANT, RIDER, ADMIN]
+  description: >
+    Business role that authored a conversation message. A semantic role that changes the meaning of the
+    thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the
+    acting user stays on domain_events.user_id) (#129).
+
+MessageBody:
+  type: string
+  maxLength: 2000
+  description: "Free-text body of a conversation message (#129)."
+
+AttachmentRef:
+  type: string
+  maxLength: 500
+  description: >
+    Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation
+    and GDPR retention are handled generically by the framework, not by this aggregate (#129).

@@ -691,3 +691,21 @@ Rider:
       throws:
         - { $ref: 'errors.yaml#/RiderNotFound' }
         - { $ref: 'errors.yaml#/InvalidRiderStatusTransition' }
+
+Conversation:
+  type: aggregate
+  description: >
+    Per-order in-app message thread; id = orderId (a conversation's identity IS its order,
+    ADR-20260725-015921). OpenConversation is its birth (snapshots customerChatEnabled, default true);
+    PostMessage appends a message with PUBLIC/INTERNAL visibility. A CUSTOMER author is rejected when
+    customer chat is disabled. Idempotent by messageId. (#129)
+  receives:
+    - message: { $ref: 'commands.yaml#/OpenConversation' }
+      emits: [{ $ref: 'events.yaml#/ConversationOpened' }]
+      throws: [{ $ref: 'errors.yaml#/ConversationAlreadyOpen' }]
+    - message: { $ref: 'commands.yaml#/PostMessage' }
+      emits: [{ $ref: 'events.yaml#/MessagePosted' }]
+      throws:
+        - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/CustomerChatDisabled' }
+        - { $ref: 'errors.yaml#/MessageAlreadyPosted' }

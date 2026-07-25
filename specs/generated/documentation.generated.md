@@ -78,6 +78,9 @@ An authenticated person who orders food via Captain.Food.
 |  | SetAddress | [✏️ `setCustomerAddress`](#mutation-setcustomeraddress) |
 |  | RemoveAddress | [✏️ `removeCustomerAddress`](#mutation-removecustomeraddress) |
 |  | SetPaymentMethod | [✏️ `setCustomerPaymentMethod`](#mutation-setcustomerpaymentmethod) |
+| 🧭 **MessageAboutMyOrder** | OpenThread | [✏️ `openConversation`](#mutation-openconversation) |
+|  | SendMessage | [✏️ `postMessage`](#mutation-postmessage) |
+|  | ReadThread | [🔎 `orderConversation`](#query-orderconversation) |
 
 <a id="story-restaurant_owner"></a>
 ### 🎬 `restaurant_owner` · 🏪 `RESTAURANT_ACCOUNT` · 🗣️ `fr-FR`
@@ -139,6 +142,8 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 |  | CancelDelivery | [✏️ `cancelDelivery`](#mutation-canceldelivery) |
 |  | EscalateDelivery | [✏️ `escalateDelivery`](#mutation-escalatedelivery) |
 |  | ReviewDeliverySatisfaction | [🔎 `restaurantDeliverySatisfaction`](#query-restaurantdeliverysatisfaction) |
+| 🧭 **HandleOrderConversation** | ReplyToCustomer | [✏️ `postMessage`](#mutation-postmessage) |
+|  | ReadInternalNotes | [🔎 `orderConversationInternalNotes`](#query-orderconversationinternalnotes) |
 
 <a id="story-rider"></a>
 ### 🎬 `rider` · 🛵 `RIDER` · 🗣️ `fr-FR`
@@ -2883,9 +2888,9 @@ _Rejects importing into a missing catalog, on a translation failure, or with a m
 <a id="sec-ctx-order"></a>
 ## 🔲 3. order
 
-_Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)._
+_Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)._
 
-### 🧰 API operations _(22)_
+### 🧰 API operations _(26)_
 
 <a id="query-cart"></a>
 #### 🔎 Query: `cart`
@@ -2914,6 +2919,26 @@ Order tracking by id; owning customer or the restaurant/admin. Ownership enforce
 - **Input**: 🧩 `OrderQueryInput!` — `id`: [🔤 `OrderId`](#scalar-orderid)
 - **Returns**: [🧩 `Order`](#type-order) · **reads** [🗄️ `OrderTracking`](#view-ordertracking)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
+
+<a id="query-orderconversation"></a>
+#### 🔎 Query: `orderConversation`
+
+The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). Ownership enforced server-side; null when the conversation has not been opened.
+
+
+- **Input**: 🧩 `OrderConversationQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
+- **Returns**: [🧩 `OrderConversation`](#type-orderconversation) · **reads** [🗄️ `OrderConversation`](#view-orderconversation)
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+
+<a id="query-orderconversationinternalnotes"></a>
+#### 🔎 Query: `orderConversationInternalNotes`
+
+The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). Ownership enforced server-side; null when the conversation has not been opened.
+
+
+- **Input**: 🧩 `OrderConversationInternalNotesQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
+- **Returns**: [🧩 `ConversationInternalNotes`](#type-conversationinternalnotes) · **reads** [🗄️ `OrderConversation`](#view-orderconversation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
 
 <a id="mutation-addcartline"></a>
 #### ✏️ Mutation: `addCartLine`
@@ -3041,6 +3066,20 @@ Order tracking by id; owning customer or the restaurant/admin. Ownership enforce
 - **Roles**: RESTAURANT, ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-openconversation"></a>
+#### ✏️ Mutation: `openConversation`
+
+- **Command**: [📩 `OpenConversation`](#command-openconversation) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-postmessage"></a>
+#### ✏️ Mutation: `postMessage`
+
+- **Command**: [📩 `PostMessage`](#command-postmessage) → handled by [🎭 `Conversation`](#actor-conversation)
+- **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 <a id="subscription-orderstatuschanged"></a>
 #### 🔔 Subscription: [`orderStatusChanged`](#subscription-orderstatuschanged)
 
@@ -3051,7 +3090,7 @@ Order status change events for ONE order, tracked by orderId — what the confir
 - **Streams**: [🧩 `Order`](#type-order)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
-### 🧩 Output types _(4)_
+### 🧩 Output types _(6)_
 
 <a id="type-cart"></a>
 #### 🧩 Type: `Cart`
@@ -3144,7 +3183,37 @@ A refund opened for decision on a paid order (RefundProcess): REQUESTED until th
 | <a id="type-refund--requestedat"></a>`requestedAt` | `string` _date-time_ | ✅ |
 | <a id="type-refund--decidedat"></a>`decidedAt` | `string` _date-time_ | ⬜ |
 
-### 🎭 Actors _(5)_
+<a id="type-orderconversation"></a>
+#### 🧩 Type: `OrderConversation`
+
+The per-order in-app conversation: the PUBLIC (customer-visible) message timeline, plus the order's live status folded from its lifecycle events and whether customer chat is enabled (#129).
+
+
+- **Read model**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-orderconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
+| <a id="type-orderconversation--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |
+| <a id="type-orderconversation--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |
+| <a id="type-orderconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |
+| <a id="type-orderconversation--openedat"></a>`openedAt` | `string` _date-time_ | ✅ |
+| <a id="type-orderconversation--messages"></a>`messages` | [[📦 `ConversationMessage`](#entity-conversationmessage)] | ✅ |
+
+<a id="type-conversationinternalnotes"></a>
+#### 🧩 Type: `ConversationInternalNotes`
+
+The INTERNAL (staff-only) notes on an order's conversation — deliberately a SEPARATE type from OrderConversation and absent from the CUSTOMER schema; that separation IS the visibility guarantee (#129).
+
+
+- **Read model**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-conversationinternalnotes--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |
+| <a id="type-conversationinternalnotes--notes"></a>`notes` | [[📦 `ConversationMessage`](#entity-conversationmessage)] | ✅ |
+
+### 🎭 Actors _(6)_
 
 <a id="actor-cart"></a>
 #### 🎭 Actor: `Cart`
@@ -3236,6 +3305,17 @@ stateDiagram-v2
   FAILED --> [*]
   REFUNDED --> [*]
 ```
+
+<a id="actor-conversation"></a>
+#### 🎭 Actor: `Conversation`
+
+_🧩 aggregate_ — Per-order in-app message thread; id = orderId (a conversation's identity IS its order, ADR-20260725-015921). OpenConversation is its birth (snapshots customerChatEnabled, default true); PostMessage appends a message with PUBLIC/INTERNAL visibility. A CUSTOMER author is rejected when customer chat is disabled. Idempotent by messageId. (#129)
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `OpenConversation`](#command-openconversation) | [⚡ `ConversationOpened`](#event-conversationopened) | [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen) |
+| [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
 
 <a id="actor-placeorderprocess"></a>
 #### 🎭 Actor: `PlaceOrderProcess`
@@ -3377,7 +3457,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(4)_
+### 🗄️ Views (read models) _(5)_
 
 <a id="view-view_deliverysatisfaction"></a>
 #### 🗄️ View: `View_DeliverySatisfaction`
@@ -3491,7 +3571,26 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(19)_
+<a id="view-orderconversation"></a>
+#### 🗄️ View: `OrderConversation`
+
+- **Source**: [🎭 `Conversation`](#actor-conversation) · 🛶 V0
+- **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes). 
+- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `order_id` | [🔤 `OrderId`](#scalar-orderid) _(derived)_ | [⚡ `ConversationOpened`.`orderId`](#event-conversationopened--orderid) | PK |  |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ | [⚡ `ConversationOpened`.`restaurantId`](#event-conversationopened--restaurantid) | index |  |
+| `customer_chat_enabled` | `boolean` | [⚡ `ConversationOpened`.`customerChatEnabled`](#event-conversationopened--customerchatenabled) | — |  |
+| `status` | [🔤 `OrderStatus`](#scalar-orderstatus) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | — | Derived from the latest order lifecycle event type (cross-aggregate fold, correlated by order_id). |
+| `messages` | `jsonb` | [⚡ `MessagePosted`](#event-messageposted) | — | PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector. |
+| `internal_notes` | `jsonb` | [⚡ `MessagePosted`](#event-messageposted) | — | INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector. |
+| `opened_at` | `timestamptz` | [⚡ `ConversationOpened`](#event-conversationopened) | — |  |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+### 📩 Commands _(21)_
 
 <a id="command-addcartline"></a>
 #### 📩 Command: `AddCartLine`
@@ -3785,7 +3884,41 @@ The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
 | <a id="command-denyrefund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="command-denyrefund--reason"></a>`reason` | `string` | ✅ |  |
 
-### ⚡ Events _(26)_
+<a id="command-openconversation"></a>
+#### 📩 Command: `OpenConversation`
+
+Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
+
+- **Dispatched by**: [✏️ `openConversation`](#mutation-openconversation) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **Throws**: [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-openconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-openconversation--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-openconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
+
+<a id="command-postmessage"></a>
+#### 📩 Command: `PostMessage`
+
+Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
+
+- **Dispatched by**: [✏️ `postMessage`](#mutation-postmessage) · **handled by** [🎭 `Conversation`](#actor-conversation)
+- **Emits**: [⚡ `MessagePosted`](#event-messageposted)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-postmessage--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-postmessage--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="command-postmessage--authorrole"></a>`authorRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="command-postmessage--visibility"></a>`visibility` | [🔤 `MessageVisibility`](#scalar-messagevisibility) | ✅ |  |
+| <a id="command-postmessage--body"></a>`body` | [🔤 `MessageBody`](#scalar-messagebody) | ✅ |  |
+| <a id="command-postmessage--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="command-postmessage--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
+
+### ⚡ Events _(28)_
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -3881,7 +4014,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 
 - **Emitted by**: [🎭 `Order`](#actor-order), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Consumed by**: [🎭 `Order`](#actor-order)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3906,7 +4039,7 @@ Restaurant has accepted to prepare the order.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3921,7 +4054,7 @@ Restaurant has started preparing an accepted order (status PREPARING).
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3935,7 +4068,7 @@ Restaurant has rejected the order.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3950,7 +4083,7 @@ Restaurant has marked the order as ready for pickup/delivery.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3964,7 +4097,7 @@ The order has been delivered to the customer.
 
 - **Emitted by**: [🎭 `Order`](#actor-order), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3978,7 +4111,7 @@ The customer cancelled the order.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3993,7 +4126,7 @@ The restaurant cancelled the order after initial acceptance.
 
 - **Emitted by**: [🎭 `Order`](#actor-order)
 - **Consumed by**: [🎭 `RefundProcess`](#actor-refundprocess)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4194,7 +4327,41 @@ The restaurant or an admin denied a pending refund request.
 | <a id="event-refunddenied--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-refunddenied--reason"></a>`reason` | `string` | ✅ |  |
 
-### 📦 Entities _(11)_
+<a id="event-conversationopened"></a>
+#### ⚡ Event: `ConversationOpened`
+
+Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). Snapshots whether customer<->restaurant direct chat is enabled for this order (default true).
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-conversationopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-conversationopened--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-conversationopened--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
+
+<a id="event-messageposted"></a>
+#### ⚡ Event: `MessagePosted`
+
+A message was appended to an order's conversation. `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `authorRole` is the business role that posted it; idempotent by messageId.
+
+- **Emitted by**: [🎭 `Conversation`](#actor-conversation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-messageposted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-messageposted--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="event-messageposted--authorrole"></a>`authorRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="event-messageposted--visibility"></a>`visibility` | [🔤 `MessageVisibility`](#scalar-messagevisibility) | ✅ |  |
+| <a id="event-messageposted--body"></a>`body` | [🔤 `MessageBody`](#scalar-messagebody) | ✅ |  |
+| <a id="event-messageposted--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="event-messageposted--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
+
+### 📦 Entities _(12)_
 
 <a id="entity-money"></a>
 #### 📦 Entity: `Money`
@@ -4344,7 +4511,22 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
 | <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
-### 🔤 Scalars _(19)_
+<a id="entity-conversationmessage"></a>
+#### 📦 Entity: `ConversationMessage`
+
+One message in an order's in-app conversation (read-model array element; #129). `authorRole` is the business role that posted it; `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `originalLocale` records the language it was written in (for later translation). Attachments are opaque framework-managed refs.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-conversationmessage--messageid"></a>`messageId` | [🔤 `ConversationMessageId`](#scalar-conversationmessageid) | ✅ |  |
+| <a id="entity-conversationmessage--authorrole"></a>`authorRole` | [🔤 `ConversationAuthorRole`](#scalar-conversationauthorrole) | ✅ |  |
+| <a id="entity-conversationmessage--visibility"></a>`visibility` | [🔤 `MessageVisibility`](#scalar-messagevisibility) | ✅ |  |
+| <a id="entity-conversationmessage--body"></a>`body` | [🔤 `MessageBody`](#scalar-messagebody) | ✅ |  |
+| <a id="entity-conversationmessage--originallocale"></a>`originalLocale` | [🔤 `Locale`](#scalar-locale) | ✅ |  |
+| <a id="entity-conversationmessage--postedat"></a>`postedAt` | `string` _date-time_ | ✅ |  |
+| <a id="entity-conversationmessage--attachmentrefs"></a>`attachmentRefs` | [[🔤 `AttachmentRef`](#scalar-attachmentref)] | ⬜ |  |
+
+### 🔤 Scalars _(24)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -4367,8 +4549,13 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| CAPTURED \| FAILED \| REFUNDED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded). |
 | <a id="scalar-refundstatus"></a>🔤 `RefundStatus` | enum (REQUESTED \| APPROVED \| DENIED \| REFUNDED) | Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.  |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
+| <a id="scalar-conversationmessageid"></a>🔤 `ConversationMessageId` | string _uuid_ | Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).  |
+| <a id="scalar-messagevisibility"></a>🔤 `MessageVisibility` | enum (PUBLIC \| INTERNAL) | Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).  |
+| <a id="scalar-conversationauthorrole"></a>🔤 `ConversationAuthorRole` | enum (CUSTOMER \| RESTAURANT \| RIDER \| ADMIN) | Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).  |
+| <a id="scalar-messagebody"></a>🔤 `MessageBody` | string | Free-text body of a conversation message (#129). |
+| <a id="scalar-attachmentref"></a>🔤 `AttachmentRef` | string | Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).  |
 
-### ⛔ Errors _(23)_
+### ⛔ Errors _(27)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -4395,8 +4582,12 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="error-priceunresolvable"></a>⛔ `PriceUnresolvable` | A cart line's price could not be resolved from the live catalog at checkout (offer or selected option no longer present). Fail-closed: the checkout is rejected — the server never falls back to a client-supplied amount.  | 🇬🇧 An item in your cart is no longer available at a known price. Please review your cart. | 🇫🇷 Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
+| <a id="error-conversationalreadyopen"></a>⛔ `ConversationAlreadyOpen` | OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).  | 🇬🇧 A conversation is already open for this order. | 🇫🇷 Une conversation est déjà ouverte pour cette commande. | [📩 `OpenConversation`](#command-openconversation) |
+| <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-customerchatdisabled"></a>⛔ `CustomerChatDisabled` | A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).  | 🇬🇧 Customer messaging is disabled for this order. | 🇫🇷 La messagerie client est désactivée pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-messagealreadyposted"></a>⛔ `MessageAlreadyPosted` | A message with this client-generated messageId was already posted to the conversation; the re-post is a duplicate and is rejected (idempotency; #129).  | 🇬🇧 This message has already been posted. | 🇫🇷 Ce message a déjà été envoyé. | [📩 `PostMessage`](#command-postmessage) |
 
-### 📐 Business rules _(21)_
+### 📐 Business rules _(25)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -4545,7 +4736,35 @@ _A Stripe payment outcome that matches no known checkout run is surfaced as a ty
 
 - **Verified by**: [🧪 `TestPaymentCaptureOrphanIsFlagged`](#test-testpaymentcaptureorphanisflagged)
 
-### 🧪 Tests _(5)_
+<a id="rule-conversationidentityistheorder"></a>
+#### 📐 Rule: `ConversationIdentityIsTheOrder`
+
+_A conversation is opened once per order (id = orderId); a second open is rejected, and posting a message before the conversation is opened is rejected (#129)._
+
+- **Verified by**: [🧪 `TestConversationOpened`](#test-testconversationopened), [🧪 `TestConversationOpenedTwiceIsRejected`](#test-testconversationopenedtwiceisrejected), [🧪 `TestPostToUnopenedConversationIsRejected`](#test-testposttounopenedconversationisrejected)
+
+<a id="rule-customerchatrequiresrestaurantoptin"></a>
+#### 📐 Rule: `CustomerChatRequiresRestaurantOptIn`
+
+_A CUSTOMER may post to the order thread only when the restaurant has customer chat enabled for that order; otherwise the post is rejected (#129)._
+
+- **Verified by**: [🧪 `TestPublicMessagePosted`](#test-testpublicmessageposted), [🧪 `TestCustomerPostRejectedWhenChatDisabled`](#test-testcustomerpostrejectedwhenchatdisabled)
+
+<a id="rule-messagescarryvisibility"></a>
+#### 📐 Rule: `MessagesCarryVisibility`
+
+_Every conversation message is either PUBLIC (customer-visible) or INTERNAL (staff-only); restaurant/rider/admin may post INTERNAL staff notes that never surface to the customer (#129)._
+
+- **Verified by**: [🧪 `TestInternalNotePosted`](#test-testinternalnoteposted)
+
+<a id="rule-messagepostingisidempotent"></a>
+#### 📐 Rule: `MessagePostingIsIdempotent`
+
+_Re-posting a message with an already-seen client-generated messageId is rejected (idempotent posting; #129)._
+
+- **Verified by**: [🧪 `TestDuplicateMessageRejected`](#test-testduplicatemessagerejected)
+
+### 🧪 Tests _(6)_
 
 **[🎭 `Cart`](#actor-cart)**
 
@@ -4912,6 +5131,78 @@ _The Payment records the refund denial (restaurant or admin) delivered by Refund
 - **When**: [📩 `RefundDenied`](#command-refunddenied)
 - **Then**: [⚡ `RefundDenied`](#event-refunddenied)
 - **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
+
+**[🎭 `Conversation`](#actor-conversation)**
+
+<a id="test-testconversationopened"></a>
+#### 🧪 Test: `TestConversationOpened`
+
+_Opens the per-order conversation_
+
+- **Given**: _(none)_
+- **When**: [📩 `OpenConversation`](#command-openconversation)
+- **Then**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
+
+<a id="test-testconversationopenedtwiceisrejected"></a>
+#### 🧪 Test: `TestConversationOpenedTwiceIsRejected`
+
+_Opening an already-open conversation is rejected_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `OpenConversation`](#command-openconversation)
+- **Thrown**: [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen)
+- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
+
+<a id="test-testposttounopenedconversationisrejected"></a>
+#### 🧪 Test: `TestPostToUnopenedConversationIsRejected`
+
+_Posting a message before the conversation is opened is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `ConversationNotFound`](#error-conversationnotfound)
+- **Verifies**: [📐 `ConversationIdentityIsTheOrder`](#rule-conversationidentityistheorder)
+
+<a id="test-testpublicmessageposted"></a>
+#### 🧪 Test: `TestPublicMessagePosted`
+
+_A customer posts a public message to the thread (chat enabled)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Then**: [⚡ `MessagePosted`](#event-messageposted)
+- **Verifies**: [📐 `CustomerChatRequiresRestaurantOptIn`](#rule-customerchatrequiresrestaurantoptin)
+
+<a id="test-testinternalnoteposted"></a>
+#### 🧪 Test: `TestInternalNotePosted`
+
+_The restaurant posts an internal staff note (not shown to the customer)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Then**: [⚡ `MessagePosted`](#event-messageposted)
+- **Verifies**: [📐 `MessagesCarryVisibility`](#rule-messagescarryvisibility)
+
+<a id="test-testcustomerpostrejectedwhenchatdisabled"></a>
+#### 🧪 Test: `TestCustomerPostRejectedWhenChatDisabled`
+
+_A customer post is rejected when the restaurant disabled customer chat_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `CustomerChatDisabled`](#error-customerchatdisabled)
+- **Verifies**: [📐 `CustomerChatRequiresRestaurantOptIn`](#rule-customerchatrequiresrestaurantoptin)
+
+<a id="test-testduplicatemessagerejected"></a>
+#### 🧪 Test: `TestDuplicateMessageRejected`
+
+_Re-posting a message with an already-seen messageId is rejected (idempotency)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
+- **Verifies**: [📐 `MessagePostingIsIdempotent`](#rule-messagepostingisidempotent)
 
 **[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
 
@@ -5798,7 +6089,7 @@ Customer set or updated their preferred Stripe payment method.
 | <a id="event-customerpaymentmethodset--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 | <a id="event-customerpaymentmethodset--paymentmethodid"></a>`paymentMethodId` | [🔤 `PaymentMethodId`](#scalar-paymentmethodid) | ✅ |  |
 
-### 🔤 Scalars _(7)_
+### 🔤 Scalars _(6)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -5808,7 +6099,6 @@ Customer set or updated their preferred Stripe payment method.
 | <a id="scalar-nationalphonenumber"></a>🔤 `NationalPhoneNumber` | string | National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'. |
 | <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
 | <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
-| <a id="scalar-locale"></a>🔤 `Locale` | string `^[a-z]{2}-[A-Z]{2}$` | i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).  |
 
 ### ⛔ Errors _(5)_
 
@@ -8076,7 +8366,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(40)_
+### 🔤 Scalars _(41)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -8103,6 +8393,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-postalcode"></a>🔤 `PostalCode` | string |  |
 | <a id="scalar-countrycode"></a>🔤 `CountryCode` | string `^[A-Z]{2}$` | ISO 3166-1 alpha-2 country code. Example: 'FR'. |
 | <a id="scalar-timezone"></a>🔤 `TimeZone` | string | IANA timezone. Example: 'Europe/Paris'. |
+| <a id="scalar-locale"></a>🔤 `Locale` | string `^[a-z]{2}-[A-Z]{2}$` | i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).  |
 | <a id="scalar-currencycode"></a>🔤 `CurrencyCode` | string `^[A-Z]{3}$` | ISO 4217 currency code. Example: 'EUR'. |
 | <a id="scalar-taxratepercent"></a>🔤 `TaxRatePercent` | number | Percentage tax rate. Example: 10.0 for 10%. |
 | <a id="scalar-quantity"></a>🔤 `Quantity` | number | Stock quantity in units. Decimals allowed to match HubRise inventory. 0 means out of stock.  |
@@ -8888,7 +9179,7 @@ aggregates; components bind the aggregates they handle and the read models they 
 | --- | --- | --- |
 | 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
-| 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess) |
+| 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess) |
 | 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
 | 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
 

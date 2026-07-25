@@ -2236,3 +2236,106 @@ impl From<UserType> for ds::UserType {
         }
     }
 }
+
+/// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ConversationMessageId(pub uuid::Uuid);
+async_graphql::scalar!(ConversationMessageId, "ConversationMessageId", "Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).");
+impl From<ds::ConversationMessageId> for ConversationMessageId {
+    fn from(v: ds::ConversationMessageId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ConversationMessageId> for ds::ConversationMessageId {
+    fn from(v: ConversationMessageId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum MessageVisibility {
+    #[graphql(name = "PUBLIC")]
+    PUBLIC,
+    #[graphql(name = "INTERNAL")]
+    INTERNAL,
+}
+impl From<ds::MessageVisibility> for MessageVisibility {
+    fn from(v: ds::MessageVisibility) -> Self {
+        match v {
+            ds::MessageVisibility::PUBLIC => Self::PUBLIC,
+            ds::MessageVisibility::INTERNAL => Self::INTERNAL,
+        }
+    }
+}
+impl From<MessageVisibility> for ds::MessageVisibility {
+    fn from(v: MessageVisibility) -> Self {
+        match v {
+            MessageVisibility::PUBLIC => Self::PUBLIC,
+            MessageVisibility::INTERNAL => Self::INTERNAL,
+        }
+    }
+}
+
+/// Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ConversationAuthorRole {
+    #[graphql(name = "CUSTOMER")]
+    CUSTOMER,
+    #[graphql(name = "RESTAURANT")]
+    RESTAURANT,
+    #[graphql(name = "RIDER")]
+    RIDER,
+    #[graphql(name = "ADMIN")]
+    ADMIN,
+}
+impl From<ds::ConversationAuthorRole> for ConversationAuthorRole {
+    fn from(v: ds::ConversationAuthorRole) -> Self {
+        match v {
+            ds::ConversationAuthorRole::CUSTOMER => Self::CUSTOMER,
+            ds::ConversationAuthorRole::RESTAURANT => Self::RESTAURANT,
+            ds::ConversationAuthorRole::RIDER => Self::RIDER,
+            ds::ConversationAuthorRole::ADMIN => Self::ADMIN,
+        }
+    }
+}
+impl From<ConversationAuthorRole> for ds::ConversationAuthorRole {
+    fn from(v: ConversationAuthorRole) -> Self {
+        match v {
+            ConversationAuthorRole::CUSTOMER => Self::CUSTOMER,
+            ConversationAuthorRole::RESTAURANT => Self::RESTAURANT,
+            ConversationAuthorRole::RIDER => Self::RIDER,
+            ConversationAuthorRole::ADMIN => Self::ADMIN,
+        }
+    }
+}
+
+/// Free-text body of a conversation message (#129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct MessageBody(pub String);
+async_graphql::scalar!(MessageBody, "MessageBody", "Free-text body of a conversation message (#129).");
+impl From<ds::MessageBody> for MessageBody {
+    fn from(v: ds::MessageBody) -> Self {
+        Self(v.0)
+    }
+}
+impl From<MessageBody> for ds::MessageBody {
+    fn from(v: MessageBody) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AttachmentRef(pub String);
+async_graphql::scalar!(AttachmentRef, "AttachmentRef", "Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).");
+impl From<ds::AttachmentRef> for AttachmentRef {
+    fn from(v: ds::AttachmentRef) -> Self {
+        Self(v.0)
+    }
+}
+impl From<AttachmentRef> for ds::AttachmentRef {
+    fn from(v: AttachmentRef) -> Self {
+        Self(v.0)
+    }
+}

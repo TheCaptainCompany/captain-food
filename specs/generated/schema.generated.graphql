@@ -81,6 +81,9 @@ scalar ProspectionScore
 scalar DeliveryChannelKey
 scalar DeliveryPartnerRegistrationId
 scalar DeliveryPartnerName
+scalar ConversationMessageId
+scalar MessageBody
+scalar AttachmentRef
 
 # ==============================================================================
 # Enums
@@ -329,6 +332,18 @@ enum UserType {
   EXTERNAL
 }
 
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+}
+
+enum ConversationAuthorRole {
+  CUSTOMER
+  RESTAURANT
+  RIDER
+  ADMIN
+}
+
 # ==============================================================================
 # Directives — ACL (@auth/@public) + declared links (@command/@reads)
 # ==============================================================================
@@ -485,6 +500,16 @@ type CheckoutSnapshot {
   totalAmount: Money!
   breakdown: PaymentBreakdown!
   note: OrderNote
+}
+
+type ConversationMessage {
+  messageId: ConversationMessageId!
+  authorRole: ConversationAuthorRole!
+  visibility: MessageVisibility!
+  body: MessageBody!
+  originalLocale: Locale!
+  postedAt: DateTime!
+  attachmentRefs: [AttachmentRef!]
 }
 
 type Restaurant {
@@ -748,6 +773,20 @@ type UberSplitPolicy {
   avgDeliveryFeeCents: Int!
   platformFeePct: String!
   effectiveFrom: DateTime!
+}
+
+type OrderConversation {
+  orderId: OrderId!
+  restaurantId: RestaurantId!
+  status: OrderStatus!
+  customerChatEnabled: Boolean!
+  openedAt: DateTime!
+  messages: [ConversationMessage!]!
+}
+
+type ConversationInternalNotes {
+  orderId: OrderId!
+  notes: [ConversationMessage!]!
 }
 
 # ==============================================================================
@@ -1223,6 +1262,22 @@ input RevokeDeliveryPartnerAvailabilityInput {
   reason: String
 }
 
+input OpenConversationInput {
+  orderId: OrderId!
+  restaurantId: RestaurantId!
+  customerChatEnabled: Boolean!
+}
+
+input PostMessageInput {
+  orderId: OrderId!
+  messageId: ConversationMessageId!
+  authorRole: ConversationAuthorRole!
+  visibility: MessageVisibility!
+  body: MessageBody!
+  originalLocale: Locale!
+  attachmentRefs: [AttachmentRef!]
+}
+
 input OperationStatusQueryInput {
   messageId: MessageId!
 }
@@ -1295,6 +1350,14 @@ input RestaurantDeliveriesQueryInput {
 input RestaurantDeliverySatisfactionQueryInput {
   restaurantId: RestaurantId!
   timeliness: DeliveryTimeliness
+}
+
+input OrderConversationQueryInput {
+  orderId: OrderId!
+}
+
+input OrderConversationInternalNotesQueryInput {
+  orderId: OrderId!
 }
 
 input PendingRefundsQueryInput {
@@ -1477,6 +1540,8 @@ type Query {
   myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliverySatisfaction(input: RestaurantDeliverySatisfactionQueryInput!): [DeliverySatisfaction!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_DeliverySatisfaction"])
+  orderConversation(input: OrderConversationQueryInput!): OrderConversation @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
+  orderConversationInternalNotes(input: OrderConversationInternalNotesQueryInput!): ConversationInternalNotes @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
   pendingRefunds(input: PendingRefundsQueryInput): [Refund!]! @auth(requires: [RESTAURANT, ADMIN]) @reads(views: ["View_PendingRefunds"])
   deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
@@ -1562,6 +1627,8 @@ type Mutation {
   registerDeliveryPartnerAvailability(input: RegisterDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RegisterDeliveryPartnerAvailability")
   approveDeliveryPartnerAvailability(input: ApproveDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ApproveDeliveryPartnerAvailability")
   revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")
+  openConversation(input: OpenConversationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "OpenConversation")
+  postMessage(input: PostMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "PostMessage")
 }
 
 # ==============================================================================

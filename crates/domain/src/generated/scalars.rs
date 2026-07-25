@@ -622,3 +622,33 @@ pub enum UserType {
     ADMIN,
     EXTERNAL,
 }
+
+/// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ConversationMessageId(pub uuid::Uuid);
+
+/// Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum MessageVisibility {
+    PUBLIC,
+    INTERNAL,
+}
+
+/// Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ConversationAuthorRole {
+    CUSTOMER,
+    RESTAURANT,
+    RIDER,
+    ADMIN,
+}
+
+/// Free-text body of a conversation message (#129).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MessageBody(pub String);
+
+/// Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AttachmentRef(pub String);

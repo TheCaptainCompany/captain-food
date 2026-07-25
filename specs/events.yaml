@@ -1639,3 +1639,34 @@ RefundDenied:
       type: string
       maxLength: 500
   required: [orderId, reason]
+
+# --- Order conversations (#129) ---
+
+ConversationOpened:
+  description: >
+    Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). Snapshots whether
+    customer<->restaurant direct chat is enabled for this order (default true).
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    customerChatEnabled: { type: boolean }
+  required: [orderId, restaurantId, customerChatEnabled]
+
+MessagePosted:
+  description: >
+    A message was appended to an order's conversation. `visibility` splits customer-visible (PUBLIC)
+    from staff-only (INTERNAL); `authorRole` is the business role that posted it; idempotent by messageId.
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+    authorRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+    visibility: { $ref: 'scalars.yaml#/MessageVisibility' }
+    body: { $ref: 'scalars.yaml#/MessageBody' }
+    originalLocale: { $ref: 'scalars.yaml#/Locale' }
+    attachmentRefs:
+      type: array
+      items: { $ref: 'scalars.yaml#/AttachmentRef' }
+      nullable: true
+  required: [orderId, messageId, authorRole, visibility, body, originalLocale]

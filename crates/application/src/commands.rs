@@ -107,6 +107,12 @@ use domain::generated::events::{
 };
 use domain::generated::scalars::{CityAvailabilityStatus, DeliveryPartnerRegistrationId};
 
+// In-app order conversations (#129) — the Conversation aggregate (id = orderId).
+use domain::conversation::ConversationState;
+use domain::generated::commands::{OpenConversation, PostMessage};
+use domain::generated::events::{ConversationOpened, MessagePosted};
+use domain::generated::scalars::ConversationAuthorRole;
+
 use crate::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
@@ -1614,6 +1620,79 @@ pub async fn revoke_delivery_partner_availability(
         reason: cmd.reason,
     });
     let stream = delivery_partner_registration_stream(&cmd.registration_id);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// Conversation (actors.yaml#/Conversation) — per-order in-app messaging (#129).
+// ================================================================================================
+
+/// The stream a Conversation aggregate lives on — keyed by the orderId (a conversation's identity IS
+/// its order, ADR-20260725-015921); byte-identical to `ConversationState::stream`.
+fn conversation_stream(id: &OrderId) -> String {
+    format!("Conversation-{}", id.0)
+}
+
+/// Handle `commands.yaml#/OpenConversation` → emit `events.yaml#/ConversationOpened` on the new
+/// `Conversation-<orderId>` stream. The birth is idempotent-guarded: an existing fold — or losing the
+/// version-0 race — rejects with `errors.yaml#/ConversationAlreadyOpen`
+/// (rules.yaml#/ConversationIdentityIsTheOrder). The snapshot `customerChatEnabled` decides whether a
+/// CUSTOMER may later post (see [`post_message`]).
+pub async fn open_conversation(
+    store: &dyn EventStore,
+    cmd: OpenConversation,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let already = |id: &OrderId| reject("ConversationAlreadyOpen", json!({ "orderId": id }));
+    let (state, _version) = Repository::new(store).load::<ConversationState>(cmd.order_id).await?;
+    if state.is_some() {
+        return Err(already(&cmd.order_id));
+    }
+    let event = DomainEvent::ConversationOpened(ConversationOpened {
+        order_id: cmd.order_id,
+        restaurant_id: cmd.restaurant_id,
+        customer_chat_enabled: cmd.customer_chat_enabled,
+    });
+    let stream = conversation_stream(&cmd.order_id);
+    match Repository::new(store).save(&stream, 0, &[event], actor).await {
+        Ok(_) => Ok(()),
+        Err(e) if is_version_conflict(&e) => Err(already(&cmd.order_id)),
+        Err(e) => Err(e),
+    }
+}
+
+/// Handle `commands.yaml#/PostMessage` → emit `events.yaml#/MessagePosted` on the order's conversation
+/// stream. Requires an opened conversation (`errors.yaml#/ConversationNotFound`,
+/// rules.yaml#/ConversationIdentityIsTheOrder); a CUSTOMER author is rejected when the restaurant left
+/// customer chat disabled (`errors.yaml#/CustomerChatDisabled`,
+/// rules.yaml#/CustomerChatRequiresRestaurantOptIn); and a re-used client-generated messageId is
+/// rejected as a duplicate (`errors.yaml#/MessageAlreadyPosted`, rules.yaml#/MessagePostingIsIdempotent).
+pub async fn post_message(
+    store: &dyn EventStore,
+    cmd: PostMessage,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<ConversationState>(cmd.order_id, || {
+            reject("ConversationNotFound", json!({ "orderId": cmd.order_id }))
+        })
+        .await?;
+    if cmd.author_role == ConversationAuthorRole::CUSTOMER && !state.customer_chat_enabled {
+        return Err(reject("CustomerChatDisabled", json!({ "orderId": cmd.order_id })));
+    }
+    if state.message_ids.contains(&cmd.message_id) {
+        return Err(reject("MessageAlreadyPosted", json!({ "messageId": cmd.message_id })));
+    }
+    let event = DomainEvent::MessagePosted(MessagePosted {
+        order_id: cmd.order_id,
+        message_id: cmd.message_id,
+        author_role: cmd.author_role,
+        visibility: cmd.visibility,
+        body: cmd.body,
+        original_locale: cmd.original_locale,
+        attachment_refs: cmd.attachment_refs,
+    });
+    let stream = conversation_stream(&cmd.order_id);
     Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
 }
 

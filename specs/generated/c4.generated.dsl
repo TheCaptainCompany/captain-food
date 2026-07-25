@@ -18,11 +18,12 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
           a_Catalog = component "Catalog" "Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import." "Aggregate"
         }
         group "order" {
-          a_Cart = component "Cart" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)." "Aggregate"
-          a_Order = component "Order" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)." "Aggregate"
-          a_Payment = component "Payment" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)." "Aggregate"
-          a_PlaceOrderProcess = component "PlaceOrderProcess" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)." "ProcessManager"
-          a_RefundProcess = component "RefundProcess" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)." "ProcessManager"
+          a_Cart = component "Cart" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "Aggregate"
+          a_Order = component "Order" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "Aggregate"
+          a_Payment = component "Payment" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "Aggregate"
+          a_Conversation = component "Conversation" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "Aggregate"
+          a_PlaceOrderProcess = component "PlaceOrderProcess" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "ProcessManager"
+          a_RefundProcess = component "RefundProcess" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "ProcessManager"
         }
         group "customer" {
           a_Customer = component "Customer" "Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding." "Aggregate"
