@@ -483,7 +483,7 @@ latency; sweep deletions per kind; bucket bytes per tenant (cost).
 
 ## 10. Scope of the implementation slice
 
-**Blocked on:** cross-cutting read authorization — `ReadScope` on the read ports + the RESTAURANT/RIDER
+**Blocked on:** [#144 "Read-side per-instance authorization: ReadScope on the read ports + RESTAURANT/RIDER identity bridges"](https://github.com/TheCaptainCompany/captain-food/issues/144) — cross-cutting read authorization — `ReadScope` on the read ports + the RESTAURANT/RIDER
 identity bridges + the `ScopeMembership` port (§4.5). Tracked separately; `/files` cannot enforce §3.3
 for two of its four roles until it lands.
 
