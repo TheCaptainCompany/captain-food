@@ -3,6 +3,35 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-25. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging epic:
+> the three spec-able DOMAIN slices are built + merged (`Conversation` aggregate).** After the epic
+> approval (below), the whole spec-able domain surface landed as three green PRs, each with its full
+> ADR-0032 completeness set and real domain + application Rust (the `crates/` workspace exists — the
+> CLAUDE.md "deferred" note is stale). **[#130](https://github.com/TheCaptainCompany/captain-food/issues/130)
+> (PR #138) — text messaging + visibility ACL:** the event-sourced `Conversation` aggregate (id =
+> orderId), `OpenConversation`/`PostMessage`, PUBLIC/INTERNAL visibility as **two role-pathed query ops**
+> (`orderConversation` incl. CUSTOMER; `orderConversationInternalNotes` staff-only, absent from the
+> customer schema = the privacy guarantee), customer-chat **opt-out default**, and the `OrderConversation`
+> projection table that folds order-status events into the thread (cross-aggregate; the
+> [#131](https://github.com/TheCaptainCompany/captain-food/issues/131) status-fold, projector deferred).
+> **[#136](https://github.com/TheCaptainCompany/captain-food/issues/136) (PR #139) — escalation + mute:**
+> `EscalateToAdmin`→`AdminInvitedToConversation`, `MuteParticipant`→`ParticipantMuted` with the reason
+> **required by the write model** (`MuteReasonRequired`, reason held out of the schema `required` on
+> purpose), `UnmuteParticipant` guarded by `ParticipantNotMuted`; mute authz at the API-role level
+> (CUSTOMER/RIDER excluded), the restaurant-can't-mute-admin refinement a noted resolver follow-up; mute
+> state on the staff read type only. **[#135](https://github.com/TheCaptainCompany/captain-food/issues/135)
+> (PR #140) — translation cache:** `RecordMessageTranslation`→`MessageTranslationAdded`, idempotent per
+> (message, locale) (`MessageNotFoundInConversation`/`TranslationAlreadyRecorded`), the cached
+> `MessageTranslation` riding on each `ConversationMessage`. Each PR: `make validate` 0 errors (25
+> baseline warnings, none new), `make rust` green (domain 42 + application 247 tests at the tip),
+> `check-drift` clean, supervised auto-merge. **Deferred/blocked (not spec-able now):** the SDUI thread
+> screens; GraphQL resolver wiring + the app projector (auto-stubbed, the accepted deferred state);
+> [#133](https://github.com/TheCaptainCompany/captain-food/issues/133) in-thread refund binding + [#137](https://github.com/TheCaptainCompany/captain-food/issues/137)
+> quick replies (need the thread screens — no standalone domain DSL);
+> [#132](https://github.com/TheCaptainCompany/captain-food/issues/132) push (needs
+> [#127](https://github.com/TheCaptainCompany/captain-food/issues/127));
+> [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) images (via the framework).
+
 > ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129): epic
 > APPROVED + reserve slice landed — in-app order conversations (messaging)
 > (PROP-20260725-013008, ADR-20260725-015921).** The product owner approved the messaging epic ("do
