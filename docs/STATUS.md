@@ -3,6 +3,26 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-25. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129): epic
+> APPROVED + reserve slice landed — in-app order conversations (messaging)
+> (PROP-20260725-013008, ADR-20260725-015921).** The product owner approved the messaging epic ("do
+> this completely"). This is **post-V0** and the Rust runtime doesn't exist yet, so the only *buildable*
+> slice now is the one the proposal marks "shippable now" (§5/§9.1): **reserve the data model**. Landed
+> spec-narrative only — a comment in `specs/entities.yaml` beside `Order` reserving the future
+> `Conversation` aggregate as **keyed by `orderId`** (a conversation's identity IS its order) and the
+> principle that `View_OrderConversation` folds BOTH the order's status events AND the conversation's
+> message events for that `orderId` (so "order status participates in the thread" is free, no retrofit).
+> No validated DSL added (would trip ADR-0032 completeness before the §8 decisions are made), so no
+> generated drift. The ADR adopts the mechanism reuse (event-sourced aggregate, role-pathed ACL for
+> PUBLIC/INTERNAL visibility, acceptance-first posting, the EXISTING refund path for in-thread refunds,
+> the #127 cascade for push) and resolves the decidable §8 decisions (translation on-demand+cache via a
+> BFF proxy; in-thread refund triggers the existing refund command; mute matrix restaurant→customer/
+> rider, admin→anyone, customer→none; post-V0 phasing). **Two decisions left OPEN on their slices**:
+> image retention window (GDPR, with [#18](https://github.com/TheCaptainCompany/captain-food/issues/18))
+> and rider-participation default. The rest of the epic is decomposed into **8 sub-issues** (§9), each
+> independently shippable behind the acceptance-first write model and carrying its own ADR-0032
+> completeness set. Spec/docs-only → straight to `main`; `make validate`/`generate` 0 errors, no drift.
+
 > ✅ **2026-07-25 — [#110](https://github.com/TheCaptainCompany/captain-food/issues/110): translation
 > hygiene gates + the runtime locale-resolution chain (PROP-20260724-133700 §1c,
 > ADR-20260725-013315).** The catalog had no gate against rot and the runtime hard-coded `fr`. Now two

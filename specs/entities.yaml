@@ -694,6 +694,13 @@ CheckoutSnapshot:
     - totalAmount
     - breakdown
 
+# RESERVED (post-V0, ADR-20260725-015921 / PROP-20260725-013008, epic #129): the future in-app
+# order-conversation aggregate `Conversation` is keyed by `orderId` — a conversation's identity IS its
+# order. Its read model (`View_OrderConversation`) folds BOTH this Order's status events AND the
+# conversation's message events for that `orderId`, ordered by occurredAt, so "order status participates
+# in the thread" is free (no status copied into a message). Not modelled as validated DSL yet (would
+# trip ADR-0032 completeness before the §8 decisions are made); the identity + fold principle are
+# reserved here so it is not a retrofit. Built per the sub-issues of #129.
 Order:
   type: object
   properties:

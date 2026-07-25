@@ -1,9 +1,9 @@
 # PROP-20260725-013008 — In-app order conversations (customer / restaurant / rider / admin messaging)
 
-- **Status**: Proposed
+- **Status**: Accepted (2026-07-25, product owner: "do this completely") — design adopted; the "reserve the data model" slice (§9.1) is landed, the rest decomposed into sub-issues (§9).
 - **Date**: 2026-07-25
 - **Tracking issue**: [#129 "Epic: in-app order conversations (customer/restaurant/rider/admin messaging) with private notes, translation, in-thread refunds, images"](https://github.com/TheCaptainCompany/captain-food/issues/129) (every proposal MUST have one, ADR-20260724-143000; always the full clickable link, never a bare number)
-- **Realized by**: (pending)
+- **Realized by**: [ADR-20260725-015921](../adr/ADR-20260725-015921-order-conversations-reserve-data-model.md) (adopts this design + reserves the `orderId`-keyed `Conversation` identity now; the `specs/entities.yaml` reservation note). The runtime slices land per the §9 sub-issues.
 - **Related**: [#127 "Notification channel cascade: push -> RCS -> SMS fallback"](https://github.com/TheCaptainCompany/captain-food/issues/127) (push delivery this depends on) · ADR-20260720-015500 (acceptance-first write model) · ADR-0041 (envelope metadata: the acting user is `domain_events.user_id`, not payload) · ADR-0015 (identity wrapped behind our GraphQL).
 
 > **Status:** Proposed — plan-mode proposal. **No `specs/**` or code changed yet.** On approval it
