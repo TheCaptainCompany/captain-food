@@ -36,11 +36,12 @@ boundedContexts:
     aggregates:
       - { $ref: 'actors.yaml#/Catalog' }
   order:
-    description: "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe)."
+    description: "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)."
     aggregates:
       - { $ref: 'actors.yaml#/Cart' }
       - { $ref: 'actors.yaml#/Order' }
       - { $ref: 'actors.yaml#/Payment' }
+      - { $ref: 'actors.yaml#/Conversation' }
     processManagers:
       - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
       - { $ref: 'processmanager.yaml#/RefundProcess' }

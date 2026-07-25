@@ -376,4 +376,22 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `OrderConversation` · 🛶 V0 · source aggregate `Conversation`
+
+- **Fed by**: `ConversationOpened`, `MessagePosted`, `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`
+- **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes).
+
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `order_id` | `OrderId` | `UUID` | PK |  |
+| `restaurant_id` | `RestaurantId` | `UUID` | index |  |
+| `customer_chat_enabled` | `boolean` | `BOOLEAN` | — |  |
+| `status` | `OrderStatus` | `INTEGER` | — | Derived from the latest order lifecycle event type (cross-aggregate fold, correlated by order_id). |
+| `messages` | `jsonb` | `JSONB` | — | PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector. |
+| `internal_notes` | `jsonb` | `JSONB` | — | INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector. |
+| `opened_at` | `timestamptz` | `TIMESTAMPTZ` | — |  |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 <!-- GENERATED:views END -->

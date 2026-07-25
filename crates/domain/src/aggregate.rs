@@ -14,6 +14,7 @@ use crate::generated::scalars::{
     CartId, CatalogId, CustomerId, DeliveryJobId, DeliveryPartnerRegistrationId, OrderId,
     RestaurantAccountId, RestaurantId, RiderId,
 };
+// A Conversation is keyed by the OrderId (its identity IS its order, #129) — same id type as Order, distinct stream.
 
 /// An event-sourced aggregate (a persistent actor): a typed identity + rehydration from its own stream.
 pub trait Aggregate: Sized {
@@ -69,6 +70,7 @@ impl_aggregate!(
 // reference, not a Copy uuid newtype) — see `crate::payment::{CATEGORY, stream, fold}`.
 // A Prospect is keyed by the prospected Restaurant's id (ADR-0020) — same id type as Restaurant, distinct stream.
 impl_aggregate!(crate::prospect::ProspectState, RestaurantId, "Prospect", crate::prospect::fold);
+impl_aggregate!(crate::conversation::ConversationState, OrderId, "Conversation", crate::conversation::fold);
 
 #[cfg(test)]
 mod tests {

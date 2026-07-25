@@ -891,6 +891,29 @@ pub struct RefundDenied {
     pub reason: String,
 }
 
+/// Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). Snapshots whether customer<->restaurant direct chat is enabled for this order (default true).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationOpened {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_chat_enabled: bool,
+}
+
+/// A message was appended to an order's conversation. `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `authorRole` is the business role that posted it; idempotent by messageId.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePosted {
+    pub order_id: OrderId,
+    pub message_id: ConversationMessageId,
+    pub author_role: ConversationAuthorRole,
+    pub visibility: MessageVisibility,
+    pub body: MessageBody,
+    pub original_locale: Locale,
+    #[serde(default)]
+    pub attachment_refs: Vec<AttachmentRef>,
+}
+
 /// Every business event as a typed, adjacently-tagged union: `{ "eventType": <name>, "payload": { … } }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "eventType", content = "payload")]
@@ -987,4 +1010,6 @@ pub enum DomainEvent {
     RefundOpened(RefundOpened),
     RefundApproved(RefundApproved),
     RefundDenied(RefundDenied),
+    ConversationOpened(ConversationOpened),
+    MessagePosted(MessagePosted),
 }

@@ -335,3 +335,43 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
         row
     })
 }
+
+/// Hand-written business logic for `OrderConversation`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait OrderConversationCompute {
+    fn status(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> OrderStatus;
+    fn messages(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> serde_json::Value;
+    fn internal_notes(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> serde_json::Value;
+}
+
+pub fn project_order_conversation<C: OrderConversationCompute>(c: &C, state: Option<OrderConversationRow>, env: &Envelope) -> Option<OrderConversationRow> {
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::ConversationOpened(e) => Some(OrderConversationRow {
+            order_id: e.order_id.clone(),
+            restaurant_id: e.restaurant_id.clone(),
+            customer_chat_enabled: e.customer_chat_enabled.clone(),
+            status: c.status(None, env),
+            messages: c.messages(None, env),
+            internal_notes: c.internal_notes(None, env),
+            opened_at: env.occurred_at,
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        DomainEvent::MessagePosted(_) => { let mut row = state?; let v = c.messages(Some(&row), env); row.messages = v; let v = c.internal_notes(Some(&row), env); row.internal_notes = v; Some(row) },
+        DomainEvent::OrderPlaced(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::OrderAcceptedByRestaurant(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::OrderPreparationStarted(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::OrderMarkedReady(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::OrderDelivered(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::OrderRejectedByRestaurant(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::OrderCancelledByCustomer(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::OrderCancelledByRestaurant(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}

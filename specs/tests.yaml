@@ -461,6 +461,20 @@ fixtures:
     type: { $ref: 'events.yaml#/RiderStatusChanged' }
     data: { riderId: "rider-1", status: "AVAILABLE" }
 
+  # --- Order conversations (#129) ---
+  conversationOpened:
+    type: { $ref: 'events.yaml#/ConversationOpened' }
+    data: { orderId: "order-1", restaurantId: "resto-1", customerChatEnabled: true }
+  conversationOpenedChatDisabled:
+    type: { $ref: 'events.yaml#/ConversationOpened' }
+    data: { orderId: "order-1", restaurantId: "resto-1", customerChatEnabled: false }
+  messagePostedPublic:
+    type: { $ref: 'events.yaml#/MessagePosted' }
+    data: { orderId: "order-1", messageId: "msg-1", authorRole: "CUSTOMER", visibility: "PUBLIC", body: "Hi, any update on my order?", originalLocale: "fr-FR" }
+  messagePostedInternal:
+    type: { $ref: 'events.yaml#/MessagePosted' }
+    data: { orderId: "order-1", messageId: "msg-2", authorRole: "RESTAURANT", visibility: "INTERNAL", body: "Customer asked about ETA; kitchen backed up.", originalLocale: "fr-FR" }
+
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
 # =====================================================================
@@ -2838,3 +2852,87 @@ tests:
       data: { paymentIntentId: "pi_unknown", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" } }
     thrown:
       - { $ref: 'errors.yaml#/PaymentEventOrphaned' }
+
+  # ----------------------- Conversation (#129) -----------------------
+  TestConversationOpened:
+    name: "Opens the per-order conversation"
+    rules: [{ $ref: 'rules.yaml#/ConversationIdentityIsTheOrder' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/OpenConversation' }
+      data: { orderId: "order-1", restaurantId: "resto-1", customerChatEnabled: true }
+    then:
+      - { $ref: '#/fixtures/conversationOpened' }
+
+  TestConversationOpenedTwiceIsRejected:
+    name: "Opening an already-open conversation is rejected"
+    rules: [{ $ref: 'rules.yaml#/ConversationIdentityIsTheOrder' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/OpenConversation' }
+      data: { orderId: "order-1", restaurantId: "resto-1", customerChatEnabled: true }
+    thrown:
+      - { $ref: 'errors.yaml#/ConversationAlreadyOpen' }
+
+  TestPostToUnopenedConversationIsRejected:
+    name: "Posting a message before the conversation is opened is rejected"
+    rules: [{ $ref: 'rules.yaml#/ConversationIdentityIsTheOrder' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/PostMessage' }
+      data: { orderId: "order-1", messageId: "msg-1", authorRole: "CUSTOMER", visibility: "PUBLIC", body: "Hi, any update on my order?", originalLocale: "fr-FR" }
+    thrown:
+      - { $ref: 'errors.yaml#/ConversationNotFound' }
+
+  TestPublicMessagePosted:
+    name: "A customer posts a public message to the thread (chat enabled)"
+    rules: [{ $ref: 'rules.yaml#/CustomerChatRequiresRestaurantOptIn' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/PostMessage' }
+      data: { orderId: "order-1", messageId: "msg-1", authorRole: "CUSTOMER", visibility: "PUBLIC", body: "Hi, any update on my order?", originalLocale: "fr-FR" }
+    then:
+      - { $ref: '#/fixtures/messagePostedPublic' }
+
+  TestInternalNotePosted:
+    name: "The restaurant posts an internal staff note (not shown to the customer)"
+    rules: [{ $ref: 'rules.yaml#/MessagesCarryVisibility' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/PostMessage' }
+      data: { orderId: "order-1", messageId: "msg-2", authorRole: "RESTAURANT", visibility: "INTERNAL", body: "Customer asked about ETA; kitchen backed up.", originalLocale: "fr-FR" }
+    then:
+      - { $ref: '#/fixtures/messagePostedInternal' }
+
+  TestCustomerPostRejectedWhenChatDisabled:
+    name: "A customer post is rejected when the restaurant disabled customer chat"
+    rules: [{ $ref: 'rules.yaml#/CustomerChatRequiresRestaurantOptIn' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpenedChatDisabled' }
+    when:
+      type: { $ref: 'commands.yaml#/PostMessage' }
+      data: { orderId: "order-1", messageId: "msg-1", authorRole: "CUSTOMER", visibility: "PUBLIC", body: "Hi, any update on my order?", originalLocale: "fr-FR" }
+    thrown:
+      - { $ref: 'errors.yaml#/CustomerChatDisabled' }
+
+  TestDuplicateMessageRejected:
+    name: "Re-posting a message with an already-seen messageId is rejected (idempotency)"
+    rules: [{ $ref: 'rules.yaml#/MessagePostingIsIdempotent' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpened' }
+      - { $ref: '#/fixtures/messagePostedPublic' }
+    when:
+      type: { $ref: 'commands.yaml#/PostMessage' }
+      data: { orderId: "order-1", messageId: "msg-1", authorRole: "CUSTOMER", visibility: "PUBLIC", body: "Hi, any update on my order?", originalLocale: "fr-FR" }
+    thrown:
+      - { $ref: 'errors.yaml#/MessageAlreadyPosted' }

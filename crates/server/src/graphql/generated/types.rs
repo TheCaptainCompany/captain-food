@@ -324,6 +324,26 @@ pub struct CheckoutSnapshot {
     pub note: Option<OrderNote>,
 }
 
+/// One message in an order's in-app conversation (read-model array element; #129). `authorRole` is the business role that posted it; `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `originalLocale` records the language it was written in (for later translation). Attachments are opaque framework-managed refs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationMessage {
+    #[graphql(name = "messageId")]
+    pub message_id: ConversationMessageId,
+    #[graphql(name = "authorRole")]
+    pub author_role: ConversationAuthorRole,
+    #[graphql(name = "visibility")]
+    pub visibility: MessageVisibility,
+    #[graphql(name = "body")]
+    pub body: MessageBody,
+    #[graphql(name = "originalLocale")]
+    pub original_locale: Locale,
+    #[graphql(name = "postedAt")]
+    pub posted_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "attachmentRefs")]
+    pub attachment_refs: Option<Vec<AttachmentRef>>,
+}
+
 /// A restaurant (public discovery + single-restaurant header). Navigates to its catalogs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -870,6 +890,36 @@ pub struct UberSplitPolicy {
     pub platform_fee_pct: f64,
     #[graphql(name = "effectiveFrom")]
     pub effective_from: chrono::DateTime<chrono::Utc>,
+}
+
+/// The per-order in-app conversation: the PUBLIC (customer-visible) message timeline, plus the order's live status folded from its lifecycle events and whether customer chat is enabled (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderConversation {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "status")]
+    pub status: OrderStatus,
+    #[graphql(name = "customerChatEnabled")]
+    pub customer_chat_enabled: bool,
+    #[graphql(name = "openedAt")]
+    pub opened_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "messages")]
+    #[serde(default)]
+    pub messages: Vec<ConversationMessage>,
+}
+
+/// The INTERNAL (staff-only) notes on an order's conversation — deliberately a SEPARATE type from OrderConversation and absent from the CUSTOMER schema; that separation IS the visibility guarantee (#129).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationInternalNotes {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "notes")]
+    #[serde(default)]
+    pub notes: Vec<ConversationMessage>,
 }
 
 /// Read-model row → API type (Stage 1a worked example). jsonb columns deserialize into the typed

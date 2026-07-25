@@ -532,6 +532,26 @@ fn fx_rider_status_changed() -> DomainEvent {
     DomainEvent::RiderStatusChanged(evs::RiderStatusChanged { rider_id: sc::RiderId(support::uid("rider-1")), status: sc::RiderStatus::AVAILABLE })
 }
 
+/// tests.yaml#/fixtures/conversationOpened — events.yaml#/ConversationOpened
+fn fx_conversation_opened() -> DomainEvent {
+    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_chat_enabled: true })
+}
+
+/// tests.yaml#/fixtures/conversationOpenedChatDisabled — events.yaml#/ConversationOpened
+fn fx_conversation_opened_chat_disabled() -> DomainEvent {
+    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_chat_enabled: false })
+}
+
+/// tests.yaml#/fixtures/messagePostedPublic — events.yaml#/MessagePosted
+fn fx_message_posted_public() -> DomainEvent {
+    DomainEvent::MessagePosted(evs::MessagePosted { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hi, any update on my order?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() })
+}
+
+/// tests.yaml#/fixtures/messagePostedInternal — events.yaml#/MessagePosted
+fn fx_message_posted_internal() -> DomainEvent {
+    DomainEvent::MessagePosted(evs::MessagePosted { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-2")), author_role: sc::ConversationAuthorRole::RESTAURANT, visibility: sc::MessageVisibility::INTERNAL, body: sc::MessageBody("Customer asked about ETA; kitchen backed up.".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() })
+}
+
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
 /// the canonical OrderTracking rows the saga legs read (`read_order`) — state the spec's
 /// GIVEN (an event list) cannot express but its cases assume.
@@ -3249,5 +3269,111 @@ async fn test_payment_capture_orphan_is_flagged() {
     let err = result.expect_err("TestPaymentCaptureOrphanIsFlagged: the spec expects a typed rejection");
     support::assert_thrown("TestPaymentCaptureOrphanIsFlagged", &err, &["PaymentEventOrphaned"]);
     bed.assert_appended("TestPaymentCaptureOrphanIsFlagged", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestConversationOpened — "Opens the per-order conversation"
+/// rules: ConversationIdentityIsTheOrder
+#[tokio::test]
+async fn test_conversation_opened() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_chat_enabled: true };
+    let result = crate::commands::open_conversation(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestConversationOpened: the spec expects acceptance");
+    bed.assert_appended("TestConversationOpened", &before, &[
+        (format!("Conversation-{}", support::uid("order-1")), fx_conversation_opened()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestConversationOpenedTwiceIsRejected — "Opening an already-open conversation is rejected"
+/// rules: ConversationIdentityIsTheOrder
+#[tokio::test]
+async fn test_conversation_opened_twice_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_chat_enabled: true };
+    let result = crate::commands::open_conversation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestConversationOpenedTwiceIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestConversationOpenedTwiceIsRejected", &err, &["ConversationAlreadyOpen"]);
+    bed.assert_appended("TestConversationOpenedTwiceIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestPostToUnopenedConversationIsRejected — "Posting a message before the conversation is opened is rejected"
+/// rules: ConversationIdentityIsTheOrder
+#[tokio::test]
+async fn test_post_to_unopened_conversation_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hi, any update on my order?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestPostToUnopenedConversationIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestPostToUnopenedConversationIsRejected", &err, &["ConversationNotFound"]);
+    bed.assert_appended("TestPostToUnopenedConversationIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestPublicMessagePosted — "A customer posts a public message to the thread (chat enabled)"
+/// rules: CustomerChatRequiresRestaurantOptIn
+#[tokio::test]
+async fn test_public_message_posted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hi, any update on my order?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestPublicMessagePosted: the spec expects acceptance");
+    bed.assert_appended("TestPublicMessagePosted", &before, &[
+        (format!("Conversation-{}", support::uid("order-1")), fx_message_posted_public()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestInternalNotePosted — "The restaurant posts an internal staff note (not shown to the customer)"
+/// rules: MessagesCarryVisibility
+#[tokio::test]
+async fn test_internal_note_posted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-2")), author_role: sc::ConversationAuthorRole::RESTAURANT, visibility: sc::MessageVisibility::INTERNAL, body: sc::MessageBody("Customer asked about ETA; kitchen backed up.".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestInternalNotePosted: the spec expects acceptance");
+    bed.assert_appended("TestInternalNotePosted", &before, &[
+        (format!("Conversation-{}", support::uid("order-1")), fx_message_posted_internal()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestCustomerPostRejectedWhenChatDisabled — "A customer post is rejected when the restaurant disabled customer chat"
+/// rules: CustomerChatRequiresRestaurantOptIn
+#[tokio::test]
+async fn test_customer_post_rejected_when_chat_disabled() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened_chat_disabled()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hi, any update on my order?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestCustomerPostRejectedWhenChatDisabled: the spec expects a typed rejection");
+    support::assert_thrown("TestCustomerPostRejectedWhenChatDisabled", &err, &["CustomerChatDisabled"]);
+    bed.assert_appended("TestCustomerPostRejectedWhenChatDisabled", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestDuplicateMessageRejected — "Re-posting a message with an already-seen messageId is rejected (idempotency)"
+/// rules: MessagePostingIsIdempotent
+#[tokio::test]
+async fn test_duplicate_message_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened(), fx_message_posted_public()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hi, any update on my order?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDuplicateMessageRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDuplicateMessageRejected", &err, &["MessageAlreadyPosted"]);
+    bed.assert_appended("TestDuplicateMessageRejected", &before, &[]);
 }
 

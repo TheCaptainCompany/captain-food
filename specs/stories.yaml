@@ -88,6 +88,12 @@ customer:
         SetAddress: { $ref: 'api.yaml#/mutations/setCustomerAddress' }
         RemoveAddress: { $ref: 'api.yaml#/mutations/removeCustomerAddress' }
         SetPaymentMethod: { $ref: 'api.yaml#/mutations/setCustomerPaymentMethod' }
+    MessageAboutMyOrder:
+      description: As a customer, I message the restaurant about my order and read the thread (#129).
+      steps:
+        OpenThread: { $ref: 'api.yaml#/mutations/openConversation' }
+        SendMessage: { $ref: 'api.yaml#/mutations/postMessage' }
+        ReadThread: { $ref: 'api.yaml#/queries/orderConversation' }
 
 restaurant_owner:
   description: >
@@ -177,6 +183,11 @@ restaurant_manager:
         CancelDelivery: { $ref: 'api.yaml#/mutations/cancelDelivery' }
         EscalateDelivery: { $ref: 'api.yaml#/mutations/escalateDelivery' }   # skip the current channel, advance the ranked dispatch walk (#60)
         ReviewDeliverySatisfaction: { $ref: 'api.yaml#/queries/restaurantDeliverySatisfaction' }   # #62 customers' delay verdicts → self-dispatch-vs-Captain decision
+    HandleOrderConversation:
+      description: As a manager, I reply on my orders' conversations and keep internal staff notes (#129).
+      steps:
+        ReplyToCustomer: { $ref: 'api.yaml#/mutations/postMessage' }
+        ReadInternalNotes: { $ref: 'api.yaml#/queries/orderConversationInternalNotes' }
 
 rider:
   description: A courier who delivers orders from restaurants to customers.

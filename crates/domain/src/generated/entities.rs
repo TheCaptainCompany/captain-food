@@ -346,3 +346,17 @@ pub struct Order {
     pub status: OrderStatus,
     pub note: Option<OrderNote>,
 }
+
+/// One message in an order's in-app conversation (read-model array element; #129). `authorRole` is the business role that posted it; `visibility` splits customer-visible (PUBLIC) from staff-only (INTERNAL); `originalLocale` records the language it was written in (for later translation). Attachments are opaque framework-managed refs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationMessage {
+    pub message_id: ConversationMessageId,
+    pub author_role: ConversationAuthorRole,
+    pub visibility: MessageVisibility,
+    pub body: MessageBody,
+    pub original_locale: Locale,
+    pub posted_at: String,
+    #[serde(default)]
+    pub attachment_refs: Vec<AttachmentRef>,
+}

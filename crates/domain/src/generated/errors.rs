@@ -618,6 +618,38 @@ pub const CANNOT_ORDER_TEST_RESTAURANT: ErrorDef = ErrorDef {
     message_fr: "Ce restaurant n'est pas disponible.",
 };
 
+/// OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).
+/// Context: `orderId`.
+pub const CONVERSATION_ALREADY_OPEN: ErrorDef = ErrorDef {
+    code: "ConversationAlreadyOpen",
+    message_en: "A conversation is already open for this order.",
+    message_fr: "Une conversation est déjà ouverte pour cette commande.",
+};
+
+/// PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).
+/// Context: `orderId`.
+pub const CONVERSATION_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "ConversationNotFound",
+    message_en: "No conversation exists for this order.",
+    message_fr: "Aucune conversation n'existe pour cette commande.",
+};
+
+/// A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).
+/// Context: `orderId`.
+pub const CUSTOMER_CHAT_DISABLED: ErrorDef = ErrorDef {
+    code: "CustomerChatDisabled",
+    message_en: "Customer messaging is disabled for this order.",
+    message_fr: "La messagerie client est désactivée pour cette commande.",
+};
+
+/// A message with this client-generated messageId was already posted to the conversation; the re-post is a duplicate and is rejected (idempotency; #129).
+/// Context: `messageId`.
+pub const MESSAGE_ALREADY_POSTED: ErrorDef = ErrorDef {
+    code: "MessageAlreadyPosted",
+    message_en: "This message has already been posted.",
+    message_fr: "Ce message a déjà été envoyé.",
+};
+
 /// Every anticipated error, in errors.yaml order.
 pub const ERRORS: &[ErrorDef] = &[
     UNAUTHORIZED,
@@ -697,6 +729,10 @@ pub const ERRORS: &[ErrorDef] = &[
     PAYMENT_EVENT_ORPHANED,
     REFUND_NOT_PENDING,
     CANNOT_ORDER_TEST_RESTAURANT,
+    CONVERSATION_ALREADY_OPEN,
+    CONVERSATION_NOT_FOUND,
+    CUSTOMER_CHAT_DISABLED,
+    MESSAGE_ALREADY_POSTED,
 ];
 
 /// Look up an anticipated error by its stable PascalCase code.

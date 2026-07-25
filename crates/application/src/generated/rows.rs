@@ -139,3 +139,17 @@ pub struct OrderTrackingRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
+
+/// The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes). 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderConversationRow {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_chat_enabled: bool,
+    pub status: OrderStatus,
+    pub messages: serde_json::Value,
+    pub internal_notes: serde_json::Value,
+    pub opened_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}

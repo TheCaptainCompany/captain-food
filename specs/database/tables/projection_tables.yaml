@@ -644,3 +644,57 @@ OrderTracking:
       from: [{ $ref: 'events.yaml#/DeliveryAcceptedByPartner/properties/estimatedDropoffAt' }]
       nullable: true
       note: "Partner-reported ETA to the customer; null when unknown."
+
+OrderConversation:
+  projector: app   # message timeline appended + PUBLIC/INTERNAL split + order-status fold = application logic
+  aggregate: Conversation
+  slice: V0
+  note: >
+    The per-order conversation read model (#129). Folds the conversation's own messages AND the order's
+    status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status
+    participates in the thread with no status copied into a message. The projector appends each
+    MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes).
+  fedBy:
+    - { $ref: 'events.yaml#/ConversationOpened' }
+    - { $ref: 'events.yaml#/MessagePosted' }
+    - { $ref: 'events.yaml#/OrderPlaced' }
+    - { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }
+    - { $ref: 'events.yaml#/OrderPreparationStarted' }
+    - { $ref: 'events.yaml#/OrderMarkedReady' }
+    - { $ref: 'events.yaml#/OrderDelivered' }
+    - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
+    - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
+    - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+  columns:
+    order_id:
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/orderId' }]
+      pk: true
+    restaurant_id:
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/restaurantId' }]
+      index: true
+    customer_chat_enabled:
+      type: boolean
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/customerChatEnabled' }]
+    status:
+      type: { $ref: 'scalars.yaml#/OrderStatus' }
+      from:
+        - { $ref: 'events.yaml#/OrderPlaced' }
+        - { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }
+        - { $ref: 'events.yaml#/OrderPreparationStarted' }
+        - { $ref: 'events.yaml#/OrderMarkedReady' }
+        - { $ref: 'events.yaml#/OrderDelivered' }
+        - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
+        - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
+        - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+      note: "Derived from the latest order lifecycle event type (cross-aggregate fold, correlated by order_id)."
+    messages:
+      type: jsonb
+      from: [{ $ref: 'events.yaml#/MessagePosted' }]
+      note: "PUBLIC ConversationMessage[] (entities.yaml#/ConversationMessage), appended per MessagePosted (visibility=PUBLIC) by the projector."
+    internal_notes:
+      type: jsonb
+      from: [{ $ref: 'events.yaml#/MessagePosted' }]
+      note: "INTERNAL ConversationMessage[] staff notes, appended per MessagePosted (visibility=INTERNAL) by the projector."
+    opened_at:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/ConversationOpened' }]

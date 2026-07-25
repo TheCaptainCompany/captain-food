@@ -987,6 +987,38 @@ pub struct RevokeDeliveryPartnerAvailabilityInput {
     pub reason: Option<String>,
 }
 
+/// Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenConversationInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "customerChatEnabled")]
+    pub customer_chat_enabled: bool,
+}
+
+/// Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct PostMessageInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "messageId")]
+    pub message_id: ConversationMessageId,
+    #[graphql(name = "authorRole")]
+    pub author_role: ConversationAuthorRole,
+    #[graphql(name = "visibility")]
+    pub visibility: MessageVisibility,
+    #[graphql(name = "body")]
+    pub body: MessageBody,
+    #[graphql(name = "originalLocale")]
+    pub original_locale: Locale,
+    #[graphql(name = "attachmentRefs")]
+    pub attachment_refs: Option<Vec<AttachmentRef>>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationStatusQueryInput {
@@ -1118,6 +1150,20 @@ pub struct RestaurantDeliverySatisfactionQueryInput {
     pub restaurant_id: RestaurantId,
     #[graphql(name = "timeliness")]
     pub timeliness: Option<DeliveryTimeliness>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderConversationQueryInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderConversationInternalNotesQueryInput {
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

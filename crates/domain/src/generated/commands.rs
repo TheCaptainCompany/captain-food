@@ -795,3 +795,26 @@ pub struct DenyRefund {
     pub order_id: OrderId,
     pub reason: String,
 }
+
+/// Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenConversation {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_chat_enabled: bool,
+}
+
+/// Post a message to an order's conversation — PUBLIC (customer-visible) or INTERNAL (staff-only note). The client-generated messageId is the idempotency key (a re-post with the same id is rejected).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostMessage {
+    pub order_id: OrderId,
+    pub message_id: ConversationMessageId,
+    pub author_role: ConversationAuthorRole,
+    pub visibility: MessageVisibility,
+    pub body: MessageBody,
+    pub original_locale: Locale,
+    #[serde(default)]
+    pub attachment_refs: Vec<AttachmentRef>,
+}

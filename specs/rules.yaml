@@ -187,3 +187,13 @@ DeliveryPartnerAvailabilityGoesLiveOnlyAfterApproval:
 # --- Rider ---
 RiderLifecycle:
   description: "A rider registers once (per auth user), may update editable profile fields, and changes availability status only through valid transitions."
+
+# --- Order conversations / messaging (#129) ---
+ConversationIdentityIsTheOrder:
+  description: "A conversation is opened once per order (id = orderId); a second open is rejected, and posting a message before the conversation is opened is rejected (#129)."
+CustomerChatRequiresRestaurantOptIn:
+  description: "A CUSTOMER may post to the order thread only when the restaurant has customer chat enabled for that order; otherwise the post is rejected (#129)."
+MessagesCarryVisibility:
+  description: "Every conversation message is either PUBLIC (customer-visible) or INTERNAL (staff-only); restaurant/rider/admin may post INTERNAL staff notes that never surface to the customer (#129)."
+MessagePostingIsIdempotent:
+  description: "Re-posting a message with an already-seen client-generated messageId is rejected (idempotent posting; #129)."
