@@ -281,9 +281,10 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
 
 /// Server-side render the checkout page to a full document (the `ssr` build).
 #[cfg(feature = "ssr")]
-pub fn render_checkout_html(state: CheckoutViewState) -> String {
+pub fn render_checkout_html(state: CheckoutViewState, lang: &str) -> String {
+    let lang = crate::i18n::normalize_locale(lang).unwrap_or(crate::i18n::DEFAULT_LOCALE);
     let body = CheckoutScreen(CheckoutScreenProps { state }).to_html();
-    crate::renderer::page_html("Checkout - Captain.Food", &body)
+    crate::renderer::page_html("Checkout - Captain.Food", lang, &body)
 }
 
 #[cfg(test)]
@@ -441,7 +442,7 @@ mod tests {
             cart_line_count: 2,
             formatted_total: "23,50 EUR".into(),
             is_delivery: true,
-        });
+        }, "fr");
         for tag in [
             "back_button_header",
             "checkout_section",
@@ -459,7 +460,7 @@ mod tests {
             cart_line_count: 1,
             formatted_total: "9,80 EUR".into(),
             is_delivery: false,
-        });
+        }, "fr");
         assert!(!collection.contains("data-s=\"delivery_details\""));
     }
 }

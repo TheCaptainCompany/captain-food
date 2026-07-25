@@ -262,9 +262,10 @@ pub fn OrderTrackingScreen(state: TrackingState) -> impl IntoView {
 
 /// Server-side render the tracking page (the `ssr` build).
 #[cfg(feature = "ssr")]
-pub fn render_tracking_html(state: TrackingState) -> String {
+pub fn render_tracking_html(state: TrackingState, lang: &str) -> String {
+    let lang = crate::i18n::normalize_locale(lang).unwrap_or(crate::i18n::DEFAULT_LOCALE);
     let body = OrderTrackingScreen(OrderTrackingScreenProps { state }).to_html();
-    crate::renderer::page_html("Your order - Captain.Food", &body)
+    crate::renderer::page_html("Your order - Captain.Food", lang, &body)
 }
 
 #[cfg(test)]
@@ -371,7 +372,7 @@ mod tests {
     fn tracking_renders_the_hero_state_machine() {
         let mut state = TrackingState::new(Uuid::now_v7());
         state.apply(&SubscriptionEvent::Next(order("PREPARING", "2026-07-23T12:05:00Z")));
-        let html = render_tracking_html(state.clone());
+        let html = render_tracking_html(state.clone(), "fr");
         assert!(html.contains("data-c=\"order_status_hero\""));
         assert!(html.contains("data-status=\"PREPARING\""));
         assert!(html.contains("data-icon=\"fire\""));
@@ -379,13 +380,13 @@ mod tests {
         assert!(!html.contains("rating_sheet"), "rating only offered when DELIVERED");
 
         state.apply(&SubscriptionEvent::Next(order("DELIVERED", "2026-07-23T13:00:00Z")));
-        let html = render_tracking_html(state);
+        let html = render_tracking_html(state, "fr");
         assert!(html.contains("data-icon=\"home\""));
         assert!(!html.contains("data-c=\"eta_bar\""), "no ETA once DELIVERED");
         assert!(html.contains("rating_sheet"), "DELIVERED offers the rating sheet");
 
         // The empty state: no order loaded.
-        let html = render_tracking_html(TrackingState::new(Uuid::now_v7()));
+        let html = render_tracking_html(TrackingState::new(Uuid::now_v7()), "fr");
         assert!(html.contains("data-status=\"UNKNOWN\""));
     }
 }
