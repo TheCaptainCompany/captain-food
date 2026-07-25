@@ -10101,6 +10101,16 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
         "setCustomerPaymentMethod" => {
             ("SetCustomerPaymentMethod", "set_customer_payment_method", Extra::None)
         }
+        // Order conversations / messaging (#129) — the Conversation aggregate handlers
+        // (crates/application/src/commands.rs); all plain (&dyn EventStore, cmd, &Actor) → Extra::None.
+        "openConversation" => ("OpenConversation", "open_conversation", Extra::None),
+        "postMessage" => ("PostMessage", "post_message", Extra::None),
+        "recordMessageTranslation" => {
+            ("RecordMessageTranslation", "record_message_translation", Extra::None)
+        }
+        "escalateToAdmin" => ("EscalateToAdmin", "escalate_to_admin", Extra::None),
+        "muteParticipant" => ("MuteParticipant", "mute_participant", Extra::None),
+        "unmuteParticipant" => ("UnmuteParticipant", "unmute_participant", Extra::None),
         _ => return None,
     };
     let (resolve_extra, extra_arg) = match extra {
