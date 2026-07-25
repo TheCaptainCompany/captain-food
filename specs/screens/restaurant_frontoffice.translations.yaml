@@ -150,6 +150,16 @@ order.empty.title: { messages: { en: "No orders yet", fr: "Aucune commande" } }
 order.empty.body: { messages: { en: "Your order history will appear here.", fr: "Votre historique de commandes apparaîtra ici." } }
 order.empty.cta:  { messages: { en: "Order now", fr: "Commander" } }
 
+# ── order conversation (in-app chat, #145) ────────────────────────────────────
+conversation.title:              { messages: { en: "Order chat", fr: "Discussion" } }
+conversation.compose_placeholder: { messages: { en: "Write a message…", fr: "Écrire un message…" } }
+conversation.send:               { messages: { en: "Send", fr: "Envoyer" } }
+conversation.quick_thanks:       { messages: { en: "Thanks!", fr: "Merci !" } }
+conversation.quick_where:        { messages: { en: "Where is my order?", fr: "Où en est ma commande ?" } }
+conversation.empty.title:        { messages: { en: "No messages yet", fr: "Aucun message" } }
+conversation.empty.body:         { messages: { en: "Start the conversation about your order.", fr: "Démarrez la discussion au sujet de votre commande." } }
+conversation.translated:         { messages: { en: "Translated", fr: "Traduit" } }
+
 # ── account ──────────────────────────────────────────────────────────────────
 account.default_name:     { messages: { en: "Captain", fr: "Captain" } }
 account.section.my_account: { messages: { en: "My account", fr: "Mon compte" } }

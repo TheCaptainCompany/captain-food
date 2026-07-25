@@ -182,6 +182,29 @@ fn cart_line_row(item: &Value) -> AnyView {
     .into_any()
 }
 
+/// One conversation message bubble (#145) — body + author role + timestamp, with a small
+/// "translated" hint when the message carries cached translations. `translated_label` is the
+/// screen-resolved (localized) hint text, shown only on bubbles that have translations.
+fn message_bubble_row(item: &Value, translated_label: &str) -> AnyView {
+    let body = item.get("body").and_then(Value::as_str).unwrap_or("").to_string();
+    let role = item.get("authorRole").and_then(Value::as_str).unwrap_or("").to_string();
+    let role_attr = role.clone();
+    let posted = item.get("postedAt").and_then(Value::as_str).unwrap_or("").to_string();
+    let has_translations =
+        item.get("translations").and_then(Value::as_array).map(|a| !a.is_empty()).unwrap_or(false);
+    let hint = translated_label.to_string();
+    let show_hint = has_translations && !hint.is_empty();
+    view! {
+        <article data-c="message_bubble_row" data-role=role_attr>
+            <span data-c="author">{role}</span>
+            <p>{body}</p>
+            <time>{posted}</time>
+            {show_hint.then(|| view! { <span data-c="translated">{hint.clone()}</span> })}
+        </article>
+    }
+    .into_any()
+}
+
 /// Render one generated node — the registry-dispatch heart of the renderer.
 pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
     let ty = node.kind.as_str();
@@ -335,6 +358,35 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
                 let cards: Vec<AnyView> = items.iter().map(order_card).collect();
                 view! { <div data-c=ty>{cards}</div> }.into_any()
             }
+        }
+
+        // ── conversation (#145) ───────────────────────────────────────────────────
+        ComponentKind::MessageBubble => {
+            // The order chat timeline: one bubble per message (mirrors OrderList → order_card),
+            // its empty state when the thread has no messages yet.
+            let items = items_of(node, ctx);
+            if items.is_empty() {
+                let title = prop_text(node, "empty_state.title", ctx);
+                let body = prop_text(node, "empty_state.body", ctx);
+                view! { <div data-c=ty data-empty="true"><h3>{title}</h3><p>{body}</p></div> }.into_any()
+            } else {
+                let translated_label = prop_text(node, "translated_label", ctx);
+                let bubbles: Vec<AnyView> =
+                    items.iter().map(|item| message_bubble_row(item, &translated_label)).collect();
+                view! { <div data-c=ty>{bubbles}</div> }.into_any()
+            }
+        }
+        ComponentKind::QuickReplyChips => {
+            // Static quick-reply chips (chips.N.label — flattened props, walked like bottom_nav).
+            let mut chips: Vec<AnyView> = Vec::new();
+            for i in 0..12 {
+                let label = prop_text(node, &format!("chips.{i}.label"), ctx);
+                if label.is_empty() {
+                    break;
+                }
+                chips.push(view! { <button type="button" data-c="quick_reply_chip">{label}</button> }.into_any());
+            }
+            view! { <div data-c=ty>{chips}</div> }.into_any()
         }
 
         // ── cart ────────────────────────────────────────────────────────────────
