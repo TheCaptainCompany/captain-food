@@ -132,6 +132,233 @@ A new `MessagePosted` (public, addressed to a participant who isn't looking) fan
 (push → RCS → SMS). Messaging is arguably #127's strongest justification. Until #127 lands, V0-of-
 messaging can degrade to in-app-only + the existing order-status notifications.
 
+## 2b. Sequence diagrams
+
+The four load-bearing flows, drawn faithfully to the hexagonal architecture (the aggregate/PM **decides**
+the facts — pure, no I/O — which are saved **through the `Repository`**, appended by its one adapter
+`PgEventStore`; ADR-20260719-031136 / docs/claude/mermaid.md).
+
+**(a) Post a message — acceptance-first, then push fan-out.** The mutation journals the command and
+returns an acceptance immediately (ADR-20260720-015500); the outcome is polled via `operationStatus`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Customer or staff client
+    box edge adapter
+        participant BFF as BFF GraphQL (role path)
+    end
+    box application core
+        participant CONV as Conversation aggregate (decides, pure)
+        participant REPO as Repository (actor journal)
+    end
+    box infrastructure adapters
+        participant PG as PgEventStore (to domain_events)
+        participant NOT as Notifier (push cascade, #127)
+    end
+    U->>BFF: postMessage(order, body, visibility) with X-SESSION-ID
+    BFF->>BFF: journal command (command_journal, idempotent)
+    BFF-->>U: MutationAcceptance(messageId, ACCEPTED)
+    Note over BFF,CONV: async handling (acceptance-first)
+    BFF->>CONV: handle PostMessage
+    CONV->>CONV: check chat allowed and not muted
+    CONV-->>REPO: save(MessagePosted)
+    REPO->>PG: append MessagePosted
+    CONV->>NOT: notify other participants
+    NOT->>NOT: push then RCS then SMS
+    U->>BFF: operationStatus(messageId)
+    BFF-->>U: SUCCEEDED
+```
+
+**(b) Visibility — the same query, two role paths.** The customer's schema projection cannot return
+`INTERNAL` messages; the staff paths can.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor RR as Restaurant client
+    actor RC as Customer client
+    box edge adapter
+        participant BFF as BFF (role-pathed graphql)
+    end
+    box read model
+        participant V as View_OrderConversation (fold)
+    end
+    RR->>BFF: conversation(order) via /restaurant/graphql
+    BFF->>V: read messages
+    V-->>RR: PUBLIC and INTERNAL (full thread)
+    RC->>BFF: conversation(order) via /public or /customer
+    BFF->>V: read messages
+    V-->>RC: PUBLIC only plus status (ACL drops INTERNAL)
+```
+
+**(c) Translation — client-initiated, persisted once.** The API key lives behind a BFF proxy, and the
+result is cached as a `MessageTranslationAdded` fact so a locale is never re-billed.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Reader client
+    box edge adapters
+        participant BFF as BFF (/internal/translate proxy)
+        participant GT as Google Translate API (our key)
+    end
+    box application core
+        participant CONV as Conversation aggregate
+        participant REPO as Repository
+    end
+    box infrastructure adapter
+        participant PG as PgEventStore
+    end
+    U->>BFF: translate(messageId, targetLocale)
+    alt translation already cached
+        BFF-->>U: cached text (MessageTranslationAdded)
+    else not cached
+        BFF->>GT: translate(text, targetLocale)
+        GT-->>BFF: translated text
+        BFF->>CONV: record translation
+        CONV-->>REPO: save(MessageTranslationAdded)
+        REPO->>PG: append
+        BFF-->>U: translated text
+    end
+```
+
+**(d) In-thread refund — reuse the existing path, request vs report split.** The chat action triggers
+the refund command we already have; Stripe **reports** the settled refund as an inbound fact.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor RC as Customer client
+    actor RR as Restaurant client
+    box edge adapter
+        participant BFF as BFF GraphQL
+    end
+    box application core
+        participant ORD as Order aggregate (decides refund)
+        participant REPO as Repository
+    end
+    box infrastructure adapters
+        participant PG as PgEventStore
+        participant ST as Stripe (external)
+    end
+    RC->>BFF: postMessage (refund request recorded in thread)
+    RR->>BFF: acceptRefund(order, amount) as a chat action
+    BFF->>ORD: handle the EXISTING refund command
+    ORD-->>REPO: save(RefundRequested)
+    REPO->>PG: append
+    Note over ORD,ST: request vs report split (CLAUDE.md)
+    ST->>BFF: webhook PaymentRefunded (inbound fact)
+    BFF->>ORD: record inbound PaymentRefunded
+    ORD-->>REPO: save(PaymentRefunded)
+    REPO->>PG: append
+```
+
+## 2c. Screen mockups (wireframes)
+
+Low-fidelity, per surface — to fix the shape, not the visual design. The SDUI component vocabulary
+(`order_list`, `status_chip`, `message_bubble`, `quick_reply_chips`, `info_row`, `button`, …) renders
+these; only genuinely new kinds (`message_bubble`, `attachment_thumb`, `quick_reply_chips`) get added
+to the registry.
+
+**Customer — chat enabled.** Public messages + the order status woven in; the translation toggle; the
+rider's proof-of-delivery photo; quick replies.
+
+```
++-------------------------------------------+
+|  <  Back        Order A1B2 - Chez Marco   |
++-------------------------------------------+
+|   * Order placed             12:02        |   <- status folds into the timeline
+|   * Accepted by restaurant   12:03        |
+|                                           |
+|   Chez Marco                 12:05        |
+|   +-----------------------------------+   |
+|   | Your pizza is in the oven!        |   |
+|   | [ globe: translated from FR ]     |   |   <- per-message translate toggle
+|   +-----------------------------------+   |
+|                                           |
+|   * Out for delivery         12:20        |
+|   Rider (Sam)                12:34        |
+|   +--------------+                        |
+|   | [ photo ]    |  Left at your door     |   <- DELIVERY_PROOF attachment
+|   +--------------+                        |
+|   * Delivered                12:35        |
++-------------------------------------------+
+| [ "Thanks!" ] [ "Where is it?" ]          |   <- quick_reply_chips
+| [ Type a message...          ] [ Send  ]  |
++-------------------------------------------+
+```
+
+**Customer — chat NOT enabled by the restaurant.** No compose box; still the status timeline and any
+public restaurant/rider messages (e.g. proof of delivery).
+
+```
++-------------------------------------------+
+|  <  Back        Order A1B2 - Chez Marco   |
++-------------------------------------------+
+|   * Order placed             12:02        |
+|   * Out for delivery         12:20        |
+|   * Delivered                12:35        |
+|   +--------------+                        |
+|   | [ photo ]    |  Left at your door     |
+|   +--------------+                        |
++-------------------------------------------+
+|  This restaurant does not take direct     |
+|  messages. Need help? [ Contact support ] |   <- compose absent (customerChatEnabled = false)
++-------------------------------------------+
+```
+
+**Restaurant back office.** Public + INTERNAL notes (the padlock), the refund action inline on a
+request, the mute control, image attach, and the internal/public compose toggle.
+
+```
++-------------------------------------------------+
+|  Order A1B2 - Marie D.        [ Mute v ] [Refund]|
++-------------------------------------------------+
+|   [lock] INTERNAL - staff only                  |
+|   Sam (rider)              12:30                 |
+|   "Customer not answering the buzzer"           |   <- customer never receives this
+|                                                 |
+|   You -> customer          12:05                |
+|   "Your pizza is in the oven!"                  |
+|   [ order photo attached ]                      |   <- ORDER_PHOTO
+|                                                 |
+|   Marie D.                 12:33                 |
+|   "Can I get a partial refund? it was cold"     |   <- refund request
+|     +-------------------------------------+     |
+|     | Accept refund:  ( ) full ( ) partial|     |   <- feeds the EXISTING refund command
+|     |                 amount [ 4.50 ] [OK] |     |
+|     +-------------------------------------+     |
++-------------------------------------------------+
+| [ Quick replies v ] [ attach ] [ Internal v ]   |
+| [ Reply...                            ] [ Send ] |
++-------------------------------------------------+
+
+  [ Mute v ] expands to (reason REQUIRED):
+  +-----------------------------------+
+  | Mute this customer for:           |
+  |  ( ) 15 min  ( ) 60 min           |
+  |  ( ) Indefinitely                 |
+  |  Reason (required):               |
+  |  [ abusive language____________ ] |
+  |                    [ Cancel ][ OK ]|
+  +-----------------------------------+
+```
+
+**Rider.** Minimal: capture proof of delivery, a private note to the restaurant, mark delivered.
+
+```
++----------------------------------------+
+|  Job A1B2 - deliver to Marie D.        |
++----------------------------------------+
+|   * Picked up               12:20      |
+|                                        |
+|   [  Take proof-of-delivery photo  ]   |   <- DELIVERY_PROOF (public to customer)
+|   [  Note to restaurant (private)  ]   |   <- INTERNAL
+|   [  Mark delivered                ]   |
++----------------------------------------+
+```
+
 ## 3. Translation — the shakiest part, decided explicitly (requirement 3)
 
 Requirement: translate **client-side with Google Translate**, and **persist the translation on our
