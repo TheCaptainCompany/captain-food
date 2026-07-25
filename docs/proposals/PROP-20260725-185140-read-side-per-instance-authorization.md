@@ -131,11 +131,80 @@ Only `Customer` has an `auth_ref`. Needed:
 > authorize as that competitor's staff. Host is tenant **routing**, never authorization. Recording this
 > explicitly because the shortcut is available, tempting, and silently catastrophic.
 
-### 3.3 The `ScopeMembership` port — resolution declared in the DSL, not hand-written per scope
+### 3.3 One generic check: a **binding** (where the scope comes from) × a **resolution** (how membership is tested)
 
-A port in `crates/application/ports` answering `is_member(scope_type, scope_id, scope) -> bool`, so
-`/files` — which is not a GraphQL resolver — shares one implementation with the resolvers instead of
-growing its own copy.
+The check is a single generic function used by every surface. It takes two inputs that must not be
+confused, because they come from different places and answer different questions:
+
+| input | question | declared in |
+|---|---|---|
+| **binding** | *which scope instance is this request about?* → `(scope_type, scope_id)` | **api.yaml** per operation (GraphQL) · the **`files` row** (`/files`) |
+| **resolution** | *what does membership in a scope type mean for a role?* → table/column | **`scope_membership.yaml`**, shared by both |
+
+```rust
+fn authorize(binding: &ScopeBinding, principal: &ReadScope) -> Allow | Deny
+```
+
+Separating them is what keeps it generic. If the table/column triple lived on each operation it would
+be repeated on every query touching an order; if the binding lived in the membership DSL it could not
+vary per operation. **api.yaml says *which* order; `scope_membership.yaml` says what "member of an
+order" means.**
+
+#### 3.3.1 The binding — api.yaml for GraphQL, the row for `/files`
+
+api.yaml already owns the role ACL, so the instance binding belongs beside it — one place answers both
+*which roles* and *on which instance*:
+
+```yaml
+# specs/api.yaml
+orderConversation:
+  roles: [CUSTOMER, RESTAURANT, RIDER, ADMIN]      # existing: the @auth ACL
+  scope: { type: ORDER, from: arg.orderId }        # NEW: the instance binding
+```
+
+`from: arg.orderId` names the argument carrying the scope id, so the guard stays generic — it never
+knows what an order is.
+
+**`/files` has no api.yaml entry, and that is exactly the case you flagged.** It is one route serving
+any object, so its binding cannot be declared per operation — it comes from the **`FilesRow`**:
+`scope_type`, `scope_id` and `audience` are columns, written at upload time. **The row *is* the
+declaration.** Same checker, same resolution table; the binding is data instead of spec. That is the
+whole reason those three columns exist on the row rather than being inferred.
+
+#### 3.3.2 Where it runs — middleware for `/files`, executor extension for GraphQL
+
+The check is cross-cutting and must never be re-implemented per resolver. But the interception point
+differs, and this is a **real constraint, not a detail**:
+
+- **`/files` → a genuine Axum middleware.** One route, one object, binding from the row. Exactly as
+  intended: `layer(from_fn(scope_guard))` in front of the handler.
+- **GraphQL → an async-graphql *extension/guard*, not an HTTP middleware.** An Axum middleware runs
+  **before the GraphQL body is parsed**: at that point the request is an opaque JSON blob, so the layer
+  cannot know which query was selected or what its arguments are — and one POST may carry several
+  operations with different scopes. The equivalent hook inside the executor (`Guard`/`Extension`) runs
+  per operation/field, *after* parsing, where the selected field and its arguments are known.
+
+Both call the same `authorize`. "Middleware" in the sense that matters — one cross-cutting
+implementation, zero authorization code in resolvers — holds; only the mounting point differs, because
+HTTP layering physically cannot see into a GraphQL body.
+
+#### 3.3.3 What the guard cannot do: list queries
+
+A guard authorizes *a named instance*. **List queries have no scope-id argument** — "my orders" is not a
+check, it is a filter. `orders`/history must be enforced by the repository predicate (§3.1), not by the
+guard, and no amount of middleware changes that.
+
+So api.yaml declares which of the two applies:
+
+```yaml
+order:   { scope: { type: ORDER, from: arg.orderId } }   # by-id  -> guard checks
+orders:  { scope: { type: ORDER, filter: customer_id } } # list   -> repository filters
+```
+
+Stating it explicitly because the failure is silent: mount the guard, see it pass on every by-id query,
+and assume lists are covered — while `orders` happily returns every customer's history.
+
+#### 3.3.4 Resolution
 
 **Resolution must be generic over `scope_type`.** `scope_type` is a configured column on the `files`
 row, so hand-writing one SQL statement per (scope type × role) is a combinatorial trap: it is N×M
@@ -253,14 +322,19 @@ spread across feature work where a missed call site hides in a diff about someth
 | **D1** | Priority relative to [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) — this is filed as a *blocker* for attachments, but on its own terms it is a live cross-tenant read exposure | treat as **higher** priority than the epic it blocks; re-prioritising is a product-owner call made in the project, so this is a recommendation only |
 | **D2** | **Restaurant staff membership model**: single `authRef` per restaurant (simplest) vs a staff↔restaurant membership table (multi-staff, future roles-within-a-restaurant) | membership table — the single-`authRef` shortcut is a retrofit the first time a restaurant has two employees |
 | **D3** | Scope for `Public` reads — confirm which projections are legitimately unrestricted (restaurant discovery, catalog, referential policies) | as listed; anything else defaults to scoped |
-| **D5** | Membership resolution as **DSL + codegen** (§3.3) vs hand-written per scope type | DSL — hand-writing is N×M statements in a security-critical path, and a new scope type should be a data change, not a code change |
+| **D5** | Membership resolution as **DSL + codegen** (§3.3.4) vs hand-written per scope type | DSL — hand-writing is N×M statements in a security-critical path, and a new scope type should be a data change, not a code change |
+| **D6** | Scope **binding** declared per operation in **api.yaml** (`scope: { type, from }`), beside the existing `roles` ACL (§3.3.1) | yes — api.yaml already owns *which roles*; *which instance* belongs in the same place, and `/files` supplies the same binding from its row |
+| **D7** | List queries are **filtered by the repository**, not guarded (§3.3.3) — the guard cannot authorize a query with no scope-id argument | confirm; api.yaml marks each op `from:` (guard) or `filter:` (repository) so the gap cannot be assumed away |
 | **D4** | Land as one focused change vs incrementally per repository | one change (§4) — a missed call site is invisible inside unrelated feature diffs |
 
 ## 7. Completeness obligations (ADR-0032)
 
 - **Rule** in `rules.yaml`: *a read never returns a row outside the caller's scope*.
-- **Validator gate**: every role reachable in an `audience` has a declared resolver for that
-  `scope_type` (§3.3) — a missing rule fails `make validate`, never degrades to a silent deny in prod.
+- **Validator gates** — a missing rule fails `make validate`, never degrades to a silent deny in prod:
+  - every role reachable in an `audience` has a declared resolver for that `scope_type` (§3.3.4);
+  - **every api.yaml operation returning tenant data declares a `scope:`** — either `from:` (guarded)
+    or `filter:` (repository-enforced). An operation with neither is a hole, and the validator is the
+    only thing that can see it, since both failure modes are silent at runtime (§3.3.3).
 - **Behaviour tests** per role, and the **negatives are the point**: customer → another customer's order;
   restaurant → another restaurant's order; rider → an unassigned job. A test that only proves the happy
   path proves nothing here.
