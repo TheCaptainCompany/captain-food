@@ -282,19 +282,40 @@ reconciliation job, no orphan-hunting query.
 Aligned with #18 and expressed the same way as the other tables (`retention:` block, documentary; the
 executable policy lives in one place).
 
-### 6.2 A SQL-only sweep is not enough — this is the operational catch
+### 6.2 A daily worker deletes the OBJECT and keeps the ROW (decided 2026-07-25)
 
-`sweep_retention()` is pure SQL. `DELETE FROM files WHERE expires_at < now()` deletes the **row** and
-**leaves the bytes in the bucket forever** — an unbounded storage bill and, far worse, a GDPR failure
-that *looks* like compliance because the database is clean.
+`sweep_retention()` is pure SQL, and pure SQL cannot reach the bucket. `DELETE FROM files WHERE
+expires_at < now()` would delete the **row** and **leave the bytes in the bucket forever** — an
+unbounded storage bill and, far worse, a GDPR failure that *looks* like compliance because the
+database is clean.
 
-So the purge is a **two-phase, app-side `FileRetentionWorker`** (the in-process worker pattern already
-used by `RetentionSweepWorker`): select expired → **delete the object** → then delete the row.
-Object-first ordering means a crash mid-way leaves a row pointing at a missing object (served as 410,
-retried next pass) rather than a bucket full of unreferenced bytes nobody knows about.
+**Product-owner decision (2026-07-25):** a `FileRetentionWorker` runs **once a day**, and for each row
+past `expires_at` it **deletes the storage object only — the row is never deleted**, just marked
+`deleted_at`. The row becomes a permanent tombstone.
 
-`sweep_retention()` keeps only a **documentary** clause plus a tombstone sweep for rows whose
-`deleted_at` is set — never the primary mechanism.
+This is simpler and strictly better than the grace-period variant first proposed here, for three
+reasons:
+
+- **410 is answerable forever.** There is no window in which a purged attachment degrades to 404
+  because its row aged out, and no grace period to tune (§6.3).
+- **Crash safety becomes trivial.** The sequence is: delete object → set `deleted_at`. A crash between
+  the two leaves the object already gone and the marker unset; the next day's pass re-issues the delete
+  (a no-op on a missing key — object deletion is idempotent) and sets the marker. No two-phase
+  reconciliation, no orphan-hunting query.
+- **The row is the audit record.** "An attachment existed here, and was purged on this date" is exactly
+  what a retention audit needs to show, and it survives.
+
+**The daily cadence is safe because the row — not the object — is the authority on policy.** The guard
+checks `expires_at < now()` *as well as* `deleted_at` (§4.2 step 4), so a file stops being served the
+second it expires, not up to 24 h later when the worker next runs. Object deletion is cleanup, never
+the enforcement point. Getting this backwards would give every expired file a free extra day of life.
+
+`sweep_retention()` keeps only a **documentary** `retention:` block for this table — it never deletes
+from `files`.
+
+**Unbounded row growth is not a concern at this scale:** a tombstone is a few hundred bytes, and Tours
+V0 volumes put this in the low thousands of rows per year. Revisit if a `files` count ever approaches
+the millions.
 
 ### 6.3 The event outlives the file — and that is correct
 
@@ -305,14 +326,20 @@ it is not.
 
 The contract that makes it usable: an expired or purged file returns **410 Gone**, distinguishable from
 **404 Not Found**. The renderer shows "attachment expired" rather than a broken image or a misleading
-"not found". A short-lived tombstone row (`deleted_at` set, purged after a grace period) is what lets us
-answer 410 truthfully instead of degrading to 404 the moment the row vanishes.
+"not found". Because the row is kept forever (§6.2), 410 stays answerable for the whole life of the
+event that references it — the ref and its explanation never fall out of step.
 
 ### 6.4 Erasure on request
 
 A data-subject erasure request must purge **before** expiry. Same worker, driven by an erasure request
 over `scope_id` / `uploaded_by` — which is exactly why both are indexed. This slots into the erasure
 story of #18 rather than inventing a parallel path.
+
+One consequence of keeping the row forever (§6.2): the tombstone still carries `uploaded_by` (an auth
+subject) and `scope_id`. Ordinary **expiry** leaves those in place — they are operational metadata
+about an order, and the personal data (the image) is gone. A genuine **erasure request** is stronger
+and must also **null `uploaded_by`**, keeping the row as an anonymous "an attachment existed and was
+erased" record. Expiry and erasure are therefore not the same operation on the row, only on the object.
 
 ## 7. Completeness obligations (ADR-0032) and observability
 
@@ -361,6 +388,7 @@ latency; sweep deletions per kind; bucket bytes per tenant (cost).
 |---|---|---|
 | **D1** | Bytes: **302 → 60 s signed URL** vs **stream through the BFF** (§4.4) | 302 — the privacy trade is small and bounded; revisit if it proves otherwise |
 | **D2** | Retention windows per kind (§6.1) | 24 h orphan / 30 d `ORDER_PHOTO` / 90 d `DELIVERY_PROOF` / 180 d `RECLAMATION` |
+| **D2b** | ~~purge mechanism~~ — **DECIDED 2026-07-25** | daily worker, **deletes the object only, keeps the row** as a permanent tombstone (§6.2) |
 | **D3** | Type allowlist excludes **SVG**; **HEIC transcoded** on upload (§4.3) | confirm — SVG same-origin is stored XSS; HEIC is the iPhone default and must be accepted |
 | **D4** | Size limits | 10 MB per file, 5 files per message |
 | **D5** | Moderation in V1 | manual report path + rate limits; automated scanning is later hardening |
@@ -381,5 +409,7 @@ transformation/thumbnails, and any owner type other than `CONVERSATION_MESSAGE`.
 - `make rust` green (build + test + validate + generate), `make validate` at **0 errors** with no new warnings.
 - Behaviour tests for the five rules of §7, including the negative cases: customer → INTERNAL note's
   attachment ⇒ 403; wrong-order customer ⇒ 403; expired ⇒ 410; extension mismatch ⇒ 404; anonymous ⇒ 401.
-- A retention test proving **object-then-row** ordering, and that a crash between the two leaves a
-  410-serving row rather than an orphaned object.
+- A retention test proving the daily worker **deletes the object and keeps the row**, that a crash
+  before `deleted_at` is set is recovered idempotently by the next pass, and — the one that matters —
+  that a row **past `expires_at` but not yet swept** is already refused with 410, so the daily cadence
+  never grants an expired file an extra day of life.
