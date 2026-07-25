@@ -106,24 +106,85 @@ Two properties carry the whole proposal:
   become correct by construction (nobody "forgets to filter the order history"), collections leak no
   existence, and it is one round trip instead of two.
 
-### 3.2 The identity bridges
+### 3.2 Where each principal value comes from
 
-| role | resolution | today |
+Two mechanisms, and which applies is the difference between `principal: userId` and a claim (§3.3.1).
+
+#### 3.2.1 `userId` is NOT the domain id — it must be bridged
+
+**`customerId` and the auth `userId` are different values.** `CustomerRegistered` carries both, and
+`authRef` is **`nullable: true`**:
+
+```yaml
+CustomerRegistered:
+  properties:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }               # domain identity
+    authRef:    { $ref: 'scalars.yaml#/ExternalReference', nullable: true }   # the Supabase sub
+```
+
+Nullable is the operative detail: a `Customer` is born on **first phone verification**, so one can exist
+with **no auth user at all** (guest/OTP flows). A guard assuming `userId == customerId` would deny those
+customers outright. The deeper reason to keep them distinct: equating them welds domain identity to
+Supabase, so changing auth provider would invalidate every `customerId` already written into the
+immutable event log. `RiderRegistered` has the same `riderId` + `authRef` split.
+
+So `principal: userId` means **bridge first** — `sub → customerId` / `sub → riderId`, resolved once per
+request (§3.1), not once per check.
+
+| role | bridge | today |
 |---|---|---|
-| ADMIN | role alone, no lookup | ✅ |
-| CUSTOMER | `sub` → `Customer.auth_ref` → `customer_id` = `OrderTracking.customer_id` | ✅ both columns exist |
-| RIDER | `sub` → `riderId` = `View_DeliveryJob.rider_id WHERE order_id = $scope` | ⚠️ `RiderRegistered.authRef` exists in `events.yaml` but is **projected nowhere** |
-| RESTAURANT | `sub` → `restaurant_id` = `OrderTracking.restaurant_id` | ❌ **no auth bridge exists at all** |
+| ADMIN | none — role alone | ✅ |
+| CUSTOMER | `sub` → `Customer.auth_ref` → `customerId` | ✅ `by_auth_ref` exists (`queries.rs:233`) |
+| RIDER | `sub` → `riderId` | ⚠️ `RiderRegistered.authRef` exists but is **projected nowhere** |
 
-Only `Customer` has an `auth_ref`. Needed:
+#### 3.2.2 Restaurant identity comes from the JWT claims, not a bridge
+
+Per the product owner (2026-07-25): a **RESTAURANT** principal carries `restaurantId` and a
+**RESTAURANT_ACCOUNT** principal carries `restaurantAccountId`, both as verified JWT claims —
+server-controlled `app_metadata`, exactly like `captain_role` today (ADR-0047), so not user-editable.
+
+This is why the two roles already exist as distinct `UserType`s: a chain's manager authenticates as
+RESTAURANT_ACCOUNT and reaches every location under the account (one hop through
+`Restaurant.restaurant_account_id`); a single-location user authenticates as RESTAURANT. No
+staff↔restaurant membership table is needed for the common case, which removes the largest open piece
+of this proposal.
+
+**One honest caveat: a claim is frozen until token refresh.** Remove someone from a restaurant and their
+existing token keeps working until it expires. That is inconsistent with the instant revocation the
+`audience` × `scope` design buys for riders (PROP-20260725-120055 §3.3). Either accept the staleness
+explicitly with a short token lifetime, or resolve staff membership from the DB and treat the claim as a
+cache. **Decision D8 (§6).**
+
+**Mobile is the easy case, not the hard one.** The cookie exists solely because a browser `<img src>`
+cannot set an `Authorization` header; native shells fetch the bytes themselves and send
+`Authorization: Bearer` on `/files` like any other call — same token, same claims, no cookie.
+
+#### 3.2.3 A customer has exactly ONE `customerId`, platform-wide
+
+Confirmed, and it is an explicit invariant rather than an accident:
+
+- ADR-20260722-174500: the domain `Customer` is *"a single **global aggregate keyed by phone /
+  `authRef`**"*, its read model *"one row per phone/`auth_ref`"*, and *"there is **no per-restaurant
+  customer** today"*. The stated product goal is *"a customer must not create a separate account per
+  restaurant"*.
+- ADR-0036 (single-origin identity): one passkey/OTP identity across the whole `*.captain.food` space.
+- The schema agrees: `Customer.customer_id` is the pk, `phone` is `unique: true`, and there is **no
+  restaurant column** — restaurant ids appear only inside the cross-restaurant `favorites`/`ratings`
+  jsonb, which is data, not scoping.
+
+So `matches: customerId` needs no restaurant dimension. (Status note: that ADR is **Proposed** pending
+DPO/CNIL review — but what is pending is the cross-restaurant *personalization/consent* half; the
+identity half it describes is already the architecture.)
+
+Remaining bridge work:
 
 - **A `Rider` read model** projecting `RiderRegistered.authRef`. The event already carries it, so this is
   a projection, not a model change — small.
-- **A restaurant staff ↔ restaurant membership model.** The genuinely open piece: it drags in
-  multi-staff-per-restaurant, and possibly roles *within* a restaurant (owner vs counter staff). Worth
-  scoping deliberately rather than bolting a single `authRef` column onto the restaurant aggregate and
-  discovering the multiplicity later. **This is the part that makes this a proposal rather than a
-  mechanical change** (decision D2, §6).
+- **`restaurantId` / `restaurantAccountId` provisioned into `app_metadata`** at staff creation, and
+  surfaced on `Principal` alongside `captain_role` (§3.2.2). Small — `auth.rs` already reads
+  `app_metadata`; this adds two optional claims.
+- **A staff ↔ restaurant membership model** only if D8 (§6) chooses DB-resolved membership over the
+  claim. The claims alone cover the common case, so this is no longer on the critical path.
 
 > ⚠️ **Do not resolve the restaurant from the `Host` header.** The tenant middleware maps
 > `{slug}.captain.food` → restaurant, and reusing it here looks free — but it identifies the storefront
@@ -169,35 +230,55 @@ knows what an order is.
 the caller links to it. That link is **role-dependent**, so it belongs in the resolution table
 (§3.3.4), keyed by `(scope_type, role)`:
 
+**No table or column names at this level** (product-owner directive, 2026-07-25). The rule states only
+*which property of the principal must equal which property of the scope*; storage is codegen's problem:
+
 ```yaml
 # specs/database/scope_membership.yaml — the RESOLUTION: how each role links to the scope
 ORDER:
-  resolvers:
-    ADMIN:      { always: true }
-    CUSTOMER:   { table: OrderTracking,    scope_column: order_id, principal_column: customer_id }
-    RESTAURANT: { table: OrderTracking,    scope_column: order_id, principal_column: restaurant_id }
-    RIDER:      { table: View_DeliveryJob, scope_column: order_id, principal_column: rider_id }
+  ADMIN:              { always: true }
+  CUSTOMER:           { principal: userId,              matches: customerId }
+  RIDER:              { principal: userId,              matches: riderId }
+  RESTAURANT:         { principal: restaurantId,        matches: restaurantId }
+  RESTAURANT_ACCOUNT: { principal: restaurantAccountId, matches: restaurant.restaurantAccountId }
 ```
 
-`principal_column` **is** the link. The three parameters of the check come from three different places,
-which is what makes one function serve every surface:
+The column never appears because it is **already declared**: the projection DSL states
+`OrderTracking.customer_id ← CustomerRegistered.customerId` (ADR-0039 lineage), so "the order's
+`customerId`" resolves to a column without anyone writing it twice — and a projection rename cannot
+desynchronise the ACL from the schema, because there is nothing to keep in sync.
+
+Two forms of `principal:`, and the difference is the identity bridge (§3.2):
+
+- **`principal: userId`** — the auth subject, which must be **bridged** to the domain id first
+  (`sub → customerId`, `sub → riderId`). See §3.2.1: these are *not* the same value.
+- **`principal: restaurantId` / `restaurantAccountId`** — read directly from the verified JWT claims,
+  no bridge (§3.2.2).
+
+`matches: restaurant.restaurantAccountId` is **one hop**, and it is required: `OrderTracking` carries
+`restaurant_id` but **no** `restaurant_account_id`, while `Restaurant.restaurant_account_id` exists with
+a declared `fk` to `View_RestaurantAccount`. Codegen resolves the hop through that FK. (Alternative:
+denormalise `restaurant_account_id` onto `OrderTracking` for a join-free check — a projection change,
+worth it only if the join shows up in practice.)
+
+The three parameters of the check come from three different places, which is what makes one function
+serve every surface:
 
 | parameter | from |
 |---|---|
 | `scope_id` | the **binding** (api.yaml `from:`, or the `files` row) |
-| principal id | the **`ReadScope`** resolved once per request (§3.1) |
-| `table` / `scope_column` / `principal_column` | the **resolution**, keyed by `(scope_type, role)` |
+| principal value | the **`ReadScope`** resolved once per request (§3.1) |
+| which properties must match | the **resolution**, keyed by `(scope_type, role)` |
 
 Worked example — `order(orderId: ord_7)` called by `ReadScope::Customer(cust_42)`:
 
 1. binding → `(ORDER, ord_7)`
-2. resolution `[ORDER][CUSTOMER]` → `OrderTracking` · `order_id` · `customer_id`
-3. `SELECT EXISTS(SELECT 1 FROM "OrderTracking" WHERE order_id = ord_7 AND customer_id = cust_42)`
+2. resolution `[ORDER][CUSTOMER]` → *the order's `customerId` must equal the principal's bridged id*
+3. codegen has already turned that into `WHERE order_id = ord_7 AND customer_id = cust_42`
 
-The same call by `ReadScope::Rider(rider_9)` resolves to `View_DeliveryJob` / `rider_id` instead — same
-binding, same operation, different link, **zero per-operation configuration**. Putting
-`principal_column` on the operation would have forced one column onto an operation that serves four
-roles.
+The same call by `ReadScope::Rider(rider_9)` matches on `riderId` instead — same binding, same
+operation, different link, **zero per-operation configuration**. Naming a principal property on the
+*operation* would have forced one role's link onto an operation serving five.
 
 **`/files` has no api.yaml entry, and that is exactly the case you flagged.** It is one route serving
 any object, so its binding cannot be declared per operation — it comes from the **`FilesRow`**:
@@ -261,22 +342,23 @@ source of truth) and ADR-0037 (schema-driven codegen). Every membership rule is 
 # specs/database/scope_membership.yaml
 ORDER:
   description: "Membership in one order."
-  resolvers:
-    ADMIN:      { always: true }
-    CUSTOMER:   { table: OrderTracking,    scope_column: order_id, principal_column: customer_id }
-    RESTAURANT: { table: OrderTracking,    scope_column: order_id, principal_column: restaurant_id }
-    RIDER:      { table: View_DeliveryJob, scope_column: order_id, principal_column: rider_id }
+  ADMIN:              { always: true }
+  CUSTOMER:           { principal: userId,              matches: customerId }
+  RIDER:              { principal: userId,              matches: riderId }
+  RESTAURANT:         { principal: restaurantId,        matches: restaurantId }
+  RESTAURANT_ACCOUNT: { principal: restaurantAccountId, matches: restaurant.restaurantAccountId }
 
 RESTAURANT:
   description: "Membership in one restaurant (KYC documents, cover photos)."
-  resolvers:
-    ADMIN:      { always: true }
-    RESTAURANT: { identity: true }   # the principal id IS the scope id — no query at all
+  ADMIN:              { always: true }
+  RESTAURANT:         { principal: restaurantId,        matches: identity }   # principal IS the scope — no query
+  RESTAURANT_ACCOUNT: { principal: restaurantAccountId, matches: restaurantAccountId }
 ```
 
-Three forms cover every case: `always` (admin), `identity` (the principal *is* the scope — a pure
-comparison, zero queries), and the table/column triple (one indexed `EXISTS`). Adding a scope type
-becomes a **data change plus a regenerate**, not new code in the guard.
+Three forms cover every case: `always` (admin), `matches: identity` (the principal *is* the scope — a
+pure comparison, zero queries), and a property match (one indexed `EXISTS`, with an optional single hop
+through a declared FK). Adding a scope type becomes a **data change plus a regenerate**, not new code
+in the guard.
 
 **Generic in the spec, static in the binary.** The codegen emits a `match` with one `sqlx::query_scalar!`
 per arm and the identifiers baked in as **literals** — it does **not** build SQL strings at runtime:
@@ -362,7 +444,8 @@ spread across feature work where a missed call site hides in a diff about someth
 | # | decision | recommendation |
 |---|---|---|
 | **D1** | Priority relative to [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) — this is filed as a *blocker* for attachments, but on its own terms it is a live cross-tenant read exposure | treat as **higher** priority than the epic it blocks; re-prioritising is a product-owner call made in the project, so this is a recommendation only |
-| **D2** | **Restaurant staff membership model**: single `authRef` per restaurant (simplest) vs a staff↔restaurant membership table (multi-staff, future roles-within-a-restaurant) | membership table — the single-`authRef` shortcut is a retrofit the first time a restaurant has two employees |
+| ~~**D2**~~ | ~~Restaurant staff membership model~~ | **resolved 2026-07-25**: RESTAURANT carries `restaurantId`, RESTAURANT_ACCOUNT carries `restaurantAccountId`, both as JWT claims (§3.2.2) — the two existing `UserType`s already model single-location vs chain |
+| **D8** | Claim **staleness**: a `restaurantId` claim stays valid until token refresh, so removing staff does not revoke immediately (§3.2.2) | accept with a short token lifetime, **or** treat the claim as a cache over a DB membership lookup — pick one explicitly; silent staleness is the bad outcome |
 | **D3** | Scope for `Public` reads — confirm which projections are legitimately unrestricted (restaurant discovery, catalog, referential policies) | as listed; anything else defaults to scoped |
 | **D5** | Membership resolution as **DSL + codegen** (§3.3.4) vs hand-written per scope type | DSL — hand-writing is N×M statements in a security-critical path, and a new scope type should be a data change, not a code change |
 | **D6** | Scope **binding** declared per operation in **api.yaml** (`scope: { type, from }`), beside the existing `roles` ACL (§3.3.1) | yes — api.yaml already owns *which roles*; *which instance* belongs in the same place, and `/files` supplies the same binding from its row |
