@@ -689,7 +689,7 @@ async fn order_status_changed_is_owned_by_the_orders_customer() {
     let mut stream = schema.execute_stream(
         Request::new(query.clone())
             .data(RequestRole::Customer)
-            .data(server::Principal { user_id: Some(auth_ref), role: RequestRole::Customer })
+            .data(server::Principal { user_id: Some(auth_ref), role: RequestRole::Customer, restaurant_id: None, restaurant_account_id: None })
             .data(customers),
     );
     spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderPlaced", 1));
@@ -710,7 +710,7 @@ async fn order_status_changed_is_owned_by_the_orders_customer() {
     let mut stream = schema.execute_stream(
         Request::new(query.clone())
             .data(RequestRole::Customer)
-            .data(server::Principal { user_id: Some(stranger_ref), role: RequestRole::Customer })
+            .data(server::Principal { user_id: Some(stranger_ref), role: RequestRole::Customer, restaurant_id: None, restaurant_account_id: None })
             .data(strangers),
     );
     spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderAccepted", 2));

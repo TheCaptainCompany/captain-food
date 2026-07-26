@@ -12,7 +12,7 @@ use domain::generated::scalars::{
     ExternalReference, OfferId, OfferName,
     OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId, ProductName,
     ProspectPipelineStatus, Quantity, RefundId, RefundStatus, RestaurantAccountId, RestaurantId,
-    RiderId, SessionId, Slug, StockStatus,
+    RiderId, ScopeType, SessionId, Slug, StockStatus, UserType,
 };
 use domain::shared::errors::DomainError;
 
@@ -490,4 +490,63 @@ pub struct UberSplitPolicyRow {
 pub trait UberSplitPolicyReadRepository: Send + Sync {
     /// The active split/fee assumption rows (one per currency), stable order.
     async fn list(&self) -> Result<Vec<UberSplitPolicyRow>, DomainError>;
+}
+
+// =====================================================================
+// Read-side per-instance authorization (#144, PROP-20260725-185140)
+// =====================================================================
+
+/// The verified caller, resolved to DOMAIN ids once per request.
+///
+/// Constructed only from an authenticated `Principal` (the edge does the `sub` → domain-id bridge and
+/// the JWT-claim reads exactly once), so nothing downstream can invent a scope for itself. The
+/// resolution is deliberately NOT repeated per check: a thread rendering five attachments pays for the
+/// bridge once, and every membership test after it is a primary-key lookup.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReadScope {
+    /// Unauthenticated. Reaches only genuinely public read models (discovery, catalog, referential).
+    Public,
+    Customer(CustomerId),
+    Restaurant(RestaurantId),
+    RestaurantAccount(RestaurantAccountId),
+    Rider(RiderId),
+    /// Unrestricted by role alone — ADMIN holds no membership rows at all, by design.
+    Admin,
+}
+
+impl ReadScope {
+    /// The `(principal_type, principal_id)` half of a membership question, or `None` for the two
+    /// scopes that are answered without consulting the index (`Admin` short-circuits, `Public` denies).
+    pub fn principal(&self) -> Option<(UserType, uuid::Uuid)> {
+        match self {
+            ReadScope::Customer(id) => Some((UserType::CUSTOMER, id.0)),
+            ReadScope::Restaurant(id) => Some((UserType::RESTAURANT, id.0)),
+            ReadScope::RestaurantAccount(id) => Some((UserType::RESTAURANT_ACCOUNT, id.0)),
+            ReadScope::Rider(id) => Some((UserType::RIDER, id.0)),
+            ReadScope::Admin | ReadScope::Public => None,
+        }
+    }
+}
+
+/// The one authorization question, asked the same way by every surface (#144).
+///
+/// GraphQL reads FILTER through it (a scope-less query returns fewer rows); a by-id fetch such as
+/// `/files/<uuid>` CHECKS through it (one object, one yes/no). Both call this port rather than
+/// growing their own logic, which is why it lives in `application` and not beside either transport.
+#[async_trait]
+pub trait ScopeMembershipRepository: Send + Sync {
+    /// May this principal see this instance?
+    async fn is_member(
+        &self,
+        scope_type: ScopeType,
+        scope_id: uuid::Uuid,
+        scope: &ReadScope,
+    ) -> Result<bool, DomainError>;
+
+    /// Every scope of this type the principal may see — the list-query filter.
+    async fn scopes_for(
+        &self,
+        scope_type: ScopeType,
+        scope: &ReadScope,
+    ) -> Result<Vec<uuid::Uuid>, DomainError>;
 }

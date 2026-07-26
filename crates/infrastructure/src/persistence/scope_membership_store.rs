@@ -13,6 +13,7 @@
 //! [`crate::persistence::enum_sql`]), not text.
 
 use application::projectors::scope_membership::membership_id;
+use application::queries::{ReadScope, ScopeMembershipRepository};
 use domain::generated::scalars::{ScopeType, UserType};
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -118,4 +119,54 @@ pub async fn scopes_for(
     .await
     .map_err(db_err)?;
     Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// The [`ScopeMembershipRepository`] adapter — the one implementation both transports share
+/// (GraphQL resolvers filter through it, a by-id fetch checks through it).
+pub struct PgScopeMembershipRepository {
+    pool: PgPool,
+}
+
+impl PgScopeMembershipRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait::async_trait]
+impl ScopeMembershipRepository for PgScopeMembershipRepository {
+    async fn is_member(
+        &self,
+        scope_type: ScopeType,
+        scope_id: Uuid,
+        scope: &ReadScope,
+    ) -> Result<bool, DomainError> {
+        match scope {
+            // ADMIN holds no rows by design — storing them would be a row per admin per instance.
+            ReadScope::Admin => Ok(true),
+            // An unauthenticated caller is never a member of anything. Public read models are reached
+            // by not asking this question at all, not by answering it `true`.
+            ReadScope::Public => Ok(false),
+            _ => {
+                let Some((principal_type, principal_id)) = scope.principal() else {
+                    return Ok(false);
+                };
+                is_member(&self.pool, scope_type, scope_id, principal_type, principal_id).await
+            }
+        }
+    }
+
+    async fn scopes_for(
+        &self,
+        scope_type: ScopeType,
+        scope: &ReadScope,
+    ) -> Result<Vec<Uuid>, DomainError> {
+        // ADMIN is deliberately NOT special-cased into "everything" here: an unbounded list is a
+        // different question from an unbounded check, and callers that need it must ask the read
+        // model directly rather than materialize every scope id in the system.
+        let Some((principal_type, principal_id)) = scope.principal() else {
+            return Ok(Vec::new());
+        };
+        scopes_for(&self.pool, principal_type, principal_id, scope_type).await
+    }
 }

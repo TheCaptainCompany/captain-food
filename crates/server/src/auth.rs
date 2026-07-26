@@ -45,6 +45,17 @@ const SUPABASE_AUDIENCE: &str = "authenticated";
 pub struct Principal {
     pub user_id: Option<String>,
     pub role: RequestRole,
+    /// Tenant claims (#144), verified with the rest of the token. The auth `sub` still needs a bridge
+    /// to reach a CustomerId or RiderId (those are DOMAIN ids, deliberately not the auth subject —
+    /// see PROP-20260725-185140 §3.2.1); the restaurant side needs none, because the claim IS the
+    /// domain id.
+    ///
+    /// KNOWN LIMITATION (proposal D8): a claim is frozen until token refresh, so removing someone from
+    /// a restaurant leaves their existing token working until it expires. That is inconsistent with the
+    /// instant revocation ScopeMembership gives riders. Accept it with a short token lifetime, or treat
+    /// the claim as a cache over a membership lookup — but choose, do not drift into it.
+    pub restaurant_id: Option<uuid::Uuid>,
+    pub restaurant_account_id: Option<uuid::Uuid>,
 }
 
 impl Principal {
@@ -52,7 +63,7 @@ impl Principal {
     /// (#92: a document GET carries no credentials, so server-side data resolution is by
     /// construction the anonymous view).
     pub(crate) fn anonymous() -> Self {
-        Self { user_id: None, role: RequestRole::Public }
+        Self { user_id: None, role: RequestRole::Public, restaurant_id: None, restaurant_account_id: None }
     }
 }
 
@@ -96,6 +107,15 @@ struct Claims {
 struct AppMetadata {
     #[serde(default)]
     captain_role: Option<String>,
+    /// The single location a RESTAURANT principal acts for (#144). Server-controlled `app_metadata`,
+    /// exactly like `captain_role` — not user-editable, so it is trustworthy without a DB lookup.
+    #[serde(default)]
+    captain_restaurant_id: Option<String>,
+    /// The account a RESTAURANT_ACCOUNT principal acts for (#144) — a chain's manager reaches every
+    /// location under it. This is why the two roles exist as distinct UserTypes rather than one
+    /// restaurant role with a multiplicity problem.
+    #[serde(default)]
+    captain_restaurant_account_id: Option<String>,
 }
 
 struct CachedJwks {
@@ -154,7 +174,12 @@ impl AuthContext {
         if path_role == RequestRole::External {
             if let Some(key) = headers.get("x-external-api-key").and_then(|v| v.to_str().ok()) {
                 return if self.external_key_valid(key) {
-                    Ok(Principal { user_id: None, role: RequestRole::External })
+                    Ok(Principal {
+                        user_id: None,
+                        role: RequestRole::External,
+                        restaurant_id: None,
+                        restaurant_account_id: None,
+                    })
                 } else {
                     Err(AuthError::Unauthorized)
                 };
@@ -169,7 +194,13 @@ impl AuthContext {
             .map(parse_role)
             .unwrap_or(RequestRole::Customer);
         if role_permitted(path_role, granted) {
-            Ok(Principal { user_id: Some(claims.sub), role: path_role })
+            let parse_uuid = |v: &Option<String>| v.as_deref().and_then(|s| uuid::Uuid::parse_str(s).ok());
+            Ok(Principal {
+                user_id: Some(claims.sub),
+                role: path_role,
+                restaurant_id: parse_uuid(&claims.app_metadata.captain_restaurant_id),
+                restaurant_account_id: parse_uuid(&claims.app_metadata.captain_restaurant_account_id),
+            })
         } else {
             Err(AuthError::Forbidden)
         }
@@ -474,5 +505,55 @@ mod tests {
         // A kid we've never cached cannot be served from stale data and cannot be fetched → rejected.
         let ctx = ctx_with_cache(test_set(), stale_instant());
         assert!(ctx.key_for("rotated-unknown-kid").await.is_err(), "unknown key must fail closed");
+    }
+}
+
+/// Resolve a verified [`Principal`] into the application's [`ReadScope`] — the ONE place the auth
+/// subject becomes a domain identity (#144, PROP-20260725-185140 §3.1/§3.2).
+///
+/// Done once per request, not once per check: a conversation thread rendering five attachments pays
+/// for the customer bridge a single time, and every membership test afterwards is a primary-key
+/// lookup with no join.
+///
+/// The two halves resolve differently, and the difference is not cosmetic:
+///   * CUSTOMER / RIDER need a **bridge** — `customerId` and `riderId` are domain ids, NOT the auth
+///     `sub`. Equating them would weld domain identity to Supabase, so changing auth provider would
+///     invalidate every id already written into the immutable event log.
+///   * RESTAURANT / RESTAURANT_ACCOUNT need **none** — the verified claim IS the domain id.
+///
+/// An unresolvable bridge yields `Public`, i.e. a denial. Fail closed: inventing an identity is the
+/// one outcome an authorization seam must never produce.
+pub async fn read_scope(
+    principal: &Principal,
+    customers: &dyn application::queries::CustomerReadRepository,
+) -> application::queries::ReadScope {
+    use application::queries::ReadScope;
+    use domain::generated::scalars::{ExternalReference, RestaurantAccountId, RestaurantId};
+
+    match principal.role {
+        RequestRole::Admin => ReadScope::Admin,
+        RequestRole::Restaurant => principal
+            .restaurant_id
+            .map(|id| ReadScope::Restaurant(RestaurantId(id)))
+            .unwrap_or(ReadScope::Public),
+        RequestRole::RestaurantAccount => principal
+            .restaurant_account_id
+            .map(|id| ReadScope::RestaurantAccount(RestaurantAccountId(id)))
+            .unwrap_or(ReadScope::Public),
+        RequestRole::Customer => {
+            let Some(sub) = principal.user_id.as_deref() else {
+                return ReadScope::Public;
+            };
+            match customers.by_auth_ref(ExternalReference(sub.to_string())).await {
+                Ok(Some(row)) => ReadScope::Customer(row.customer_id),
+                // No bridge row (or the lookup failed) -> no identity -> denied. Never a guess.
+                _ => ReadScope::Public,
+            }
+        }
+        // RIDER's bridge needs a Rider read model projecting RiderRegistered.authRef, which does not
+        // exist yet (#144 scope). Until it lands a rider resolves to Public — a DENIAL, which is the
+        // safe direction and visible in the authorization-denial signal rather than silent.
+        RequestRole::Rider => ReadScope::Public,
+        RequestRole::Public | RequestRole::External => ReadScope::Public,
     }
 }

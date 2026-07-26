@@ -271,6 +271,17 @@ const REGISTRY: &[ProjectorGroup] = &[
         stream_prefixes: &["Conversation-", "Order-"],
         projectors: &[ReadModelProjector::OrderConversation],
     },
+    // BACKFILL IS FREE, and deliberately so: a group with no `projection_checkpoint` row starts at
+    // position 0 (`drain_group`'s `unwrap_or(0)`), so ScopeMembership's first tick replays the whole
+    // log and materializes every historical membership. No separate backfill job, no migration
+    // script, nothing to run by hand before enforcement goes live — which matters because
+    // enforcement lands immediately rather than behind a shadow mode (product-owner decision), so a
+    // missing grant would be a production denial rather than a log line.
+    //
+    // Replay is safe because both operations are idempotent over the same ordered log: `grant` upserts
+    // on a key DERIVED from the membership itself, and a historical grant -> revoke -> grant sequence
+    // folds to the same end state the live path produced. Re-running it is a no-op, not a duplication.
+    //
     // ScopeMembership (#144) spans THREE categories under ONE checkpoint, and the single checkpoint
     // is the load-bearing part — not a convenience. Grants arrive on `Order-%` and `Restaurant-%`;
     // the rider revoke/grant pair arrives on `Delivery-%`. With independent checkpoints those
