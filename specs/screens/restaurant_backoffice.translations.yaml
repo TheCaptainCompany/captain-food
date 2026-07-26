@@ -10,6 +10,7 @@ back.pause_orders: { messages: { en: "Pause orders", fr: "Suspendre les commande
 back.nav.orders:       { messages: { en: "Orders", fr: "Commandes" } }
 back.nav.deliveries:   { messages: { en: "Deliveries", fr: "Livraisons" } }
 back.nav.refunds:      { messages: { en: "Refunds", fr: "Remboursements" } }
+back.nav.claims:       { messages: { en: "Claims", fr: "Réclamations" } }
 back.nav.satisfaction: { messages: { en: "Satisfaction", fr: "Satisfaction" } }
 
 # ── order queue ──────────────────────────────────────────────────────────────
@@ -69,3 +70,28 @@ back.chat.mute.role_label:    { messages: { en: "Who to mute", fr: "Qui réduire
 back.chat.mute.role.customer: { messages: { en: "Customer", fr: "Client" } }
 back.chat.mute.role.rider:    { messages: { en: "Rider", fr: "Livreur" } }
 back.chat.mute.reason_ph:     { messages: { en: "Reason (required)", fr: "Motif (obligatoire)" } }
+
+# ── claims queue + resolve panel (#157) ──────────────────────────────────────
+back.claims.title:        { messages: { en: "Claims", fr: "Réclamations" } }
+back.claims.filter.label: { messages: { en: "Status", fr: "Statut" } }
+back.claims.status.open:     { messages: { en: "Open", fr: "Ouvertes" } }
+back.claims.status.resolved: { messages: { en: "Resolved", fr: "Résolues" } }
+back.claims.status.rejected: { messages: { en: "Rejected", fr: "Rejetées" } }
+back.claims.empty.title:  { messages: { en: "No claims", fr: "Aucune réclamation" } }
+back.claims.empty.body:   { messages: { en: "Customer claims on your orders appear here.", fr: "Les réclamations des clients sur vos commandes apparaissent ici." } }
+back.claims.order_ref:    { messages: { en: "Order", fr: "Commande" } }
+back.claims.category:     { messages: { en: "Problem", fr: "Problème" } }
+back.claims.description:  { messages: { en: "Details", fr: "Détails" } }
+back.claims.note_ph:      { messages: { en: "Note (optional)", fr: "Note (facultatif)" } }
+back.claims.resolve.title:  { messages: { en: "Resolve claim", fr: "Résoudre la réclamation" } }
+back.claims.resolve.label:  { messages: { en: "Resolve as", fr: "Résoudre en" } }
+back.claims.resolve.submit: { messages: { en: "Resolve", fr: "Résoudre" } }
+back.claims.resolution.full_refund:     { messages: { en: "Full refund", fr: "Remboursement total" } }
+back.claims.resolution.partial_refund:  { messages: { en: "Partial refund", fr: "Remboursement partiel" } }
+back.claims.resolution.replacement:     { messages: { en: "Replacement", fr: "Remplacement" } }
+back.claims.resolution.goodwill_credit: { messages: { en: "Goodwill credit", fr: "Geste commercial" } }
+back.claims.amount.title:    { messages: { en: "Amount", fr: "Montant" } }
+back.claims.amount.subtitle: { messages: { en: "Choose the amount to refund or credit.", fr: "Choisissez le montant à rembourser ou à créditer." } }
+back.claims.amount.custom:   { messages: { en: "Other amount", fr: "Autre montant" } }
+back.claims.reject.label:     { messages: { en: "Reject", fr: "Rejeter" } }
+back.claims.reject.reason_ph: { messages: { en: "Reason (required)", fr: "Motif (obligatoire)" } }

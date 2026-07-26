@@ -179,3 +179,36 @@ account.sign_out:         { messages: { en: "Sign out", fr: "Se déconnecter" } 
 account.coins_badge:
   params: { points: "loyalty points balance" }
   messages: { en: "{points} pts", fr: "{points} pts" }
+
+# ── reclamations / customer claims (#157) ────────────────────────────────────
+claim.open.title:      { messages: { en: "Report a problem", fr: "Signaler un problème" } }
+claim.open.submit:     { messages: { en: "Submit claim", fr: "Envoyer la réclamation" } }
+claim.order_ref:       { messages: { en: "Order", fr: "Commande" } }
+claim.category.label:  { messages: { en: "What went wrong?", fr: "Que s'est-il passé ?" } }
+claim.category.missing_item:  { messages: { en: "Missing item", fr: "Article manquant" } }
+claim.category.wrong_item:    { messages: { en: "Wrong item", fr: "Mauvais article" } }
+claim.category.quality:       { messages: { en: "Quality", fr: "Qualité" } }
+claim.category.late_delivery: { messages: { en: "Late delivery", fr: "Livraison en retard" } }
+claim.category.damaged:       { messages: { en: "Damaged", fr: "Endommagé" } }
+claim.category.not_delivered: { messages: { en: "Not delivered", fr: "Non livré" } }
+claim.category.other:         { messages: { en: "Other", fr: "Autre" } }
+claim.description_ph:  { messages: { en: "Tell us more…", fr: "Dites-nous en plus…" } }
+claim.requested.label: { messages: { en: "What would resolve this? (optional)", fr: "Comment résoudre cela ? (facultatif)" } }
+claim.resolution.full_refund:     { messages: { en: "Full refund", fr: "Remboursement total" } }
+claim.resolution.partial_refund:  { messages: { en: "Partial refund", fr: "Remboursement partiel" } }
+claim.resolution.replacement:     { messages: { en: "Replacement", fr: "Remplacement" } }
+claim.resolution.goodwill_credit: { messages: { en: "Goodwill credit", fr: "Geste commercial" } }
+claim.evidence.label:  { messages: { en: "Add a photo (optional)", fr: "Ajouter une photo (facultatif)" } }
+claim.evidence.add:    { messages: { en: "Attach", fr: "Joindre" } }
+claim.evidence.ref_ph: { messages: { en: "Photo reference", fr: "Référence de la photo" } }
+claim.mine.title:      { messages: { en: "My claims", fr: "Mes réclamations" } }
+claim.mine.empty.title: { messages: { en: "No claims", fr: "Aucune réclamation" } }
+claim.mine.empty.body:  { messages: { en: "You haven't reported a problem with any order.", fr: "Vous n'avez signalé aucun problème sur vos commandes." } }
+claim.detail.title:       { messages: { en: "Claim", fr: "Réclamation" } }
+claim.detail.category:    { messages: { en: "Problem", fr: "Problème" } }
+claim.detail.description: { messages: { en: "Details", fr: "Détails" } }
+claim.detail.resolution:  { messages: { en: "Resolution", fr: "Résolution" } }
+claim.detail.reason:      { messages: { en: "Reason", fr: "Motif" } }
+claim.detail.open_thread: { messages: { en: "Open the conversation", fr: "Ouvrir la conversation" } }
+claim.reopen.label:     { messages: { en: "Reopen", fr: "Rouvrir" } }
+claim.reopen.reason_ph: { messages: { en: "Why are you reopening? (optional)", fr: "Pourquoi rouvrez-vous ? (facultatif)" } }

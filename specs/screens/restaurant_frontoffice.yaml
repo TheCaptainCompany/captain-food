@@ -78,6 +78,8 @@ resolvers:
   operationStatus.byMessage: { query: { $ref: 'api.yaml#/queries/operationStatus' } }
   paymentStatus.byOrder:     { query: { $ref: 'api.yaml#/queries/paymentStatus' } }
   conversation.byOrder:      { query: { $ref: 'api.yaml#/queries/orderConversation' } }   # #145 — the order's PUBLIC chat thread; arg `orderId` from the route `:orderId` (same-name convention)
+  reclamations.mine:         { query: { $ref: 'api.yaml#/queries/myReclamations' } }   # #157 — the customer's own claims list (no args)
+  reclamation.byId:          { query: { $ref: 'api.yaml#/queries/reclamation' } }   # #157 — one claim's detail; arg `reclamationId` from the route `:reclamationId` (same-name convention)
   # ── GAPS — UI data needs with no backing API query yet ──
   promotions.active: { gap: "No promotions/deals query — HubRise deals not modelled in V0 (home promo banners)." }
   dishes.search:     { gap: "No dish/product search query — only restaurant search (queries/restaurants) exists." }
@@ -111,6 +113,11 @@ actions:
   record_delivery_satisfaction: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/recordDeliverySatisfaction' } }   # #62 delay survey
   tip_order:   { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/tipOrder' }, note: "Post-delivery tip to the courier (recipient RIDER, or RESTAURANT for self-dispatch); à la Uber Eats/Deliveroo." }
   post_message: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/postMessage' }, note: "#145 — customer posts a PUBLIC message to the order thread. The idempotency key `messageId` is a client-minted UUIDv7: the compose binds it to the `{{ $uuid }}` mint token, which the SDUI executor resolves to a fresh UUIDv7 at dispatch time and persists with the pending write (#147, executor::fill_mint_tokens)." }
+  # #157 — customer reclamation (claim) writes. `reclamationId` is a client-minted UUID (the idempotent
+  # birth key) bound to the `{{ $uuid }}` mint token, mirroring post_message's messageId (#147).
+  open_reclamation:            { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/openReclamation' }, note: "Open a claim over a delivered order. reclamationId = {{ $uuid }} (client-minted birth key); customerId/restaurantId are read back off the resolved order (order.byId), as placeOrder supplies them." }
+  reopen_reclamation:          { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/reopenReclamation' }, note: "Reopen a decided (rejected/resolved) claim within the 14-day window (#151)." }
+  attach_reclamation_evidence: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/attachReclamationEvidence' }, note: "Attach an evidence photo by opaque attachmentRef. The file upload/picker (#134) is deferred; the ref is supplied manually here — the command itself models the domain fact with the opaque ref only (#156)." }
   # ── GAPS — UI actions with no backing API mutation yet ──
   apply_promo_code: { kind: gap, gap: "No applyPromoCode mutation — promo codes / cart discount not modelled." }
   set_delivery_mode: { kind: gap, gap: "Cart-level delivery-mode toggle not modelled — serviceType is chosen at placeOrder." }
@@ -525,6 +532,144 @@ screens:
                 authorRole: "CUSTOMER"
                 messageId: "{{ $uuid }}"
                 originalLocale: "{{ $locale }}"
+      - { component: bottom_nav }
+
+  # SCREEN 5c — Open a claim (#157). A structured overlay on the order the customer is already in: pick a
+  # category, describe the problem, optionally state the resolution they want, submit → openReclamation.
+  # The write needs customerId + restaurantId + orderId: they are read back off the resolved order
+  # (order.byId, arg `orderId` from the route), exactly as placeOrder supplies them. reclamationId is the
+  # client-minted birth key ({{ $uuid }} mint token, #147). Evidence upload is #134-deferred (see gaps).
+  - id: open_claim
+    roles: [CUSTOMER]
+    route: "/orders/:orderId/claim"
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.open.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [order.byId]
+    actions_used: [open_reclamation]
+    gaps:
+      - "Evidence photo is added AFTER the claim exists (attach needs the reclamationId): the `attach_reclamation_evidence` affordance lives on `claim_detail`, not here. A real in-form photo picker is #134-deferred."
+    components:
+      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.open.title' }, sticky: true }
+      - { type: info_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.order_ref' }, value: "{{ order.id }}" }
+      - type: chip_multi_select
+        id: category
+        label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.category.label' }
+        single_select: true
+        options:
+          - { value: MISSING_ITEM,  label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.category.missing_item' } }
+          - { value: WRONG_ITEM,    label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.category.wrong_item' } }
+          - { value: QUALITY,       label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.category.quality' } }
+          - { value: LATE_DELIVERY, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.category.late_delivery' } }
+          - { value: DAMAGED,       label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.category.damaged' } }
+          - { value: NOT_DELIVERED, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.category.not_delivered' } }
+          - { value: OTHER,         label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.category.other' } }
+      - { type: text_input, id: description, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.description_ph' } }
+      # Requested resolution — the customer's ask (optional). REJECTED is not offerable to the customer.
+      - type: chip_multi_select
+        id: requested
+        label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.requested.label' }
+        single_select: true
+        options:
+          - { value: FULL_REFUND,     label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.resolution.full_refund' } }
+          - { value: PARTIAL_REFUND,  label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.resolution.partial_refund' } }
+          - { value: REPLACEMENT,     label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.resolution.replacement' } }
+          - { value: GOODWILL_CREDIT, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.resolution.goodwill_credit' } }
+      - type: button
+        id: submit_claim_btn
+        label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.open.submit' }
+        variant: primary
+        full_width: true
+        # reclamationId is the client-minted birth key; orderId/customerId/restaurantId come from the
+        # resolved order (order.byId). These + category + description cover every required OpenReclamation
+        # field, so a real submit is server-acceptable (requestedResolution is optional).
+        action:
+          type: open_reclamation
+          variables:
+            reclamationId: "{{ $uuid }}"
+            orderId: "{{ order.id }}"
+            customerId: "{{ order.customerId }}"
+            restaurantId: "{{ order.restaurantId }}"
+            category: "{{ category.value }}"
+            description: "{{ description.value }}"
+            requestedResolution: "{{ requested.value }}"
+      - { component: bottom_nav }
+
+  # SCREEN 5d — My claims (#157): the customer's own list of claims, each a card with order + category +
+  # status chip, tapping through to the claim detail. Empty state when the customer has never claimed.
+  - id: my_claims
+    roles: [CUSTOMER]
+    route: "/claims"
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.mine.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [reclamations.mine]
+    components:
+      - { component: topbar }
+      - { type: page_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.mine.title' } }
+      - type: list
+        id: claims_list
+        items: "{{ reclamations }}"
+        item_action: { type: navigate, route: "/claims/{{ item.reclamationId }}" }
+        empty_state:
+          title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.mine.empty.title' }
+          body: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.mine.empty.body' }
+      - { component: bottom_nav }
+
+  # SCREEN 5e — Claim detail (#157): category/description/status/resolution/reason for one claim, a Reopen
+  # control (meaningful once REJECTED, within the 14-day window), and a deep-link into the order thread
+  # where the discussion + woven claim timeline live (§2.5). Arg `reclamationId` from the route.
+  - id: claim_detail
+    roles: [CUSTOMER]
+    route: "/claims/:reclamationId"
+    title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.detail.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [reclamation.byId]
+    actions_used: [reopen_reclamation, attach_reclamation_evidence]
+    gaps:
+      - "Evidence: a real photo picker is #134-deferred — the `attach_reclamation_evidence` affordance takes an opaque attachmentRef in a text field; the command models the domain fact with the opaque ref only (#156)."
+    components:
+      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.detail.title' }, sticky: true }
+      - { type: status_chip, status: "{{ reclamation.status }}" }
+      - { type: info_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.order_ref' }, value: "{{ reclamation.orderId }}" }
+      - { type: info_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.detail.category' }, value: "{{ reclamation.category }}" }
+      - { type: info_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.detail.description' }, value: "{{ reclamation.description }}" }
+      - { type: info_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.detail.resolution' }, value: "{{ reclamation.resolution }}", visible_when: "reclamation.status == 'RESOLVED'" }
+      - { type: info_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.detail.reason' }, value: "{{ reclamation.rejectReason }}", visible_when: "reclamation.status == 'REJECTED'" }
+      # Reopen — only meaningful once the claim was REJECTED (or unsatisfactorily resolved); gated on status.
+      - type: section
+        id: reopen
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.reopen.label' }
+        visible_when: "reclamation.status == 'REJECTED'"
+        content:
+          - { type: text_input, id: reopen_reason, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.reopen.reason_ph' } }
+          - type: button
+            id: reopen_btn
+            label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.reopen.label' }
+            variant: primary
+            action:
+              type: reopen_reclamation
+              variables:
+                reclamationId: "{{ reclamation.reclamationId }}"
+                reason: "{{ reopen_reason.value }}"
+      # Evidence (#134-deferred): attach an opaque attachmentRef to THIS claim (reclamationId is real
+      # here). A real photo picker replaces the manual ref field when #134 lands.
+      - type: section
+        id: evidence
+        title: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.evidence.label' }
+        content:
+          - { type: text_input, id: attachment_ref, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.evidence.ref_ph' } }
+          - type: button
+            id: add_photo_btn
+            label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.evidence.add' }
+            variant: outline
+            action:
+              type: attach_reclamation_evidence
+              variables:
+                reclamationId: "{{ reclamation.reclamationId }}"
+                attachmentRef: "{{ attachment_ref.value }}"
+      - { type: button, id: open_thread_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/claim.detail.open_thread' }, variant: outline, icon: message_circle, action: { type: navigate, route: "/orders/{{ reclamation.orderId }}/chat" } }
       - { component: bottom_nav }
 
   # SCREEN 6 — Account
