@@ -231,3 +231,9 @@ CreditCannotBeOverspent:
   description: "A customer can never spend more store credit than their available balance; an over-spend is rejected and the balance never goes negative (#158)."
 GoodwillCreditGrantedOnResolution:
   description: "When a reclamation is resolved as GOODWILL_CREDIT, the ReclamationProcess saga grants the claimant store credit for the recorded amount (#158)."
+ReplacementOrderPlacedOnResolution:
+  description: >
+    When a reclamation is resolved as REPLACEMENT, a no-charge replacement order is placed with the SAME
+    line items as the original, a $0 buyer total and no payment (no Stripe PaymentIntent), linked to the
+    original via OrderPlaced.replacementOf — so it enters the normal fulfilment/dispatch flow. Idempotent
+    per reclamationId: a re-delivered resolution never places a second replacement (#159, ADR-20260726-171736).

@@ -1429,6 +1429,27 @@ ConsumeCustomerCredit:
     orderId: { $ref: 'scalars.yaml#/OrderId' }
   required: [customerId, amount, orderId]
 
+PlaceReplacementOrder:
+  description: >
+    Place a NO-CHARGE replacement order for a resolved reclamation (ReclamationResolved REPLACEMENT,
+    ADR-20260726-171736 / #159). Dispatched by the ReclamationProcess saga; NOT a public GraphQL mutation.
+    The handler reads the ORIGINAL order (by originalOrderId) and remakes it as a new Order carrying the
+    SAME line items, a $0 buyer total and NO paymentIntentId (no Stripe), linked via OrderPlaced.replacementOf.
+    It then enters the normal fulfilment/dispatch flow (the restaurant remakes it, the rider redelivers).
+    Idempotent per reclamationId: the saga derives a deterministic orderId from reclamationId, so a
+    re-delivered ReclamationResolved re-targets the same new-order stream and is absorbed as a no-op — never
+    a second replacement.
+  type: object
+  properties:
+    orderId:
+      $ref: 'scalars.yaml#/OrderId'
+      description: "Saga-generated id for the new replacement order (deterministic from reclamationId — the idempotency key)."
+    originalOrderId:
+      $ref: 'scalars.yaml#/OrderId'
+      description: "The original order to remake; its line items and delivery details are copied verbatim."
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  required: [orderId, originalOrderId, reclamationId]
+
 # =====================================================================
 # Order conversations / messaging (Conversation aggregate, #129)
 # =====================================================================

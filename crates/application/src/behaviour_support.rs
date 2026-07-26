@@ -477,7 +477,7 @@ pub fn tracking_row_from_order_placed(
         estimated_ready_at: None,
         placed_at: chrono::Utc::now(),
         status_changed_at: chrono::Utc::now(),
-        payment_intent_id: Some(e.payment_intent_id.clone()),
+        payment_intent_id: e.payment_intent_id.clone(),
         payment_status: "CAPTURED".to_string(),
         restaurant_stars: None,
         rating_comment: None,

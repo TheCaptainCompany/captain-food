@@ -135,7 +135,8 @@ mod tests {
                 captain_net: z,
             },
             note: None,
-            payment_intent_id: PaymentIntentId("pi_test_1".into()),
+            replacement_of: None,
+            payment_intent_id: Some(PaymentIntentId("pi_test_1".into())),
         })
     }
     fn accepted() -> DomainEvent {

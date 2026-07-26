@@ -195,7 +195,8 @@ fn placed(service_type: ServiceType) -> DomainEvent {
             captain_net: eur(0),
         },
         note: None,
-        payment_intent_id: PaymentIntentId("pi_123".into()),
+        replacement_of: None,
+        payment_intent_id: Some(PaymentIntentId("pi_123".into())),
     })
 }
 

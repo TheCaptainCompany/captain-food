@@ -655,7 +655,15 @@ ReclamationProcess:
     isolate credit / refund / REPLACEMENT (deferred to #159) without either blindly refunding a REPLACEMENT
     (a wrong money-move) or duplicating the approval mechanism (forbidden). Wiring the refund arm through
     the canonical RequestRefund -> RefundRequested -> RefundProcess path with correct per-resolution
-    dispatch is the flagged follow-up. REPLACEMENT is likewise a reserved no-op here (#159).
+    dispatch is the flagged follow-up.
+    REPLACEMENT arm (WIRED, ADR-20260726-171736 / #159): on a REPLACEMENT resolution the saga places a
+    NO-CHARGE replacement order — it reads the ORIGINAL order (cross-aggregate, by orderId) and sends
+    PlaceReplacementOrder to the Order aggregate, which remakes the same items as a new linked order with a
+    $0 buyer total and no paymentIntentId (OrderPlaced.replacementOf). The generated linear-branch below
+    still isolates only the GOODWILL_CREDIT credit grant; the REPLACEMENT dispatch (a cross-aggregate read
+    + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's
+    hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch
+    decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
   receives:
     - message: { $ref: 'events.yaml#/ReclamationResolved' }
       description: >

@@ -62,7 +62,8 @@ impl place_order_process::PaymentCapturedHooks for PlaceOrderCapturedHooks<'_> {
             total_amount: snap.total_amount.clone(),
             breakdown: snap.breakdown.clone(),
             note: snap.note.clone(),
-            payment_intent_id: event.payment_intent_id.clone(),
+            replacement_of: None,
+            payment_intent_id: Some(event.payment_intent_id.clone()),
         }))
     }
 
@@ -257,7 +258,7 @@ mod tests {
             })
             .expect("OrderPlaced on the order stream");
         assert_eq!(placed.order_id, OrderId(uid(1)));
-        assert_eq!(placed.payment_intent_id, PaymentIntentId("pi_123".into()));
+        assert_eq!(placed.payment_intent_id, Some(PaymentIntentId("pi_123".into())));
         assert_eq!(placed.total_amount, eur(1960));
         assert_eq!(domain::order::fold(&order_events).unwrap().status, OrderStatus::PLACED);
         // …the cart is CHECKED_OUT…

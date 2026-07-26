@@ -814,6 +814,15 @@ pub struct ConsumeCustomerCredit {
     pub order_id: OrderId,
 }
 
+/// Place a NO-CHARGE replacement order for a resolved reclamation (ReclamationResolved REPLACEMENT, ADR-20260726-171736 / #159). Dispatched by the ReclamationProcess saga; NOT a public GraphQL mutation. The handler reads the ORIGINAL order (by originalOrderId) and remakes it as a new Order carrying the SAME line items, a $0 buyer total and NO paymentIntentId (no Stripe), linked via OrderPlaced.replacementOf. It then enters the normal fulfilment/dispatch flow (the restaurant remakes it, the rider redelivers). Idempotent per reclamationId: the saga derives a deterministic orderId from reclamationId, so a re-delivered ReclamationResolved re-targets the same new-order stream and is absorbed as a no-op — never a second replacement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceReplacementOrder {
+    pub order_id: OrderId,
+    pub original_order_id: OrderId,
+    pub reclamation_id: ReclamationId,
+}
+
 /// Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

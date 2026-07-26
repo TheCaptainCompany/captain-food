@@ -428,6 +428,15 @@ Order:
     - message: { $ref: 'events.yaml#/OrderPlaced' }
       emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
       effect: "Birth: PlaceOrderProcess delivers OrderPlaced; the Order records it (idempotent)."
+    # No-charge replacement birth (ReclamationProcess REPLACEMENT arm, ADR-20260726-171736 / #159): remakes
+    # the original order (read by originalOrderId) as a NEW Order with the SAME items, $0 buyer total and no
+    # paymentIntentId, linked via OrderPlaced.replacementOf. Idempotent per reclamationId (deterministic
+    # orderId, absorbed at version 0). Saga-dispatched — no public mutation (command-no-mutation is expected).
+    - message: { $ref: 'commands.yaml#/PlaceReplacementOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+      effect: "Remake the original order as a linked no-charge replacement (OrderPlaced replacementOf, buyer total 0)."
     - message: { $ref: 'commands.yaml#/AcceptOrder' }
       emits: [{ $ref: 'events.yaml#/OrderAcceptedByRestaurant' }]
       throws:

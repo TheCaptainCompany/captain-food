@@ -35,7 +35,7 @@ use domain::generated::commands::{
     UpdateRestaurant, UpdateRestaurantAccount, UpdateRestaurantGoogleBusinessProfile, VerifyPhone,
     VerifyGoogleBusinessProfileOrderLink,
 };
-use domain::generated::entities::{CheckoutSnapshot, Money, Product, Stock};
+use domain::generated::entities::{CheckoutSnapshot, Money, PaymentBreakdown, Product, Stock};
 use domain::generated::events::{
     CatalogCategoryAdded, CatalogCategoryRemoved, CatalogCategoryUpdated, CatalogCreated,
     CatalogImported, CustomerAddressRemoved, CustomerAddressSet, CustomerEmailVerified,
@@ -74,9 +74,9 @@ use domain::delivery_job::DeliveryJobState;
 use domain::generated::commands::{
     AcceptDelivery, AddCartLine, AssignDeliveryToPartner, BindCartToCustomer, CancelDelivery,
     ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, EscalateDelivery,
-    PlaceOrder, RateOrder, RateRestaurant, RecordDeliverySatisfaction, RegisterRider, RemoveCartLine,
-    ReportDeliveryIssue, RequestRefund, ResolveDeliveryIssue, TipOrder, UnassignDeliveryFromPartner,
-    UpdateRiderInfo,
+    PlaceOrder, PlaceReplacementOrder, RateOrder, RateRestaurant, RecordDeliverySatisfaction,
+    RegisterRider, RemoveCartLine, ReportDeliveryIssue, RequestRefund, ResolveDeliveryIssue, TipOrder,
+    UnassignDeliveryFromPartner, UpdateRiderInfo,
 };
 use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
@@ -84,8 +84,8 @@ use domain::generated::events::{
     DeliveryAcceptedByRider, DeliveryAssignedToPartner, DeliveryCancelled, DeliveryCompleted,
     DeliveryDeclinedByRider, DeliveryEscalationRequested, DeliveryIssueReported, DeliveryIssueResolved,
     DeliveryPickedUp, DeliverySatisfactionRecorded,
-    DeliveryUnassignedFromPartner, OrderRated, OrderTipped, PaymentIntentCreated, RefundRequested,
-    RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered,
+    DeliveryUnassignedFromPartner, OrderPlaced, OrderRated, OrderTipped, PaymentIntentCreated,
+    RefundRequested, RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered,
 };
 use domain::generated::scalars::{
     CartId, CartStatus, CatalogItemAvailability, DeliveryJobId, DeliveryStatus, Mode,
@@ -2063,6 +2063,77 @@ pub async fn consume_customer_credit(
     });
     let stream = format!("CustomerCredit-{}", cmd.customer_id.0);
     Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// Replacement order (actors.yaml#/Order) — the ReclamationProcess REPLACEMENT arm's command leg
+// (#159, ADR-20260726-171736). Saga-driven, no public GraphQL mutation (command-no-mutation).
+// ================================================================================================
+
+/// A zeroed `Money` in `currency` — a replacement order's buyer total and every breakdown line are $0
+/// (no money moves, no Stripe): only the ITEMS carry over, so the restaurant knows what to remake.
+fn zero_money(currency: &CurrencyCode) -> Money {
+    Money { amount_cents: domain::generated::scalars::MoneyCents(0), currency: currency.clone() }
+}
+
+/// Handle `commands.yaml#/PlaceReplacementOrder` → emit `events.yaml#/OrderPlaced` on a NEW
+/// `Order-<orderId>` stream, carrying the ORIGINAL order's line items + delivery details, a $0 buyer
+/// total, a zeroed breakdown, NO `paymentIntentId`, and `replacementOf` = the original order id
+/// (rules.yaml#/ReplacementOrderPlacedOnResolution). The replacement then flows through the normal
+/// fulfilment/dispatch as any order (the restaurant remakes it, the rider redelivers).
+///
+/// The original order is read cross-aggregate by folding its stream for the birth `OrderPlaced` (the
+/// same pattern as PlaceOrderProcess reads its frozen checkout); a missing original rejects with
+/// `errors.yaml#/OrderNotFound`. Idempotent per resolved claim: the saga derives `orderId`
+/// deterministically from `reclamationId`, so a re-delivered `ReclamationResolved` re-targets the same
+/// new-order stream and the version-0 append is absorbed as a no-op — never a second replacement.
+pub async fn place_replacement_order(
+    store: &dyn EventStore,
+    cmd: PlaceReplacementOrder,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    // Read the original order's birth fact (cross-aggregate, by orderId) — the source of the items and
+    // delivery details to copy. `require_order`-style scoping is not applied: a replacement is placed by
+    // the saga, not a tenant, and there is no commanding restaurant to scope against.
+    let (original_events, _) = store.load(&order_stream(&cmd.original_order_id)).await?;
+    let Some(original) = original_events.iter().find_map(|e| match e {
+        DomainEvent::OrderPlaced(p) => Some(p.clone()),
+        _ => None,
+    }) else {
+        return Err(reject("OrderNotFound", json!({ "orderId": cmd.original_order_id })));
+    };
+    let currency = original.total_amount.currency.clone();
+    let event = DomainEvent::OrderPlaced(OrderPlaced {
+        mode: original.mode,
+        order_id: cmd.order_id,
+        // A replacement is a NEW order — never carry the original's external `ref` (it is HubRise's
+        // idempotent import key; reusing it would collide).
+        r#ref: None,
+        restaurant_id: original.restaurant_id,
+        customer_id: original.customer_id,
+        customer_contact: original.customer_contact.clone(),
+        service_type: original.service_type,
+        delivery_address: original.delivery_address.clone(),
+        items: original.items.clone(),
+        total_amount: zero_money(&currency),
+        breakdown: PaymentBreakdown {
+            articles: zero_money(&currency),
+            delivery: zero_money(&currency),
+            service_fee: zero_money(&currency),
+            total: zero_money(&currency),
+            restaurant_contribution: zero_money(&currency),
+            restaurant_payout: zero_money(&currency),
+            rider_payout: zero_money(&currency),
+            captain_net: zero_money(&currency),
+        },
+        note: original.note.clone(),
+        replacement_of: Some(cmd.original_order_id),
+        // No charge: a replacement has no Stripe PaymentIntent.
+        payment_intent_id: None,
+    });
+    // Version-0 birth: a re-delivered claim (same deterministic orderId) clashes and is absorbed — one
+    // replacement per resolved claim, never two.
+    idempotent_on_existing(Repository::new(store).save(&order_stream(&cmd.order_id), 0, &[event], actor).await)
 }
 
 // ================================================================================================

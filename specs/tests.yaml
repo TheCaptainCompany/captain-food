@@ -260,6 +260,29 @@ fixtures:
         riderPayout: { amountCents: 0, currency: "EUR" }
         captainNet: { amountCents: 0, currency: "EUR" }
       paymentIntentId: "pi_123"
+  # The no-charge replacement of `orderPlaced` (#159): SAME items + delivery details, $0 buyer total, a
+  # zeroed breakdown, no paymentIntentId, linked to the original via replacementOf (ADR-20260726-171736).
+  orderPlacedReplacement:
+    type: { $ref: 'events.yaml#/OrderPlaced' }
+    data:
+      orderId: "replacement-order-1"
+      restaurantId: "resto-1"
+      customerContact: { displayName: "Johnny", phone: "+33612345678" }
+      serviceType: "DELIVERY"
+      deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
+      items:
+        - { offerId: "off-1", productId: "prod-1", name: "Margherita", offerName: "Default", quantity: 2, unitPrice: { amountCents: 980, currency: "EUR" }, lineTotal: { amountCents: 1960, currency: "EUR" } }
+      totalAmount: { amountCents: 0, currency: "EUR" }
+      breakdown:
+        articles: { amountCents: 0, currency: "EUR" }
+        delivery: { amountCents: 0, currency: "EUR" }
+        serviceFee: { amountCents: 0, currency: "EUR" }
+        total: { amountCents: 0, currency: "EUR" }
+        restaurantContribution: { amountCents: 0, currency: "EUR" }
+        restaurantPayout: { amountCents: 0, currency: "EUR" }
+        riderPayout: { amountCents: 0, currency: "EUR" }
+        captainNet: { amountCents: 0, currency: "EUR" }
+      replacementOf: "order-1"
   orderAcceptedByRestaurant:
     type: { $ref: 'events.yaml#/OrderAcceptedByRestaurant' }
     data: { orderId: "order-1", restaurantId: "resto-1" }
@@ -3314,3 +3337,16 @@ tests:
       data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", resolution: "GOODWILL_CREDIT", refundAmount: { amountCents: 500, currency: "EUR" } }
     then:
       - { $ref: '#/fixtures/customerCreditGranted' }
+
+  # ------------- Replacement order (Order aggregate, #159) -----------
+  TestPlaceReplacementOrderCopiesItems:
+    name: "Places a no-charge replacement order copying the original's items, linked via replacementOf"
+    rules: [{ $ref: 'rules.yaml#/ReplacementOrderPlacedOnResolution' }]
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceReplacementOrder' }
+      data: { orderId: "replacement-order-1", originalOrderId: "order-1", reclamationId: "recl-1" }
+    then:
+      - { $ref: '#/fixtures/orderPlacedReplacement' }
