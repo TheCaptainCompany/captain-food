@@ -30,15 +30,17 @@ use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
+use application::projectors::scope_membership;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{CartId, CatalogId, CustomerId, OrderId, RestaurantId};
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
+use uuid::Uuid;
 
 use crate::persistence::{
     cart_store, catalog_store, customer_store, db_err, order_conversation_store,
-    order_tracking_store, prospection_store, restaurant_store,
+    order_tracking_store, prospection_store, restaurant_store, scope_membership_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -60,6 +62,7 @@ enum ReadModelProjector {
     Cart,
     OrderTracking,
     OrderConversation,
+    ScopeMembership,
 }
 
 impl ReadModelProjector {
@@ -152,6 +155,63 @@ impl ReadModelProjector {
                     order_conversation_store::upsert(pool, &next).await?;
                 }
             }
+            Self::ScopeMembership => {
+                // SET-shaped, unlike every arm above: one event yields N row changes, not one row —
+                // so there is no `load -> project -> upsert` triple here, and no generated dispatch
+                // (`emit_projectors` cannot express a multi-row fold with a derived pk, #144).
+                //
+                // Two lookups the PURE fold cannot do are resolved here and passed in:
+                //   * Delivery* events carry only a deliveryJobId -> which order is it?
+                //   * OrderPlaced carries no restaurantAccountId -> which account owns the restaurant?
+                // An unresolved lookup yields NO changes (the pure layer's choice): denying is safe,
+                // guessing a scope id would grant against the wrong instance.
+                let resolved = scope_membership::Resolved {
+                    order_id: resolve_delivery_order(pool, env).await?,
+                    restaurant_account_id: resolve_restaurant_account(pool, env).await?,
+                };
+                let changes = scope_membership::membership_changes(env, &resolved);
+                if changes.is_empty() {
+                    return Ok(());
+                }
+                // ONE transaction for all of an event's changes. A reassignment is a revoke followed
+                // by a grant; committing them separately would leave a window in which the order has
+                // NO rider — or, if the order flipped, one in which BOTH hold access.
+                let mut tx = pool.begin().await.map_err(db_err)?;
+                for change in &changes {
+                    match change {
+                        scope_membership::MembershipChange::Grant {
+                            scope_type,
+                            scope_id,
+                            principal_type,
+                            principal_id,
+                        } => {
+                            scope_membership_store::grant(
+                                &mut tx,
+                                *scope_type,
+                                *scope_id,
+                                *principal_type,
+                                *principal_id,
+                                env.occurred_at,
+                            )
+                            .await?;
+                        }
+                        scope_membership::MembershipChange::RevokeRole {
+                            scope_type,
+                            scope_id,
+                            principal_type,
+                        } => {
+                            scope_membership_store::revoke_role(
+                                &mut tx,
+                                *scope_type,
+                                *scope_id,
+                                *principal_type,
+                            )
+                            .await?;
+                        }
+                    }
+                }
+                tx.commit().await.map_err(db_err)?;
+            }
         }
         Ok(())
     }
@@ -211,7 +271,60 @@ const REGISTRY: &[ProjectorGroup] = &[
         stream_prefixes: &["Conversation-", "Order-"],
         projectors: &[ReadModelProjector::OrderConversation],
     },
+    // ScopeMembership (#144) spans THREE categories under ONE checkpoint, and the single checkpoint
+    // is the load-bearing part — not a convenience. Grants arrive on `Order-%` and `Restaurant-%`;
+    // the rider revoke/grant pair arrives on `Delivery-%`. With independent checkpoints those
+    // categories could interleave out of global `position` order, folding a revoke BEFORE the grant
+    // it supersedes and leaving a stale grant behind — the one failure mode of an ACL cache that is
+    // a silent breach rather than a visible denial. One checkpoint = one totally ordered fold.
+    ProjectorGroup {
+        checkpoint: "ScopeMembership",
+        stream_prefixes: &["Order-", "Delivery-", "Restaurant-"],
+        projectors: &[ReadModelProjector::ScopeMembership],
+    },
 ];
+
+/// Which order does this `Delivery-%` event's job belong to? `DeliveryAcceptedByRider`,
+/// `DeliveryCancelled` and `DeliveryDispatchFailed` carry only a `deliveryJobId`, so the order is
+/// resolved from the delivery read model. `None` (unknown job) yields no membership change at all —
+/// denying is the safe direction.
+async fn resolve_delivery_order(pool: &PgPool, env: &Envelope) -> Result<Option<Uuid>, DomainError> {
+    use domain::generated::events::DomainEvent as E;
+    let job_id = match &env.event {
+        E::DeliveryAcceptedByRider(e) => e.delivery_job_id.0,
+        E::DeliveryCancelled(e) => e.delivery_job_id.0,
+        E::DeliveryDispatchFailed(e) => e.delivery_job_id.0,
+        _ => return Ok(None),
+    };
+    let row: Option<(Uuid,)> =
+        sqlx::query_as("SELECT order_id FROM View_DeliveryJob WHERE delivery_job_id = $1")
+            .bind(job_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(db_err)?;
+    Ok(row.map(|(id,)| id))
+}
+
+/// Which account owns the restaurant on this event? Only `OrderPlaced` needs it — it carries a
+/// `restaurantId` but no `restaurantAccountId`. (`RestaurantRegistered` carries `account_id` itself,
+/// so it is deliberately absent here.) An unresolved account simply omits that one grant.
+async fn resolve_restaurant_account(
+    pool: &PgPool,
+    env: &Envelope,
+) -> Result<Option<Uuid>, DomainError> {
+    use domain::generated::events::DomainEvent as E;
+    let restaurant_id = match &env.event {
+        E::OrderPlaced(e) => e.restaurant_id.0,
+        _ => return Ok(None),
+    };
+    let row: Option<(Option<Uuid>,)> =
+        sqlx::query_as("SELECT restaurant_account_id FROM restaurant WHERE restaurant_id = $1")
+            .bind(restaurant_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(db_err)?;
+    Ok(row.and_then(|(id,)| id))
+}
 
 pub struct ProjectionWorker {
     pool: PgPool,

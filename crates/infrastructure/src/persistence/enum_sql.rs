@@ -12,7 +12,7 @@ use domain::generated::scalars::{
     DeliveryTimeliness, GbpLinkStatus,
     InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     ProspectPipelineStatus, RefundProcessStatus, RefundStatus, RestaurantDispatchMode,
-    RestaurantListingStatus, RestaurantStatus, ServiceType, ThumbRating,
+    RestaurantListingStatus, RestaurantStatus, ScopeType, ServiceType, ThumbRating, UserType,
 };
 use domain::shared::errors::DomainError;
 
@@ -178,3 +178,18 @@ mod tests {
         assert!(RestaurantStatus::from_ord(99).is_err());
     }
 }
+
+// --- Read-side per-instance authorization (#144) ---
+// ScopeMembership stores BOTH of these as ordinals. UserType's order must track scalars.yaml exactly:
+// it is also the wire ordinal for `domain_events.user_type` and `command_journal.user_type`, so a
+// reordering here would silently re-label historical rows, not just this table.
+enum_ord!(ScopeType { ORDER => 0, RESTAURANT => 1 });
+enum_ord!(UserType {
+    PUBLIC => 0,
+    CUSTOMER => 1,
+    RESTAURANT_ACCOUNT => 2,
+    RESTAURANT => 3,
+    RIDER => 4,
+    ADMIN => 5,
+    EXTERNAL => 6,
+});
