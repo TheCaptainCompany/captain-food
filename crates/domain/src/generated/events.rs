@@ -493,7 +493,8 @@ pub struct OrderPlaced {
     pub total_amount: Money,
     pub breakdown: PaymentBreakdown,
     pub note: Option<OrderNote>,
-    pub payment_intent_id: PaymentIntentId,
+    pub replacement_of: Option<OrderId>,
+    pub payment_intent_id: Option<PaymentIntentId>,
 }
 
 /// Restaurant has accepted to prepare the order.

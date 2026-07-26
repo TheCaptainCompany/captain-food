@@ -3367,6 +3367,7 @@ _🧩 aggregate_ — A single order through its lifecycle. Born from OrderPlaced
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [⚡ `OrderPlaced`](#event-orderplaced) | [⚡ `OrderPlaced`](#event-orderplaced) | — |
+| [📩 `PlaceReplacementOrder`](#command-placereplacementorder) | [⚡ `OrderPlaced`](#event-orderplaced) | [⛔ `OrderNotFound`](#error-ordernotfound) |
 | [📩 `AcceptOrder`](#command-acceptorder) | [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | [📩 `StartPreparation`](#command-startpreparation) | [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | [📩 `MarkOrderReady`](#command-markorderready) | [⚡ `OrderMarkedReady`](#event-ordermarkedready) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
@@ -3622,7 +3623,7 @@ sequenceDiagram
 <a id="actor-reclamationprocess"></a>
 #### 🎭 Actor: `ReclamationProcess`
 
-_⚙️ process manager_ — Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). A refund resolution (FULL_REFUND / PARTIAL_REFUND) falls through UN-automated in this slice: the branch below only acts on GOODWILL_CREDIT. WHY the refund arm is flagged, not wired: the existing refund path opens a PENDING_APPROVAL refund from a refundable fact and requires a SEPARATE explicit ApproveRefund decision (with its own state-row guard + Stripe call) to move money; a single 2-way saga branch cannot isolate credit / refund / REPLACEMENT (deferred to #159) without either blindly refunding a REPLACEMENT (a wrong money-move) or duplicating the approval mechanism (forbidden). Wiring the refund arm through the canonical RequestRefund -> RefundRequested -> RefundProcess path with correct per-resolution dispatch is the flagged follow-up. REPLACEMENT is likewise a reserved no-op here (#159).
+_⚙️ process manager_ — Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). A refund resolution (FULL_REFUND / PARTIAL_REFUND) falls through UN-automated in this slice: the branch below only acts on GOODWILL_CREDIT. WHY the refund arm is flagged, not wired: the existing refund path opens a PENDING_APPROVAL refund from a refundable fact and requires a SEPARATE explicit ApproveRefund decision (with its own state-row guard + Stripe call) to move money; a single 2-way saga branch cannot isolate credit / refund / REPLACEMENT (deferred to #159) without either blindly refunding a REPLACEMENT (a wrong money-move) or duplicating the approval mechanism (forbidden). Wiring the refund arm through the canonical RequestRefund -> RefundRequested -> RefundProcess path with correct per-resolution dispatch is the flagged follow-up. REPLACEMENT arm (WIRED, ADR-20260726-171736 / #159): on a REPLACEMENT resolution the saga places a NO-CHARGE replacement order — it reads the ORIGINAL order (cross-aggregate, by orderId) and sends PlaceReplacementOrder to the Order aggregate, which remakes the same items as a new linked order with a $0 buyer total and no paymentIntentId (OrderPlaced.replacementOf). The generated linear-branch below still isolates only the GOODWILL_CREDIT credit grant; the REPLACEMENT dispatch (a cross-aggregate read + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
 
 
 | Receives | Emits → | Throws |
@@ -3807,7 +3808,7 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(32)_
+### 📩 Commands _(33)_
 
 <a id="command-addcartline"></a>
 #### 📩 Command: `AddCartLine`
@@ -4131,6 +4132,21 @@ Spend a customer's available store credit at checkout (rejected if it exceeds th
 | <a id="command-consumecustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to spend (<= available balance). |
 | <a id="command-consumecustomercredit--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 
+<a id="command-placereplacementorder"></a>
+#### 📩 Command: `PlaceReplacementOrder`
+
+Place a NO-CHARGE replacement order for a resolved reclamation (ReclamationResolved REPLACEMENT, ADR-20260726-171736 / #159). Dispatched by the ReclamationProcess saga; NOT a public GraphQL mutation. The handler reads the ORIGINAL order (by originalOrderId) and remakes it as a new Order carrying the SAME line items, a $0 buyer total and NO paymentIntentId (no Stripe), linked via OrderPlaced.replacementOf. It then enters the normal fulfilment/dispatch flow (the restaurant remakes it, the rider redelivers). Idempotent per reclamationId: the saga derives a deterministic orderId from reclamationId, so a re-delivered ReclamationResolved re-targets the same new-order stream and is absorbed as a no-op — never a second replacement.
+
+- **Dispatched by**: — · **handled by** [🎭 `Order`](#actor-order)
+- **Emits**: [⚡ `OrderPlaced`](#event-orderplaced)
+- **Throws**: [⛔ `OrderNotFound`](#error-ordernotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-placereplacementorder--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | Saga-generated id for the new replacement order (deterministic from reclamationId — the idempotency key). |
+| <a id="command-placereplacementorder--originalorderid"></a>`originalOrderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | The original order to remake; its line items and delivery details are copied verbatim. |
+| <a id="command-placereplacementorder--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+
 <a id="command-openconversation"></a>
 #### 📩 Command: `OpenConversation`
 
@@ -4414,7 +4430,8 @@ A customer has placed an order and payment was successfully authorized/captured.
 | <a id="event-orderplaced--totalamount"></a>`totalAmount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="event-orderplaced--breakdown"></a>`breakdown` | [📦 `PaymentBreakdown`](#entity-paymentbreakdown) | ✅ | Server-computed fee/split breakdown (ADR-0016/0017); breakdown.total == totalAmount. |
 | <a id="event-orderplaced--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
-| <a id="event-orderplaced--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
+| <a id="event-orderplaced--replacementof"></a>`replacementOf` | [🔤 `OrderId`](#scalar-orderid) | ⬜ | Set when this order is a NO-CHARGE replacement remade for a resolved reclamation (ReclamationResolved REPLACEMENT, ADR-20260726-171736 / #159): the id of the ORIGINAL order it replaces. A replacement is a normal Order that flows through the usual fulfilment/dispatch, but carries a $0 buyer total and NO paymentIntentId (no Stripe). Absent for an ordinary paid order.  |
+| <a id="event-orderplaced--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ⬜ | The captured Stripe PaymentIntent for a paid order. ABSENT for a no-charge replacement order (replacementOf set) — no money moved, so there is no PaymentIntent (ADR-20260726-171736).  |
 
 <a id="event-orderacceptedbyrestaurant"></a>
 #### ⚡ Event: `OrderAcceptedByRestaurant`
@@ -5174,7 +5191,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-cartrestaurantmismatch"></a>⛔ `CartRestaurantMismatch` | Line/checkout restaurant differs from the cart's restaurant (no mixing). | 🇬🇧 Your cart already has items from another restaurant, not '{restaurantName}'. | 🇫🇷 Votre panier contient déjà des articles d'un autre restaurant que '{restaurantName}'. | [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-cartlinenotfound"></a>⛔ `CartLineNotFound` | No line with this id in the cart. | 🇬🇧 This cart line no longer exists. | 🇫🇷 Cette ligne du panier n'existe plus. | [📩 `RemoveCartLine`](#command-removecartline), [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity) |
 | <a id="error-cartempty"></a>⛔ `CartEmpty` | Checkout attempted on an empty cart. | 🇬🇧 Your cart is empty. | 🇫🇷 Votre panier est vide. | [📩 `PlaceOrder`](#command-placeorder) |
-| <a id="error-ordernotfound"></a>⛔ `OrderNotFound` | No order with this id. | 🇬🇧 Order not found. | 🇫🇷 Commande introuvable. | [📩 `AcceptOrder`](#command-acceptorder), [📩 `StartPreparation`](#command-startpreparation), [📩 `MarkOrderReady`](#command-markorderready), [📩 `MarkOrderDelivered`](#command-markorderdelivered), [📩 `RejectOrder`](#command-rejectorder), [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer), [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant), [📩 `RateOrder`](#command-rateorder), [📩 `RateRestaurant`](#command-raterestaurant), [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction), [📩 `TipOrder`](#command-tiporder), [📩 `RequestRefund`](#command-requestrefund) |
+| <a id="error-ordernotfound"></a>⛔ `OrderNotFound` | No order with this id. | 🇬🇧 Order not found. | 🇫🇷 Commande introuvable. | [📩 `PlaceReplacementOrder`](#command-placereplacementorder), [📩 `AcceptOrder`](#command-acceptorder), [📩 `StartPreparation`](#command-startpreparation), [📩 `MarkOrderReady`](#command-markorderready), [📩 `MarkOrderDelivered`](#command-markorderdelivered), [📩 `RejectOrder`](#command-rejectorder), [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer), [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant), [📩 `RateOrder`](#command-rateorder), [📩 `RateRestaurant`](#command-raterestaurant), [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction), [📩 `TipOrder`](#command-tiporder), [📩 `RequestRefund`](#command-requestrefund) |
 | <a id="error-invalidorderstatus"></a>⛔ `InvalidOrderStatus` | Order is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the order is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la commande est '{currentStatus}'. | [📩 `AcceptOrder`](#command-acceptorder), [📩 `StartPreparation`](#command-startpreparation), [📩 `MarkOrderReady`](#command-markorderready), [📩 `MarkOrderDelivered`](#command-markorderdelivered), [📩 `RejectOrder`](#command-rejectorder), [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer), [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant), [📩 `RateOrder`](#command-rateorder), [📩 `RateRestaurant`](#command-raterestaurant), [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction), [📩 `TipOrder`](#command-tiporder), [📩 `RequestRefund`](#command-requestrefund) |
 | <a id="error-orderalreadyrated"></a>⛔ `OrderAlreadyRated` | The delivery (rider thumb) has already been rated for this order; final. | 🇬🇧 You have already rated this delivery. | 🇫🇷 Vous avez déjà noté cette livraison. | [📩 `RateOrder`](#command-rateorder) |
 | <a id="error-restaurantalreadyrated"></a>⛔ `RestaurantAlreadyRated` | The restaurant has already been rated for this order; final (one per order). | 🇬🇧 You have already rated the restaurant for this order. | 🇫🇷 Vous avez déjà noté le restaurant pour cette commande. | [📩 `RateRestaurant`](#command-raterestaurant) |
@@ -5203,7 +5220,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
 
-### 📐 Business rules _(40)_
+### 📐 Business rules _(41)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5484,6 +5501,13 @@ _A customer can never spend more store credit than their available balance; an o
 _When a reclamation is resolved as GOODWILL_CREDIT, the ReclamationProcess saga grants the claimant store credit for the recorded amount (#158)._
 
 - **Verified by**: [🧪 `TestReclamationProcessGrantsGoodwillCredit`](#test-testreclamationprocessgrantsgoodwillcredit)
+
+<a id="rule-replacementorderplacedonresolution"></a>
+#### 📐 Rule: `ReplacementOrderPlacedOnResolution`
+
+_When a reclamation is resolved as REPLACEMENT, a no-charge replacement order is placed with the SAME line items as the original, a $0 buyer total and no payment (no Stripe PaymentIntent), linked to the original via OrderPlaced.replacementOf — so it enters the normal fulfilment/dispatch flow. Idempotent per reclamationId: a re-delivered resolution never places a second replacement (#159, ADR-20260726-171736)._
+
+- **Verified by**: [🧪 `TestPlaceReplacementOrderCopiesItems`](#test-testplacereplacementordercopiesitems)
 
 ### 🧪 Tests _(9)_
 
@@ -5780,6 +5804,16 @@ _The Order is born by recording the OrderPlaced fact delivered by PlaceOrderProc
 - **When**: [📩 `OrderPlaced`](#command-orderplaced)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+
+<a id="test-testplacereplacementordercopiesitems"></a>
+#### 🧪 Test: `TestPlaceReplacementOrderCopiesItems`
+
+_Places a no-charge replacement order copying the original's items, linked via replacementOf_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced)
+- **When**: [📩 `PlaceReplacementOrder`](#command-placereplacementorder)
+- **Then**: [⚡ `OrderPlaced`](#event-orderplaced)
+- **Verifies**: [📐 `ReplacementOrderPlacedOnResolution`](#rule-replacementorderplacedonresolution)
 
 **[🎭 `Payment`](#actor-payment)**
 

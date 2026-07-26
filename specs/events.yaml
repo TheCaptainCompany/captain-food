@@ -919,8 +919,20 @@ OrderPlaced:
     note:
       $ref: 'scalars.yaml#/OrderNote'
       nullable: true
+    replacementOf:
+      $ref: 'scalars.yaml#/OrderId'
+      nullable: true
+      description: >
+        Set when this order is a NO-CHARGE replacement remade for a resolved reclamation
+        (ReclamationResolved REPLACEMENT, ADR-20260726-171736 / #159): the id of the ORIGINAL order it
+        replaces. A replacement is a normal Order that flows through the usual fulfilment/dispatch, but
+        carries a $0 buyer total and NO paymentIntentId (no Stripe). Absent for an ordinary paid order.
     paymentIntentId:
       $ref: 'scalars.yaml#/PaymentIntentId'
+      nullable: true
+      description: >
+        The captured Stripe PaymentIntent for a paid order. ABSENT for a no-charge replacement order
+        (replacementOf set) — no money moved, so there is no PaymentIntent (ADR-20260726-171736).
   required:
     - orderId
     - restaurantId
@@ -929,7 +941,6 @@ OrderPlaced:
     - items
     - totalAmount
     - breakdown
-    - paymentIntentId
 
 OrderAcceptedByRestaurant:
   description: "Restaurant has accepted to prepare the order."
