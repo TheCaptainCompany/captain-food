@@ -87,6 +87,9 @@ scalar AttachmentRef
 scalar MuteReason
 scalar EscalationReason
 scalar TranslatedText
+scalar ReclamationId
+scalar ReclamationDescription
+scalar ReclamationReason
 
 # ==============================================================================
 # Enums
@@ -345,6 +348,24 @@ enum ConversationAuthorRole {
   RESTAURANT
   RIDER
   ADMIN
+}
+
+enum ReclamationCategory {
+  MISSING_ITEM
+  WRONG_ITEM
+  QUALITY
+  LATE_DELIVERY
+  DAMAGED
+  NOT_DELIVERED
+  OTHER
+}
+
+enum ReclamationResolution {
+  FULL_REFUND
+  PARTIAL_REFUND
+  REPLACEMENT
+  GOODWILL_CREDIT
+  REJECTED
 }
 
 # ==============================================================================
@@ -1319,6 +1340,31 @@ input UnmuteParticipantInput {
   mutedRole: ConversationAuthorRole!
 }
 
+input OpenReclamationInput {
+  reclamationId: ReclamationId!
+  orderId: OrderId!
+  category: ReclamationCategory!
+  description: ReclamationDescription!
+  requestedResolution: ReclamationResolution
+}
+
+input ResolveReclamationInput {
+  reclamationId: ReclamationId!
+  resolution: ReclamationResolution!
+  note: ReclamationReason
+  refundAmount: MoneyInput
+}
+
+input RejectReclamationInput {
+  reclamationId: ReclamationId!
+  reason: ReclamationReason
+}
+
+input ReopenReclamationInput {
+  reclamationId: ReclamationId!
+  reason: ReclamationReason
+}
+
 input OperationStatusQueryInput {
   messageId: MessageId!
 }
@@ -1674,6 +1720,10 @@ type Mutation {
   escalateToAdmin(input: EscalateToAdminInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @command(name: "EscalateToAdmin")
   muteParticipant(input: MuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "MuteParticipant")
   unmuteParticipant(input: UnmuteParticipantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "UnmuteParticipant")
+  openReclamation(input: OpenReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "OpenReclamation")
+  resolveReclamation(input: ResolveReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "ResolveReclamation")
+  rejectReclamation(input: RejectReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "RejectReclamation")
+  reopenReclamation(input: ReopenReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ReopenReclamation")
 }
 
 # ==============================================================================

@@ -95,6 +95,11 @@ customer:
         SendMessage: { $ref: 'api.yaml#/mutations/postMessage' }
         TranslateMessage: { $ref: 'api.yaml#/mutations/recordMessageTranslation' }
         ReadThread: { $ref: 'api.yaml#/queries/orderConversation' }
+    RaiseAClaim:
+      description: As a customer, I raise a claim/dispute about a delivered order and can reopen a decided one (#151).
+      steps:
+        OpenClaim: { $ref: 'api.yaml#/mutations/openReclamation' }
+        ReopenClaim: { $ref: 'api.yaml#/mutations/reopenReclamation' }
 
 restaurant_owner:
   description: >
@@ -192,6 +197,11 @@ restaurant_manager:
         EscalateToAdmin: { $ref: 'api.yaml#/mutations/escalateToAdmin' }   # pull an admin in with a reason (#129)
         MuteParticipant: { $ref: 'api.yaml#/mutations/muteParticipant' }   # mute a disruptive role, reason required (#129)
         UnmuteParticipant: { $ref: 'api.yaml#/mutations/unmuteParticipant' }
+    HandleClaims:
+      description: As a manager, I decide customers' claims on my orders — resolving or rejecting each (#151).
+      steps:
+        ResolveClaim: { $ref: 'api.yaml#/mutations/resolveReclamation' }
+        RejectClaim: { $ref: 'api.yaml#/mutations/rejectReclamation' }
 
 rider:
   description: A courier who delivers orders from restaurants to customers.

@@ -12,7 +12,7 @@
 use crate::generated::events::DomainEvent;
 use crate::generated::scalars::{
     CartId, CatalogId, CustomerId, DeliveryJobId, DeliveryPartnerRegistrationId, OrderId,
-    RestaurantAccountId, RestaurantId, RiderId,
+    ReclamationId, RestaurantAccountId, RestaurantId, RiderId,
 };
 // A Conversation is keyed by the OrderId (its identity IS its order, #129) — same id type as Order, distinct stream.
 
@@ -71,6 +71,8 @@ impl_aggregate!(
 // A Prospect is keyed by the prospected Restaurant's id (ADR-0020) — same id type as Restaurant, distinct stream.
 impl_aggregate!(crate::prospect::ProspectState, RestaurantId, "Prospect", crate::prospect::fold);
 impl_aggregate!(crate::conversation::ConversationState, OrderId, "Conversation", crate::conversation::fold);
+// A Reclamation is keyed by its own reclamationId (MULTIPLE claims per order; #153).
+impl_aggregate!(crate::reclamation::ReclamationState, ReclamationId, "Reclamation", crate::reclamation::fold);
 
 #[cfg(test)]
 mod tests {

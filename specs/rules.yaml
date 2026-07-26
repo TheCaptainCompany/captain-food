@@ -207,3 +207,15 @@ TranslationsAreCachedOncePerLocale:
   description: "A message is translated at most once per target locale; re-recording an existing (message, locale) translation is rejected (translate once, reuse; #129)."
 TranslationTargetsAPostedMessage:
   description: "A translation can only be recorded for a message that was actually posted to the conversation (#129)."
+
+# --- Reclamations / customer claims (#151) ---
+ReclamationIsUniquePerId:
+  description: "A reclamation is opened once per reclamationId; opening a claim with an already-used id is rejected (#151)."
+OnlyOpenReclamationsAreDecided:
+  description: "A reclamation can be resolved or rejected only while it is OPEN; deciding one that is not open is rejected (#151)."
+ReclamationRejectionCarriesAReason:
+  description: "Rejecting a reclamation requires a non-empty reason; a rejection without one is rejected (#151)."
+PartialRefundResolutionCarriesAnAmount:
+  description: "Resolving a reclamation as PARTIAL_REFUND requires a refund amount; a partial refund without one is rejected (#151)."
+OnlyDecidedReclamationsCanBeReopened:
+  description: "Only a decided (resolved or rejected) reclamation can be reopened; reopening an open reclamation is rejected (#151)."

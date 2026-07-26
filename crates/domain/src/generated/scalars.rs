@@ -664,3 +664,39 @@ pub struct EscalationReason(pub String);
 /// A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TranslatedText(pub String);
+
+/// Client-generated id of a customer reclamation (claim/dispute) — the idempotency key for OpenReclamation (a re-open with the same id is rejected). Multiple reclamations may exist per order, so the reclamation has its own identity, distinct from the orderId it is about (#151).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ReclamationId(pub uuid::Uuid);
+
+/// What the customer is claiming about the order: an item was missing, the wrong item was delivered, a quality problem, a late delivery, damaged goods, nothing delivered at all, or another reason (#151).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ReclamationCategory {
+    MISSING_ITEM,
+    WRONG_ITEM,
+    QUALITY,
+    LATE_DELIVERY,
+    DAMAGED,
+    NOT_DELIVERED,
+    OTHER,
+}
+
+/// The decision recorded when a reclamation is closed: a full or partial refund, a replacement order, a goodwill credit, or a rejection of the claim. The aggregate records the DECISION only; the refund money-move, credit ledger and replacement orders are downstream slices (#151).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ReclamationResolution {
+    FULL_REFUND,
+    PARTIAL_REFUND,
+    REPLACEMENT,
+    GOODWILL_CREDIT,
+    REJECTED,
+}
+
+/// Free-text description of the problem the customer is claiming about the order (#151).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ReclamationDescription(pub String);
+
+/// Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ReclamationReason(pub String);

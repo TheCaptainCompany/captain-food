@@ -572,6 +572,26 @@ fn fx_message_translation_added() -> DomainEvent {
     DomainEvent::MessageTranslationAdded(evs::MessageTranslationAdded { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), locale: sc::Locale("en-US".into()), text: sc::TranslatedText("Hi, any update on my order?".into()) })
 }
 
+/// tests.yaml#/fixtures/reclamationOpened — events.yaml#/ReclamationOpened
+fn fx_reclamation_opened() -> DomainEvent {
+    DomainEvent::ReclamationOpened(evs::ReclamationOpened { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None })
+}
+
+/// tests.yaml#/fixtures/reclamationResolvedFullRefund — events.yaml#/ReclamationResolved
+fn fx_reclamation_resolved_full_refund() -> DomainEvent {
+    DomainEvent::ReclamationResolved(evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: None, refund_amount: None })
+}
+
+/// tests.yaml#/fixtures/reclamationRejected — events.yaml#/ReclamationRejected
+fn fx_reclamation_rejected() -> DomainEvent {
+    DomainEvent::ReclamationRejected(evs::ReclamationRejected { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: sc::ReclamationReason("The delivery photo shows all items were handed over.".into()) })
+}
+
+/// tests.yaml#/fixtures/reclamationReopened — events.yaml#/ReclamationReopened
+fn fx_reclamation_reopened() -> DomainEvent {
+    DomainEvent::ReclamationReopened(evs::ReclamationReopened { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: Some(sc::ReclamationReason("Customer sent a photo; taking another look.".into())) })
+}
+
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
 /// the canonical OrderTracking rows the saga legs read (`read_order`) — state the spec's
 /// GIVEN (an event list) cannot express but its cases assume.
@@ -3533,5 +3553,200 @@ async fn test_unmute_not_muted_rejected() {
     let err = result.expect_err("TestUnmuteNotMutedRejected: the spec expects a typed rejection");
     support::assert_thrown("TestUnmuteNotMutedRejected", &err, &["ParticipantNotMuted"]);
     bed.assert_appended("TestUnmuteNotMutedRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReclamationOpened — "Opens a customer reclamation over an order"
+/// rules: ReclamationIsUniquePerId
+#[tokio::test]
+async fn test_reclamation_opened() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::OpenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None };
+    let result = crate::commands::open_reclamation(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestReclamationOpened: the spec expects acceptance");
+    bed.assert_appended("TestReclamationOpened", &before, &[
+        (format!("Reclamation-{}", support::uid("recl-1")), fx_reclamation_opened()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestReclamationOpenedTwiceIsRejected — "Opening a reclamation with an already-used id is rejected"
+/// rules: ReclamationIsUniquePerId
+#[tokio::test]
+async fn test_reclamation_opened_twice_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::OpenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None };
+    let result = crate::commands::open_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestReclamationOpenedTwiceIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestReclamationOpenedTwiceIsRejected", &err, &["ReclamationAlreadyExists"]);
+    bed.assert_appended("TestReclamationOpenedTwiceIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReclamationResolvedFullRefund — "Resolves an open reclamation with a full refund"
+/// rules: OnlyOpenReclamationsAreDecided
+#[tokio::test]
+async fn test_reclamation_resolved_full_refund() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ResolveReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: None, refund_amount: None };
+    let result = crate::commands::resolve_reclamation(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestReclamationResolvedFullRefund: the spec expects acceptance");
+    bed.assert_appended("TestReclamationResolvedFullRefund", &before, &[
+        (format!("Reclamation-{}", support::uid("recl-1")), fx_reclamation_resolved_full_refund()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestResolveNotOpenRejected — "Resolving a reclamation that is not open is rejected"
+/// rules: OnlyOpenReclamationsAreDecided
+#[tokio::test]
+async fn test_resolve_not_open_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened(), fx_reclamation_resolved_full_refund()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ResolveReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: None, refund_amount: None };
+    let result = crate::commands::resolve_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestResolveNotOpenRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestResolveNotOpenRejected", &err, &["ReclamationNotOpen"]);
+    bed.assert_appended("TestResolveNotOpenRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestResolvePartialRefundWithoutAmountRejected — "Resolving as PARTIAL_REFUND without an amount is rejected"
+/// rules: PartialRefundResolutionCarriesAnAmount
+#[tokio::test]
+async fn test_resolve_partial_refund_without_amount_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ResolveReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), resolution: sc::ReclamationResolution::PARTIAL_REFUND, note: None, refund_amount: None };
+    let result = crate::commands::resolve_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestResolvePartialRefundWithoutAmountRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestResolvePartialRefundWithoutAmountRejected", &err, &["PartialRefundAmountRequired"]);
+    bed.assert_appended("TestResolvePartialRefundWithoutAmountRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReclamationRejected — "Rejects an open reclamation with a reason"
+/// rules: ReclamationRejectionCarriesAReason
+#[tokio::test]
+async fn test_reclamation_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RejectReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: Some(sc::ReclamationReason("The delivery photo shows all items were handed over.".into())) };
+    let result = crate::commands::reject_reclamation(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestReclamationRejected: the spec expects acceptance");
+    bed.assert_appended("TestReclamationRejected", &before, &[
+        (format!("Reclamation-{}", support::uid("recl-1")), fx_reclamation_rejected()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestRejectWithoutReasonRejected — "Rejecting a reclamation without a reason is rejected"
+/// rules: ReclamationRejectionCarriesAReason
+#[tokio::test]
+async fn test_reject_without_reason_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RejectReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: None };
+    let result = crate::commands::reject_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRejectWithoutReasonRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRejectWithoutReasonRejected", &err, &["RejectionReasonRequired"]);
+    bed.assert_appended("TestRejectWithoutReasonRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRejectNotOpenRejected — "Rejecting a reclamation that is not open is rejected"
+/// rules: OnlyOpenReclamationsAreDecided
+#[tokio::test]
+async fn test_reject_not_open_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened(), fx_reclamation_rejected()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RejectReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: Some(sc::ReclamationReason("The delivery photo shows all items were handed over.".into())) };
+    let result = crate::commands::reject_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRejectNotOpenRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRejectNotOpenRejected", &err, &["ReclamationNotOpen"]);
+    bed.assert_appended("TestRejectNotOpenRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReclamationReopened — "Reopens a rejected reclamation for another look"
+/// rules: OnlyDecidedReclamationsCanBeReopened
+#[tokio::test]
+async fn test_reclamation_reopened() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened(), fx_reclamation_rejected()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ReopenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: Some(sc::ReclamationReason("Customer sent a photo; taking another look.".into())) };
+    let result = crate::commands::reopen_reclamation(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestReclamationReopened: the spec expects acceptance");
+    bed.assert_appended("TestReclamationReopened", &before, &[
+        (format!("Reclamation-{}", support::uid("recl-1")), fx_reclamation_reopened()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestReopenOpenRejected — "Reopening a reclamation that is still open is rejected"
+/// rules: OnlyDecidedReclamationsCanBeReopened
+#[tokio::test]
+async fn test_reopen_open_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ReopenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: Some(sc::ReclamationReason("Customer sent a photo; taking another look.".into())) };
+    let result = crate::commands::reopen_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestReopenOpenRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestReopenOpenRejected", &err, &["ReclamationNotReopenable"]);
+    bed.assert_appended("TestReopenOpenRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestResolveMissingReclamationRejected — "Resolving a reclamation that does not exist is rejected"
+/// rules: OnlyOpenReclamationsAreDecided
+#[tokio::test]
+async fn test_resolve_missing_reclamation_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ResolveReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: None, refund_amount: None };
+    let result = crate::commands::resolve_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestResolveMissingReclamationRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestResolveMissingReclamationRejected", &err, &["ReclamationNotFound"]);
+    bed.assert_appended("TestResolveMissingReclamationRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRejectMissingReclamationRejected — "Rejecting a reclamation that does not exist is rejected"
+/// rules: OnlyOpenReclamationsAreDecided
+#[tokio::test]
+async fn test_reject_missing_reclamation_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RejectReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: Some(sc::ReclamationReason("The delivery photo shows all items were handed over.".into())) };
+    let result = crate::commands::reject_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRejectMissingReclamationRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRejectMissingReclamationRejected", &err, &["ReclamationNotFound"]);
+    bed.assert_appended("TestRejectMissingReclamationRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReopenMissingReclamationRejected — "Reopening a reclamation that does not exist is rejected"
+/// rules: OnlyDecidedReclamationsCanBeReopened
+#[tokio::test]
+async fn test_reopen_missing_reclamation_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ReopenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: Some(sc::ReclamationReason("Customer sent a photo; taking another look.".into())) };
+    let result = crate::commands::reopen_reclamation(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestReopenMissingReclamationRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestReopenMissingReclamationRejected", &err, &["ReclamationNotFound"]);
+    bed.assert_appended("TestReopenMissingReclamationRejected", &before, &[]);
 }
 

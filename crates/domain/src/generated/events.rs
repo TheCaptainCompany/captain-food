@@ -950,6 +950,43 @@ pub struct ParticipantUnmuted {
     pub muted_role: ConversationAuthorRole,
 }
 
+/// Birth of a customer reclamation over a delivered order (id = reclamationId; #153). Records the category, the customer's description and — optionally — the resolution the customer requested. The 14-day window and order-eligibility (order exists/delivered) are enforced in the application layer when opening, not by the aggregate (#151).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReclamationOpened {
+    pub reclamation_id: ReclamationId,
+    pub order_id: OrderId,
+    pub category: ReclamationCategory,
+    pub description: ReclamationDescription,
+    pub requested_resolution: Option<ReclamationResolution>,
+}
+
+/// A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReclamationResolved {
+    pub reclamation_id: ReclamationId,
+    pub resolution: ReclamationResolution,
+    pub note: Option<ReclamationReason>,
+    pub refund_amount: Option<Money>,
+}
+
+/// A reclamation was rejected (the claim was declined) with a recorded reason (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReclamationRejected {
+    pub reclamation_id: ReclamationId,
+    pub reason: ReclamationReason,
+}
+
+/// A previously decided (resolved or rejected) reclamation was reopened for another look (rules.yaml#/OnlyDecidedReclamationsCanBeReopened). `reason` is optional — a reopen need not state why — mirroring the optional command input (there is no reason-required guard on reopen, unlike reject) (#151).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReclamationReopened {
+    pub reclamation_id: ReclamationId,
+    pub reason: Option<ReclamationReason>,
+}
+
 /// Every business event as a typed, adjacently-tagged union: `{ "eventType": <name>, "payload": { … } }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "eventType", content = "payload")]
@@ -1052,4 +1089,8 @@ pub enum DomainEvent {
     AdminInvitedToConversation(AdminInvitedToConversation),
     ParticipantMuted(ParticipantMuted),
     ParticipantUnmuted(ParticipantUnmuted),
+    ReclamationOpened(ReclamationOpened),
+    ReclamationResolved(ReclamationResolved),
+    ReclamationRejected(ReclamationRejected),
+    ReclamationReopened(ReclamationReopened),
 }

@@ -119,6 +119,16 @@ use domain::generated::events::{
 };
 use domain::generated::scalars::ConversationAuthorRole;
 
+// Reclamations / customer claims (#151) — the Reclamation aggregate (id = reclamationId).
+use domain::reclamation::{ReclamationState, ReclamationStatus};
+use domain::generated::commands::{
+    OpenReclamation, RejectReclamation, ReopenReclamation, ResolveReclamation,
+};
+use domain::generated::events::{
+    ReclamationOpened, ReclamationRejected, ReclamationReopened, ReclamationResolved,
+};
+use domain::generated::scalars::{ReclamationId, ReclamationResolution};
+
 use crate::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
@@ -1813,6 +1823,144 @@ pub async fn unmute_participant(
         muted_role: cmd.muted_role,
     });
     let stream = conversation_stream(&cmd.order_id);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// Reclamation (actors.yaml#/Reclamation) — customer claim/dispute lifecycle (#151, #153).
+//
+// This slice is the aggregate LIFECYCLE only: open -> resolve/reject -> reopen. `ReclamationResolved`
+// records the resolution DECISION (+ amount for a PARTIAL_REFUND) so the downstream refund/credit/
+// replacement slices react later; no money-move happens here. The 14-day window and order-eligibility
+// (order exists/delivered) are cross-aggregate/temporal invariants enforced in the application layer in
+// a follow-up (reading the order's delivered-at vs now), NOT pure-aggregate invariants.
+// ================================================================================================
+
+/// A `errors.yaml#/ReclamationNotFound` rejection for a reclamation that was never opened.
+fn reclamation_not_found(reclamation_id: &ReclamationId) -> DomainError {
+    reject("ReclamationNotFound", json!({ "reclamationId": reclamation_id }))
+}
+
+/// Handle `commands.yaml#/OpenReclamation` → emit `events.yaml#/ReclamationOpened` on the new
+/// `Reclamation-<reclamationId>` stream. The birth is idempotent-guarded: an existing fold — or losing
+/// the version-0 race — rejects with `errors.yaml#/ReclamationAlreadyExists`
+/// (rules.yaml#/ReclamationIsUniquePerId). Records the requested resolution when supplied.
+pub async fn open_reclamation(
+    store: &dyn EventStore,
+    cmd: OpenReclamation,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let already =
+        |id: &ReclamationId| reject("ReclamationAlreadyExists", json!({ "reclamationId": id }));
+    let (state, _version) = Repository::new(store).load::<ReclamationState>(cmd.reclamation_id).await?;
+    if state.is_some() {
+        return Err(already(&cmd.reclamation_id));
+    }
+    let event = DomainEvent::ReclamationOpened(ReclamationOpened {
+        reclamation_id: cmd.reclamation_id,
+        order_id: cmd.order_id,
+        category: cmd.category,
+        description: cmd.description,
+        requested_resolution: cmd.requested_resolution,
+    });
+    let stream = format!("Reclamation-{}", cmd.reclamation_id.0);
+    match Repository::new(store).save(&stream, 0, &[event], actor).await {
+        Ok(_) => Ok(()),
+        Err(e) if is_version_conflict(&e) => Err(already(&cmd.reclamation_id)),
+        Err(e) => Err(e),
+    }
+}
+
+/// Handle `commands.yaml#/ResolveReclamation` → emit `events.yaml#/ReclamationResolved` on the
+/// reclamation's stream. Requires an existing reclamation (`errors.yaml#/ReclamationNotFound`) that is
+/// currently OPEN (`errors.yaml#/ReclamationNotOpen`, rules.yaml#/OnlyOpenReclamationsAreDecided); a
+/// PARTIAL_REFUND without a `refundAmount` is rejected (`errors.yaml#/PartialRefundAmountRequired`,
+/// rules.yaml#/PartialRefundResolutionCarriesAnAmount). Records the decision only — no money-move.
+pub async fn resolve_reclamation(
+    store: &dyn EventStore,
+    cmd: ResolveReclamation,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<ReclamationState>(cmd.reclamation_id, || reclamation_not_found(&cmd.reclamation_id))
+        .await?;
+    if state.status != ReclamationStatus::OPEN {
+        return Err(reject("ReclamationNotOpen", json!({ "reclamationId": cmd.reclamation_id })));
+    }
+    if cmd.resolution == ReclamationResolution::PARTIAL_REFUND && cmd.refund_amount.is_none() {
+        return Err(reject(
+            "PartialRefundAmountRequired",
+            json!({ "reclamationId": cmd.reclamation_id }),
+        ));
+    }
+    let event = DomainEvent::ReclamationResolved(ReclamationResolved {
+        reclamation_id: cmd.reclamation_id,
+        resolution: cmd.resolution,
+        note: cmd.note,
+        refund_amount: cmd.refund_amount,
+    });
+    let stream = format!("Reclamation-{}", cmd.reclamation_id.0);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RejectReclamation` → emit `events.yaml#/ReclamationRejected` on the
+/// reclamation's stream. Requires an existing reclamation (`errors.yaml#/ReclamationNotFound`) that is
+/// currently OPEN (`errors.yaml#/ReclamationNotOpen`, rules.yaml#/OnlyOpenReclamationsAreDecided) and a
+/// NON-EMPTY `reason` — a rejection without one is rejected (`errors.yaml#/RejectionReasonRequired`,
+/// rules.yaml#/ReclamationRejectionCarriesAReason): the schema leaves `reason` optional on purpose, so
+/// the "reasoned" invariant lives here in the write model (like MuteParticipant).
+pub async fn reject_reclamation(
+    store: &dyn EventStore,
+    cmd: RejectReclamation,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<ReclamationState>(cmd.reclamation_id, || reclamation_not_found(&cmd.reclamation_id))
+        .await?;
+    if state.status != ReclamationStatus::OPEN {
+        return Err(reject("ReclamationNotOpen", json!({ "reclamationId": cmd.reclamation_id })));
+    }
+    let reason = match cmd.reason {
+        Some(reason) if !reason.0.trim().is_empty() => reason,
+        _ => {
+            return Err(reject(
+                "RejectionReasonRequired",
+                json!({ "reclamationId": cmd.reclamation_id }),
+            ))
+        }
+    };
+    let event = DomainEvent::ReclamationRejected(ReclamationRejected {
+        reclamation_id: cmd.reclamation_id,
+        reason,
+    });
+    let stream = format!("Reclamation-{}", cmd.reclamation_id.0);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ReopenReclamation` → emit `events.yaml#/ReclamationReopened` on the
+/// reclamation's stream. Requires an existing reclamation (`errors.yaml#/ReclamationNotFound`) in a
+/// DECIDED (resolved or rejected) state — reopening one still OPEN is rejected
+/// (`errors.yaml#/ReclamationNotReopenable`, rules.yaml#/OnlyDecidedReclamationsCanBeReopened). The
+/// `reason` is optional (a reopen need not state why).
+pub async fn reopen_reclamation(
+    store: &dyn EventStore,
+    cmd: ReopenReclamation,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<ReclamationState>(cmd.reclamation_id, || reclamation_not_found(&cmd.reclamation_id))
+        .await?;
+    if state.status == ReclamationStatus::OPEN {
+        return Err(reject(
+            "ReclamationNotReopenable",
+            json!({ "reclamationId": cmd.reclamation_id }),
+        ));
+    }
+    let event = DomainEvent::ReclamationReopened(ReclamationReopened {
+        reclamation_id: cmd.reclamation_id,
+        reason: cmd.reason,
+    });
+    let stream = format!("Reclamation-{}", cmd.reclamation_id.0);
     Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
 }
 

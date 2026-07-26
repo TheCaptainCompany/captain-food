@@ -20,6 +20,7 @@ pub mod generated;
 pub mod order;
 pub mod payment;
 pub mod prospect;
+pub mod reclamation;
 pub mod restaurant;
 pub mod restaurant_account;
 pub mod rider;

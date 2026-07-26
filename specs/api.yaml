@@ -982,6 +982,24 @@ mutations:
     roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
     slice: V0
 
+  # Reclamations / customer claims (#151)
+  openReclamation:
+    command: { $ref: 'commands.yaml#/OpenReclamation' }
+    roles: [CUSTOMER]
+    slice: V0
+  resolveReclamation:
+    command: { $ref: 'commands.yaml#/ResolveReclamation' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V0
+  rejectReclamation:
+    command: { $ref: 'commands.yaml#/RejectReclamation' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V0
+  reopenReclamation:
+    command: { $ref: 'commands.yaml#/ReopenReclamation' }
+    roles: [CUSTOMER]
+    slice: V0
+
 
 subscriptions:
 

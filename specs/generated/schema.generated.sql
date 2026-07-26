@@ -156,6 +156,14 @@ INSERT INTO ref_message_visibility (value, sort_order) VALUES ('PUBLIC',0),('INT
 CREATE TABLE ref_conversation_author_role(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_conversation_author_role (value, sort_order) VALUES ('CUSTOMER',0),('RESTAURANT',1),('RIDER',2),('ADMIN',3);
 
+-- ReclamationCategory
+CREATE TABLE ref_reclamation_category(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_reclamation_category (value, sort_order) VALUES ('MISSING_ITEM',0),('WRONG_ITEM',1),('QUALITY',2),('LATE_DELIVERY',3),('DAMAGED',4),('NOT_DELIVERED',5),('OTHER',6);
+
+-- ReclamationResolution
+CREATE TABLE ref_reclamation_resolution(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_reclamation_resolution (value, sort_order) VALUES ('FULL_REFUND',0),('PARTIAL_REFUND',1),('REPLACEMENT',2),('GOODWILL_CREDIT',3),('REJECTED',4);
+
 CREATE TABLE domain_events (
   position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   id UUID NOT NULL UNIQUE,

@@ -10132,6 +10132,12 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
         "escalateToAdmin" => ("EscalateToAdmin", "escalate_to_admin", Extra::None),
         "muteParticipant" => ("MuteParticipant", "mute_participant", Extra::None),
         "unmuteParticipant" => ("UnmuteParticipant", "unmute_participant", Extra::None),
+        // Reclamations / customer claims (#151) — the Reclamation aggregate handlers
+        // (crates/application/src/commands.rs); all plain (&dyn EventStore, cmd, &Actor) → Extra::None.
+        "openReclamation" => ("OpenReclamation", "open_reclamation", Extra::None),
+        "resolveReclamation" => ("ResolveReclamation", "resolve_reclamation", Extra::None),
+        "rejectReclamation" => ("RejectReclamation", "reject_reclamation", Extra::None),
+        "reopenReclamation" => ("ReopenReclamation", "reopen_reclamation", Extra::None),
         _ => return None,
     };
     let (resolve_extra, extra_arg) = match extra {
@@ -12128,6 +12134,7 @@ const BT_AGGREGATES: &[(&str, &str, bool)] = &[
     ("Rider", "riderId", true),
     ("DeliveryPartnerRegistration", "registrationId", true),
     ("Conversation", "orderId", true),   // id = orderId (a conversation's identity IS its order; #129)
+    ("Reclamation", "reclamationId", true),   // id = reclamationId (its own identity; MULTIPLE claims per order; #151)
 ];
 
 fn bt_agg(actor: &str) -> Option<(&'static str, &'static str, bool)> {

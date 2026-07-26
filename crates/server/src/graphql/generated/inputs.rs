@@ -1067,6 +1067,56 @@ pub struct UnmuteParticipantInput {
     pub muted_role: ConversationAuthorRole,
 }
 
+/// Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open with the same id is rejected). Records the category, description and optionally the requested resolution. The 14-day window and order-eligibility are enforced in the application layer, not here (#151).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenReclamationInput {
+    #[graphql(name = "reclamationId")]
+    pub reclamation_id: ReclamationId,
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "category")]
+    pub category: ReclamationCategory,
+    #[graphql(name = "description")]
+    pub description: ReclamationDescription,
+    #[graphql(name = "requestedResolution")]
+    pub requested_resolution: Option<ReclamationResolution>,
+}
+
+/// Resolve (decide) an OPEN reclamation with a `resolution`. A PARTIAL_REFUND requires a `refundAmount` (enforced by the write model as errors.yaml#/PartialRefundAmountRequired, not by the schema). The aggregate records the decision only; the refund/credit/replacement automation is downstream (#151).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveReclamationInput {
+    #[graphql(name = "reclamationId")]
+    pub reclamation_id: ReclamationId,
+    #[graphql(name = "resolution")]
+    pub resolution: ReclamationResolution,
+    #[graphql(name = "note")]
+    pub note: Option<ReclamationReason>,
+    #[graphql(name = "refundAmount")]
+    pub refund_amount: Option<MoneyInput>,
+}
+
+/// Reject an OPEN reclamation. A `reason` is REQUIRED, but is left OUT of `required` on purpose: the "reasoned" invariant is enforced by the write model as an anticipated error (errors.yaml#/RejectionReasonRequired), not by the schema (#151).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RejectReclamationInput {
+    #[graphql(name = "reclamationId")]
+    pub reclamation_id: ReclamationId,
+    #[graphql(name = "reason")]
+    pub reason: Option<ReclamationReason>,
+}
+
+/// Reopen a previously decided (resolved or rejected) reclamation for another look. The reclamation must exist and be in a decided state (errors.yaml#/ReclamationNotReopenable) (#151).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ReopenReclamationInput {
+    #[graphql(name = "reclamationId")]
+    pub reclamation_id: ReclamationId,
+    #[graphql(name = "reason")]
+    pub reason: Option<ReclamationReason>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationStatusQueryInput {
