@@ -345,3 +345,51 @@ pub mod rider {
         TERMINAL.contains(&state)
     }
 }
+
+/// Reclamation lifecycle over [`ReclamationStatus`] (specs/actors.yaml#/Reclamation/lifecycle).
+pub mod reclamation {
+    use crate::generated::events::DomainEvent;
+    use crate::generated::scalars::ReclamationStatus;
+
+    /// Terminal states — no outgoing transitions.
+    pub const TERMINAL: &[ReclamationStatus] = &[];
+
+    /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.
+    pub fn initial(event: &DomainEvent) -> Option<ReclamationStatus> {
+        match event {
+            DomainEvent::ReclamationOpened(_) => Some(ReclamationStatus::OPEN),
+            _ => None,
+        }
+    }
+
+    /// The declared transition table: `Some(next)` iff `event` legally moves the machine from
+    /// `from`; `None` = illegal transition, or an event outside the machine (status no-op). A
+    /// dynamic-target arm matches only when the event's carried state equals the declared target.
+    pub fn transition(from: ReclamationStatus, event: &DomainEvent) -> Option<ReclamationStatus> {
+        match (from, event) {
+            (ReclamationStatus::OPEN, DomainEvent::ReclamationResolved(_)) => Some(ReclamationStatus::RESOLVED),
+            (ReclamationStatus::OPEN, DomainEvent::ReclamationRejected(_)) => Some(ReclamationStatus::REJECTED),
+            (ReclamationStatus::RESOLVED, DomainEvent::ReclamationReopened(_)) => Some(ReclamationStatus::OPEN),
+            (ReclamationStatus::REJECTED, DomainEvent::ReclamationReopened(_)) => Some(ReclamationStatus::OPEN),
+            _ => None,
+        }
+    }
+
+    /// The state `event` drives the machine to, irrespective of the current state — at fold
+    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
+    /// for an event outside the machine (or whose target depends on the current state). A dynamic
+    /// (event-carried) target is the event's payload field.
+    pub fn target(event: &DomainEvent) -> Option<ReclamationStatus> {
+        match event {
+            DomainEvent::ReclamationResolved(_) => Some(ReclamationStatus::RESOLVED),
+            DomainEvent::ReclamationRejected(_) => Some(ReclamationStatus::REJECTED),
+            DomainEvent::ReclamationReopened(_) => Some(ReclamationStatus::OPEN),
+            _ => None,
+        }
+    }
+
+    /// Whether `state` is terminal (no outgoing transitions).
+    pub fn is_terminal(state: ReclamationStatus) -> bool {
+        TERMINAL.contains(&state)
+    }
+}

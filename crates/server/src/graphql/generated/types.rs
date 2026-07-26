@@ -6,7 +6,7 @@
 #![allow(non_camel_case_types)]
 
 use application::projections::{CartRow, CatalogRow, CustomerRow, OrderConversationRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
-use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, PricingPolicyRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
+use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, PricingPolicyRow, ReclamationRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
 use super::scalars::*;
@@ -822,6 +822,38 @@ pub struct DeliveryPartnerAvailability {
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// A customer claim/dispute over a delivered order (aggregate Reclamation, id = reclamationId; #154). Serves the customer's "my claims" list + claim detail and the restaurant's/admin's claims queue. `status` is derived from the lifecycle facts (OPEN → RESOLVED/REJECTED → OPEN on reopen); the decision fields (`resolution`, `refundAmount`, `rejectReason`, `decidedAt`) are null while OPEN.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Reclamation {
+    #[graphql(name = "reclamationId")]
+    pub reclamation_id: ReclamationId,
+    #[graphql(name = "orderId")]
+    pub order_id: OrderId,
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    #[graphql(name = "category")]
+    pub category: ReclamationCategory,
+    #[graphql(name = "description")]
+    pub description: ReclamationDescription,
+    #[graphql(name = "requestedResolution")]
+    pub requested_resolution: Option<ReclamationResolution>,
+    #[graphql(name = "status")]
+    pub status: ReclamationStatus,
+    #[graphql(name = "resolution")]
+    pub resolution: Option<ReclamationResolution>,
+    #[graphql(name = "refundAmount")]
+    pub refund_amount: Option<Money>,
+    #[graphql(name = "rejectReason")]
+    pub reject_reason: Option<ReclamationReason>,
+    #[graphql(name = "openedAt")]
+    pub opened_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "decidedAt")]
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin decides, then APPROVED (Stripe refund requested) or DENIED, and REFUNDED once Stripe settles. Serves the restaurant's and admin's refund queue (filter status = REQUESTED for pending ones).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -1251,6 +1283,33 @@ impl From<DeliveryPartnerAvailabilityRow> for DeliveryPartnerAvailability {
             contact_email: row.contact_email.into(),
             status: row.status.into(),
             requested_at: row.requested_at,
+            decided_at: row.decided_at,
+        }
+    }
+}
+
+/// Read-model row → API type: the `View_Reclamation` fold-view row (customer claims, #154 —
+/// Opened/Resolved/Rejected/Reopened folded on the Reclamation stream). The decision fields are null
+/// while OPEN; `refundAmount` rebuilds from the minor-units column + the row currency (both present
+/// only when a refund amount was recorded).
+impl From<ReclamationRow> for Reclamation {
+    fn from(row: ReclamationRow) -> Self {
+        Self {
+            reclamation_id: row.reclamation_id.into(),
+            order_id: row.order_id.into(),
+            customer_id: row.customer_id.into(),
+            restaurant_id: row.restaurant_id.into(),
+            category: row.category.into(),
+            description: row.description.into(),
+            requested_resolution: row.requested_resolution.map(Into::into),
+            status: row.status.into(),
+            resolution: row.resolution.map(Into::into),
+            refund_amount: match (row.refund_amount_cents, row.currency) {
+                (Some(cents), Some(currency)) => Some(order_money(cents, &currency)),
+                _ => None,
+            },
+            reject_reason: row.reject_reason.map(Into::into),
+            opened_at: row.opened_at,
             decided_at: row.decided_at,
         }
     }

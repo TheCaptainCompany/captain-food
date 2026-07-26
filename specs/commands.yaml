@@ -1486,18 +1486,21 @@ OpenReclamation:
   description: >
     Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open
     with the same id is rejected). Records the category, description and optionally the requested
-    resolution. The 14-day window and order-eligibility are enforced in the application layer, not here
-    (#151).
+    resolution. The client supplies `customerId` (whose claim) and `restaurantId` (whose restaurant's
+    order), mirroring how placeOrder supplies them — they scope the read model (#154). The 14-day window
+    and order-eligibility are enforced in the application layer, not here (#151).
   type: object
   properties:
     reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
     orderId: { $ref: 'scalars.yaml#/OrderId' }
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
     category: { $ref: 'scalars.yaml#/ReclamationCategory' }
     description: { $ref: 'scalars.yaml#/ReclamationDescription' }
     requestedResolution:
       $ref: 'scalars.yaml#/ReclamationResolution'
       nullable: true
-  required: [reclamationId, orderId, category, description]
+  required: [reclamationId, orderId, customerId, restaurantId, category, description]
 
 ResolveReclamation:
   description: >

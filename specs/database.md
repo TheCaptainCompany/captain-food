@@ -192,6 +192,31 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `View_Reclamation` · 🔭 V1 · source aggregate `Reclamation`
+
+- **Fed by**: `ReclamationOpened`, `ReclamationResolved`, `ReclamationRejected`, `ReclamationReopened`
+- **Rules**: `status` is derived from the latest lifecycle event type: OPEN on Opened → RESOLVED on Resolved / REJECTED on Rejected → OPEN again on Reopened. Set-once identity fields (order_id, customer_id, restaurant_id, category, description, requested_resolution) are carried only by the ReclamationOpened birth fact. The decision fields (resolution, refund_amount_cents/currency, reject_reason, decided_at) fill in on the ReclamationResolved / ReclamationRejected fact and are null while OPEN.
+- **Indexes**: `(customer_id, status)`, `(restaurant_id, status)`
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `reclamation_id` | `ReclamationId` | `UUID` | PK |  |
+| `order_id` | `OrderId` | `UUID` | index |  |
+| `customer_id` | `CustomerId` | `UUID` | index |  |
+| `restaurant_id` | `RestaurantId` | `UUID` | index |  |
+| `category` | `ReclamationCategory` | `INTEGER` | — |  |
+| `description` | `ReclamationDescription` | `TEXT` | — |  |
+| `requested_resolution` | `ReclamationResolution` | `INTEGER` | nullable | The resolution the customer asked for at open time, if any. |
+| `status` | `ReclamationStatus` | `INTEGER` | — | Derived from the latest lifecycle event type. |
+| `resolution` | `ReclamationResolution` | `INTEGER` | nullable | The decided resolution once resolved; null while OPEN or if rejected. |
+| `refund_amount_cents` | `MoneyCents` | `BIGINT` | nullable | amountCents of ReclamationResolved.refundAmount (Money — a PARTIAL_REFUND amount); null otherwise. |
+| `currency` | `CurrencyCode` | `TEXT` | nullable | currency of ReclamationResolved.refundAmount (Money); null unless a refund amount was recorded. |
+| `reject_reason` | `ReclamationReason` | `TEXT` | nullable | The reason recorded on rejection; null unless rejected. |
+| `opened_at` | `timestamptz` | `TIMESTAMPTZ` | — | occurrence: max(occurred_at) of the birth fact. |
+| `decided_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | occurrence: max(occurred_at) of the latest decision (resolve/reject); null while OPEN. |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 ### `View_PendingRefunds` · 🛶 V0 · source aggregate `Payment`
 
 - **Fed by**: `RefundOpened`, `RefundApproved`, `RefundDenied`, `PaymentRefunded`

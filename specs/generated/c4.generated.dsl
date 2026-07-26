@@ -22,6 +22,7 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
           a_Order = component "Order" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "Aggregate"
           a_Payment = component "Payment" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "Aggregate"
           a_Conversation = component "Conversation" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "Aggregate"
+          a_Reclamation = component "Reclamation" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "Aggregate"
           a_PlaceOrderProcess = component "PlaceOrderProcess" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "ProcessManager"
           a_RefundProcess = component "RefundProcess" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "ProcessManager"
         }

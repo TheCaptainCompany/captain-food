@@ -1723,19 +1723,23 @@ ParticipantUnmuted:
 ReclamationOpened:
   description: >
     Birth of a customer reclamation over a delivered order (id = reclamationId; #153). Records the
-    category, the customer's description and — optionally — the resolution the customer requested. The
-    14-day window and order-eligibility (order exists/delivered) are enforced in the application layer
-    when opening, not by the aggregate (#151).
+    category, the customer's description and — optionally — the resolution the customer requested.
+    Carries `customerId` (whose claim) and `restaurantId` (on whose restaurant's order) — business data
+    the client supplies, mirroring how OrderPlaced carries them — so the read model can scope "my
+    claims" and the restaurant's claims queue (#154). The 14-day window and order-eligibility (order
+    exists/delivered) are enforced in the application layer when opening, not by the aggregate (#151).
   type: object
   properties:
     reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
     orderId: { $ref: 'scalars.yaml#/OrderId' }
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
     category: { $ref: 'scalars.yaml#/ReclamationCategory' }
     description: { $ref: 'scalars.yaml#/ReclamationDescription' }
     requestedResolution:
       $ref: 'scalars.yaml#/ReclamationResolution'
       nullable: true
-  required: [reclamationId, orderId, category, description]
+  required: [reclamationId, orderId, customerId, restaurantId, category, description]
 
 ReclamationResolved:
   description: >

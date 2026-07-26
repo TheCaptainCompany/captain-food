@@ -130,6 +130,8 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
         Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
     let delivery_partner_availabilities: Arc<dyn application::queries::DeliveryPartnerAvailabilityReadRepository> =
         Arc::new(infrastructure::PgDeliveryPartnerAvailabilityRepository::new(pool.clone()));
+    let reclamations: Arc<dyn application::queries::ReclamationReadRepository> =
+        Arc::new(infrastructure::PgReclamationRepository::new(pool.clone()));
     let order_conversations: Arc<dyn application::queries::OrderConversationReadRepository> =
         Arc::new(infrastructure::PgOrderConversationRepository::new(pool.clone()));
     let event_store: Arc<dyn EventStore> = Arc::new(PgEventStore::new(pool.clone()));
@@ -159,6 +161,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,
+            reclamations,
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,

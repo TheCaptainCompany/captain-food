@@ -17,8 +17,9 @@ use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
     DeliveryReadRepository, OrderConversationReadRepository, OrderReadRepository,
-    PricingPolicyReadRepository, ProspectionReadRepository, RefundReadRepository,
-    RestaurantReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
+    PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
+    RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
+    UberSplitPolicyReadRepository,
 };
 
 use infrastructure::{EventBus, OperationStatusBus};
@@ -46,6 +47,7 @@ pub struct ReadDeps {
     pub refunds: Arc<dyn RefundReadRepository>,
     pub delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository>,
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
+    pub reclamations: Arc<dyn ReclamationReadRepository>,
 }
 
 /// Write-side ports injected into the mutation resolvers' context (ADR-0035 composition root): the
@@ -103,6 +105,7 @@ pub fn build_schema(
         builder = builder.data(d.refunds);
         builder = builder.data(d.delivery_satisfaction);
         builder = builder.data(d.delivery_partner_availabilities);
+        builder = builder.data(d.reclamations);
     }
     if let Some(w) = writes {
         builder = builder.data(w.event_store);

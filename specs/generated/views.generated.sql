@@ -96,6 +96,39 @@ SELECT
 FROM domain_events c
 WHERE c.event_type = 'DeliveryPartnerAvailabilityRequested';
 
+CREATE OR REPLACE VIEW View_Reclamation AS
+SELECT
+  (c.payload->>'reclamationId')::uuid AS reclamation_id,
+  (c.payload->>'orderId')::uuid AS order_id,
+  (c.payload->>'customerId')::uuid AS customer_id,
+  (c.payload->>'restaurantId')::uuid AS restaurant_id,
+  (CASE c.payload->>'category' WHEN 'MISSING_ITEM' THEN 0 WHEN 'WRONG_ITEM' THEN 1 WHEN 'QUALITY' THEN 2 WHEN 'LATE_DELIVERY' THEN 3 WHEN 'DAMAGED' THEN 4 WHEN 'NOT_DELIVERED' THEN 5 WHEN 'OTHER' THEN 6 END) AS category,
+  c.payload->>'description' AS description,
+  (CASE c.payload->>'requestedResolution' WHEN 'FULL_REFUND' THEN 0 WHEN 'PARTIAL_REFUND' THEN 1 WHEN 'REPLACEMENT' THEN 2 WHEN 'GOODWILL_CREDIT' THEN 3 WHEN 'REJECTED' THEN 4 END) AS requested_resolution,
+  (SELECT CASE e.event_type WHEN 'ReclamationOpened' THEN 0 WHEN 'ReclamationResolved' THEN 1 WHEN 'ReclamationRejected' THEN 2 WHEN 'ReclamationReopened' THEN 0 END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationOpened', 'ReclamationResolved', 'ReclamationRejected', 'ReclamationReopened')
+     ORDER BY e.position DESC LIMIT 1) AS status,
+  (SELECT (CASE e.payload->>'resolution' WHEN 'FULL_REFUND' THEN 0 WHEN 'PARTIAL_REFUND' THEN 1 WHEN 'REPLACEMENT' THEN 2 WHEN 'GOODWILL_CREDIT' THEN 3 WHEN 'REJECTED' THEN 4 END) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved') AND e.payload ? 'resolution'
+     ORDER BY e.position DESC LIMIT 1) AS resolution,
+  (SELECT (e.payload->'refundAmount'->>'amountCents')::bigint FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved') AND e.payload ? 'refundAmount'
+     ORDER BY e.position DESC LIMIT 1) AS refund_amount_cents,
+  (SELECT e.payload->'refundAmount'->>'currency' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved') AND e.payload ? 'refundAmount'
+     ORDER BY e.position DESC LIMIT 1) AS currency,
+  (SELECT e.payload->>'reason' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationRejected') AND e.payload ? 'reason'
+     ORDER BY e.position DESC LIMIT 1) AS reject_reason,
+  c.occurred_at AS opened_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved', 'ReclamationRejected')) AS decided_at,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationOpened', 'ReclamationResolved', 'ReclamationRejected', 'ReclamationReopened')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'ReclamationOpened';
+
 CREATE OR REPLACE VIEW View_PendingRefunds AS
 SELECT
   (c.payload->>'orderId')::uuid AS order_id,

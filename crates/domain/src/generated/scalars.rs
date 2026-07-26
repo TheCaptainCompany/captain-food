@@ -700,3 +700,12 @@ pub struct ReclamationDescription(pub String);
 /// Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ReclamationReason(pub String);
+
+/// Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ReclamationStatus {
+    OPEN,
+    RESOLVED,
+    REJECTED,
+}

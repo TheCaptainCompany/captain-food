@@ -287,6 +287,93 @@ View_DeliveryPartnerAvailability:
         - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityApproved' }
         - { $ref: 'events.yaml#/DeliveryPartnerAvailabilityRevoked' }
       note: "occurrence: max(occurred_at) of the latest decision (approve/revoke); null while PENDING."
+# Reclamations / customer claims (#154, epic #151/#153) — the my-claims / claims-queue / claim-detail
+# read model. One row per reclamation (id = reclamationId), folded over the four lifecycle facts on the
+# Reclamation stream. `status` is derived from the latest lifecycle event type; the set-once identity
+# (order/customer/restaurant + category/description/requestedResolution) rides the ReclamationOpened
+# birth fact; the decision fields fill in on ReclamationResolved / ReclamationRejected. Runtime
+# write-path over domain_events (SQL fold view, ADR-0039 — no materialized table, no projector).
+View_Reclamation:
+  aggregate: Reclamation
+  slice: V1
+  fedBy:
+    - { $ref: 'events.yaml#/ReclamationOpened' }
+    - { $ref: 'events.yaml#/ReclamationResolved' }
+    - { $ref: 'events.yaml#/ReclamationRejected' }
+    - { $ref: 'events.yaml#/ReclamationReopened' }
+  rules:
+    - "`status` is derived from the latest lifecycle event type: OPEN on Opened → RESOLVED on Resolved / REJECTED on Rejected → OPEN again on Reopened."
+    - "Set-once identity fields (order_id, customer_id, restaurant_id, category, description, requested_resolution) are carried only by the ReclamationOpened birth fact."
+    - "The decision fields (resolution, refund_amount_cents/currency, reject_reason, decided_at) fill in on the ReclamationResolved / ReclamationRejected fact and are null while OPEN."
+  indexes:
+    - [customer_id, status]     # a customer's own claims (myReclamations)
+    - [restaurant_id, status]   # the restaurant's claims queue (restaurantReclamations)
+  columns:
+    reclamation_id:
+      from: [{ $ref: 'events.yaml#/ReclamationOpened/properties/reclamationId' }]
+      pk: true
+    order_id:
+      from: [{ $ref: 'events.yaml#/ReclamationOpened/properties/orderId' }]
+      index: true
+    customer_id:
+      from: [{ $ref: 'events.yaml#/ReclamationOpened/properties/customerId' }]
+      index: true
+    restaurant_id:
+      from: [{ $ref: 'events.yaml#/ReclamationOpened/properties/restaurantId' }]
+      index: true
+    category:
+      from: [{ $ref: 'events.yaml#/ReclamationOpened/properties/category' }]
+    description:
+      from: [{ $ref: 'events.yaml#/ReclamationOpened/properties/description' }]
+    requested_resolution:
+      type: { $ref: 'scalars.yaml#/ReclamationResolution' }
+      from: [{ $ref: 'events.yaml#/ReclamationOpened/properties/requestedResolution' }]
+      nullable: true
+      note: "The resolution the customer asked for at open time, if any."
+    status:
+      type: { $ref: 'scalars.yaml#/ReclamationStatus' }
+      derive:
+        ReclamationOpened: OPEN
+        ReclamationResolved: RESOLVED
+        ReclamationRejected: REJECTED
+        ReclamationReopened: OPEN
+      from:
+        - { $ref: 'events.yaml#/ReclamationOpened' }
+        - { $ref: 'events.yaml#/ReclamationResolved' }
+        - { $ref: 'events.yaml#/ReclamationRejected' }
+        - { $ref: 'events.yaml#/ReclamationReopened' }
+      note: "Derived from the latest lifecycle event type."
+    resolution:
+      type: { $ref: 'scalars.yaml#/ReclamationResolution' }
+      from: [{ $ref: 'events.yaml#/ReclamationResolved/properties/resolution' }]
+      nullable: true
+      note: "The decided resolution once resolved; null while OPEN or if rejected."
+    refund_amount_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from: [{ $ref: 'events.yaml#/ReclamationResolved/properties/refundAmount' }]
+      nullable: true
+      note: "amountCents of ReclamationResolved.refundAmount (Money — a PARTIAL_REFUND amount); null otherwise."
+    currency:
+      type: { $ref: 'scalars.yaml#/CurrencyCode' }
+      from: [{ $ref: 'events.yaml#/ReclamationResolved/properties/refundAmount' }]
+      nullable: true
+      note: "currency of ReclamationResolved.refundAmount (Money); null unless a refund amount was recorded."
+    reject_reason:
+      type: { $ref: 'scalars.yaml#/ReclamationReason' }
+      from: [{ $ref: 'events.yaml#/ReclamationRejected/properties/reason' }]
+      nullable: true
+      note: "The reason recorded on rejection; null unless rejected."
+    opened_at:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/ReclamationOpened' }]
+      note: "occurrence: max(occurred_at) of the birth fact."
+    decided_at:
+      type: timestamptz
+      nullable: true
+      from:
+        - { $ref: 'events.yaml#/ReclamationResolved' }
+        - { $ref: 'events.yaml#/ReclamationRejected' }
+      note: "occurrence: max(occurred_at) of the latest decision (resolve/reject); null while OPEN."
 # Refund queue (RefundProcess) — the pendingRefunds read model. One row per refund opened on a captured
 # payment (RefundOpened, delivered by RefundProcess to the Payment aggregate), folded with the decision
 # and settlement facts recorded on the same Payment stream. The full lifecycle stays in the view

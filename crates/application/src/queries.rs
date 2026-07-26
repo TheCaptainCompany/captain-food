@@ -10,9 +10,10 @@ use domain::generated::scalars::{
     CustomerId, DeliveryChannelKey, DeliveryDissatisfactionReason, DeliveryJobId, DeliveryPartnerName,
     DeliveryPartnerRegistrationId, DeliveryProvider, DeliveryStatus, DeliveryTimeliness, EmailAddress,
     ExternalReference, OfferId, OfferName,
-    OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId, ProductName,
-    ProspectPipelineStatus, Quantity, RefundId, RefundStatus, RestaurantAccountId, RestaurantId,
-    RiderId, SessionId, Slug, StockStatus,
+    MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
+    ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
+    ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
+    RefundStatus, RestaurantAccountId, RestaurantId, RiderId, SessionId, Slug, StockStatus,
 };
 use domain::shared::errors::DomainError;
 
@@ -416,6 +417,61 @@ pub trait DeliveryPartnerAvailabilityReadRepository: Send + Sync {
         &self,
         filter: DeliveryPartnerAvailabilityFilter,
     ) -> Result<Vec<DeliveryPartnerAvailabilityRow>, DomainError>;
+}
+
+/// One `View_Reclamation` fold-view row (customer claims/disputes, #154 — ADR-0039). Hand-written
+/// (view-backed read models get no generated row): field order/types mirror the view's columns;
+/// `status` (and the two nullable enum columns) come back as their INTEGER ordinal (ADR-0037). The
+/// set-once identity is carried by the ReclamationOpened birth fact; the decision fields fill in on
+/// the resolve/reject fact and are `None` while OPEN. The refund amount is the minor-units column +
+/// row currency (both `None` unless a refund amount was recorded).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReclamationRow {
+    pub reclamation_id: ReclamationId,
+    pub order_id: OrderId,
+    pub customer_id: CustomerId,
+    pub restaurant_id: RestaurantId,
+    pub category: ReclamationCategory,
+    pub description: ReclamationDescription,
+    /// The resolution the customer asked for at open time, if any.
+    pub requested_resolution: Option<ReclamationResolution>,
+    /// OPEN (awaiting a decision) → RESOLVED / REJECTED → OPEN again on reopen.
+    pub status: ReclamationStatus,
+    /// The decided resolution once resolved; `None` while OPEN or if rejected.
+    pub resolution: Option<ReclamationResolution>,
+    /// The PARTIAL_REFUND amount (minor units) + its currency; both `None` unless recorded.
+    pub refund_amount_cents: Option<MoneyCents>,
+    pub currency: Option<CurrencyCode>,
+    /// The reason recorded on rejection; `None` unless rejected.
+    pub reject_reason: Option<ReclamationReason>,
+    pub opened_at: chrono::DateTime<chrono::Utc>,
+    /// The decision's occurrence time; `None` while OPEN.
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Optional filters for the restaurant claims queue — mirrors the `restaurantReclamations` query args
+/// in api.yaml (`status` / `category`; status OPEN = the outstanding queue).
+#[derive(Debug, Clone, Default)]
+pub struct ReclamationFilter {
+    pub status: Option<ReclamationStatus>,
+    pub category: Option<ReclamationCategory>,
+}
+
+/// Read port over the `View_Reclamation` read model (customer claims, #154). Backs the customer
+/// `myReclamations` / `reclamation` reads and the restaurant/admin `restaurantReclamations` queue.
+#[async_trait]
+pub trait ReclamationReadRepository: Send + Sync {
+    /// A customer's own reclamations, newest-first (the `myReclamations` list).
+    async fn by_customer(
+        &self,
+        customer_id: CustomerId,
+    ) -> Result<Vec<ReclamationRow>, DomainError>;
+
+    /// The restaurant/admin claims queue, newest-first, honouring the status/category filter.
+    async fn list(&self, filter: ReclamationFilter) -> Result<Vec<ReclamationRow>, DomainError>;
+
+    /// A single reclamation by id (claim detail); `None` when unknown.
+    async fn by_id(&self, id: ReclamationId) -> Result<Option<ReclamationRow>, DomainError>;
 }
 
 /// Optional filters for the admin prospection pipeline — mirrors the `prospectionPipeline` query args

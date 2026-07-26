@@ -180,6 +180,28 @@ impl application::queries::DeliveryPartnerAvailabilityReadRepository for Empty {
 }
 
 #[async_trait]
+impl application::queries::ReclamationReadRepository for Empty {
+    async fn by_customer(
+        &self,
+        _c: ds::CustomerId,
+    ) -> Result<Vec<application::queries::ReclamationRow>, DomainError> {
+        Ok(vec![])
+    }
+    async fn list(
+        &self,
+        _f: application::queries::ReclamationFilter,
+    ) -> Result<Vec<application::queries::ReclamationRow>, DomainError> {
+        Ok(vec![])
+    }
+    async fn by_id(
+        &self,
+        _id: ds::ReclamationId,
+    ) -> Result<Option<application::queries::ReclamationRow>, DomainError> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
 impl application::queries::DeliverySatisfactionReadRepository for Empty {
     async fn by_restaurant(
         &self,
@@ -290,6 +312,7 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
+            reclamations: Arc::new(Empty),
         }),
         None,
         Some(bus),

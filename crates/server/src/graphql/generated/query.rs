@@ -365,6 +365,44 @@ impl QueryRoot {
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(DeliveryPartnerAvailability::from).collect())
     }
+    /// The authenticated customer's own reclamations (claims/disputes), newest-first (#154). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row); an anonymous caller sees an empty list.
+    #[graphql(name = "myReclamations", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn my_reclamations(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<Reclamation>> {
+        let Some(auth_ref) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id.clone()) else {
+            return Ok(Vec::new());
+        };
+        let customers = ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()?;
+        let Some(customer) = customers
+            .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref))
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        else {
+            return Ok(Vec::new());
+        };
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
+        let rows = repo.by_customer(customer.customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(Reclamation::from).collect())
+    }
+    /// The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the EXTERNAL deliveryPartnerAvailabilities queue records).
+    #[graphql(name = "restaurantReclamations", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    async fn restaurant_reclamations(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantReclamationsQueryInput>) -> async_graphql::Result<Vec<Reclamation>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
+        let filter = input
+            .map(|i| application::queries::ReclamationFilter {
+                status: i.status.map(Into::into),
+                category: i.category.map(Into::into),
+            })
+            .unwrap_or_default();
+        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(Reclamation::from).collect())
+    }
+    /// A single reclamation by id (#154) — claim detail for the customer who raised it and the restaurant/admin deciding it. Null when unknown.
+    #[graphql(name = "reclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
+    async fn reclamation(&self, ctx: &async_graphql::Context<'_>, input: ReclamationQueryInput) -> async_graphql::Result<Option<Reclamation>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
+        let row = repo.by_id(input.reclamation_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(row.map(Reclamation::from))
+    }
     /// All restaurant locations under an account (back-office; ownership enforced server-side).
     #[graphql(name = "restaurantLocationsByAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
     async fn restaurant_locations_by_account(&self, ctx: &async_graphql::Context<'_>, input: RestaurantLocationsByAccountQueryInput) -> async_graphql::Result<Vec<Restaurant>> {

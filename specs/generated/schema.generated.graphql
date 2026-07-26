@@ -368,6 +368,12 @@ enum ReclamationResolution {
   REJECTED
 }
 
+enum ReclamationStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
 # ==============================================================================
 # Directives — ACL (@auth/@public) + declared links (@command/@reads)
 # ==============================================================================
@@ -761,6 +767,22 @@ type DeliveryPartnerAvailability {
   contactEmail: EmailAddress!
   status: CityAvailabilityStatus!
   requestedAt: DateTime!
+  decidedAt: DateTime
+}
+
+type Reclamation {
+  reclamationId: ReclamationId!
+  orderId: OrderId!
+  customerId: CustomerId!
+  restaurantId: RestaurantId!
+  category: ReclamationCategory!
+  description: ReclamationDescription!
+  requestedResolution: ReclamationResolution
+  status: ReclamationStatus!
+  resolution: ReclamationResolution
+  refundAmount: Money
+  rejectReason: ReclamationReason
+  openedAt: DateTime!
   decidedAt: DateTime
 }
 
@@ -1343,6 +1365,8 @@ input UnmuteParticipantInput {
 input OpenReclamationInput {
   reclamationId: ReclamationId!
   orderId: OrderId!
+  customerId: CustomerId!
+  restaurantId: RestaurantId!
   category: ReclamationCategory!
   description: ReclamationDescription!
   requestedResolution: ReclamationResolution
@@ -1456,6 +1480,15 @@ input DeliveryPartnerAvailabilitiesQueryInput {
   cityId: CityId
   channel: DeliveryChannelKey
   status: CityAvailabilityStatus
+}
+
+input RestaurantReclamationsQueryInput {
+  status: ReclamationStatus
+  category: ReclamationCategory
+}
+
+input ReclamationQueryInput {
+  reclamationId: ReclamationId!
 }
 
 input RestaurantLocationsByAccountQueryInput {
@@ -1631,6 +1664,9 @@ type Query {
   orderConversationInternalNotes(input: OrderConversationInternalNotesQueryInput!): ConversationInternalNotes @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
   pendingRefunds(input: PendingRefundsQueryInput): [Refund!]! @auth(requires: [RESTAURANT, ADMIN]) @reads(views: ["View_PendingRefunds"])
   deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
+  myReclamations: [Reclamation!]! @auth(requires: [CUSTOMER]) @reads(views: ["View_Reclamation"])
+  restaurantReclamations(input: RestaurantReclamationsQueryInput): [Reclamation!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_Reclamation"])
+  reclamation(input: ReclamationQueryInput!): Reclamation @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_Reclamation"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
   prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
   pricingPolicy: [PricingPolicy!]! @auth(requires: [ADMIN]) @reads(views: ["PricingPolicy"])

@@ -164,6 +164,10 @@ INSERT INTO ref_reclamation_category (value, sort_order) VALUES ('MISSING_ITEM',
 CREATE TABLE ref_reclamation_resolution(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_reclamation_resolution (value, sort_order) VALUES ('FULL_REFUND',0),('PARTIAL_REFUND',1),('REPLACEMENT',2),('GOODWILL_CREDIT',3),('REJECTED',4);
 
+-- ReclamationStatus
+CREATE TABLE ref_reclamation_status(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_reclamation_status (value, sort_order) VALUES ('OPEN',0),('RESOLVED',1),('REJECTED',2);
+
 CREATE TABLE domain_events (
   position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   id UUID NOT NULL UNIQUE,

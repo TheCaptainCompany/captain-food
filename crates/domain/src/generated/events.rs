@@ -950,12 +950,14 @@ pub struct ParticipantUnmuted {
     pub muted_role: ConversationAuthorRole,
 }
 
-/// Birth of a customer reclamation over a delivered order (id = reclamationId; #153). Records the category, the customer's description and — optionally — the resolution the customer requested. The 14-day window and order-eligibility (order exists/delivered) are enforced in the application layer when opening, not by the aggregate (#151).
+/// Birth of a customer reclamation over a delivered order (id = reclamationId; #153). Records the category, the customer's description and — optionally — the resolution the customer requested. Carries `customerId` (whose claim) and `restaurantId` (on whose restaurant's order) — business data the client supplies, mirroring how OrderPlaced carries them — so the read model can scope "my claims" and the restaurant's claims queue (#154). The 14-day window and order-eligibility (order exists/delivered) are enforced in the application layer when opening, not by the aggregate (#151).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReclamationOpened {
     pub reclamation_id: ReclamationId,
     pub order_id: OrderId,
+    pub customer_id: CustomerId,
+    pub restaurant_id: RestaurantId,
     pub category: ReclamationCategory,
     pub description: ReclamationDescription,
     pub requested_resolution: Option<ReclamationResolution>,

@@ -2511,3 +2511,32 @@ impl From<ReclamationReason> for ds::ReclamationReason {
         Self(v.0)
     }
 }
+
+/// Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ReclamationStatus {
+    #[graphql(name = "OPEN")]
+    OPEN,
+    #[graphql(name = "RESOLVED")]
+    RESOLVED,
+    #[graphql(name = "REJECTED")]
+    REJECTED,
+}
+impl From<ds::ReclamationStatus> for ReclamationStatus {
+    fn from(v: ds::ReclamationStatus) -> Self {
+        match v {
+            ds::ReclamationStatus::OPEN => Self::OPEN,
+            ds::ReclamationStatus::RESOLVED => Self::RESOLVED,
+            ds::ReclamationStatus::REJECTED => Self::REJECTED,
+        }
+    }
+}
+impl From<ReclamationStatus> for ds::ReclamationStatus {
+    fn from(v: ReclamationStatus) -> Self {
+        match v {
+            ReclamationStatus::OPEN => Self::OPEN,
+            ReclamationStatus::RESOLVED => Self::RESOLVED,
+            ReclamationStatus::REJECTED => Self::REJECTED,
+        }
+    }
+}
