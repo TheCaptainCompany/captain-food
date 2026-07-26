@@ -347,6 +347,11 @@ enum ConversationAuthorRole {
   ADMIN
 }
 
+enum ScopeType {
+  ORDER
+  RESTAURANT
+}
+
 # ==============================================================================
 # Directives — ACL (@auth/@public) + declared links (@command/@reads)
 # ==============================================================================

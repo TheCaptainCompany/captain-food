@@ -397,4 +397,27 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `ScopeMembership` · 🛶 V0 · 🔒 internal · source aggregate `Order`
+
+- **Consumed by**: command handlers / auth resolution (no GraphQL query).
+- **Fed by**: `OrderPlaced`, `DeliveryAcceptedByRider`, `DeliveryCancelled`, `DeliveryDispatchFailed`, `RestaurantRegistered`
+- **Rules**: GRANT on OrderPlaced: the order's customer, its restaurant, and that restaurant's account. These are PERMANENT — order history must stay readable forever (product-owner decision, 2026-07-25). GRANT on DeliveryAcceptedByRider: the accepting rider, resolved to its order via the delivery job (the event carries only deliveryJobId). REVOKE on DeliveryCancelled / DeliveryDispatchFailed: the rider row for that job's order. The ONLY revoke in V0 — riders are the only membership that ends. GRANT on RestaurantRegistered: the restaurant itself and its owning account, scope_type RESTAURANT. ADMIN holds NO rows — the guard short-circuits on the role. Storing them would mean a row per admin per instance, unbounded and pointless. membership_id is UUIDv5 over (scope_type, scope_id, principal_type, principal_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern). The revoke events (DeliveryCancelled / DeliveryDispatchFailed) map `from` NO column, because they DELETE a row rather than write one — so the validator reports the same `view-fedby-unused` design-hole warning it already reports for View_RestaurantAccount's RestaurantAccountDeleted tombstone. Intentional, not drift. The built-in `tombstone:` marker does not fit: it is singular and drops the row by the view's own pk, whereas a revoke must resolve deliveryJobId -> orderId and then derive the RIDER principal's membership_id.
+- **Note**: WHO may see WHICH protected instance (#144). One row per (scope, principal): the single index every read-side authorization question resolves against, for every role and every surface — `SELECT EXISTS(... WHERE membership_id = $1)`. The guard never learns what an order is, so a new ScopeType is a projector rule rather than new code in the guard.
+Adopting this index replaced four separate mechanisms (PROP-20260725-185140 §3.4): per-role table/column resolution, the restaurant -> account hop, an `active` predicate on rider membership, and multi-rider-per-order special cases. Reassignment needs no special handling: it is a REVOKE followed by a GRANT, so the previous rider loses access the moment the new one is recorded.
+SAFETY: this is an ACL cache with asymmetric failure modes. A MISSING row denies (visible, safe); a STALE row grants (a silent breach). The revoke rules are therefore more safety-critical than the grants, and the projector errs toward deleting. Drift is repairable by replay, which is the property that makes the cache acceptable at all.
+
+- **Indexes**: `(principal_type, principal_id, scope_type)`, `(scope_type, scope_id)`
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `membership_id` | `uuid` | `UUID` | PK | UUIDv5(scope_type|scope_id|principal_type|principal_id) — derived, never random, so a replayed grant upserts onto itself. |
+| `scope_type` | `ScopeType` | `INTEGER` | — | Which KIND of instance — ORDER or RESTAURANT. Constant per grant rule, not read from a payload. |
+| `scope_id` | `uuid` | `UUID` | — | The protected instance: an OrderId or a RestaurantId. Rider grants resolve it from the delivery job, whose event carries only deliveryJobId. |
+| `principal_type` | `UserType` | `INTEGER` | — | In the key deliberately: a rider who is ALSO a customer must hold two distinct memberships, or their customer row would let them fetch rider-audience data.
+ |
+| `principal_id` | `uuid` | `UUID` | — | The DOMAIN id (customerId / restaurantId / restaurantAccountId / riderId), never the auth subject — the sub->domain bridge happens once per request at the edge. |
+| `granted_at` | `timestamptz` | `TIMESTAMPTZ` | — | When the membership was recorded — audit trail for 'since when could this principal see this?'. |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 <!-- GENERATED:views END -->

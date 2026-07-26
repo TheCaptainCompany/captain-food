@@ -2384,3 +2384,28 @@ impl From<TranslatedText> for ds::TranslatedText {
         Self(v.0)
     }
 }
+
+/// The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names exactly one protected instance: `ScopeMembership` records who belongs to it, and the `files` row carries the pair as its access binding. Read-side per-instance authorization asks one question of this vocabulary — "is this principal a member of (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an order or a restaurant is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ScopeType {
+    #[graphql(name = "ORDER")]
+    ORDER,
+    #[graphql(name = "RESTAURANT")]
+    RESTAURANT,
+}
+impl From<ds::ScopeType> for ScopeType {
+    fn from(v: ds::ScopeType) -> Self {
+        match v {
+            ds::ScopeType::ORDER => Self::ORDER,
+            ds::ScopeType::RESTAURANT => Self::RESTAURANT,
+        }
+    }
+}
+impl From<ScopeType> for ds::ScopeType {
+    fn from(v: ScopeType) -> Self {
+        match v {
+            ScopeType::ORDER => Self::ORDER,
+            ScopeType::RESTAURANT => Self::RESTAURANT,
+        }
+    }
+}

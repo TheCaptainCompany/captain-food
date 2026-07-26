@@ -7617,6 +7617,11 @@ fn projection_rust_type(ty: &str) -> String {
         "boolean" => "bool".to_string(),
         "numeric" => "f64".to_string(),
         "timestamptz" => "chrono::DateTime<chrono::Utc>".to_string(),
+        // A raw `uuid` column — an id with no dedicated domain scalar because it is POLYMORPHIC
+        // (ScopeMembership.scope_id is an OrderId or a RestaurantId; principal_id a CustomerId,
+        // RestaurantId, RestaurantAccountId or RiderId). Without this arm the bare crate name `uuid`
+        // was emitted as the field type and the row struct did not compile (#144).
+        "uuid" => "uuid::Uuid".to_string(),
         scalar => scalar.to_string(),
     }
 }
