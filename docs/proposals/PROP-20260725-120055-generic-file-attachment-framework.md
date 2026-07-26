@@ -91,6 +91,161 @@ time-ordered prefix keeps the b-tree and the bucket's key distribution healthy.
 > capability token. The guard in §4 is what protects the file; the id is never the protection. This is
 > exactly why alternative (c) in §8 is rejected.
 
+## 2b. Sequence diagrams
+
+Added 2026-07-26 to meet the standing proposal directive (docs/proposals/README.md). Drawn faithfully
+to the hexagonal architecture: the aggregate/PM **decides** (pure, no I/O), facts are saved through the
+`Repository` and appended by its one adapter `PgEventStore` (ADR-20260719-031136, docs/claude/mermaid.md).
+
+**(a) Upload, then post — why the file exists before the message does.** The client needs refs to build
+`PostMessage`, so the row is created first with a SHORT expiry that the post then extends. An abandoned
+upload expires on its own; no orphan-hunting job.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Rider or staff client
+    box edge adapter
+        participant BFF as BFF (POST /files)
+    end
+    box infrastructure adapters
+        participant OBJ as Supabase Storage
+        participant REG as files registry
+    end
+    box application core
+        participant CONV as Conversation aggregate (decides, pure)
+        participant REPO as Repository
+        participant PG as PgEventStore
+    end
+    U->>BFF: POST /files (multipart)
+    BFF->>BFF: sniff magic bytes, allowlist, size cap
+    BFF->>OBJ: put object
+    BFF->>REG: insert row (audience, scope, expires_at = 24h)
+    BFF-->>U: { ref = /files/<uuid7>.<ext> }
+    U->>BFF: postMessage(order, body, visibility, attachmentRefs)
+    BFF->>CONV: handle PostMessage
+    CONV-->>REPO: save(MessagePosted with refs)
+    REPO->>PG: append
+    BFF->>REG: NARROW audience to the message visibility, extend expires_at
+    Note over BFF,REG: narrowing only, never widening -- see 3.4
+```
+
+**(b) Serving one file — the guard, in order.** Authorization is evaluated at READ time against current
+membership, which is why the ref is a stable name and never a signed URL.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor B as Browser (img src) or native shell
+    box edge adapter
+        participant GUARD as /files middleware
+    end
+    box application core
+        participant SM as ScopeMembershipRepository (port)
+    end
+    box infrastructure adapters
+        participant REG as files registry
+        participant OBJ as Supabase Storage
+    end
+    B->>GUARD: GET /files/<uuid7>.<ext> (cookie or Bearer)
+    GUARD->>GUARD: verify JWT -> Principal -> ReadScope
+    GUARD->>REG: load row by file_id
+    alt expired or purged
+        GUARD-->>B: 410 Gone (renderer shows "attachment expired")
+    else extension mismatch or unknown id
+        GUARD-->>B: 404
+    else role not in audience
+        GUARD-->>B: 403
+    else
+        GUARD->>SM: is_member(scope_type, scope_id, scope)
+        alt not a member
+            GUARD-->>B: 403 (counted as an operator signal)
+        else
+            GUARD->>OBJ: sign URL (60s)
+            GUARD-->>B: 302 -> signed URL
+        end
+    end
+```
+
+**(c) Retention — the object dies, the row does not.** Pure SQL cannot reach the bucket, so a daily
+worker owns the purge; the row survives forever as the tombstone that keeps 410 answerable.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant W as FileRetentionWorker (daily)
+    participant REG as files registry
+    participant OBJ as Supabase Storage
+    W->>REG: select rows past expires_at, deleted_at is null
+    loop each expired file
+        W->>OBJ: delete object
+        W->>REG: set deleted_at (row KEPT)
+    end
+    Note over W,REG: crash between the two -> next pass re-deletes (idempotent) and sets the marker
+    Note over REG: the guard checks expires_at, NOT deleted_at alone -- so a file stops being served the<br/>moment it expires, never up to a day later when the worker next runs
+```
+
+## 2c. Screen mockups (wireframes)
+
+Low-fidelity, per use case — to fix the shape, not the visual design.
+
+**Customer — an attachment in the order thread.** The rider's proof-of-delivery photo, served through
+the guard on the customer's own session cookie.
+
+```
++-------------------------------------------+
+|  <  Back        Order A1B2 - Chez Marco   |
++-------------------------------------------+
+|   * Out for delivery         12:20        |
+|                                           |
+|   Rider (Sam)                12:34        |
+|   +--------------+                        |
+|   |   [ photo ]  |  Left at your door     |   <- GET /files/0198..jpg (cookie auth)
+|   +--------------+                        |
+|   * Delivered                12:35        |
++-------------------------------------------+
+```
+
+**Customer — the same thread 90 days later.** The event still carries the ref; the bytes are gone. This
+is the design working, and it is why 410 must be distinguishable from 404.
+
+```
+|   Rider (Sam)                12:34        |
+|   +--------------+                        |
+|   | (!) Attachment|  Left at your door    |   <- 410 Gone -> "expired", never a broken image
+|   |    expired    |                       |
+|   +--------------+                        |
+```
+
+**Rider — capture proof of delivery.** The upload that creates the row before any message exists.
+
+```
++----------------------------------------+
+|  Job A1B2 - deliver to Marie D.        |
++----------------------------------------+
+|  [   Take proof-of-delivery photo   ]  |   -> POST /files  (DELIVERY_PROOF)
+|  [   Attach + mark delivered        ]  |   -> postMessage(attachmentRefs)
++----------------------------------------+
+   HEIC from the camera is transcoded server-side; SVG is refused (4.3)
+```
+
+**Restaurant back office — an INTERNAL note with an attachment.** The audience-narrowing case: this
+photo must NOT be reachable by the customer even though they are a member of the order.
+
+```
++-------------------------------------------------+
+|  Order A1B2 - Marie D.                          |
+|   [lock] INTERNAL - staff only                  |
+|   You -> staff             12:05                |
+|   "Packed wrong, see photo"                     |
+|   +--------------+                              |
+|   |  [ photo ]   |                              |   <- audience = {RESTAURANT, RIDER, ADMIN}
+|   +--------------+                              |      customer -> 403 (3.4)
++-------------------------------------------------+
+| [ attach ] [ Internal v ]      [ Reply... ][Send]|
++-------------------------------------------------+
+```
+
 ## 3. The `files` registry (decisions 2 + 3)
 
 New DSL file `specs/database/tables/files.yaml`, in the **application/transport-owned** table category
@@ -116,7 +271,7 @@ files:
     checksum:      { type: text, index: true }           # sha256 hex — integrity + dedupe
     storage_key:   { type: text, unique: true }          # object key in the bucket (ADR-0042)
 
-    owner_type:    { type: FileOwnerType, index: true }  # CONVERSATION_MESSAGE (first; extensible)
+    owner_type:    { type: FileOwnerType, index: true }  # CONVERSATION_MESSAGE | RECLAMATION (see below)
     owner_id:      { type: uuid, index: true }           # = ConversationMessageId for that owner_type
     position:      { type: int }                         # stable ordering of the N files of one owner
 
@@ -134,6 +289,14 @@ files:
 
 New scalar enums: `FileOwnerType`, `FileScopeType`, `FileKind` (the codegen emits a `ref_*` lookup table
 per scalar enum, ADR-0037).
+
+> **The generic `owner_type` is already justified in practice, not just in principle** (2026-07-26).
+> `ReclamationEvidenceAttached` ([#156](https://github.com/TheCaptainCompany/captain-food/issues/156),
+> merged `ec7357a`) is a **second** consumer of `AttachmentRef`, and its commit says so explicitly:
+> *"the actual upload/storage is the #134 attachment framework's concern (still open); this models the
+> domain fact only."* So there are now two owner types in reality — `CONVERSATION_MESSAGE` and
+> `RECLAMATION` — which settles alternative (e) in §8: a bespoke `message_files` table would already
+> need a sibling, one release later.
 
 ### 3.2 N files per message (requirement: *"more than one file per messageId"*)
 
@@ -264,7 +427,7 @@ browser history and any intermediate log. Streaming through the BFF avoids that 
 choke point for byte-level auditing, at the cost of egress + CPU on every image view.
 
 Given the content (order photos, doorstep photos), the 60-second window is an acceptable trade — but it
-**is** a privacy trade, so it is decision **D1** in §9 rather than an assumption.
+**is** a privacy trade, so it is decision §9.1 rather than an assumption.
 
 ### 4.5 Where the scope check lives, and the prerequisite it exposes
 
@@ -477,7 +640,10 @@ latency; sweep deletions per kind; bucket bytes per tenant (cost).
 - **(e) A bespoke `message_files` table.** Rejected as the primary shape: the product owner asked for a
   generic framework, and KYC documents, restaurant cover photos and dispute evidence are all visible on
   the roadmap. `owner_type` + `owner_id` costs one column and one enum today and avoids three more
-  near-identical tables later. (A dedicated table would win only if the ACL differed per owner type —
+  near-identical tables later. **Confirmed 2026-07-26**: reclamation evidence
+  ([#156](https://github.com/TheCaptainCompany/captain-food/issues/156)) shipped against the same
+  opaque `AttachmentRef` within a day of this proposal — the second owner type arrived before the
+  first was even built. (A dedicated table would win only if the ACL differed per owner type —
   it does not; `audience` × `scope` covers all of them.)
 - **(f) Serve straight from Supabase Storage with Postgres RLS.** Rejected: our authorization model
   lives in the JWT/role path (ADR-0047), not in RLS. Using RLS here would fork the ACL into two engines
@@ -488,14 +654,46 @@ latency; sweep deletions per kind; bucket bytes per tenant (cost).
 
 ## 9. Decisions this proposal asks the product owner to make
 
-| # | decision | recommendation |
+Each decision lists its options with **pros / cons** (standing directive, docs/proposals/README.md);
+a settled choice is marked **→ CHOSEN**.
+
+**9.1 How the bytes reach the client** (§4.4)
+| Option | Pros | Cons |
 |---|---|---|
-| **D1** | Bytes: **302 → 60 s signed URL** vs **stream through the BFF** (§4.4) | 302 — the privacy trade is small and bounded; revisit if it proves otherwise |
-| **D2** | Retention windows per kind (§6.1) | 24 h orphan / 30 d `ORDER_PHOTO` / 90 d `DELIVERY_PROOF` / 180 d `RECLAMATION` |
-| **D2b** | ~~purge mechanism~~ — **DECIDED 2026-07-25** | daily worker, **deletes the object only, keeps the row** as a permanent tombstone (§6.2) |
-| **D3** | Type allowlist excludes **SVG**; **HEIC transcoded** on upload (§4.3) | confirm — SVG same-origin is stored XSS; HEIC is the iPhone default and must be accepted |
-| **D4** | Size limits | 10 MB per file, 5 files per message |
-| **D5** | Moderation in V1 | manual report path + rate limits; automated scanning is later hardening |
+| **302 → 60 s signed Supabase URL** *(recommended)* | Authorization stays entirely ours; egress stays Supabase's — no Render bandwidth or BFF request-time spent proxying photos, which matters when an operator scrolls a day of threads | For 60 s the signed URL is bearer-shareable and lands in browser history and intermediate logs |
+| Stream through the BFF | Nothing leaks past the guard; one choke point for byte-level auditing | Pays egress + CPU on every image view; the BFF becomes a media proxy |
+
+**9.2 Retention windows per kind** (§6.1)
+| Option | Pros | Cons |
+|---|---|---|
+| **24 h orphan / 30 d `ORDER_PHOTO` / 90 d `DELIVERY_PROOF` / 180 d `RECLAMATION`** *(recommended)* | Each window matches its dispute horizon; 90 d aligns with the existing journal/mirror windows; 180 d outlives a card chargeback | Four values to remember; `RECLAMATION` holds personal data longest |
+| One uniform window for all kinds | Trivial to reason about and to audit | Either over-retains doorstep photos or under-retains dispute evidence — the two have genuinely different horizons |
+
+**9.3 Purge mechanism** — **DECIDED 2026-07-25** (§6.2)
+| Option | Pros | Cons |
+|---|---|---|
+| **Daily worker deletes the OBJECT, keeps the ROW → CHOSEN** | 410 answerable forever; crash-safe by idempotence (delete object → set marker); the row is the retention audit record | Rows grow unboundedly (negligible at Tours scale — low thousands/year) |
+| Delete object then row after a grace period | No tombstone growth | A grace period to tune, and a window where an expired attachment degrades to 404 instead of 410 |
+| SQL-only sweep in `sweep_retention()` | Fits the existing retention machinery | **Wrong** — pure SQL cannot reach the bucket, so the bytes survive forever: an unbounded bill and a GDPR failure that *looks* like compliance because the database is clean |
+
+**9.4 Type allowlist** (§4.3)
+| Option | Pros | Cons |
+|---|---|---|
+| **`jpg`/`png`/`webp`, HEIC transcoded, SVG refused** *(recommended)* | Closes same-origin stored XSS (an SVG is a script container served next to the session cookie); HEIC is the iPhone camera default, so accepting it keeps rider proof-of-delivery working | Transcoding costs CPU on upload and needs an image library |
+| Also allow SVG | Vector evidence, smaller files | A stored-XSS vector against the session — not acceptable for user-supplied bytes on our own origin |
+| Refuse HEIC outright | No transcoding dependency | Breaks proof-of-delivery for roughly half the rider fleet |
+
+**9.5 Size limits**
+| Option | Pros | Cons |
+|---|---|---|
+| **10 MB per file, 5 files per message** *(recommended)* | Comfortably fits a modern phone photo; bounds abuse and storage per thread | A burst-shot rider may hit the 5-file cap |
+| Larger / unbounded | Never blocks a legitimate upload | Storage cost and upload-time abuse scale with no ceiling |
+
+**9.6 Moderation in V1**
+| Option | Pros | Cons |
+|---|---|---|
+| **Manual report path + per-participant rate limits** *(recommended)* | Ships now; composes with the epic's mute; no third-party processor sees customer images | Abusive content is visible until reported |
+| Automated scanning at upload | Catches it before anyone sees it | A third-party processor receives customer personal data (a GDPR + positioning cost), plus latency and false positives on food photos |
 
 ## 10. Scope of the implementation slice
 
