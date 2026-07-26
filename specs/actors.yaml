@@ -729,3 +729,36 @@ Conversation:
       throws:
         - { $ref: 'errors.yaml#/ConversationNotFound' }
         - { $ref: 'errors.yaml#/ParticipantNotMuted' }
+
+Reclamation:
+  type: aggregate
+  description: >
+    Customer claim/dispute over a delivered order; id = reclamationId (its own identity, correlated to an
+    orderId — MULTIPLE reclamations may exist per order, #153). OpenReclamation is its birth; it then moves
+    through OPEN -> RESOLVED/REJECTED, and a decided reclamation may be reopened back to OPEN. This slice is
+    the lifecycle only: ReclamationResolved records the DECISION (+ amount for a PARTIAL_REFUND) so the
+    downstream refund/credit/replacement slices react later; the aggregate performs no money-move. The
+    14-day window and order-eligibility (order exists/delivered) are cross-aggregate/temporal invariants
+    enforced in the APPLICATION layer (reading the order's delivered-at vs now), NOT here (#151).
+  receives:
+    - message: { $ref: 'commands.yaml#/OpenReclamation' }
+      emits: [{ $ref: 'events.yaml#/ReclamationOpened' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationAlreadyExists' }
+    - message: { $ref: 'commands.yaml#/ResolveReclamation' }
+      emits: [{ $ref: 'events.yaml#/ReclamationResolved' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationNotFound' }
+        - { $ref: 'errors.yaml#/ReclamationNotOpen' }
+        - { $ref: 'errors.yaml#/PartialRefundAmountRequired' }
+    - message: { $ref: 'commands.yaml#/RejectReclamation' }
+      emits: [{ $ref: 'events.yaml#/ReclamationRejected' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationNotFound' }
+        - { $ref: 'errors.yaml#/ReclamationNotOpen' }
+        - { $ref: 'errors.yaml#/RejectionReasonRequired' }
+    - message: { $ref: 'commands.yaml#/ReopenReclamation' }
+      emits: [{ $ref: 'events.yaml#/ReclamationReopened' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationNotFound' }
+        - { $ref: 'errors.yaml#/ReclamationNotReopenable' }

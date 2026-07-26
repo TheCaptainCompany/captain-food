@@ -1480,6 +1480,67 @@ UnmuteParticipant:
     mutedRole: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
   required: [orderId, mutedRole]
 
+# --- Reclamations / customer claims (#151) ---
+
+OpenReclamation:
+  description: >
+    Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open
+    with the same id is rejected). Records the category, description and optionally the requested
+    resolution. The 14-day window and order-eligibility are enforced in the application layer, not here
+    (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    category: { $ref: 'scalars.yaml#/ReclamationCategory' }
+    description: { $ref: 'scalars.yaml#/ReclamationDescription' }
+    requestedResolution:
+      $ref: 'scalars.yaml#/ReclamationResolution'
+      nullable: true
+  required: [reclamationId, orderId, category, description]
+
+ResolveReclamation:
+  description: >
+    Resolve (decide) an OPEN reclamation with a `resolution`. A PARTIAL_REFUND requires a `refundAmount`
+    (enforced by the write model as errors.yaml#/PartialRefundAmountRequired, not by the schema). The
+    aggregate records the decision only; the refund/credit/replacement automation is downstream (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    resolution: { $ref: 'scalars.yaml#/ReclamationResolution' }
+    note:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+    refundAmount:
+      $ref: 'entities.yaml#/Money'
+      nullable: true
+  required: [reclamationId, resolution]
+
+RejectReclamation:
+  description: >
+    Reject an OPEN reclamation. A `reason` is REQUIRED, but is left OUT of `required` on purpose: the
+    "reasoned" invariant is enforced by the write model as an anticipated error
+    (errors.yaml#/RejectionReasonRequired), not by the schema (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    reason:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+  required: [reclamationId]
+
+ReopenReclamation:
+  description: >
+    Reopen a previously decided (resolved or rejected) reclamation for another look. The reclamation must
+    exist and be in a decided state (errors.yaml#/ReclamationNotReopenable) (#151).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    reason:
+      $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+  required: [reclamationId]
+
 # =====================================================================
 # Where the rest lives
 # =====================================================================

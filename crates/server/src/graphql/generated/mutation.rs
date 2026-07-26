@@ -3476,6 +3476,186 @@ impl MutationRoot {
         });
         Ok(acceptance(&env, OperationStatus::PENDING, false))
     }
+    #[graphql(name = "openReclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn open_reclamation(&self, ctx: &async_graphql::Context<'_>, input: OpenReclamationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        let cmd: domain::generated::commands::OpenReclamation = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        let entry = application::journal::CommandJournalEntry {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type,
+            channel: domain::generated::scalars::CommandChannel::GRAPHQL,
+            command_type: "OpenReclamation".into(),
+            payload_hash: application::journal::payload_hash(&payload_json),
+            payload: payload_json,
+        };
+        match journal.insert(&entry).await.map_err(domain_error)? {
+            application::journal::JournalInsertOutcome::Duplicate { status, payload_hash } => {
+                if payload_hash != entry.payload_hash {
+                    return Err(conflict_error(env.message_id));
+                }
+                return Ok(acceptance(&env, journal_status_api(status), true));
+            }
+            application::journal::JournalInsertOutcome::Inserted => {}
+        }
+        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        let actor = application::ports::Actor {
+            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
+            user_type: env.user_type,
+            correlation_id: env.correlation_id,
+            cause_id: Some(env.message_id),
+        };
+        let (message_id, correlation_id) = (env.message_id, env.correlation_id);
+        tokio::spawn(async move {
+            let outcome = application::commands::open_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ());
+            complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;
+        });
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+    }
+    #[graphql(name = "resolveReclamation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    async fn resolve_reclamation(&self, ctx: &async_graphql::Context<'_>, input: ResolveReclamationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        let cmd: domain::generated::commands::ResolveReclamation = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        let entry = application::journal::CommandJournalEntry {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type,
+            channel: domain::generated::scalars::CommandChannel::GRAPHQL,
+            command_type: "ResolveReclamation".into(),
+            payload_hash: application::journal::payload_hash(&payload_json),
+            payload: payload_json,
+        };
+        match journal.insert(&entry).await.map_err(domain_error)? {
+            application::journal::JournalInsertOutcome::Duplicate { status, payload_hash } => {
+                if payload_hash != entry.payload_hash {
+                    return Err(conflict_error(env.message_id));
+                }
+                return Ok(acceptance(&env, journal_status_api(status), true));
+            }
+            application::journal::JournalInsertOutcome::Inserted => {}
+        }
+        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        let actor = application::ports::Actor {
+            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
+            user_type: env.user_type,
+            correlation_id: env.correlation_id,
+            cause_id: Some(env.message_id),
+        };
+        let (message_id, correlation_id) = (env.message_id, env.correlation_id);
+        tokio::spawn(async move {
+            let outcome = application::commands::resolve_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ());
+            complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;
+        });
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+    }
+    #[graphql(name = "rejectReclamation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    async fn reject_reclamation(&self, ctx: &async_graphql::Context<'_>, input: RejectReclamationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        let cmd: domain::generated::commands::RejectReclamation = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        let entry = application::journal::CommandJournalEntry {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type,
+            channel: domain::generated::scalars::CommandChannel::GRAPHQL,
+            command_type: "RejectReclamation".into(),
+            payload_hash: application::journal::payload_hash(&payload_json),
+            payload: payload_json,
+        };
+        match journal.insert(&entry).await.map_err(domain_error)? {
+            application::journal::JournalInsertOutcome::Duplicate { status, payload_hash } => {
+                if payload_hash != entry.payload_hash {
+                    return Err(conflict_error(env.message_id));
+                }
+                return Ok(acceptance(&env, journal_status_api(status), true));
+            }
+            application::journal::JournalInsertOutcome::Inserted => {}
+        }
+        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        let actor = application::ports::Actor {
+            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
+            user_type: env.user_type,
+            correlation_id: env.correlation_id,
+            cause_id: Some(env.message_id),
+        };
+        let (message_id, correlation_id) = (env.message_id, env.correlation_id);
+        tokio::spawn(async move {
+            let outcome = application::commands::reject_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ());
+            complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;
+        });
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+    }
+    #[graphql(name = "reopenReclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn reopen_reclamation(&self, ctx: &async_graphql::Context<'_>, input: ReopenReclamationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
+        let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        let cmd: domain::generated::commands::ReopenReclamation = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        let entry = application::journal::CommandJournalEntry {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type,
+            channel: domain::generated::scalars::CommandChannel::GRAPHQL,
+            command_type: "ReopenReclamation".into(),
+            payload_hash: application::journal::payload_hash(&payload_json),
+            payload: payload_json,
+        };
+        match journal.insert(&entry).await.map_err(domain_error)? {
+            application::journal::JournalInsertOutcome::Duplicate { status, payload_hash } => {
+                if payload_hash != entry.payload_hash {
+                    return Err(conflict_error(env.message_id));
+                }
+                return Ok(acceptance(&env, journal_status_api(status), true));
+            }
+            application::journal::JournalInsertOutcome::Inserted => {}
+        }
+        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        let actor = application::ports::Actor {
+            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
+            user_type: env.user_type,
+            correlation_id: env.correlation_id,
+            cause_id: Some(env.message_id),
+        };
+        let (message_id, correlation_id) = (env.message_id, env.correlation_id);
+        tokio::spawn(async move {
+            let outcome = application::commands::reopen_reclamation(store.as_ref(), cmd, &actor).await.map(|_| ());
+            complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;
+        });
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+    }
 }
 
 /// The stripped serde wire shape of the GraphQL input — both the journal `payload` column and the

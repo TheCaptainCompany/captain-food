@@ -2384,3 +2384,130 @@ impl From<TranslatedText> for ds::TranslatedText {
         Self(v.0)
     }
 }
+
+/// Client-generated id of a customer reclamation (claim/dispute) — the idempotency key for OpenReclamation (a re-open with the same id is rejected). Multiple reclamations may exist per order, so the reclamation has its own identity, distinct from the orderId it is about (#151).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ReclamationId(pub uuid::Uuid);
+async_graphql::scalar!(ReclamationId, "ReclamationId", "Client-generated id of a customer reclamation (claim/dispute) — the idempotency key for OpenReclamation (a re-open with the same id is rejected). Multiple reclamations may exist per order, so the reclamation has its own identity, distinct from the orderId it is about (#151).");
+impl From<ds::ReclamationId> for ReclamationId {
+    fn from(v: ds::ReclamationId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ReclamationId> for ds::ReclamationId {
+    fn from(v: ReclamationId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// What the customer is claiming about the order: an item was missing, the wrong item was delivered, a quality problem, a late delivery, damaged goods, nothing delivered at all, or another reason (#151).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ReclamationCategory {
+    #[graphql(name = "MISSING_ITEM")]
+    MISSING_ITEM,
+    #[graphql(name = "WRONG_ITEM")]
+    WRONG_ITEM,
+    #[graphql(name = "QUALITY")]
+    QUALITY,
+    #[graphql(name = "LATE_DELIVERY")]
+    LATE_DELIVERY,
+    #[graphql(name = "DAMAGED")]
+    DAMAGED,
+    #[graphql(name = "NOT_DELIVERED")]
+    NOT_DELIVERED,
+    #[graphql(name = "OTHER")]
+    OTHER,
+}
+impl From<ds::ReclamationCategory> for ReclamationCategory {
+    fn from(v: ds::ReclamationCategory) -> Self {
+        match v {
+            ds::ReclamationCategory::MISSING_ITEM => Self::MISSING_ITEM,
+            ds::ReclamationCategory::WRONG_ITEM => Self::WRONG_ITEM,
+            ds::ReclamationCategory::QUALITY => Self::QUALITY,
+            ds::ReclamationCategory::LATE_DELIVERY => Self::LATE_DELIVERY,
+            ds::ReclamationCategory::DAMAGED => Self::DAMAGED,
+            ds::ReclamationCategory::NOT_DELIVERED => Self::NOT_DELIVERED,
+            ds::ReclamationCategory::OTHER => Self::OTHER,
+        }
+    }
+}
+impl From<ReclamationCategory> for ds::ReclamationCategory {
+    fn from(v: ReclamationCategory) -> Self {
+        match v {
+            ReclamationCategory::MISSING_ITEM => Self::MISSING_ITEM,
+            ReclamationCategory::WRONG_ITEM => Self::WRONG_ITEM,
+            ReclamationCategory::QUALITY => Self::QUALITY,
+            ReclamationCategory::LATE_DELIVERY => Self::LATE_DELIVERY,
+            ReclamationCategory::DAMAGED => Self::DAMAGED,
+            ReclamationCategory::NOT_DELIVERED => Self::NOT_DELIVERED,
+            ReclamationCategory::OTHER => Self::OTHER,
+        }
+    }
+}
+
+/// The decision recorded when a reclamation is closed: a full or partial refund, a replacement order, a goodwill credit, or a rejection of the claim. The aggregate records the DECISION only; the refund money-move, credit ledger and replacement orders are downstream slices (#151).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ReclamationResolution {
+    #[graphql(name = "FULL_REFUND")]
+    FULL_REFUND,
+    #[graphql(name = "PARTIAL_REFUND")]
+    PARTIAL_REFUND,
+    #[graphql(name = "REPLACEMENT")]
+    REPLACEMENT,
+    #[graphql(name = "GOODWILL_CREDIT")]
+    GOODWILL_CREDIT,
+    #[graphql(name = "REJECTED")]
+    REJECTED,
+}
+impl From<ds::ReclamationResolution> for ReclamationResolution {
+    fn from(v: ds::ReclamationResolution) -> Self {
+        match v {
+            ds::ReclamationResolution::FULL_REFUND => Self::FULL_REFUND,
+            ds::ReclamationResolution::PARTIAL_REFUND => Self::PARTIAL_REFUND,
+            ds::ReclamationResolution::REPLACEMENT => Self::REPLACEMENT,
+            ds::ReclamationResolution::GOODWILL_CREDIT => Self::GOODWILL_CREDIT,
+            ds::ReclamationResolution::REJECTED => Self::REJECTED,
+        }
+    }
+}
+impl From<ReclamationResolution> for ds::ReclamationResolution {
+    fn from(v: ReclamationResolution) -> Self {
+        match v {
+            ReclamationResolution::FULL_REFUND => Self::FULL_REFUND,
+            ReclamationResolution::PARTIAL_REFUND => Self::PARTIAL_REFUND,
+            ReclamationResolution::REPLACEMENT => Self::REPLACEMENT,
+            ReclamationResolution::GOODWILL_CREDIT => Self::GOODWILL_CREDIT,
+            ReclamationResolution::REJECTED => Self::REJECTED,
+        }
+    }
+}
+
+/// Free-text description of the problem the customer is claiming about the order (#151).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ReclamationDescription(pub String);
+async_graphql::scalar!(ReclamationDescription, "ReclamationDescription", "Free-text description of the problem the customer is claiming about the order (#151).");
+impl From<ds::ReclamationDescription> for ReclamationDescription {
+    fn from(v: ds::ReclamationDescription) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ReclamationDescription> for ds::ReclamationDescription {
+    fn from(v: ReclamationDescription) -> Self {
+        Self(v.0)
+    }
+}
+
+/// Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ReclamationReason(pub String);
+async_graphql::scalar!(ReclamationReason, "ReclamationReason", "Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).");
+impl From<ds::ReclamationReason> for ReclamationReason {
+    fn from(v: ds::ReclamationReason) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ReclamationReason> for ds::ReclamationReason {
+    fn from(v: ReclamationReason) -> Self {
+        Self(v.0)
+    }
+}

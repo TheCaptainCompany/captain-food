@@ -682,6 +682,54 @@ pub const PARTICIPANT_NOT_MUTED: ErrorDef = ErrorDef {
     message_fr: "Ce participant n'est pas actuellement muet.",
 };
 
+/// OpenReclamation targeted a reclamationId that already exists; the birth is idempotent-guarded, so a second open is rejected (rules.yaml#/ReclamationIsUniquePerId) (#151).
+/// Context: `reclamationId`.
+pub const RECLAMATION_ALREADY_EXISTS: ErrorDef = ErrorDef {
+    code: "ReclamationAlreadyExists",
+    message_en: "A reclamation already exists with this id.",
+    message_fr: "Une réclamation existe déjà avec cet identifiant.",
+};
+
+/// Resolve/reject/reopen targeted a reclamation that does not exist; a decision cannot be made before the reclamation is opened (#151).
+/// Context: `reclamationId`.
+pub const RECLAMATION_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "ReclamationNotFound",
+    message_en: "No reclamation exists with this id.",
+    message_fr: "Aucune réclamation n'existe avec cet identifiant.",
+};
+
+/// Resolve or reject targeted a reclamation that is not currently OPEN; only an open reclamation can be decided (rules.yaml#/OnlyOpenReclamationsAreDecided) (#151).
+/// Context: `reclamationId`.
+pub const RECLAMATION_NOT_OPEN: ErrorDef = ErrorDef {
+    code: "ReclamationNotOpen",
+    message_en: "This reclamation is not open.",
+    message_fr: "Cette réclamation n'est pas ouverte.",
+};
+
+/// Reopen targeted a reclamation that is not in a decided (resolved or rejected) state; only a decided reclamation can be reopened (rules.yaml#/OnlyDecidedReclamationsCanBeReopened) (#151).
+/// Context: `reclamationId`.
+pub const RECLAMATION_NOT_REOPENABLE: ErrorDef = ErrorDef {
+    code: "ReclamationNotReopenable",
+    message_en: "This reclamation cannot be reopened.",
+    message_fr: "Cette réclamation ne peut pas être rouverte.",
+};
+
+/// A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).
+/// Context: `reclamationId`.
+pub const REJECTION_REASON_REQUIRED: ErrorDef = ErrorDef {
+    code: "RejectionReasonRequired",
+    message_en: "A reason is required to reject a reclamation.",
+    message_fr: "Un motif est requis pour rejeter une réclamation.",
+};
+
+/// A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).
+/// Context: `reclamationId`.
+pub const PARTIAL_REFUND_AMOUNT_REQUIRED: ErrorDef = ErrorDef {
+    code: "PartialRefundAmountRequired",
+    message_en: "A refund amount is required for a partial refund.",
+    message_fr: "Un montant de remboursement est requis pour un remboursement partiel.",
+};
+
 /// Every anticipated error, in errors.yaml order.
 pub const ERRORS: &[ErrorDef] = &[
     UNAUTHORIZED,
@@ -769,6 +817,12 @@ pub const ERRORS: &[ErrorDef] = &[
     TRANSLATION_ALREADY_RECORDED,
     MUTE_REASON_REQUIRED,
     PARTICIPANT_NOT_MUTED,
+    RECLAMATION_ALREADY_EXISTS,
+    RECLAMATION_NOT_FOUND,
+    RECLAMATION_NOT_OPEN,
+    RECLAMATION_NOT_REOPENABLE,
+    REJECTION_REASON_REQUIRED,
+    PARTIAL_REFUND_AMOUNT_REQUIRED,
 ];
 
 /// Look up an anticipated error by its stable PascalCase code.

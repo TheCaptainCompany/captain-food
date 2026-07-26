@@ -803,3 +803,65 @@ ParticipantNotMuted:
   messages:
     en: "This participant is not currently muted."
     fr: "Ce participant n'est pas actuellement muet."
+
+# --- Reclamations / customer claims (#151) ---
+
+ReclamationAlreadyExists:
+  description: >
+    OpenReclamation targeted a reclamationId that already exists; the birth is idempotent-guarded, so a
+    second open is rejected (rules.yaml#/ReclamationIsUniquePerId) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "A reclamation already exists with this id."
+    fr: "Une réclamation existe déjà avec cet identifiant."
+
+ReclamationNotFound:
+  description: >
+    Resolve/reject/reopen targeted a reclamation that does not exist; a decision cannot be made before the
+    reclamation is opened (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "No reclamation exists with this id."
+    fr: "Aucune réclamation n'existe avec cet identifiant."
+
+ReclamationNotOpen:
+  description: >
+    Resolve or reject targeted a reclamation that is not currently OPEN; only an open reclamation can be
+    decided (rules.yaml#/OnlyOpenReclamationsAreDecided) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "This reclamation is not open."
+    fr: "Cette réclamation n'est pas ouverte."
+
+ReclamationNotReopenable:
+  description: >
+    Reopen targeted a reclamation that is not in a decided (resolved or rejected) state; only a decided
+    reclamation can be reopened (rules.yaml#/OnlyDecidedReclamationsCanBeReopened) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "This reclamation cannot be reopened."
+    fr: "Cette réclamation ne peut pas être rouverte."
+
+RejectionReasonRequired:
+  description: >
+    A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was
+    declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "A reason is required to reject a reclamation."
+    fr: "Un motif est requis pour rejeter une réclamation."
+
+PartialRefundAmountRequired:
+  description: >
+    A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the
+    amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  messages:
+    en: "A refund amount is required for a partial refund."
+    fr: "Un montant de remboursement est requis pour un remboursement partiel."

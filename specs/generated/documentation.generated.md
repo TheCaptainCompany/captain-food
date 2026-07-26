@@ -82,6 +82,8 @@ An authenticated person who orders food via Captain.Food.
 |  | SendMessage | [✏️ `postMessage`](#mutation-postmessage) |
 |  | TranslateMessage | [✏️ `recordMessageTranslation`](#mutation-recordmessagetranslation) |
 |  | ReadThread | [🔎 `orderConversation`](#query-orderconversation) |
+| 🧭 **RaiseAClaim** | OpenClaim | [✏️ `openReclamation`](#mutation-openreclamation) |
+|  | ReopenClaim | [✏️ `reopenReclamation`](#mutation-reopenreclamation) |
 
 <a id="story-restaurant_owner"></a>
 ### 🎬 `restaurant_owner` · 🏪 `RESTAURANT_ACCOUNT` · 🗣️ `fr-FR`
@@ -148,6 +150,8 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 |  | EscalateToAdmin | [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) |
 |  | MuteParticipant | [✏️ `muteParticipant`](#mutation-muteparticipant) |
 |  | UnmuteParticipant | [✏️ `unmuteParticipant`](#mutation-unmuteparticipant) |
+| 🧭 **HandleClaims** | ResolveClaim | [✏️ `resolveReclamation`](#mutation-resolvereclamation) |
+|  | RejectClaim | [✏️ `rejectReclamation`](#mutation-rejectreclamation) |
 
 <a id="story-rider"></a>
 ### 🎬 `rider` · 🛵 `RIDER` · 🗣️ `fr-FR`
@@ -8409,7 +8413,7 @@ _criticality: **high**_
 
 _Shared vocabulary and operations that span several bounded contexts (or belong to none)._
 
-### 🧰 API operations _(6)_
+### 🧰 API operations _(10)_
 
 <a id="query-phonecountries"></a>
 #### 🔎 Query: `phoneCountries`
@@ -8456,6 +8460,34 @@ The active Uber Eats split/fee assumptions for the estimated comparison (admin; 
 - **Input**: _(none)_
 - **Returns**: [🧩 `UberSplitPolicy`](#type-ubersplitpolicy) (list) · **reads** [🗄️ `UberSplitPolicy`](#view-ubersplitpolicy)
 - **Roles**: ADMIN · **slice** V1
+
+<a id="mutation-openreclamation"></a>
+#### ✏️ Mutation: `openReclamation`
+
+- **Command**: [📩 `OpenReclamation`](#command-openreclamation) → handled by [🎭 `Reclamation`](#actor-reclamation)
+- **Roles**: CUSTOMER · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-resolvereclamation"></a>
+#### ✏️ Mutation: `resolveReclamation`
+
+- **Command**: [📩 `ResolveReclamation`](#command-resolvereclamation) → handled by [🎭 `Reclamation`](#actor-reclamation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-rejectreclamation"></a>
+#### ✏️ Mutation: `rejectReclamation`
+
+- **Command**: [📩 `RejectReclamation`](#command-rejectreclamation) → handled by [🎭 `Reclamation`](#actor-reclamation)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-reopenreclamation"></a>
+#### ✏️ Mutation: `reopenReclamation`
+
+- **Command**: [📩 `ReopenReclamation`](#command-reopenreclamation) → handled by [🎭 `Reclamation`](#actor-reclamation)
+- **Roles**: CUSTOMER · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="subscription-operationstatuschanged"></a>
 #### 🔔 Subscription: [`operationStatusChanged`](#subscription-operationstatuschanged)
@@ -8646,6 +8678,147 @@ Calibratable Uber Eats split/fee assumptions for the estimated comparison (ADR-0
 | <a id="type-ubersplitpolicy--platformfeepct"></a>`platformFeePct` | `number` | ✅ |
 | <a id="type-ubersplitpolicy--effectivefrom"></a>`effectiveFrom` | `string` _date-time_ | ✅ |
 
+### 🎭 Actors _(1)_
+
+<a id="actor-reclamation"></a>
+#### 🎭 Actor: `Reclamation`
+
+_🧩 aggregate_ — Customer claim/dispute over a delivered order; id = reclamationId (its own identity, correlated to an orderId — MULTIPLE reclamations may exist per order, #153). OpenReclamation is its birth; it then moves through OPEN -> RESOLVED/REJECTED, and a decided reclamation may be reopened back to OPEN. This slice is the lifecycle only: ReclamationResolved records the DECISION (+ amount for a PARTIAL_REFUND) so the downstream refund/credit/replacement slices react later; the aggregate performs no money-move. The 14-day window and order-eligibility (order exists/delivered) are cross-aggregate/temporal invariants enforced in the APPLICATION layer (reading the order's delivered-at vs now), NOT here (#151).
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `OpenReclamation`](#command-openreclamation) | [⚡ `ReclamationOpened`](#event-reclamationopened) | [⛔ `ReclamationAlreadyExists`](#error-reclamationalreadyexists) |
+| [📩 `ResolveReclamation`](#command-resolvereclamation) | [⚡ `ReclamationResolved`](#event-reclamationresolved) | [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotOpen`](#error-reclamationnotopen), [⛔ `PartialRefundAmountRequired`](#error-partialrefundamountrequired) |
+| [📩 `RejectReclamation`](#command-rejectreclamation) | [⚡ `ReclamationRejected`](#event-reclamationrejected) | [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotOpen`](#error-reclamationnotopen), [⛔ `RejectionReasonRequired`](#error-rejectionreasonrequired) |
+| [📩 `ReopenReclamation`](#command-reopenreclamation) | [⚡ `ReclamationReopened`](#event-reclamationreopened) | [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotReopenable`](#error-reclamationnotreopenable) |
+
+### 📩 Commands _(4)_
+
+<a id="command-openreclamation"></a>
+#### 📩 Command: `OpenReclamation`
+
+Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open with the same id is rejected). Records the category, description and optionally the requested resolution. The 14-day window and order-eligibility are enforced in the application layer, not here (#151).
+
+- **Dispatched by**: [✏️ `openReclamation`](#mutation-openreclamation) · **handled by** [🎭 `Reclamation`](#actor-reclamation)
+- **Emits**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **Throws**: [⛔ `ReclamationAlreadyExists`](#error-reclamationalreadyexists)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-openreclamation--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="command-openreclamation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="command-openreclamation--category"></a>`category` | [🔤 `ReclamationCategory`](#scalar-reclamationcategory) | ✅ |  |
+| <a id="command-openreclamation--description"></a>`description` | [🔤 `ReclamationDescription`](#scalar-reclamationdescription) | ✅ |  |
+| <a id="command-openreclamation--requestedresolution"></a>`requestedResolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ⬜ |  |
+
+<a id="command-resolvereclamation"></a>
+#### 📩 Command: `ResolveReclamation`
+
+Resolve (decide) an OPEN reclamation with a `resolution`. A PARTIAL_REFUND requires a `refundAmount` (enforced by the write model as errors.yaml#/PartialRefundAmountRequired, not by the schema). The aggregate records the decision only; the refund/credit/replacement automation is downstream (#151).
+
+- **Dispatched by**: [✏️ `resolveReclamation`](#mutation-resolvereclamation) · **handled by** [🎭 `Reclamation`](#actor-reclamation)
+- **Emits**: [⚡ `ReclamationResolved`](#event-reclamationresolved)
+- **Throws**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotOpen`](#error-reclamationnotopen), [⛔ `PartialRefundAmountRequired`](#error-partialrefundamountrequired)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-resolvereclamation--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="command-resolvereclamation--resolution"></a>`resolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ✅ |  |
+| <a id="command-resolvereclamation--note"></a>`note` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
+| <a id="command-resolvereclamation--refundamount"></a>`refundAmount` | [📦 `Money`](#entity-money) | ⬜ |  |
+
+<a id="command-rejectreclamation"></a>
+#### 📩 Command: `RejectReclamation`
+
+Reject an OPEN reclamation. A `reason` is REQUIRED, but is left OUT of `required` on purpose: the "reasoned" invariant is enforced by the write model as an anticipated error (errors.yaml#/RejectionReasonRequired), not by the schema (#151).
+
+- **Dispatched by**: [✏️ `rejectReclamation`](#mutation-rejectreclamation) · **handled by** [🎭 `Reclamation`](#actor-reclamation)
+- **Emits**: [⚡ `ReclamationRejected`](#event-reclamationrejected)
+- **Throws**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotOpen`](#error-reclamationnotopen), [⛔ `RejectionReasonRequired`](#error-rejectionreasonrequired)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-rejectreclamation--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="command-rejectreclamation--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
+
+<a id="command-reopenreclamation"></a>
+#### 📩 Command: `ReopenReclamation`
+
+Reopen a previously decided (resolved or rejected) reclamation for another look. The reclamation must exist and be in a decided state (errors.yaml#/ReclamationNotReopenable) (#151).
+
+- **Dispatched by**: [✏️ `reopenReclamation`](#mutation-reopenreclamation) · **handled by** [🎭 `Reclamation`](#actor-reclamation)
+- **Emits**: [⚡ `ReclamationReopened`](#event-reclamationreopened)
+- **Throws**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotReopenable`](#error-reclamationnotreopenable)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-reopenreclamation--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="command-reopenreclamation--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
+
+### ⚡ Events _(4)_
+
+<a id="event-reclamationopened"></a>
+#### ⚡ Event: `ReclamationOpened`
+
+Birth of a customer reclamation over a delivered order (id = reclamationId; #153). Records the category, the customer's description and — optionally — the resolution the customer requested. The 14-day window and order-eligibility (order exists/delivered) are enforced in the application layer when opening, not by the aggregate (#151).
+
+- **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-reclamationopened--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="event-reclamationopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-reclamationopened--category"></a>`category` | [🔤 `ReclamationCategory`](#scalar-reclamationcategory) | ✅ |  |
+| <a id="event-reclamationopened--description"></a>`description` | [🔤 `ReclamationDescription`](#scalar-reclamationdescription) | ✅ |  |
+| <a id="event-reclamationopened--requestedresolution"></a>`requestedResolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ⬜ |  |
+
+<a id="event-reclamationresolved"></a>
+#### ⚡ Event: `ReclamationResolved`
+
+A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151).
+
+- **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-reclamationresolved--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="event-reclamationresolved--resolution"></a>`resolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ✅ |  |
+| <a id="event-reclamationresolved--note"></a>`note` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
+| <a id="event-reclamationresolved--refundamount"></a>`refundAmount` | [📦 `Money`](#entity-money) | ⬜ |  |
+
+<a id="event-reclamationrejected"></a>
+#### ⚡ Event: `ReclamationRejected`
+
+A reclamation was rejected (the claim was declined) with a recorded reason (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).
+
+- **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-reclamationrejected--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="event-reclamationrejected--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ✅ |  |
+
+<a id="event-reclamationreopened"></a>
+#### ⚡ Event: `ReclamationReopened`
+
+A previously decided (resolved or rejected) reclamation was reopened for another look (rules.yaml#/OnlyDecidedReclamationsCanBeReopened). `reason` is optional — a reopen need not state why — mirroring the optional command input (there is no reason-required guard on reopen, unlike reject) (#151).
+
+- **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-reclamationreopened--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="event-reclamationreopened--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
+
 ### 📦 Entities _(3)_
 
 <a id="entity-courier"></a>
@@ -8681,7 +8854,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(41)_
+### 🔤 Scalars _(46)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -8726,8 +8899,13 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-deliverychannelkind"></a>🔤 `DeliveryChannelKind` | enum (POOL \| PARTNER) | Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60). |
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
+| <a id="scalar-reclamationid"></a>🔤 `ReclamationId` | string _uuid_ | Client-generated id of a customer reclamation (claim/dispute) — the idempotency key for OpenReclamation (a re-open with the same id is rejected). Multiple reclamations may exist per order, so the reclamation has its own identity, distinct from the orderId it is about (#151).  |
+| <a id="scalar-reclamationcategory"></a>🔤 `ReclamationCategory` | enum (MISSING_ITEM \| WRONG_ITEM \| QUALITY \| LATE_DELIVERY \| DAMAGED \| NOT_DELIVERED \| OTHER) | What the customer is claiming about the order: an item was missing, the wrong item was delivered, a quality problem, a late delivery, damaged goods, nothing delivered at all, or another reason (#151).  |
+| <a id="scalar-reclamationresolution"></a>🔤 `ReclamationResolution` | enum (FULL_REFUND \| PARTIAL_REFUND \| REPLACEMENT \| GOODWILL_CREDIT \| REJECTED) | The decision recorded when a reclamation is closed: a full or partial refund, a replacement order, a goodwill credit, or a rejection of the claim. The aggregate records the DECISION only; the refund money-move, credit ledger and replacement orders are downstream slices (#151).  |
+| <a id="scalar-reclamationdescription"></a>🔤 `ReclamationDescription` | string | Free-text description of the problem the customer is claiming about the order (#151). |
+| <a id="scalar-reclamationreason"></a>🔤 `ReclamationReason` | string | Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).  |
 
-### ⛔ Errors _(10)_
+### ⛔ Errors _(16)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -8741,6 +8919,183 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
+| <a id="error-reclamationalreadyexists"></a>⛔ `ReclamationAlreadyExists` | OpenReclamation targeted a reclamationId that already exists; the birth is idempotent-guarded, so a second open is rejected (rules.yaml#/ReclamationIsUniquePerId) (#151).  | 🇬🇧 A reclamation already exists with this id. | 🇫🇷 Une réclamation existe déjà avec cet identifiant. | [📩 `OpenReclamation`](#command-openreclamation) |
+| <a id="error-reclamationnotfound"></a>⛔ `ReclamationNotFound` | Resolve/reject/reopen targeted a reclamation that does not exist; a decision cannot be made before the reclamation is opened (#151).  | 🇬🇧 No reclamation exists with this id. | 🇫🇷 Aucune réclamation n'existe avec cet identifiant. | [📩 `ResolveReclamation`](#command-resolvereclamation), [📩 `RejectReclamation`](#command-rejectreclamation), [📩 `ReopenReclamation`](#command-reopenreclamation) |
+| <a id="error-reclamationnotopen"></a>⛔ `ReclamationNotOpen` | Resolve or reject targeted a reclamation that is not currently OPEN; only an open reclamation can be decided (rules.yaml#/OnlyOpenReclamationsAreDecided) (#151).  | 🇬🇧 This reclamation is not open. | 🇫🇷 Cette réclamation n'est pas ouverte. | [📩 `ResolveReclamation`](#command-resolvereclamation), [📩 `RejectReclamation`](#command-rejectreclamation) |
+| <a id="error-reclamationnotreopenable"></a>⛔ `ReclamationNotReopenable` | Reopen targeted a reclamation that is not in a decided (resolved or rejected) state; only a decided reclamation can be reopened (rules.yaml#/OnlyDecidedReclamationsCanBeReopened) (#151).  | 🇬🇧 This reclamation cannot be reopened. | 🇫🇷 Cette réclamation ne peut pas être rouverte. | [📩 `ReopenReclamation`](#command-reopenreclamation) |
+| <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
+| <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
+
+### 📐 Business rules _(5)_
+
+<a id="rule-reclamationisuniqueperid"></a>
+#### 📐 Rule: `ReclamationIsUniquePerId`
+
+_A reclamation is opened once per reclamationId; opening a claim with an already-used id is rejected (#151)._
+
+- **Verified by**: [🧪 `TestReclamationOpened`](#test-testreclamationopened), [🧪 `TestReclamationOpenedTwiceIsRejected`](#test-testreclamationopenedtwiceisrejected)
+
+<a id="rule-onlyopenreclamationsaredecided"></a>
+#### 📐 Rule: `OnlyOpenReclamationsAreDecided`
+
+_A reclamation can be resolved or rejected only while it is OPEN; deciding one that is not open is rejected (#151)._
+
+- **Verified by**: [🧪 `TestReclamationResolvedFullRefund`](#test-testreclamationresolvedfullrefund), [🧪 `TestResolveNotOpenRejected`](#test-testresolvenotopenrejected), [🧪 `TestRejectNotOpenRejected`](#test-testrejectnotopenrejected), [🧪 `TestResolveMissingReclamationRejected`](#test-testresolvemissingreclamationrejected), [🧪 `TestRejectMissingReclamationRejected`](#test-testrejectmissingreclamationrejected)
+
+<a id="rule-reclamationrejectioncarriesareason"></a>
+#### 📐 Rule: `ReclamationRejectionCarriesAReason`
+
+_Rejecting a reclamation requires a non-empty reason; a rejection without one is rejected (#151)._
+
+- **Verified by**: [🧪 `TestReclamationRejected`](#test-testreclamationrejected), [🧪 `TestRejectWithoutReasonRejected`](#test-testrejectwithoutreasonrejected)
+
+<a id="rule-partialrefundresolutioncarriesanamount"></a>
+#### 📐 Rule: `PartialRefundResolutionCarriesAnAmount`
+
+_Resolving a reclamation as PARTIAL_REFUND requires a refund amount; a partial refund without one is rejected (#151)._
+
+- **Verified by**: [🧪 `TestResolvePartialRefundWithoutAmountRejected`](#test-testresolvepartialrefundwithoutamountrejected)
+
+<a id="rule-onlydecidedreclamationscanbereopened"></a>
+#### 📐 Rule: `OnlyDecidedReclamationsCanBeReopened`
+
+_Only a decided (resolved or rejected) reclamation can be reopened; reopening an open reclamation is rejected (#151)._
+
+- **Verified by**: [🧪 `TestReclamationReopened`](#test-testreclamationreopened), [🧪 `TestReopenOpenRejected`](#test-testreopenopenrejected), [🧪 `TestReopenMissingReclamationRejected`](#test-testreopenmissingreclamationrejected)
+
+### 🧪 Tests _(1)_
+
+**[🎭 `Reclamation`](#actor-reclamation)**
+
+<a id="test-testreclamationopened"></a>
+#### 🧪 Test: `TestReclamationOpened`
+
+_Opens a customer reclamation over an order_
+
+- **Given**: _(none)_
+- **When**: [📩 `OpenReclamation`](#command-openreclamation)
+- **Then**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **Verifies**: [📐 `ReclamationIsUniquePerId`](#rule-reclamationisuniqueperid)
+
+<a id="test-testreclamationopenedtwiceisrejected"></a>
+#### 🧪 Test: `TestReclamationOpenedTwiceIsRejected`
+
+_Opening a reclamation with an already-used id is rejected_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **When**: [📩 `OpenReclamation`](#command-openreclamation)
+- **Thrown**: [⛔ `ReclamationAlreadyExists`](#error-reclamationalreadyexists)
+- **Verifies**: [📐 `ReclamationIsUniquePerId`](#rule-reclamationisuniqueperid)
+
+<a id="test-testreclamationresolvedfullrefund"></a>
+#### 🧪 Test: `TestReclamationResolvedFullRefund`
+
+_Resolves an open reclamation with a full refund_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **When**: [📩 `ResolveReclamation`](#command-resolvereclamation)
+- **Then**: [⚡ `ReclamationResolved`](#event-reclamationresolved)
+- **Verifies**: [📐 `OnlyOpenReclamationsAreDecided`](#rule-onlyopenreclamationsaredecided)
+
+<a id="test-testresolvenotopenrejected"></a>
+#### 🧪 Test: `TestResolveNotOpenRejected`
+
+_Resolving a reclamation that is not open is rejected_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved)
+- **When**: [📩 `ResolveReclamation`](#command-resolvereclamation)
+- **Thrown**: [⛔ `ReclamationNotOpen`](#error-reclamationnotopen)
+- **Verifies**: [📐 `OnlyOpenReclamationsAreDecided`](#rule-onlyopenreclamationsaredecided)
+
+<a id="test-testresolvepartialrefundwithoutamountrejected"></a>
+#### 🧪 Test: `TestResolvePartialRefundWithoutAmountRejected`
+
+_Resolving as PARTIAL_REFUND without an amount is rejected_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **When**: [📩 `ResolveReclamation`](#command-resolvereclamation)
+- **Thrown**: [⛔ `PartialRefundAmountRequired`](#error-partialrefundamountrequired)
+- **Verifies**: [📐 `PartialRefundResolutionCarriesAnAmount`](#rule-partialrefundresolutioncarriesanamount)
+
+<a id="test-testreclamationrejected"></a>
+#### 🧪 Test: `TestReclamationRejected`
+
+_Rejects an open reclamation with a reason_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **When**: [📩 `RejectReclamation`](#command-rejectreclamation)
+- **Then**: [⚡ `ReclamationRejected`](#event-reclamationrejected)
+- **Verifies**: [📐 `ReclamationRejectionCarriesAReason`](#rule-reclamationrejectioncarriesareason)
+
+<a id="test-testrejectwithoutreasonrejected"></a>
+#### 🧪 Test: `TestRejectWithoutReasonRejected`
+
+_Rejecting a reclamation without a reason is rejected_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **When**: [📩 `RejectReclamation`](#command-rejectreclamation)
+- **Thrown**: [⛔ `RejectionReasonRequired`](#error-rejectionreasonrequired)
+- **Verifies**: [📐 `ReclamationRejectionCarriesAReason`](#rule-reclamationrejectioncarriesareason)
+
+<a id="test-testrejectnotopenrejected"></a>
+#### 🧪 Test: `TestRejectNotOpenRejected`
+
+_Rejecting a reclamation that is not open is rejected_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationRejected`](#event-reclamationrejected)
+- **When**: [📩 `RejectReclamation`](#command-rejectreclamation)
+- **Thrown**: [⛔ `ReclamationNotOpen`](#error-reclamationnotopen)
+- **Verifies**: [📐 `OnlyOpenReclamationsAreDecided`](#rule-onlyopenreclamationsaredecided)
+
+<a id="test-testreclamationreopened"></a>
+#### 🧪 Test: `TestReclamationReopened`
+
+_Reopens a rejected reclamation for another look_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationRejected`](#event-reclamationrejected)
+- **When**: [📩 `ReopenReclamation`](#command-reopenreclamation)
+- **Then**: [⚡ `ReclamationReopened`](#event-reclamationreopened)
+- **Verifies**: [📐 `OnlyDecidedReclamationsCanBeReopened`](#rule-onlydecidedreclamationscanbereopened)
+
+<a id="test-testreopenopenrejected"></a>
+#### 🧪 Test: `TestReopenOpenRejected`
+
+_Reopening a reclamation that is still open is rejected_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **When**: [📩 `ReopenReclamation`](#command-reopenreclamation)
+- **Thrown**: [⛔ `ReclamationNotReopenable`](#error-reclamationnotreopenable)
+- **Verifies**: [📐 `OnlyDecidedReclamationsCanBeReopened`](#rule-onlydecidedreclamationscanbereopened)
+
+<a id="test-testresolvemissingreclamationrejected"></a>
+#### 🧪 Test: `TestResolveMissingReclamationRejected`
+
+_Resolving a reclamation that does not exist is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `ResolveReclamation`](#command-resolvereclamation)
+- **Thrown**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound)
+- **Verifies**: [📐 `OnlyOpenReclamationsAreDecided`](#rule-onlyopenreclamationsaredecided)
+
+<a id="test-testrejectmissingreclamationrejected"></a>
+#### 🧪 Test: `TestRejectMissingReclamationRejected`
+
+_Rejecting a reclamation that does not exist is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `RejectReclamation`](#command-rejectreclamation)
+- **Thrown**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound)
+- **Verifies**: [📐 `OnlyOpenReclamationsAreDecided`](#rule-onlyopenreclamationsaredecided)
+
+<a id="test-testreopenmissingreclamationrejected"></a>
+#### 🧪 Test: `TestReopenMissingReclamationRejected`
+
+_Reopening a reclamation that does not exist is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `ReopenReclamation`](#command-reopenreclamation)
+- **Thrown**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound)
+- **Verifies**: [📐 `OnlyDecidedReclamationsCanBeReopened`](#rule-onlydecidedreclamationscanbereopened)
 
 ### 📡 Observability _(5)_
 

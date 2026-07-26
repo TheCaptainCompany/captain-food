@@ -487,6 +487,20 @@ fixtures:
     type: { $ref: 'events.yaml#/MessageTranslationAdded' }
     data: { orderId: "order-1", messageId: "msg-1", locale: "en-US", text: "Hi, any update on my order?" }
 
+  # --- Reclamations / customer claims (#151) ---
+  reclamationOpened:
+    type: { $ref: 'events.yaml#/ReclamationOpened' }
+    data: { reclamationId: "recl-1", orderId: "order-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
+  reclamationResolvedFullRefund:
+    type: { $ref: 'events.yaml#/ReclamationResolved' }
+    data: { reclamationId: "recl-1", resolution: "FULL_REFUND" }
+  reclamationRejected:
+    type: { $ref: 'events.yaml#/ReclamationRejected' }
+    data: { reclamationId: "recl-1", reason: "The delivery photo shows all items were handed over." }
+  reclamationReopened:
+    type: { $ref: 'events.yaml#/ReclamationReopened' }
+    data: { reclamationId: "recl-1", reason: "Customer sent a photo; taking another look." }
+
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
 # =====================================================================
@@ -3059,3 +3073,159 @@ tests:
       data: { orderId: "order-1", mutedRole: "RIDER" }
     thrown:
       - { $ref: 'errors.yaml#/ParticipantNotMuted' }
+
+  # ----------------------- Reclamation (#151) ------------------------
+  TestReclamationOpened:
+    name: "Opens a customer reclamation over an order"
+    rules: [{ $ref: 'rules.yaml#/ReclamationIsUniquePerId' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/OpenReclamation' }
+      data: { reclamationId: "recl-1", orderId: "order-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
+    then:
+      - { $ref: '#/fixtures/reclamationOpened' }
+
+  TestReclamationOpenedTwiceIsRejected:
+    name: "Opening a reclamation with an already-used id is rejected"
+    rules: [{ $ref: 'rules.yaml#/ReclamationIsUniquePerId' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/OpenReclamation' }
+      data: { reclamationId: "recl-1", orderId: "order-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
+    thrown:
+      - { $ref: 'errors.yaml#/ReclamationAlreadyExists' }
+
+  TestReclamationResolvedFullRefund:
+    name: "Resolves an open reclamation with a full refund"
+    rules: [{ $ref: 'rules.yaml#/OnlyOpenReclamationsAreDecided' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/ResolveReclamation' }
+      data: { reclamationId: "recl-1", resolution: "FULL_REFUND" }
+    then:
+      - { $ref: '#/fixtures/reclamationResolvedFullRefund' }
+
+  TestResolveNotOpenRejected:
+    name: "Resolving a reclamation that is not open is rejected"
+    rules: [{ $ref: 'rules.yaml#/OnlyOpenReclamationsAreDecided' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+      - { $ref: '#/fixtures/reclamationResolvedFullRefund' }
+    when:
+      type: { $ref: 'commands.yaml#/ResolveReclamation' }
+      data: { reclamationId: "recl-1", resolution: "FULL_REFUND" }
+    thrown:
+      - { $ref: 'errors.yaml#/ReclamationNotOpen' }
+
+  TestResolvePartialRefundWithoutAmountRejected:
+    name: "Resolving as PARTIAL_REFUND without an amount is rejected"
+    rules: [{ $ref: 'rules.yaml#/PartialRefundResolutionCarriesAnAmount' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/ResolveReclamation' }
+      data: { reclamationId: "recl-1", resolution: "PARTIAL_REFUND" }
+    thrown:
+      - { $ref: 'errors.yaml#/PartialRefundAmountRequired' }
+
+  TestReclamationRejected:
+    name: "Rejects an open reclamation with a reason"
+    rules: [{ $ref: 'rules.yaml#/ReclamationRejectionCarriesAReason' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/RejectReclamation' }
+      data: { reclamationId: "recl-1", reason: "The delivery photo shows all items were handed over." }
+    then:
+      - { $ref: '#/fixtures/reclamationRejected' }
+
+  TestRejectWithoutReasonRejected:
+    name: "Rejecting a reclamation without a reason is rejected"
+    rules: [{ $ref: 'rules.yaml#/ReclamationRejectionCarriesAReason' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/RejectReclamation' }
+      data: { reclamationId: "recl-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/RejectionReasonRequired' }
+
+  TestRejectNotOpenRejected:
+    name: "Rejecting a reclamation that is not open is rejected"
+    rules: [{ $ref: 'rules.yaml#/OnlyOpenReclamationsAreDecided' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+      - { $ref: '#/fixtures/reclamationRejected' }
+    when:
+      type: { $ref: 'commands.yaml#/RejectReclamation' }
+      data: { reclamationId: "recl-1", reason: "The delivery photo shows all items were handed over." }
+    thrown:
+      - { $ref: 'errors.yaml#/ReclamationNotOpen' }
+
+  TestReclamationReopened:
+    name: "Reopens a rejected reclamation for another look"
+    rules: [{ $ref: 'rules.yaml#/OnlyDecidedReclamationsCanBeReopened' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+      - { $ref: '#/fixtures/reclamationRejected' }
+    when:
+      type: { $ref: 'commands.yaml#/ReopenReclamation' }
+      data: { reclamationId: "recl-1", reason: "Customer sent a photo; taking another look." }
+    then:
+      - { $ref: '#/fixtures/reclamationReopened' }
+
+  TestReopenOpenRejected:
+    name: "Reopening a reclamation that is still open is rejected"
+    rules: [{ $ref: 'rules.yaml#/OnlyDecidedReclamationsCanBeReopened' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/ReopenReclamation' }
+      data: { reclamationId: "recl-1", reason: "Customer sent a photo; taking another look." }
+    thrown:
+      - { $ref: 'errors.yaml#/ReclamationNotReopenable' }
+
+  TestResolveMissingReclamationRejected:
+    name: "Resolving a reclamation that does not exist is rejected"
+    rules: [{ $ref: 'rules.yaml#/OnlyOpenReclamationsAreDecided' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/ResolveReclamation' }
+      data: { reclamationId: "recl-1", resolution: "FULL_REFUND" }
+    thrown:
+      - { $ref: 'errors.yaml#/ReclamationNotFound' }
+
+  TestRejectMissingReclamationRejected:
+    name: "Rejecting a reclamation that does not exist is rejected"
+    rules: [{ $ref: 'rules.yaml#/OnlyOpenReclamationsAreDecided' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RejectReclamation' }
+      data: { reclamationId: "recl-1", reason: "The delivery photo shows all items were handed over." }
+    thrown:
+      - { $ref: 'errors.yaml#/ReclamationNotFound' }
+
+  TestReopenMissingReclamationRejected:
+    name: "Reopening a reclamation that does not exist is rejected"
+    rules: [{ $ref: 'rules.yaml#/OnlyDecidedReclamationsCanBeReopened' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/ReopenReclamation' }
+      data: { reclamationId: "recl-1", reason: "Customer sent a photo; taking another look." }
+    thrown:
+      - { $ref: 'errors.yaml#/ReclamationNotFound' }
