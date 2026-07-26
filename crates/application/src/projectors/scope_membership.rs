@@ -68,10 +68,10 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
             let order_id = e.order_id.0;
             let mut out = Vec::with_capacity(3);
 
-            // Guest checkout leaves `customer_id` unset (OrderPlaced.customerId is Option), so there
-            // is simply no CUSTOMER principal to grant. A guest reaches their own order through the
-            // session-ownership path, not through membership — see the note in `scope_membership`
-            // tests and the open question on the PR.
+            // `customer_id` is optional, so an order may carry no Captain customer at all. This is
+            // NOT guest checkout — the product requires a verified phone at checkout, which creates
+            // the Customer — it is the externally-originated order. No Captain identity, nothing to
+            // grant; the restaurant grant below still applies.
             if let Some(c) = &e.customer_id {
                 out.push(MembershipChange::Grant {
                     scope_type: ScopeType::ORDER,
@@ -251,10 +251,14 @@ mod tests {
         }));
     }
 
-    /// Guest checkout: OrderPlaced.customerId is optional, so there is no CUSTOMER principal to
-    /// grant. The order still grants the restaurant — a guest order is not an unowned order.
+    /// An order with NO Captain customer. Not guest checkout — the product spec requires a verified
+    /// phone at checkout (PRODUCT_SPEC_WEB_CLIENT.md §3.5), which creates the Customer, so the Captain
+    /// flow always has one. `customerId` is optional for orders that originate OUTSIDE that flow
+    /// (externally-channeled / imported). Granting no CUSTOMER membership there is correct, not a gap:
+    /// someone who ordered through the restaurant's own channel has no Captain identity to grant to.
+    /// The order still grants the restaurant — an unidentified order is not an unowned one.
     #[test]
-    fn guest_order_grants_no_customer_membership() {
+    fn order_without_a_captain_customer_grants_no_customer_membership() {
         let changes = membership_changes(
             &env(order_placed(ORDER, RESTAURANT, None)),
             &Resolved { order_id: None, restaurant_account_id: None },
