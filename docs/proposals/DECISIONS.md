@@ -111,6 +111,24 @@ saying "yes to all" is a reasonable use of five minutes.
 |---|---|---|---|
 | 2026-07-26 | **PROP-193000 D1–D4** — continuous development loop | **Deferred.** The daily architecture-review routine is sufficient for now; the dev loop stays off until the proposals are under control. `dev-loop.yml` remains `workflow_dispatch`-only with `dry_run` defaulting true. | Product owner, this register |
 
+## 6. Newest — the daily cycle itself
+
+[PROP-20260726-201500](PROP-20260726-201500-daily-decision-cycle.md) ([#211](https://github.com/TheCaptainCompany/captain-food/issues/211))
+proposes closing the loop: audit → ask → record → implement, daily. Its **D5 is the one that decides
+whether the cycle works at all** — whether DSL diffs join the daily approval ritual. Verified finding
+behind it: all six §1 decisions above unblock work that needs `specs/**` changes, so answering them
+moves items from 🔴 RED to 🟠 AMBER, **not** to 🟢 GREEN. Without D5 the cycle would ask the important
+questions and still be unable to act on the answers.
+
+| # | Decision | Recommendation |
+|---|---|---|
+| D1 | Where the ask lands | One standing pinned GitHub issue, rewritten daily |
+| D2 | What counts as an answer | Free prose, re-stated by the next run before use (24h interpretation window) |
+| D3 | How many questions per day | Up to 3, plus one batch block |
+| D4 | When nothing is answered for days | Keep implementing GREEN; escalate the ask with its age |
+| **D5** | **Do DSL diffs join the ritual?** | **Yes — it is what makes the cycle reach the work, and it keeps a human approving every DSL change** |
+| — | Start with a week of ask-only? | Recommended |
+
 ---
 
 ## Maintenance
