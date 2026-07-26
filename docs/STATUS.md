@@ -57,7 +57,12 @@
 > New skill **`.claude/skills/architecture-review/`** encodes the whole procedure — dedup table against
 > #144/#151/#127/#134 and the epics, a probe checklist recording the 2026-07-26 baseline for every
 > check, the triage rules, and the proposal template — so the review is reproducible by any session and
-> the daily run needs no prompt engineering.
+> the daily run needs no prompt engineering. The loop itself is a **scheduled GitHub Action**
+> (`.github/workflows/architecture-review.yml`) rather than a session-bound routine: it runs at
+> **07:00 Europe/Paris year-round** (two UTC cron entries plus a timezone guard, since GH cron has no
+> DST), reuses the `CLAUDE_CODE_OAUTH_TOKEN` secret the repo already has, and is version-controlled —
+> so it survives sessions and needs nothing from an operator. It is fenced: no `specs/**` edits, no
+> issue claims, no implementation work, and a two-line report on a quiet day.
 
 > ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging:
 > functional customer send + the restaurant staff screen.** Two more green PRs finish the usable loop.

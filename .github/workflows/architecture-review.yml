@@ -1,0 +1,101 @@
+# Daily architecture review (issue #206-series follow-up to the 2026-07-26 review).
+#
+# Runs the `.claude/skills/architecture-review` skill against `main` every morning at 07:00
+# Europe/Paris and reports only what CHANGED plus genuinely NEW findings. The skill carries the whole
+# procedure -- the dedup table against live work (#144, #151, #127, #134 and the epics), the probe
+# checklist with the 2026-07-26 baseline for every check, the BACKLOG.md triage rules, and the
+# proposal template -- so this workflow stays a thin scheduler.
+#
+# TIMEZONE: GitHub cron is UTC and has no DST. Two entries are scheduled (05:23 and 06:23 UTC) and a
+# guard step keeps only the run where it is actually 07:00 in Europe/Paris -- so it fires exactly once
+# a day, at 07:00 local, in both CET and CEST.
+#
+# BOUNDARIES (enforced by the skill, restated here because this run is unattended):
+#   - never modifies specs/** (DSL changes are plan-mode-only, with approval);
+#   - never claims an issue and never starts implementation work;
+#   - proposals + docs go straight to `main` (product-owner directive);
+#   - prioritisation stays a product-owner decision in the GitHub Project.
+name: architecture-review
+
+on:
+  schedule:
+    - cron: "23 5 * * *"   # 07:00 Europe/Paris while CEST (summer)
+    - cron: "23 6 * * *"   # 07:00 Europe/Paris while CET  (winter)
+  workflow_dispatch: {}    # manual run, ignores the timezone guard
+
+permissions:
+  contents: write        # push proposals / STATUS.md to main
+  issues: write          # file new findings
+  pull-requests: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: architecture-review
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    # Keep only the scheduled run that lands on 07:00 Europe/Paris; always allow manual dispatch.
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          HOUR=$(TZ=Europe/Paris date +%H)
+          if [ "$HOUR" = "07" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "skipping: it is ${HOUR}:00 in Europe/Paris, not 07:00"
+          fi
+
+  review:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0   # the review reads recent history to see what shipped
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run the architecture review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          prompt: |
+            You are a software architect with 30 years of experience in food ordering and delivery
+            platforms, reviewing this repository.
+
+            Run the `architecture-review` skill (`.claude/skills/architecture-review/SKILL.md`) in
+            full, following its procedure exactly: sync, dedup BEFORE analysing, run the probe
+            checklist in `references/checklist.md`, report what changed, and file only genuinely NEW
+            findings.
+
+            Hard boundaries for this unattended run:
+              - NEVER modify anything under `specs/**`.
+              - NEVER claim an issue (no `status/in-progress` label) and NEVER start implementation
+                work on one.
+              - Proposals and docs go straight to `main`; run `make rust` before pushing anything that
+                regenerates artifacts.
+              - Every new issue carries Type, an `impact/*` label, and all four org fields
+                (Priority, Value Size, Impact, Effort) per docs/BACKLOG.md.
+              - Every finding must cite `file:line`. If you cannot evidence it, do not file it.
+              - If nothing meaningful changed, say so in two lines and stop. Do not pad, and do not
+                restate the existing backlog.
+          claude_args: '--max-turns 120'
