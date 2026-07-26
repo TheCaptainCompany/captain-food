@@ -43,15 +43,17 @@ use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
     DeliveryReadRepository, OrderReadRepository,
-    PricingPolicyReadRepository, ProspectionReadRepository, RefundReadRepository,
-    RestaurantReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
+    PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
+    RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
+    UberSplitPolicyReadRepository,
 };
 use infrastructure::{
     EventBus, FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
     PgCartRepository, PgCatalogRepository, PgCustomerRepository,
     PgDeliveryPartnerAvailabilityRepository, PgDeliveryRepository, PgDeliverySatisfactionRepository,
     PgEventStore,
-    PgOrderRepository, PgPricingPolicyRepository, PgProspectionRepository, PgRefundQueueRepository,
+    PgOrderRepository, PgPricingPolicyRepository, PgProspectionRepository, PgReclamationRepository,
+    PgRefundQueueRepository,
     PgRestaurantRepository, PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, ProcessManagerRunner,
     ProcessManagerStatus, ProjectionStatus, ProjectionWorker, SireneSyncWorker,
     UnverifiedGbpOrderLinkProbe,
@@ -257,6 +259,8 @@ pub fn router() -> Router {
                     Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
                 let delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository> =
                     Arc::new(PgDeliveryPartnerAvailabilityRepository::new(pool.clone()));
+                let reclamations: Arc<dyn ReclamationReadRepository> =
+                    Arc::new(PgReclamationRepository::new(pool.clone()));
                 read_deps = Some(ReadDeps {
                     restaurants,
                     prospection,
@@ -272,6 +276,7 @@ pub fn router() -> Router {
                     refunds,
                     delivery_satisfaction,
                     delivery_partner_availabilities,
+                    reclamations,
                 });
 
                 // Write side (CQRS commands): the event store behind the mutation resolvers, plus the

@@ -100,6 +100,8 @@ customer:
       steps:
         OpenClaim: { $ref: 'api.yaml#/mutations/openReclamation' }
         ReopenClaim: { $ref: 'api.yaml#/mutations/reopenReclamation' }
+        ReviewMyClaims: { $ref: 'api.yaml#/queries/myReclamations' }   # my own claims list (#154)
+        ViewClaim: { $ref: 'api.yaml#/queries/reclamation' }   # claim detail (#154)
 
 restaurant_owner:
   description: >
@@ -200,6 +202,7 @@ restaurant_manager:
     HandleClaims:
       description: As a manager, I decide customers' claims on my orders — resolving or rejecting each (#151).
       steps:
+        WorkClaimsQueue: { $ref: 'api.yaml#/queries/restaurantReclamations' }   # my orders' claims queue (status OPEN = outstanding) (#154)
         ResolveClaim: { $ref: 'api.yaml#/mutations/resolveReclamation' }
         RejectClaim: { $ref: 'api.yaml#/mutations/rejectReclamation' }
 

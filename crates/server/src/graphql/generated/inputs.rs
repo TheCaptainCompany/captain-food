@@ -1067,7 +1067,7 @@ pub struct UnmuteParticipantInput {
     pub muted_role: ConversationAuthorRole,
 }
 
-/// Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open with the same id is rejected). Records the category, description and optionally the requested resolution. The 14-day window and order-eligibility are enforced in the application layer, not here (#151).
+/// Open a customer reclamation over a delivered order (id = reclamationId; idempotent birth — a re-open with the same id is rejected). Records the category, description and optionally the requested resolution. The client supplies `customerId` (whose claim) and `restaurantId` (whose restaurant's order), mirroring how placeOrder supplies them — they scope the read model (#154). The 14-day window and order-eligibility are enforced in the application layer, not here (#151).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenReclamationInput {
@@ -1075,6 +1075,10 @@ pub struct OpenReclamationInput {
     pub reclamation_id: ReclamationId,
     #[graphql(name = "orderId")]
     pub order_id: OrderId,
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
     #[graphql(name = "category")]
     pub category: ReclamationCategory,
     #[graphql(name = "description")]
@@ -1282,6 +1286,22 @@ pub struct DeliveryPartnerAvailabilitiesQueryInput {
     pub channel: Option<DeliveryChannelKey>,
     #[graphql(name = "status")]
     pub status: Option<CityAvailabilityStatus>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantReclamationsQueryInput {
+    #[graphql(name = "status")]
+    pub status: Option<ReclamationStatus>,
+    #[graphql(name = "category")]
+    pub category: Option<ReclamationCategory>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ReclamationQueryInput {
+    #[graphql(name = "reclamationId")]
+    pub reclamation_id: ReclamationId,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

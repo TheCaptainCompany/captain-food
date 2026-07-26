@@ -737,9 +737,28 @@ Reclamation:
     orderId — MULTIPLE reclamations may exist per order, #153). OpenReclamation is its birth; it then moves
     through OPEN -> RESOLVED/REJECTED, and a decided reclamation may be reopened back to OPEN. This slice is
     the lifecycle only: ReclamationResolved records the DECISION (+ amount for a PARTIAL_REFUND) so the
-    downstream refund/credit/replacement slices react later; the aggregate performs no money-move. The
-    14-day window and order-eligibility (order exists/delivered) are cross-aggregate/temporal invariants
-    enforced in the APPLICATION layer (reading the order's delivered-at vs now), NOT here (#151).
+    downstream refund/credit/replacement slices react later; the aggregate performs no money-move.
+    ReclamationOpened carries customerId/restaurantId (client-supplied, like OrderPlaced) so the
+    View_Reclamation read model can scope "my claims" and the restaurant's claims queue (#154).
+    FOLLOW-UP (NOT enforced yet): the 14-day window and order-eligibility (order exists/DELIVERED) are
+    cross-aggregate/temporal invariants that belong in the APPLICATION layer (reading the order's
+    delivered-at vs now). They are DEFERRED because the pure command-handler signature has no clock seam
+    — a wall-clock stamp in a handler would break command→event determinism (see report_delivery_issue),
+    and the order's delivered-at is event-envelope metadata not surfaced in the Order fold state. The
+    DELIVERED-eligibility half is a clean cross-aggregate read (fold the Order stream, as require_order
+    does); the 14-day-window half needs an injected clock that does not exist yet. Kept together as one
+    follow-up rather than shipping a half-guard with unenforceable errors/rules (#151).
+  lifecycle:
+    status: { $ref: 'scalars.yaml#/ReclamationStatus' }
+    initial:
+      - event: { $ref: 'events.yaml#/ReclamationOpened' }
+        to: OPEN
+    transitions:
+      - { from: [OPEN], event: { $ref: 'events.yaml#/ReclamationResolved' }, to: RESOLVED }
+      - { from: [OPEN], event: { $ref: 'events.yaml#/ReclamationRejected' }, to: REJECTED }
+      # A decided reclamation can be reopened — RESOLVED/REJECTED are therefore NOT terminal.
+      - { from: [RESOLVED, REJECTED], event: { $ref: 'events.yaml#/ReclamationReopened' }, to: OPEN }
+    terminal: []
   receives:
     - message: { $ref: 'commands.yaml#/OpenReclamation' }
       emits: [{ $ref: 'events.yaml#/ReclamationOpened' }]

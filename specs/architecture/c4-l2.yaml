@@ -42,6 +42,7 @@ boundedContexts:
       - { $ref: 'actors.yaml#/Order' }
       - { $ref: 'actors.yaml#/Payment' }
       - { $ref: 'actors.yaml#/Conversation' }
+      - { $ref: 'actors.yaml#/Reclamation' }
     processManagers:
       - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
       - { $ref: 'processmanager.yaml#/RefundProcess' }

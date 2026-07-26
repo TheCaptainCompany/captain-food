@@ -490,7 +490,7 @@ fixtures:
   # --- Reclamations / customer claims (#151) ---
   reclamationOpened:
     type: { $ref: 'events.yaml#/ReclamationOpened' }
-    data: { reclamationId: "recl-1", orderId: "order-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
+    data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", restaurantId: "restaurant-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
   reclamationResolvedFullRefund:
     type: { $ref: 'events.yaml#/ReclamationResolved' }
     data: { reclamationId: "recl-1", resolution: "FULL_REFUND" }
@@ -3082,7 +3082,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/OpenReclamation' }
-      data: { reclamationId: "recl-1", orderId: "order-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
+      data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", restaurantId: "restaurant-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
     then:
       - { $ref: '#/fixtures/reclamationOpened' }
 
@@ -3094,7 +3094,7 @@ tests:
       - { $ref: '#/fixtures/reclamationOpened' }
     when:
       type: { $ref: 'commands.yaml#/OpenReclamation' }
-      data: { reclamationId: "recl-1", orderId: "order-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
+      data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", restaurantId: "restaurant-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
     thrown:
       - { $ref: 'errors.yaml#/ReclamationAlreadyExists' }
 

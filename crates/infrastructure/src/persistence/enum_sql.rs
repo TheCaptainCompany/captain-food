@@ -11,8 +11,9 @@ use domain::generated::scalars::{
     CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus,
     DeliveryTimeliness, GbpLinkStatus,
     InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
-    ProspectPipelineStatus, RefundProcessStatus, RefundStatus, RestaurantDispatchMode,
-    RestaurantListingStatus, RestaurantStatus, ServiceType, ThumbRating,
+    ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
+    RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
+    RestaurantStatus, ServiceType, ThumbRating,
 };
 use domain::shared::errors::DomainError;
 
@@ -109,6 +110,23 @@ enum_ord!(DeliveryDispatchProcessStatus {
 });
 enum_ord!(RestaurantDispatchMode { CAPTAIN => 0, RESTAURANT => 1 });
 enum_ord!(CityAvailabilityStatus { PENDING => 0, APPROVED => 1, REVOKED => 2 });
+enum_ord!(ReclamationStatus { OPEN => 0, RESOLVED => 1, REJECTED => 2 });
+enum_ord!(ReclamationCategory {
+    MISSING_ITEM => 0,
+    WRONG_ITEM => 1,
+    QUALITY => 2,
+    LATE_DELIVERY => 3,
+    DAMAGED => 4,
+    NOT_DELIVERED => 5,
+    OTHER => 6,
+});
+enum_ord!(ReclamationResolution {
+    FULL_REFUND => 0,
+    PARTIAL_REFUND => 1,
+    REPLACEMENT => 2,
+    GOODWILL_CREDIT => 3,
+    REJECTED => 4,
+});
 enum_ord!(CommandJournalStatus { RECEIVED => 0, SUCCEEDED => 1, REJECTED => 2, FAILED => 3 });
 enum_ord!(CommandChannel { GRAPHQL => 0, WORKER => 1, INTERNAL => 2 });
 enum_ord!(InboundEventStatus { RECEIVED => 0, DELIVERED => 1, FAILED => 2 });

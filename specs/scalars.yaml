@@ -838,3 +838,12 @@ ReclamationReason:
   description: >
     Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined,
     or why it is being reopened after a decision (#151).
+
+ReclamationStatus:
+  type: string
+  enum: [OPEN, RESOLVED, REJECTED]
+  description: >
+    Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation):
+    OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on
+    ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in
+    `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).

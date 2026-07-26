@@ -73,14 +73,16 @@ mod tests {
         ReclamationOpened, ReclamationRejected, ReclamationReopened, ReclamationResolved,
     };
     use crate::generated::scalars::{
-        OrderId, ReclamationCategory, ReclamationDescription, ReclamationId, ReclamationReason,
-        ReclamationResolution,
+        CustomerId, OrderId, ReclamationCategory, ReclamationDescription, ReclamationId,
+        ReclamationReason, ReclamationResolution, RestaurantId,
     };
 
     fn opened() -> DomainEvent {
         DomainEvent::ReclamationOpened(ReclamationOpened {
             reclamation_id: ReclamationId(uuid::Uuid::nil()),
             order_id: OrderId(uuid::Uuid::nil()),
+            customer_id: CustomerId(uuid::Uuid::nil()),
+            restaurant_id: RestaurantId(uuid::Uuid::nil()),
             category: ReclamationCategory::MISSING_ITEM,
             description: ReclamationDescription("Drinks missing.".into()),
             requested_resolution: None,

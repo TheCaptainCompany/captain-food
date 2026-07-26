@@ -574,7 +574,7 @@ fn fx_message_translation_added() -> DomainEvent {
 
 /// tests.yaml#/fixtures/reclamationOpened — events.yaml#/ReclamationOpened
 fn fx_reclamation_opened() -> DomainEvent {
-    DomainEvent::ReclamationOpened(evs::ReclamationOpened { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None })
+    DomainEvent::ReclamationOpened(evs::ReclamationOpened { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), restaurant_id: sc::RestaurantId(support::uid("restaurant-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None })
 }
 
 /// tests.yaml#/fixtures/reclamationResolvedFullRefund — events.yaml#/ReclamationResolved
@@ -3562,7 +3562,7 @@ async fn test_reclamation_opened() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::OpenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None };
+    let cmd = cmds::OpenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), restaurant_id: sc::RestaurantId(support::uid("restaurant-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None };
     let result = crate::commands::open_reclamation(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestReclamationOpened: the spec expects acceptance");
     bed.assert_appended("TestReclamationOpened", &before, &[
@@ -3578,7 +3578,7 @@ async fn test_reclamation_opened_twice_is_rejected() {
     spec_baseline(&bed).await;
     bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::OpenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None };
+    let cmd = cmds::OpenReclamation { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), restaurant_id: sc::RestaurantId(support::uid("restaurant-1")), category: sc::ReclamationCategory::MISSING_ITEM, description: sc::ReclamationDescription("The drinks were missing from my order.".into()), requested_resolution: None };
     let result = crate::commands::open_reclamation(&bed.store, cmd, &support::actor()).await;
     let err = result.expect_err("TestReclamationOpenedTwiceIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestReclamationOpenedTwiceIsRejected", &err, &["ReclamationAlreadyExists"]);

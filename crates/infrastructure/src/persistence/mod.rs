@@ -22,6 +22,7 @@ pub mod order_conversation_store;
 pub mod order_tracking_store;
 pub mod prospection;
 pub mod prospection_store;
+pub mod reclamation;
 pub mod referential;
 pub mod refund_queue;
 pub mod restaurant;
@@ -52,6 +53,7 @@ pub use referential::{
     PgPricingPolicyRepository, PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
 };
 pub use delivery_partner_availability::PgDeliveryPartnerAvailabilityRepository;
+pub use reclamation::PgReclamationRepository;
 pub use refund_queue::PgRefundQueueRepository;
 pub use restaurant::PgRestaurantRepository;
 

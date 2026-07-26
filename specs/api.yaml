@@ -300,6 +300,27 @@ types:
       status: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
       requestedAt: { type: string, format: date-time }
       decidedAt: { type: string, format: date-time, nullable: true }
+  Reclamation:
+    description: >
+      A customer claim/dispute over a delivered order (aggregate Reclamation, id = reclamationId; #154).
+      Serves the customer's "my claims" list + claim detail and the restaurant's/admin's claims queue.
+      `status` is derived from the lifecycle facts (OPEN → RESOLVED/REJECTED → OPEN on reopen); the
+      decision fields (`resolution`, `refundAmount`, `rejectReason`, `decidedAt`) are null while OPEN.
+    reads: [{ $ref: 'database/projection_views.yaml#/View_Reclamation' }]
+    properties:
+      reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+      orderId: { $ref: 'scalars.yaml#/OrderId' }
+      customerId: { $ref: 'scalars.yaml#/CustomerId' }
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      category: { $ref: 'scalars.yaml#/ReclamationCategory' }
+      description: { $ref: 'scalars.yaml#/ReclamationDescription' }
+      requestedResolution: { $ref: 'scalars.yaml#/ReclamationResolution', nullable: true }
+      status: { $ref: 'scalars.yaml#/ReclamationStatus' }
+      resolution: { $ref: 'scalars.yaml#/ReclamationResolution', nullable: true }   # the decided resolution once resolved
+      refundAmount: { $ref: 'entities.yaml#/Money', nullable: true }   # the PARTIAL_REFUND amount, if recorded
+      rejectReason: { $ref: 'scalars.yaml#/ReclamationReason', nullable: true }   # the reason recorded on rejection
+      openedAt: { type: string, format: date-time }
+      decidedAt: { type: string, format: date-time, nullable: true }
   Refund:
     description: >
       A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin
@@ -605,6 +626,39 @@ queries:
       status: { $ref: 'scalars.yaml#/CityAvailabilityStatus' }
     returns: { $ref: '#/types/DeliveryPartnerAvailability', array: true }
     roles: [EXTERNAL, ADMIN]
+    slice: V1
+
+  myReclamations:
+    description: >
+      The authenticated customer's own reclamations (claims/disputes), newest-first (#154). No args —
+      scoped server-side to the caller's Customer identity (the verified session principal → Customer
+      row); an anonymous caller sees an empty list.
+    returns: { $ref: '#/types/Reclamation', array: true }
+    roles: [CUSTOMER]
+    slice: V1
+
+  restaurantReclamations:
+    description: >
+      The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims,
+      an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category.
+      Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a
+      recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the
+      EXTERNAL deliveryPartnerAvailabilities queue records).
+    args:
+      status: { $ref: 'scalars.yaml#/ReclamationStatus' }
+      category: { $ref: 'scalars.yaml#/ReclamationCategory' }
+    returns: { $ref: '#/types/Reclamation', array: true }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
+    slice: V1
+
+  reclamation:
+    description: >
+      A single reclamation by id (#154) — claim detail for the customer who raised it and the
+      restaurant/admin deciding it. Null when unknown.
+    args:
+      reclamationId: { $ref: 'scalars.yaml#/ReclamationId', required: true }
+    returns: { $ref: '#/types/Reclamation', nullable: true }
+    roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
     slice: V1
 
   restaurantLocationsByAccount:

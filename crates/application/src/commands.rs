@@ -1859,6 +1859,8 @@ pub async fn open_reclamation(
     let event = DomainEvent::ReclamationOpened(ReclamationOpened {
         reclamation_id: cmd.reclamation_id,
         order_id: cmd.order_id,
+        customer_id: cmd.customer_id,
+        restaurant_id: cmd.restaurant_id,
         category: cmd.category,
         description: cmd.description,
         requested_resolution: cmd.requested_resolution,
