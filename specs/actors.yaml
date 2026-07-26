@@ -781,3 +781,8 @@ Reclamation:
       throws:
         - { $ref: 'errors.yaml#/ReclamationNotFound' }
         - { $ref: 'errors.yaml#/ReclamationNotReopenable' }
+    # Evidence may be attached in ANY lifecycle state — the only guard is that the claim exists (#156).
+    - message: { $ref: 'commands.yaml#/AttachReclamationEvidence' }
+      emits: [{ $ref: 'events.yaml#/ReclamationEvidenceAttached' }]
+      throws:
+        - { $ref: 'errors.yaml#/ReclamationNotFound' }

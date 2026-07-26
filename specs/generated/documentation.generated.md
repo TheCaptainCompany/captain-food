@@ -83,6 +83,7 @@ An authenticated person who orders food via Captain.Food.
 |  | TranslateMessage | [✏️ `recordMessageTranslation`](#mutation-recordmessagetranslation) |
 |  | ReadThread | [🔎 `orderConversation`](#query-orderconversation) |
 | 🧭 **RaiseAClaim** | OpenClaim | [✏️ `openReclamation`](#mutation-openreclamation) |
+|  | AttachEvidence | [✏️ `attachReclamationEvidence`](#mutation-attachreclamationevidence) |
 |  | ReopenClaim | [✏️ `reopenReclamation`](#mutation-reopenreclamation) |
 |  | ReviewMyClaims | [🔎 `myReclamations`](#query-myreclamations) |
 |  | ViewClaim | [🔎 `reclamation`](#query-reclamation) |
@@ -2911,7 +2912,7 @@ _Rejects importing into a missing catalog, on a translation failure, or with a m
 
 _Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)._
 
-### 🧰 API operations _(35)_
+### 🧰 API operations _(36)_
 
 <a id="query-cart"></a>
 #### 🔎 Query: `cart`
@@ -3164,6 +3165,13 @@ A single reclamation by id (#154) — claim detail for the customer who raised i
 #### ✏️ Mutation: `reopenReclamation`
 
 - **Command**: [📩 `ReopenReclamation`](#command-reopenreclamation) → handled by [🎭 `Reclamation`](#actor-reclamation)
+- **Roles**: CUSTOMER · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-attachreclamationevidence"></a>
+#### ✏️ Mutation: `attachReclamationEvidence`
+
+- **Command**: [📩 `AttachReclamationEvidence`](#command-attachreclamationevidence) → handled by [🎭 `Reclamation`](#actor-reclamation)
 - **Roles**: CUSTOMER · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
@@ -3447,6 +3455,7 @@ _🧩 aggregate_ — Customer claim/dispute over a delivered order; id = reclama
 | [📩 `ResolveReclamation`](#command-resolvereclamation) | [⚡ `ReclamationResolved`](#event-reclamationresolved) | [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotOpen`](#error-reclamationnotopen), [⛔ `PartialRefundAmountRequired`](#error-partialrefundamountrequired) |
 | [📩 `RejectReclamation`](#command-rejectreclamation) | [⚡ `ReclamationRejected`](#event-reclamationrejected) | [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotOpen`](#error-reclamationnotopen), [⛔ `RejectionReasonRequired`](#error-rejectionreasonrequired) |
 | [📩 `ReopenReclamation`](#command-reopenreclamation) | [⚡ `ReclamationReopened`](#event-reclamationreopened) | [⛔ `ReclamationNotFound`](#error-reclamationnotfound), [⛔ `ReclamationNotReopenable`](#error-reclamationnotreopenable) |
+| [📩 `AttachReclamationEvidence`](#command-attachreclamationevidence) | [⚡ `ReclamationEvidenceAttached`](#event-reclamationevidenceattached) | [⛔ `ReclamationNotFound`](#error-reclamationnotfound) |
 
 Lifecycle (generated from the declared state machine):
 
@@ -3744,7 +3753,7 @@ sequenceDiagram
 
 - **Source**: [🎭 `Conversation`](#actor-conversation) · 🛶 V0
 - **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes). 
-- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded), [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation), [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved), [⚡ `ReclamationRejected`](#event-reclamationrejected), [⚡ `ReclamationReopened`](#event-reclamationreopened)
+- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded), [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation), [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved), [⚡ `ReclamationRejected`](#event-reclamationrejected), [⚡ `ReclamationReopened`](#event-reclamationreopened), [⚡ `ReclamationEvidenceAttached`](#event-reclamationevidenceattached)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -3758,11 +3767,11 @@ sequenceDiagram
 | `admin_invited` | `boolean` | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | — | True once an admin was pulled in by a reasoned escalation (#129). |
 | `escalation_reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | [⚡ `AdminInvitedToConversation`.`reason`](#event-admininvitedtoconversation--reason) | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
 | `muted` | `jsonb` | [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted) | — | current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector. |
-| `claim_events` | `jsonb` | [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved), [⚡ `ReclamationRejected`](#event-reclamationrejected), [⚡ `ReclamationReopened`](#event-reclamationreopened) | — | ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status shows inline in the per-order conversation (§2.5, #155). |
+| `claim_events` | `jsonb` | [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved), [⚡ `ReclamationRejected`](#event-reclamationrejected), [⚡ `ReclamationReopened`](#event-reclamationreopened), [⚡ `ReclamationEvidenceAttached`](#event-reclamationevidenceattached) | — | ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED/EVIDENCE_ATTACHED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status and evidence show inline in the per-order conversation (§2.5, #155, #156). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(29)_
+### 📩 Commands _(30)_
 
 <a id="command-addcartline"></a>
 #### 📩 Command: `AddCartLine`
@@ -4213,7 +4222,21 @@ Reopen a previously decided (resolved or rejected) reclamation for another look.
 | <a id="command-reopenreclamation--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
 | <a id="command-reopenreclamation--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
 
-### ⚡ Events _(36)_
+<a id="command-attachreclamationevidence"></a>
+#### 📩 Command: `AttachReclamationEvidence`
+
+Attach an evidence photo (opaque, framework-managed attachment ref) to an existing claim. The only guard is that the reclamation exists (errors.yaml#/ReclamationNotFound) — evidence may be attached in any lifecycle state. `orderId` is NOT supplied: the handler stamps it from the aggregate's fold state (established at ReclamationOpened), like the #155 decision events. The file upload/storage is out of scope here (#134) — this models the domain fact with the opaque ref only (#156).
+
+- **Dispatched by**: [✏️ `attachReclamationEvidence`](#mutation-attachreclamationevidence) · **handled by** [🎭 `Reclamation`](#actor-reclamation)
+- **Emits**: [⚡ `ReclamationEvidenceAttached`](#event-reclamationevidenceattached)
+- **Throws**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-attachreclamationevidence--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="command-attachreclamationevidence--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ✅ |  |
+
+### ⚡ Events _(37)_
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -4782,6 +4805,21 @@ A previously decided (resolved or rejected) reclamation was reopened for another
 | <a id="event-reclamationreopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-reclamationreopened--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
 
+<a id="event-reclamationevidenceattached"></a>
+#### ⚡ Event: `ReclamationEvidenceAttached`
+
+The customer attached an evidence photo to their claim — an opaque, framework-managed attachment ref (storage/moderation/GDPR retention handled generically by the framework, not this aggregate; #156). Evidence may be attached in any lifecycle state — the only guard is that the claim exists. `orderId` rides along (from the aggregate's fold state, established at ReclamationOpened) so the evidence weaves into the per-order conversation thread, keyed by order (§2.5, #155).
+
+- **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `OrderConversation`](#view-orderconversation)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-reclamationevidenceattached--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="event-reclamationevidenceattached--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-reclamationevidenceattached--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ✅ |  |
+
 ### 📦 Entities _(15)_
 
 <a id="entity-money"></a>
@@ -4972,7 +5010,7 @@ A role currently muted in an order conversation (read-model array element; #129)
 <a id="entity-claimtimelineentry"></a>
 #### 📦 Entity: `ClaimTimelineEntry`
 
-One reclamation-lifecycle entry woven into the per-order conversation thread (read-model array element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED); `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/ `refundAmount` from a resolution, `reason` from a rejection or reopen. `at` is the fact's occurred-at. Customer-visible — it is the customer's own claim shown inline in their order thread.
+One reclamation-lifecycle entry woven into the per-order conversation thread (read-model array element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED); `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/ `refundAmount` from a resolution, `reason` from a rejection or reopen, `attachmentRef` from an EVIDENCE_ATTACHED (#156). `at` is the fact's occurred-at. Customer-visible — it is the customer's own claim shown inline in their order thread.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4983,6 +5021,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="entity-claimtimelineentry--resolution"></a>`resolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ⬜ |  |
 | <a id="entity-claimtimelineentry--refundamount"></a>`refundAmount` | [📦 `Money`](#entity-money) | ⬜ |  |
 | <a id="entity-claimtimelineentry--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
+| <a id="entity-claimtimelineentry--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ⬜ |  |
 | <a id="entity-claimtimelineentry--at"></a>`at` | `string` _date-time_ | ✅ |  |
 
 ### 🔤 Scalars _(34)_
@@ -5022,7 +5061,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="scalar-reclamationdescription"></a>🔤 `ReclamationDescription` | string | Free-text description of the problem the customer is claiming about the order (#151). |
 | <a id="scalar-reclamationreason"></a>🔤 `ReclamationReason` | string | Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).  |
 | <a id="scalar-reclamationstatus"></a>🔤 `ReclamationStatus` | enum (OPEN \| RESOLVED \| REJECTED) | Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).  |
-| <a id="scalar-claimtimelineeventkind"></a>🔤 `ClaimTimelineEventKind` | enum (OPENED \| RESOLVED \| REJECTED \| REOPENED) | Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected) or REOPENED (ReclamationReopened). Lets the order thread show a claim's status inline without copying the reclamation's own read model (§2.5, #155).  |
+| <a id="scalar-claimtimelineeventkind"></a>🔤 `ClaimTimelineEventKind` | enum (OPENED \| RESOLVED \| REJECTED \| REOPENED \| EVIDENCE_ATTACHED) | Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).  |
 
 ### ⛔ Errors _(37)_
 
@@ -5060,13 +5099,13 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-mutereasonrequired"></a>⛔ `MuteReasonRequired` | A participant was muted without a justification reason; a mute must record why (rules.yaml#/MuteRequiresAReason) (#129).  | 🇬🇧 A reason is required to mute a participant. | 🇫🇷 Un motif est requis pour rendre un participant muet. | [📩 `MuteParticipant`](#command-muteparticipant) |
 | <a id="error-participantnotmuted"></a>⛔ `ParticipantNotMuted` | An unmute targeted a role that is not currently muted in the order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).  | 🇬🇧 This participant is not currently muted. | 🇫🇷 Ce participant n'est pas actuellement muet. | [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
 | <a id="error-reclamationalreadyexists"></a>⛔ `ReclamationAlreadyExists` | OpenReclamation targeted a reclamationId that already exists; the birth is idempotent-guarded, so a second open is rejected (rules.yaml#/ReclamationIsUniquePerId) (#151).  | 🇬🇧 A reclamation already exists with this id. | 🇫🇷 Une réclamation existe déjà avec cet identifiant. | [📩 `OpenReclamation`](#command-openreclamation) |
-| <a id="error-reclamationnotfound"></a>⛔ `ReclamationNotFound` | Resolve/reject/reopen targeted a reclamation that does not exist; a decision cannot be made before the reclamation is opened (#151).  | 🇬🇧 No reclamation exists with this id. | 🇫🇷 Aucune réclamation n'existe avec cet identifiant. | [📩 `ResolveReclamation`](#command-resolvereclamation), [📩 `RejectReclamation`](#command-rejectreclamation), [📩 `ReopenReclamation`](#command-reopenreclamation) |
+| <a id="error-reclamationnotfound"></a>⛔ `ReclamationNotFound` | Resolve/reject/reopen targeted a reclamation that does not exist; a decision cannot be made before the reclamation is opened (#151).  | 🇬🇧 No reclamation exists with this id. | 🇫🇷 Aucune réclamation n'existe avec cet identifiant. | [📩 `ResolveReclamation`](#command-resolvereclamation), [📩 `RejectReclamation`](#command-rejectreclamation), [📩 `ReopenReclamation`](#command-reopenreclamation), [📩 `AttachReclamationEvidence`](#command-attachreclamationevidence) |
 | <a id="error-reclamationnotopen"></a>⛔ `ReclamationNotOpen` | Resolve or reject targeted a reclamation that is not currently OPEN; only an open reclamation can be decided (rules.yaml#/OnlyOpenReclamationsAreDecided) (#151).  | 🇬🇧 This reclamation is not open. | 🇫🇷 Cette réclamation n'est pas ouverte. | [📩 `ResolveReclamation`](#command-resolvereclamation), [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-reclamationnotreopenable"></a>⛔ `ReclamationNotReopenable` | Reopen targeted a reclamation that is not in a decided (resolved or rejected) state; only a decided reclamation can be reopened (rules.yaml#/OnlyDecidedReclamationsCanBeReopened) (#151).  | 🇬🇧 This reclamation cannot be reopened. | 🇫🇷 Cette réclamation ne peut pas être rouverte. | [📩 `ReopenReclamation`](#command-reopenreclamation) |
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
 
-### 📐 Business rules _(35)_
+### 📐 Business rules _(36)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5312,6 +5351,13 @@ _Resolving a reclamation as PARTIAL_REFUND requires a refund amount; a partial r
 _Only a decided (resolved or rejected) reclamation can be reopened; reopening an open reclamation is rejected (#151)._
 
 - **Verified by**: [🧪 `TestReclamationReopened`](#test-testreclamationreopened), [🧪 `TestReopenOpenRejected`](#test-testreopenopenrejected), [🧪 `TestReopenMissingReclamationRejected`](#test-testreopenmissingreclamationrejected)
+
+<a id="rule-reclamationevidencetargetsanexistingclaim"></a>
+#### 📐 Rule: `ReclamationEvidenceTargetsAnExistingClaim`
+
+_Evidence (an attachment ref) can only be attached to an existing reclamation; attaching to a claim that was never opened is rejected (#156)._
+
+- **Verified by**: [🧪 `TestReclamationEvidenceAttached`](#test-testreclamationevidenceattached), [🧪 `TestAttachEvidenceMissingReclamationRejected`](#test-testattachevidencemissingreclamationrejected)
 
 ### 🧪 Tests _(7)_
 
@@ -5974,6 +6020,26 @@ _Reopening a reclamation that does not exist is rejected_
 - **When**: [📩 `ReopenReclamation`](#command-reopenreclamation)
 - **Thrown**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound)
 - **Verifies**: [📐 `OnlyDecidedReclamationsCanBeReopened`](#rule-onlydecidedreclamationscanbereopened)
+
+<a id="test-testreclamationevidenceattached"></a>
+#### 🧪 Test: `TestReclamationEvidenceAttached`
+
+_Attaches an evidence photo to an open reclamation_
+
+- **Given**: [⚡ `ReclamationOpened`](#event-reclamationopened)
+- **When**: [📩 `AttachReclamationEvidence`](#command-attachreclamationevidence)
+- **Then**: [⚡ `ReclamationEvidenceAttached`](#event-reclamationevidenceattached)
+- **Verifies**: [📐 `ReclamationEvidenceTargetsAnExistingClaim`](#rule-reclamationevidencetargetsanexistingclaim)
+
+<a id="test-testattachevidencemissingreclamationrejected"></a>
+#### 🧪 Test: `TestAttachEvidenceMissingReclamationRejected`
+
+_Attaching evidence to a reclamation that does not exist is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `AttachReclamationEvidence`](#command-attachreclamationevidence)
+- **Thrown**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound)
+- **Verifies**: [📐 `ReclamationEvidenceTargetsAnExistingClaim`](#rule-reclamationevidencetargetsanexistingclaim)
 
 **[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
 

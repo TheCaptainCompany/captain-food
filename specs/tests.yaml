@@ -500,6 +500,9 @@ fixtures:
   reclamationReopened:
     type: { $ref: 'events.yaml#/ReclamationReopened' }
     data: { reclamationId: "recl-1", orderId: "order-1", reason: "Customer sent a photo; taking another look." }
+  reclamationEvidenceAttached:
+    type: { $ref: 'events.yaml#/ReclamationEvidenceAttached' }
+    data: { reclamationId: "recl-1", orderId: "order-1", attachmentRef: "attachment-ref-1" }
 
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
@@ -3227,5 +3230,28 @@ tests:
     when:
       type: { $ref: 'commands.yaml#/ReopenReclamation' }
       data: { reclamationId: "recl-1", reason: "Customer sent a photo; taking another look." }
+    thrown:
+      - { $ref: 'errors.yaml#/ReclamationNotFound' }
+
+  TestReclamationEvidenceAttached:
+    name: "Attaches an evidence photo to an open reclamation"
+    rules: [{ $ref: 'rules.yaml#/ReclamationEvidenceTargetsAnExistingClaim' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given:
+      - { $ref: '#/fixtures/reclamationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/AttachReclamationEvidence' }
+      data: { reclamationId: "recl-1", attachmentRef: "attachment-ref-1" }
+    then:
+      - { $ref: '#/fixtures/reclamationEvidenceAttached' }
+
+  TestAttachEvidenceMissingReclamationRejected:
+    name: "Attaching evidence to a reclamation that does not exist is rejected"
+    rules: [{ $ref: 'rules.yaml#/ReclamationEvidenceTargetsAnExistingClaim' }]
+    actor: { $ref: 'actors.yaml#/Reclamation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/AttachReclamationEvidence' }
+      data: { reclamationId: "recl-1", attachmentRef: "attachment-ref-1" }
     thrown:
       - { $ref: 'errors.yaml#/ReclamationNotFound' }

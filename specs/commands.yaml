@@ -1544,6 +1544,19 @@ ReopenReclamation:
       nullable: true
   required: [reclamationId]
 
+AttachReclamationEvidence:
+  description: >
+    Attach an evidence photo (opaque, framework-managed attachment ref) to an existing claim. The only
+    guard is that the reclamation exists (errors.yaml#/ReclamationNotFound) — evidence may be attached in
+    any lifecycle state. `orderId` is NOT supplied: the handler stamps it from the aggregate's fold state
+    (established at ReclamationOpened), like the #155 decision events. The file upload/storage is out of
+    scope here (#134) — this models the domain fact with the opaque ref only (#156).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    attachmentRef: { $ref: 'scalars.yaml#/AttachmentRef' }
+  required: [reclamationId, attachmentRef]
+
 # =====================================================================
 # Where the rest lives
 # =====================================================================

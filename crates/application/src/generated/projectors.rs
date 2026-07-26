@@ -382,6 +382,7 @@ pub fn project_order_conversation<C: OrderConversationCompute>(c: &C, state: Opt
         DomainEvent::ReclamationResolved(_) => { let mut row = state?; let v = c.claim_events(Some(&row), env); row.claim_events = v; Some(row) },
         DomainEvent::ReclamationRejected(_) => { let mut row = state?; let v = c.claim_events(Some(&row), env); row.claim_events = v; Some(row) },
         DomainEvent::ReclamationReopened(_) => { let mut row = state?; let v = c.claim_events(Some(&row), env); row.claim_events = v; Some(row) },
+        DomainEvent::ReclamationEvidenceAttached(_) => { let mut row = state?; let v = c.claim_events(Some(&row), env); row.claim_events = v; Some(row) },
         _ => return state,
     };
     next.map(|mut row| {

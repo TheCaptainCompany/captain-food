@@ -850,9 +850,10 @@ ReclamationStatus:
 
 ClaimTimelineEventKind:
   type: string
-  enum: [OPENED, RESOLVED, REJECTED, REOPENED]
+  enum: [OPENED, RESOLVED, REJECTED, REOPENED, EVIDENCE_ATTACHED]
   description: >
     Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order
     conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED
-    (ReclamationRejected) or REOPENED (ReclamationReopened). Lets the order thread show a claim's status
-    inline without copying the reclamation's own read model (§2.5, #155).
+    (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached
+    — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's
+    status and evidence inline without copying the reclamation's own read model (§2.5, #155).

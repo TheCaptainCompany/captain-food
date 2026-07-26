@@ -122,10 +122,12 @@ use domain::generated::scalars::ConversationAuthorRole;
 // Reclamations / customer claims (#151) — the Reclamation aggregate (id = reclamationId).
 use domain::reclamation::{ReclamationState, ReclamationStatus};
 use domain::generated::commands::{
-    OpenReclamation, RejectReclamation, ReopenReclamation, ResolveReclamation,
+    AttachReclamationEvidence, OpenReclamation, RejectReclamation, ReopenReclamation,
+    ResolveReclamation,
 };
 use domain::generated::events::{
-    ReclamationOpened, ReclamationRejected, ReclamationReopened, ReclamationResolved,
+    ReclamationEvidenceAttached, ReclamationOpened, ReclamationRejected, ReclamationReopened,
+    ReclamationResolved,
 };
 use domain::generated::scalars::{ReclamationId, ReclamationResolution};
 
@@ -1968,6 +1970,30 @@ pub async fn reopen_reclamation(
         // Order rides along from fold state so the claim weaves into the order thread, keyed by order (#155).
         order_id: state.order_id,
         reason: cmd.reason,
+    });
+    let stream = format!("Reclamation-{}", cmd.reclamation_id.0);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/AttachReclamationEvidence` → emit `events.yaml#/ReclamationEvidenceAttached`
+/// on the reclamation's stream. The only guard is that the reclamation exists
+/// (`errors.yaml#/ReclamationNotFound`, rules.yaml#/ReclamationEvidenceTargetsAnExistingClaim) — evidence
+/// may be attached in ANY lifecycle state (no status guard), so the fold is unchanged. `orderId` is NOT
+/// on the command: it rides along from the aggregate's fold state (established at ReclamationOpened) so
+/// the evidence weaves into the per-order conversation thread, keyed by order (§2.5, #155/#156). The
+/// `attachmentRef` is an opaque, framework-managed ref; the file upload/storage is out of scope (#134).
+pub async fn attach_reclamation_evidence(
+    store: &dyn EventStore,
+    cmd: AttachReclamationEvidence,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<ReclamationState>(cmd.reclamation_id, || reclamation_not_found(&cmd.reclamation_id))
+        .await?;
+    let event = DomainEvent::ReclamationEvidenceAttached(ReclamationEvidenceAttached {
+        reclamation_id: cmd.reclamation_id,
+        order_id: state.order_id,
+        attachment_ref: cmd.attachment_ref,
     });
     let stream = format!("Reclamation-{}", cmd.reclamation_id.0);
     Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())

@@ -99,6 +99,7 @@ customer:
       description: As a customer, I raise a claim/dispute about a delivered order and can reopen a decided one (#151).
       steps:
         OpenClaim: { $ref: 'api.yaml#/mutations/openReclamation' }
+        AttachEvidence: { $ref: 'api.yaml#/mutations/attachReclamationEvidence' }   # attach an evidence photo to my claim (#156)
         ReopenClaim: { $ref: 'api.yaml#/mutations/reopenReclamation' }
         ReviewMyClaims: { $ref: 'api.yaml#/queries/myReclamations' }   # my own claims list (#154)
         ViewClaim: { $ref: 'api.yaml#/queries/reclamation' }   # claim detail (#154)

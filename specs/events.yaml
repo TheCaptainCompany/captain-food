@@ -1788,3 +1788,17 @@ ReclamationReopened:
       $ref: 'scalars.yaml#/ReclamationReason'
       nullable: true
   required: [reclamationId, orderId]
+
+ReclamationEvidenceAttached:
+  description: >
+    The customer attached an evidence photo to their claim — an opaque, framework-managed attachment ref
+    (storage/moderation/GDPR retention handled generically by the framework, not this aggregate; #156).
+    Evidence may be attached in any lifecycle state — the only guard is that the claim exists. `orderId`
+    rides along (from the aggregate's fold state, established at ReclamationOpened) so the evidence weaves
+    into the per-order conversation thread, keyed by order (§2.5, #155).
+  type: object
+  properties:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    attachmentRef: { $ref: 'scalars.yaml#/AttachmentRef' }
+  required: [reclamationId, orderId, attachmentRef]

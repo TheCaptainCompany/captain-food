@@ -815,7 +815,8 @@ ClaimTimelineEntry:
     element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED);
     `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The
     remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/
-    `refundAmount` from a resolution, `reason` from a rejection or reopen. `at` is the fact's occurred-at.
+    `refundAmount` from a resolution, `reason` from a rejection or reopen, `attachmentRef` from an
+    EVIDENCE_ATTACHED (#156). `at` is the fact's occurred-at.
     Customer-visible — it is the customer's own claim shown inline in their order thread.
   properties:
     kind:
@@ -836,6 +837,9 @@ ClaimTimelineEntry:
       nullable: true
     reason:
       $ref: 'scalars.yaml#/ReclamationReason'
+      nullable: true
+    attachmentRef:
+      $ref: 'scalars.yaml#/AttachmentRef'
       nullable: true
     at:
       type: string
