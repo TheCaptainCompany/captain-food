@@ -1,5 +1,12 @@
 # Proposals — the pre-decision record
 
+> **📋 [DECISIONS.md](DECISIONS.md) — the open-decision register.** Every decision the proposals are
+> waiting on, in one page, ranked by leverage. **Implementation does not start from a proposal whose
+> `Status` is not `Approved`** — the `architect` agent classifies such issues 🔴 RED and never
+> dispatches them, so the register is the throttle on the whole pipeline. Answer decisions there, on
+> the tracking issue, or in an ADR; then flip the proposal's `Status`, naming what recorded it.
+> A proposal may be **partially approved** — mark the decided rows and note the remainder in its header.
+
 **Every proposal presented for approval is committed HERE before (or with) its execution**
 (product-owner directive, 2026-07-24; ADR-20260724-135945). ADRs record what was *decided*;
 proposals record what was *put on the table* — the option space, the trade-offs weighed, and the

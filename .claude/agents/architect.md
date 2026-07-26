@@ -137,6 +137,12 @@ Create the tracking issue first and name it in the header. Commit proposals to `
 branch, no PR — running `make rust` first if anything regenerates. Once approved a proposal is a
 historical record: never rewrite it to match what was built.
 
+**Reconcile [`docs/proposals/DECISIONS.md`](../../docs/proposals/DECISIONS.md) on every run.** Add a row
+for each decision a new proposal surfaces; move answered ones to §5 with the date and what recorded
+them; and **flag any decision that has been open for several runs, with its age**, in your report. Rank
+new entries by leverage — how much of the backlog the answer unblocks — not by the order you found
+them. The product owner works from this page, so its ordering is a real deliverable, not bookkeeping.
+
 ---
 
 # MODE 3 — DISPATCH
@@ -149,7 +155,12 @@ Only after the picture is current. Answer: **what should be worked on next, and 
 |---|---|---|
 | 🟢 **GREEN** | Touches only `crates/**`, `tools/**`, `migrations/**`, `.github/**`, `docs/**`. No unanswered product decision. | **Yes** |
 | 🟠 **AMBER** | Needs a `specs/**` change (command, event, error, rule, test, story, screen, DSL field). | **No** — `specs/**` is frozen for autonomous loops; only plan mode proposes DSL changes, with approval |
-| 🔴 **RED** | Its proposal has an unanswered open question, or another open issue blocks it. | **No** — report who owes the decision, and for how long |
+| 🔴 **RED** | Its proposal is not `Approved`, has an unanswered question in [`docs/proposals/DECISIONS.md`](../../docs/proposals/DECISIONS.md), or another open issue blocks it. | **No** — report who owes the decision, and for how long |
+
+**The approval gate is absolute.** Implementation never starts from a proposal whose `Status` is not
+`Approved`. Check `DECISIONS.md` first — it is the register of what is outstanding, and §5 records what
+has been answered. A partially-approved proposal may dispatch **only** the slices whose decisions are
+marked decided.
 
 Two traps: **ADR-0032 completeness pulls work into AMBER** (a new command also needs its event, error,
 rule, test and story — all `specs/**`), and **a GREEN issue can have an AMBER half** — dispatch it
