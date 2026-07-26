@@ -285,7 +285,7 @@ The refund queue (RefundProcess): refunds opened for decision, with their lifecy
 The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. Restaurant/ownership scoping is enforced server-side; the per-restaurant narrowing seam is a recorded follow-up gap (no restaurant principal in the GraphQL context yet — the same gap the EXTERNAL deliveryPartnerAvailabilities queue records).
 
 
-- **Input**: 🧩 `RestaurantReclamationsQueryInput` — `status?`: [🔤 `ReclamationStatus`](#scalar-reclamationstatus), `category?`: [🔤 `ReclamationCategory`](#scalar-reclamationcategory)
+- **Input**: 🧩 `RestaurantReclamationsQueryInput` — `status?`: [🔤 `ReclamationStatus`](#scalar-reclamationstatus), `category?`: [🔤 `ReclamationCategory`](#scalar-reclamationcategory), `overdue?`: `boolean`
 - **Returns**: [🧩 `Reclamation`](#type-reclamation) (list) · **reads** [🗄️ `View_Reclamation`](#view-view_reclamation)
 - **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V1
 
@@ -3281,6 +3281,7 @@ A customer claim/dispute over a delivered order (aggregate Reclamation, id = rec
 | <a id="type-reclamation--rejectreason"></a>`rejectReason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |
 | <a id="type-reclamation--openedat"></a>`openedAt` | `string` _date-time_ | ✅ |
 | <a id="type-reclamation--decidedat"></a>`decidedAt` | `string` _date-time_ | ⬜ |
+| <a id="type-reclamation--overdue"></a>`overdue` | `boolean` | ✅ |
 
 <a id="type-refund"></a>
 #### 🧩 Type: `Refund`
@@ -6419,7 +6420,7 @@ _Grants store credit when a claim is resolved as GOODWILL_CREDIT_
 - **Then**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
 - **Verifies**: [📐 `GoodwillCreditGrantedOnResolution`](#rule-goodwillcreditgrantedonresolution)
 
-### 📡 Observability _(2)_
+### 📡 Observability _(3)_
 
 <a id="obs-place-order"></a>
 #### 📡 Contract: `place-order`
@@ -6484,6 +6485,36 @@ _criticality: **high**_
 - **Metrics**: `refund_duration_ms` _(histogram)_ · **Business metrics**: `refunds_settled_total` _(counter)_, `saga_compensation_total` _(counter)_
 - **Status rules**: success ⇐ spans [`refund.request`, `event.store.append`]
 - **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 2%
+
+<a id="obs-reclamation-sla"></a>
+#### 📡 Contract: `reclamation-sla`
+
+_criticality: **medium**_
+
+- **Workflow**:  · command [📩 `ResolveReclamation`](#command-resolvereclamation)
+- **Emits**: [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved), [⚡ `ReclamationRejected`](#event-reclamationrejected) · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `command.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `reclamation_id` | `domain.aggregate_id` | ✅ | [🔤 `ReclamationId`](#scalar-reclamationid) |
+| `command_type` | `command.type` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `command.receive` | `SERVER` | ✅ | — | `business.command_type`*, `business.actor`* |
+| `command.validate` | `INTERNAL` | ✅ | — | `business.validation_status`* |
+| `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`*, `business.stream_id`* |
+| `event.publish` | `PRODUCER` | ✅ | — | `business.event_type`* |
+
+- **Metrics**: `reclamation_decision_duration_ms` _(histogram)_ · **Business metrics**: `reclamations_decided_total` _(counter)_, `reclamations_overdue_total` _(counter)_
+- **Status rules**: success ⇐ spans [`command.receive`, `command.validate`, `event.store.append`, `event.publish`]
+- **SLOs**: p95 ≤ 600ms · p99 ≤ 1500ms · error rate ≤ 2%
 
 <a id="sec-ctx-customer"></a>
 ## 🔲 4. customer
@@ -9848,6 +9879,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 │ «staff_topbar»                           │
 │ page_header — Claims                     │
 │ chip_multi_select — Status               │
+│ chip_multi_select — SLA                  │
 │ list                                     │
 │ «staff_nav»                              │
 └──────────────────────────────────────────┘
@@ -9867,6 +9899,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 │ «staff_topbar»                           │
 │ page_header — Resolve claim              │
 │ status_chip                              │
+│ badge                                    │
 │ info_row — Order                         │
 │ info_row — Problem                       │
 │ info_row — Details                       │
@@ -10300,6 +10333,10 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-claims-amount-custom"></a>`back.claims.amount.custom` | — | Other amount | Autre montant |
 | <a id="translation-back-claims-reject-label"></a>`back.claims.reject.label` | — | Reject | Rejeter |
 | <a id="translation-back-claims-reject-reason_ph"></a>`back.claims.reject.reason_ph` | — | Reason (required) | Motif (obligatoire) |
+| <a id="translation-back-claims-filter-overdue"></a>`back.claims.filter.overdue` | — | SLA | SLA |
+| <a id="translation-back-claims-overdue-all"></a>`back.claims.overdue.all` | — | All | Toutes |
+| <a id="translation-back-claims-overdue-only"></a>`back.claims.overdue.only` | — | Overdue only | En retard uniquement |
+| <a id="translation-back-claims-overdue-badge"></a>`back.claims.overdue.badge` | — | Overdue | En retard |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |

@@ -753,3 +753,73 @@ delivery-dispatch-strategy:
 
   latency_budget: { max_p95_ms: 800, max_p99_ms: 2000 }
   error_budget: { max_error_rate_pct: 2.0 }
+
+# =====================================================================
+# reclamation-sla — the claim first-response SLA (epic #151, slice #160)
+# OpenReclamation -> ReclamationOpened (OPEN, the first-response clock starts) -> the staff decide it:
+#   ResolveReclamation -> ReclamationResolved | RejectReclamation -> ReclamationReoccured... (REJECTED)
+# "First response" for V0 = the claim being DECIDED (resolved/rejected). There is NO domain clock
+# (time is event-envelope occurred_at, #154); `overdue` is a READ-TIME computation in the query repo
+# (status OPEN AND opened_at older than RECLAMATION_FIRST_RESPONSE_TARGET_HOURS) surfaced on the
+# staff claims queue — hence the reclamations_overdue_total BAM signal, not a domain event.
+# The contract binds the decision command (ResolveReclamation) on the Reclamation aggregate; the
+# spans cover the decide path (open is the birth fact whose occurred_at anchors the clock).
+# =====================================================================
+reclamation-sla:
+  feature: reclamation-sla
+  criticality: medium
+  workflow:
+    aggregate: { $ref: 'actors.yaml#/Reclamation' }
+    command: { $ref: 'commands.yaml#/ResolveReclamation' }
+    emits:
+      - { $ref: 'events.yaml#/ReclamationOpened' }
+      - { $ref: 'events.yaml#/ReclamationResolved' }
+      - { $ref: 'events.yaml#/ReclamationRejected' }
+
+  run_identity:
+    - { name: correlation_id, source: "command.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: reclamation_id, source: "domain.aggregate_id", businessKey: { $ref: 'scalars.yaml#/ReclamationId' }, required: true }
+    - { name: command_type, source: "command.type", required: true }
+
+  spans:
+    - name: "command.receive"
+      kind: SERVER
+      required: true
+      attributes:
+        - { key: "business.command_type", type: string, required: true }   # ResolveReclamation | RejectReclamation
+        - { key: "business.actor", type: string, required: true }
+    - name: "command.validate"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.validation_status", type: string, required: true }   # accepted | rejected (ReclamationNotOpen / ReclamationNotFound)
+    - name: "event.store.append"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }   # ReclamationResolved | ReclamationRejected
+        - { key: "business.stream_id", type: string, required: true }
+    - name: "event.publish"
+      kind: PRODUCER
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+
+  metrics:
+    - { name: "reclamation_decision_duration_ms", type: histogram, attributes: ["outcome"] }   # opened_at -> decided (first-response latency)
+  business_metrics:
+    - { name: "reclamations_decided_total", type: counter, attributes: ["outcome"] }   # outcome = resolved | rejected
+    - { name: "reclamations_overdue_total", type: counter, attributes: ["restaurant_id"] }   # SLA breach signal — the read-time overdue count surfaced to the staff queue (#160)
+
+  status_rules:
+    success:
+      required_spans: ["command.receive", "command.validate", "event.store.append", "event.publish"]
+      conditions: ["command.validate.business.validation_status == 'accepted'"]
+    business_rejected:
+      conditions: ["command.validate.business.validation_status == 'rejected'"]   # decided a non-OPEN / unknown claim
+    technical_error:
+      any_span_errors: true
+
+  latency_budget: { max_p95_ms: 600, max_p99_ms: 1500 }
+  error_budget: { max_error_rate_pct: 2.0 }

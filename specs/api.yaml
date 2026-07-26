@@ -321,6 +321,7 @@ types:
       rejectReason: { $ref: 'scalars.yaml#/ReclamationReason', nullable: true }   # the reason recorded on rejection
       openedAt: { type: string, format: date-time }
       decidedAt: { type: string, format: date-time, nullable: true }
+      overdue: { type: boolean }   # #160 first-response SLA: computed AT READ TIME (not stored) — status OPEN and opened_at older than the target (RECLAMATION_FIRST_RESPONSE_TARGET_HOURS); the fold-view generator can't express a now()-dependent column, so the read repo computes it
   Refund:
     description: >
       A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin
@@ -648,6 +649,7 @@ queries:
     args:
       status: { $ref: 'scalars.yaml#/ReclamationStatus' }
       category: { $ref: 'scalars.yaml#/ReclamationCategory' }
+      overdue: { type: boolean }   # #160 SLA: when true, only OPEN claims past the first-response target (opened_at < now() - target)
     returns: { $ref: '#/types/Reclamation', array: true }
     roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]
     slice: V1

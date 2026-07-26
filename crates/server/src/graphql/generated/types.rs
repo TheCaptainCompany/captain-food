@@ -876,6 +876,8 @@ pub struct Reclamation {
     pub opened_at: chrono::DateTime<chrono::Utc>,
     #[graphql(name = "decidedAt")]
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "overdue")]
+    pub overdue: bool,
 }
 
 /// A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin decides, then APPROVED (Stripe refund requested) or DENIED, and REFUNDED once Stripe settles. Serves the restaurant's and admin's refund queue (filter status = REQUESTED for pending ones).
@@ -1340,6 +1342,7 @@ impl From<ReclamationRow> for Reclamation {
             reject_reason: row.reject_reason.map(Into::into),
             opened_at: row.opened_at,
             decided_at: row.decided_at,
+            overdue: row.overdue,
         }
     }
 }

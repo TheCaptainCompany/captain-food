@@ -391,6 +391,7 @@ impl QueryRoot {
             .map(|i| application::queries::ReclamationFilter {
                 status: i.status.map(Into::into),
                 category: i.category.map(Into::into),
+                overdue: i.overdue,
             })
             .unwrap_or_default();
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;

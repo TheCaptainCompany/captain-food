@@ -227,6 +227,10 @@
     "en": "Status",
     "fr": "Statut"
   },
+  "back.claims.filter.overdue": {
+    "en": "SLA",
+    "fr": "SLA"
+  },
   "back.claims.note_ph": {
     "en": "Note (optional)",
     "fr": "Note (facultatif)"
@@ -234,6 +238,18 @@
   "back.claims.order_ref": {
     "en": "Order",
     "fr": "Commande"
+  },
+  "back.claims.overdue.all": {
+    "en": "All",
+    "fr": "Toutes"
+  },
+  "back.claims.overdue.badge": {
+    "en": "Overdue",
+    "fr": "En retard"
+  },
+  "back.claims.overdue.only": {
+    "en": "Overdue only",
+    "fr": "En retard uniquement"
   },
   "back.claims.reject.label": {
     "en": "Reject",

@@ -95,3 +95,8 @@ back.claims.amount.subtitle: { messages: { en: "Choose the amount to refund or c
 back.claims.amount.custom:   { messages: { en: "Other amount", fr: "Autre montant" } }
 back.claims.reject.label:     { messages: { en: "Reject", fr: "Rejeter" } }
 back.claims.reject.reason_ph: { messages: { en: "Reason (required)", fr: "Motif (obligatoire)" } }
+# First-response SLA (#160): the overdue filter toggle + the per-claim overdue marker.
+back.claims.filter.overdue:  { messages: { en: "SLA", fr: "SLA" } }
+back.claims.overdue.all:     { messages: { en: "All", fr: "Toutes" } }
+back.claims.overdue.only:    { messages: { en: "Overdue only", fr: "En retard uniquement" } }
+back.claims.overdue.badge:   { messages: { en: "Overdue", fr: "En retard" } }

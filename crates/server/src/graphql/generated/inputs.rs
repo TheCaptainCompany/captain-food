@@ -1305,6 +1305,8 @@ pub struct RestaurantReclamationsQueryInput {
     pub status: Option<ReclamationStatus>,
     #[graphql(name = "category")]
     pub category: Option<ReclamationCategory>,
+    #[graphql(name = "overdue")]
+    pub overdue: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

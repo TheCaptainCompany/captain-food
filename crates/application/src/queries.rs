@@ -447,14 +447,28 @@ pub struct ReclamationRow {
     pub opened_at: chrono::DateTime<chrono::Utc>,
     /// The decision's occurrence time; `None` while OPEN.
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// First-response SLA flag (#160), computed AT READ TIME by the repo (never a stored/folded
+    /// column): `status == OPEN && opened_at < now() − RECLAMATION_FIRST_RESPONSE_TARGET`. An OPEN
+    /// claim not answered past the target is overdue so the staff queue surfaces it.
+    pub overdue: bool,
 }
 
+/// First-response SLA target (#160): an OPEN claim whose `opened_at` is older than this is flagged
+/// `overdue`. "First response" for V0 = the claim being decided (resolved/rejected), so overdue is
+/// simply an OPEN claim older than the target. A single named constant — configurable (per-restaurant
+/// / per-category, or a referential policy) later; there is NO domain clock (time is read-time here,
+/// event-envelope `occurred_at` in the domain — #154).
+pub const RECLAMATION_FIRST_RESPONSE_TARGET_HOURS: i64 = 24;
+
 /// Optional filters for the restaurant claims queue — mirrors the `restaurantReclamations` query args
-/// in api.yaml (`status` / `category`; status OPEN = the outstanding queue).
+/// in api.yaml (`status` / `category`; status OPEN = the outstanding queue). `overdue: Some(true)`
+/// narrows to OPEN claims past the first-response target (#160).
 #[derive(Debug, Clone, Default)]
 pub struct ReclamationFilter {
     pub status: Option<ReclamationStatus>,
     pub category: Option<ReclamationCategory>,
+    /// When `Some(true)`, return only overdue claims (`status == OPEN && opened_at < now() − target`).
+    pub overdue: Option<bool>,
 }
 
 /// Read port over the `View_Reclamation` read model (customer claims, #154). Backs the customer
