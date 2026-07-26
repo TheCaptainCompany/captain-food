@@ -1,9 +1,9 @@
 # PROP-20260726-013207 — First-class reclamation (customer claim/dispute) lifecycle
 
-- **Status**: Proposed — plan-mode proposal. **No `specs/**` or code changed yet.** On approval it becomes an ADR that lands with the first implementation slice.
+- **Status**: Accepted (2026-07-26, product owner made the §9 decisions) — see [ADR-20260726-124204](../adr/ADR-20260726-124204-reclamation-lifecycle.md). Realized incrementally by the §10 sub-issues; the two automations (credit ledger, replacement order) are promoted to **V0** by decision #2 and each carry their own ADR at build time.
 - **Date**: 2026-07-26
 - **Tracking issue**: [#151 "First-class reclamation (customer claim/dispute) lifecycle — open, discuss, resolve (refund/replacement/goodwill/reject)"](https://github.com/TheCaptainCompany/captain-food/issues/151) (every proposal MUST have one, ADR-20260724-143000; always the full clickable link)
-- **Realized by**: _(filled at completion — ADR + PR)_
+- **Realized by**: [ADR-20260726-124204](../adr/ADR-20260726-124204-reclamation-lifecycle.md) (adopts this design + records the 7 §9 decisions). The §10 sub-issues land the slices.
 - **Related**: [#129 "Epic: in-app order conversations (messaging)"](https://github.com/TheCaptainCompany/captain-food/issues/129) (the discussion channel — now live on the customer + restaurant surfaces) · [PROP-20260725-013008](PROP-20260725-013008-order-conversations-messaging.md) §2.7/§9.5 (in-thread refund binding, [#133](https://github.com/TheCaptainCompany/captain-food/issues/133)) · [PROP-20260725-120055](PROP-20260725-120055-generic-file-attachment-framework.md) ([#134](https://github.com/TheCaptainCompany/captain-food/issues/134), the `RECLAMATION` evidence photo) · the existing **refund flow** (`RequestRefund`/`ApproveRefund` + `RefundProcess`) · ADR-0041 (acting user is envelope, not payload) · CLAUDE.md request/report split.
 
 > **Status:** Proposed. This document records the design and the decisions it asks the product owner
