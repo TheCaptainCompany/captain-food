@@ -219,3 +219,5 @@ PartialRefundResolutionCarriesAnAmount:
   description: "Resolving a reclamation as PARTIAL_REFUND requires a refund amount; a partial refund without one is rejected (#151)."
 OnlyDecidedReclamationsCanBeReopened:
   description: "Only a decided (resolved or rejected) reclamation can be reopened; reopening an open reclamation is rejected (#151)."
+ReclamationEvidenceTargetsAnExistingClaim:
+  description: "Evidence (an attachment ref) can only be attached to an existing reclamation; attaching to a claim that was never opened is rejected (#156)."

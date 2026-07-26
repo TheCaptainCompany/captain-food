@@ -125,7 +125,8 @@ impl OrderConversationCompute for OrderConversationProjector {
     /// The claim-lifecycle timeline woven into the order thread (§2.5, #155): appends one
     /// `ClaimTimelineEntry` per Reclamation* event, with `kind` derived from the event type and the
     /// per-kind fields carried through (category/requestedResolution on OPENED, resolution/refundAmount/
-    /// note on RESOLVED, reason on REJECTED/REOPENED). `at` is the envelope's occurred_at (ADR-0041). All
+    /// note on RESOLVED, reason on REJECTED/REOPENED, attachmentRef on EVIDENCE_ATTACHED (#156)). `at` is
+    /// the envelope's occurred_at (ADR-0041). All
     /// keys are always emitted (nulls where a kind does not carry them) so the read-model deserialization
     /// is total, mirroring `message_json`/`muted`. The row is keyed by the event's `orderId` upstream, so
     /// entries land on the right order thread; entries are appended in global `position` order.
@@ -140,6 +141,7 @@ impl OrderConversationCompute for OrderConversationProjector {
                 "resolution": Value::Null,
                 "refundAmount": Value::Null,
                 "reason": Value::Null,
+                "attachmentRef": Value::Null,
                 "at": env.occurred_at,
             })),
             DomainEvent::ReclamationResolved(e) => Some(json!({
@@ -150,6 +152,7 @@ impl OrderConversationCompute for OrderConversationProjector {
                 "resolution": e.resolution,
                 "refundAmount": e.refund_amount,
                 "reason": e.note,
+                "attachmentRef": Value::Null,
                 "at": env.occurred_at,
             })),
             DomainEvent::ReclamationRejected(e) => Some(json!({
@@ -160,6 +163,7 @@ impl OrderConversationCompute for OrderConversationProjector {
                 "resolution": Value::Null,
                 "refundAmount": Value::Null,
                 "reason": e.reason,
+                "attachmentRef": Value::Null,
                 "at": env.occurred_at,
             })),
             DomainEvent::ReclamationReopened(e) => Some(json!({
@@ -170,6 +174,20 @@ impl OrderConversationCompute for OrderConversationProjector {
                 "resolution": Value::Null,
                 "refundAmount": Value::Null,
                 "reason": e.reason,
+                "attachmentRef": Value::Null,
+                "at": env.occurred_at,
+            })),
+            // Evidence photo attached to the claim (#156): carries the opaque attachmentRef; all other
+            // per-kind fields stay null. Keyed onto the order row by the event's orderId upstream.
+            DomainEvent::ReclamationEvidenceAttached(e) => Some(json!({
+                "kind": "EVIDENCE_ATTACHED",
+                "reclamationId": e.reclamation_id,
+                "category": Value::Null,
+                "requestedResolution": Value::Null,
+                "resolution": Value::Null,
+                "refundAmount": Value::Null,
+                "reason": Value::Null,
+                "attachmentRef": e.attachment_ref,
                 "at": env.occurred_at,
             })),
             _ => None,
@@ -186,12 +204,12 @@ mod tests {
     use super::*;
     use crate::projections::project_order_conversation;
     use domain::generated::events::{
-        ConversationOpened, MessagePosted, OrderAcceptedByRestaurant, ReclamationOpened,
-        ReclamationResolved,
+        ConversationOpened, MessagePosted, OrderAcceptedByRestaurant, ReclamationEvidenceAttached,
+        ReclamationOpened, ReclamationResolved,
     };
     use domain::generated::scalars::{
-        ConversationAuthorRole, ConversationMessageId, CustomerId, Locale, MessageBody, OrderId,
-        ReclamationCategory, ReclamationId, ReclamationResolution, RestaurantId,
+        AttachmentRef, ConversationAuthorRole, ConversationMessageId, CustomerId, Locale,
+        MessageBody, OrderId, ReclamationCategory, ReclamationId, ReclamationResolution, RestaurantId,
     };
 
     const NIL: &str = "00000000-0000-0000-0000-000000000000";
@@ -282,11 +300,20 @@ mod tests {
         });
         let row = project_order_conversation(&c, Some(row), &env(resolved_claim)).unwrap();
 
+        let evidence = DomainEvent::ReclamationEvidenceAttached(ReclamationEvidenceAttached {
+            reclamation_id: ReclamationId(uuid::Uuid::new_v4()),
+            order_id: OrderId(NIL.parse().unwrap()),
+            attachment_ref: AttachmentRef("attachment-ref-1".into()),
+        });
+        let row = project_order_conversation(&c, Some(row), &env(evidence)).unwrap();
+
         let claims = row.claim_events.as_array().unwrap();
-        assert_eq!(claims.len(), 2);
+        assert_eq!(claims.len(), 3);
         assert_eq!(claims[0].get("kind").unwrap(), "OPENED");
         assert_eq!(claims[0].get("requestedResolution").unwrap(), "FULL_REFUND");
         assert_eq!(claims[1].get("kind").unwrap(), "RESOLVED");
         assert_eq!(claims[1].get("resolution").unwrap(), "FULL_REFUND");
+        assert_eq!(claims[2].get("kind").unwrap(), "EVIDENCE_ATTACHED");
+        assert_eq!(claims[2].get("attachmentRef").unwrap(), "attachment-ref-1");
     }
 }

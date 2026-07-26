@@ -368,7 +368,7 @@ pub struct MutedParticipant {
     pub until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// One reclamation-lifecycle entry woven into the per-order conversation thread (read-model array element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED); `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/ `refundAmount` from a resolution, `reason` from a rejection or reopen. `at` is the fact's occurred-at. Customer-visible — it is the customer's own claim shown inline in their order thread.
+/// One reclamation-lifecycle entry woven into the per-order conversation thread (read-model array element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED); `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/ `refundAmount` from a resolution, `reason` from a rejection or reopen, `attachmentRef` from an EVIDENCE_ATTACHED (#156). `at` is the fact's occurred-at. Customer-visible — it is the customer's own claim shown inline in their order thread.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaimTimelineEntry {
@@ -386,6 +386,8 @@ pub struct ClaimTimelineEntry {
     pub refund_amount: Option<Money>,
     #[graphql(name = "reason")]
     pub reason: Option<ReclamationReason>,
+    #[graphql(name = "attachmentRef")]
+    pub attachment_ref: Option<AttachmentRef>,
     #[graphql(name = "at")]
     pub at: chrono::DateTime<chrono::Utc>,
 }

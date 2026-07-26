@@ -673,6 +673,7 @@ OrderConversation:
     - { $ref: 'events.yaml#/ReclamationResolved' }
     - { $ref: 'events.yaml#/ReclamationRejected' }
     - { $ref: 'events.yaml#/ReclamationReopened' }
+    - { $ref: 'events.yaml#/ReclamationEvidenceAttached' }
   columns:
     order_id:
       from: [{ $ref: 'events.yaml#/ConversationOpened/properties/orderId' }]
@@ -732,4 +733,5 @@ OrderConversation:
         - { $ref: 'events.yaml#/ReclamationResolved' }
         - { $ref: 'events.yaml#/ReclamationRejected' }
         - { $ref: 'events.yaml#/ReclamationReopened' }
-      note: "ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status shows inline in the per-order conversation (§2.5, #155)."
+        - { $ref: 'events.yaml#/ReclamationEvidenceAttached' }
+      note: "ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED/EVIDENCE_ATTACHED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status and evidence show inline in the per-order conversation (§2.5, #155, #156)."

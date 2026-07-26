@@ -2541,7 +2541,7 @@ impl From<ReclamationStatus> for ds::ReclamationStatus {
     }
 }
 
-/// Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected) or REOPENED (ReclamationReopened). Lets the order thread show a claim's status inline without copying the reclamation's own read model (§2.5, #155).
+/// Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum ClaimTimelineEventKind {
     #[graphql(name = "OPENED")]
@@ -2552,6 +2552,8 @@ pub enum ClaimTimelineEventKind {
     REJECTED,
     #[graphql(name = "REOPENED")]
     REOPENED,
+    #[graphql(name = "EVIDENCE_ATTACHED")]
+    EVIDENCE_ATTACHED,
 }
 impl From<ds::ClaimTimelineEventKind> for ClaimTimelineEventKind {
     fn from(v: ds::ClaimTimelineEventKind) -> Self {
@@ -2560,6 +2562,7 @@ impl From<ds::ClaimTimelineEventKind> for ClaimTimelineEventKind {
             ds::ClaimTimelineEventKind::RESOLVED => Self::RESOLVED,
             ds::ClaimTimelineEventKind::REJECTED => Self::REJECTED,
             ds::ClaimTimelineEventKind::REOPENED => Self::REOPENED,
+            ds::ClaimTimelineEventKind::EVIDENCE_ATTACHED => Self::EVIDENCE_ATTACHED,
         }
     }
 }
@@ -2570,6 +2573,7 @@ impl From<ClaimTimelineEventKind> for ds::ClaimTimelineEventKind {
             ClaimTimelineEventKind::RESOLVED => Self::RESOLVED,
             ClaimTimelineEventKind::REJECTED => Self::REJECTED,
             ClaimTimelineEventKind::REOPENED => Self::REOPENED,
+            ClaimTimelineEventKind::EVIDENCE_ATTACHED => Self::EVIDENCE_ATTACHED,
         }
     }
 }

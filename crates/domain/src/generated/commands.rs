@@ -893,3 +893,11 @@ pub struct ReopenReclamation {
     pub reclamation_id: ReclamationId,
     pub reason: Option<ReclamationReason>,
 }
+
+/// Attach an evidence photo (opaque, framework-managed attachment ref) to an existing claim. The only guard is that the reclamation exists (errors.yaml#/ReclamationNotFound) — evidence may be attached in any lifecycle state. `orderId` is NOT supplied: the handler stamps it from the aggregate's fold state (established at ReclamationOpened), like the #155 decision events. The file upload/storage is out of scope here (#134) — this models the domain fact with the opaque ref only (#156).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachReclamationEvidence {
+    pub reclamation_id: ReclamationId,
+    pub attachment_ref: AttachmentRef,
+}

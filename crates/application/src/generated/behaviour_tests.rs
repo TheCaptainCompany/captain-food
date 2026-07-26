@@ -592,6 +592,11 @@ fn fx_reclamation_reopened() -> DomainEvent {
     DomainEvent::ReclamationReopened(evs::ReclamationReopened { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), reason: Some(sc::ReclamationReason("Customer sent a photo; taking another look.".into())) })
 }
 
+/// tests.yaml#/fixtures/reclamationEvidenceAttached — events.yaml#/ReclamationEvidenceAttached
+fn fx_reclamation_evidence_attached() -> DomainEvent {
+    DomainEvent::ReclamationEvidenceAttached(evs::ReclamationEvidenceAttached { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), attachment_ref: sc::AttachmentRef("attachment-ref-1".into()) })
+}
+
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
 /// the canonical OrderTracking rows the saga legs read (`read_order`) — state the spec's
 /// GIVEN (an event list) cannot express but its cases assume.
@@ -3748,5 +3753,35 @@ async fn test_reopen_missing_reclamation_rejected() {
     let err = result.expect_err("TestReopenMissingReclamationRejected: the spec expects a typed rejection");
     support::assert_thrown("TestReopenMissingReclamationRejected", &err, &["ReclamationNotFound"]);
     bed.assert_appended("TestReopenMissingReclamationRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReclamationEvidenceAttached — "Attaches an evidence photo to an open reclamation"
+/// rules: ReclamationEvidenceTargetsAnExistingClaim
+#[tokio::test]
+async fn test_reclamation_evidence_attached() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Reclamation-{}", support::uid("recl-1")), vec![fx_reclamation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::AttachReclamationEvidence { reclamation_id: sc::ReclamationId(support::uid("recl-1")), attachment_ref: sc::AttachmentRef("attachment-ref-1".into()) };
+    let result = crate::commands::attach_reclamation_evidence(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestReclamationEvidenceAttached: the spec expects acceptance");
+    bed.assert_appended("TestReclamationEvidenceAttached", &before, &[
+        (format!("Reclamation-{}", support::uid("recl-1")), fx_reclamation_evidence_attached()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestAttachEvidenceMissingReclamationRejected — "Attaching evidence to a reclamation that does not exist is rejected"
+/// rules: ReclamationEvidenceTargetsAnExistingClaim
+#[tokio::test]
+async fn test_attach_evidence_missing_reclamation_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::AttachReclamationEvidence { reclamation_id: sc::ReclamationId(support::uid("recl-1")), attachment_ref: sc::AttachmentRef("attachment-ref-1".into()) };
+    let result = crate::commands::attach_reclamation_evidence(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestAttachEvidenceMissingReclamationRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestAttachEvidenceMissingReclamationRejected", &err, &["ReclamationNotFound"]);
+    bed.assert_appended("TestAttachEvidenceMissingReclamationRejected", &before, &[]);
 }
 

@@ -170,7 +170,7 @@ INSERT INTO ref_reclamation_status (value, sort_order) VALUES ('OPEN',0),('RESOL
 
 -- ClaimTimelineEventKind
 CREATE TABLE ref_claim_timeline_event_kind(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
-INSERT INTO ref_claim_timeline_event_kind (value, sort_order) VALUES ('OPENED',0),('RESOLVED',1),('REJECTED',2),('REOPENED',3);
+INSERT INTO ref_claim_timeline_event_kind (value, sort_order) VALUES ('OPENED',0),('RESOLVED',1),('REJECTED',2),('REOPENED',3),('EVIDENCE_ATTACHED',4);
 
 CREATE TABLE domain_events (
   position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

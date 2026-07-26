@@ -992,6 +992,15 @@ pub struct ReclamationReopened {
     pub reason: Option<ReclamationReason>,
 }
 
+/// The customer attached an evidence photo to their claim — an opaque, framework-managed attachment ref (storage/moderation/GDPR retention handled generically by the framework, not this aggregate; #156). Evidence may be attached in any lifecycle state — the only guard is that the claim exists. `orderId` rides along (from the aggregate's fold state, established at ReclamationOpened) so the evidence weaves into the per-order conversation thread, keyed by order (§2.5, #155).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReclamationEvidenceAttached {
+    pub reclamation_id: ReclamationId,
+    pub order_id: OrderId,
+    pub attachment_ref: AttachmentRef,
+}
+
 /// Every business event as a typed, adjacently-tagged union: `{ "eventType": <name>, "payload": { … } }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "eventType", content = "payload")]
@@ -1098,4 +1107,5 @@ pub enum DomainEvent {
     ReclamationResolved(ReclamationResolved),
     ReclamationRejected(ReclamationRejected),
     ReclamationReopened(ReclamationReopened),
+    ReclamationEvidenceAttached(ReclamationEvidenceAttached),
 }

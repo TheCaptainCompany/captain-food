@@ -379,6 +379,7 @@ enum ClaimTimelineEventKind {
   RESOLVED
   REJECTED
   REOPENED
+  EVIDENCE_ATTACHED
 }
 
 # ==============================================================================
@@ -569,6 +570,7 @@ type ClaimTimelineEntry {
   resolution: ReclamationResolution
   refundAmount: Money
   reason: ReclamationReason
+  attachmentRef: AttachmentRef
   at: DateTime!
 }
 
@@ -1408,6 +1410,11 @@ input ReopenReclamationInput {
   reason: ReclamationReason
 }
 
+input AttachReclamationEvidenceInput {
+  reclamationId: ReclamationId!
+  attachmentRef: AttachmentRef!
+}
+
 input OperationStatusQueryInput {
   messageId: MessageId!
 }
@@ -1779,6 +1786,7 @@ type Mutation {
   resolveReclamation(input: ResolveReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "ResolveReclamation")
   rejectReclamation(input: RejectReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "RejectReclamation")
   reopenReclamation(input: ReopenReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ReopenReclamation")
+  attachReclamationEvidence(input: AttachReclamationEvidenceInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "AttachReclamationEvidence")
 }
 
 # ==============================================================================

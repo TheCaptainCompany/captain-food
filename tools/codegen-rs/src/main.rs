@@ -10157,6 +10157,7 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
         "resolveReclamation" => ("ResolveReclamation", "resolve_reclamation", Extra::None),
         "rejectReclamation" => ("RejectReclamation", "reject_reclamation", Extra::None),
         "reopenReclamation" => ("ReopenReclamation", "reopen_reclamation", Extra::None),
+        "attachReclamationEvidence" => ("AttachReclamationEvidence", "attach_reclamation_evidence", Extra::None),
         _ => return None,
     };
     let (resolve_extra, extra_arg) = match extra {
