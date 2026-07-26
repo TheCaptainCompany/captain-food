@@ -3,6 +3,29 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-26. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-26 — [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) reclamation
+> (claim/dispute) epic — 7 of 8 slices done (ADR-20260726-124204).** A first-class `Reclamation`
+> aggregate (keyed by `reclamationId`, multiple per order) tying the order conversation (discussion),
+> the refund path (money), and the attachment framework (evidence) into one lifecycle — built out V0 per
+> the product-owner decisions (PROP-20260726-013207 §9). Merged: **#153** aggregate core (open/resolve/
+> reject/reopen, live mutations) · **#154** read model + queries (my-claims / claims-queue / detail;
+> customerId/restaurantId scoping; the 14-day window flagged — no domain clock seam) · **#155** claim
+> lifecycle woven into the order conversation timeline (`claim_events`) · **#156** evidence (opaque ref,
+> storage deferred to #134) · **#157** the full SDUI (customer open-claim/my-claims/detail; staff
+> claims-queue/resolve-panel) · **#159** replacement-order automation (the saga's REPLACEMENT arm places
+> a genuine no-charge `replacementOf` order; deterministic-id idempotency, no double-placement) ·
+> **#160** SLA (read-time `overdue` flag + staff-queue filter/badge + the `reclamation-sla` observability
+> contract). **#158** landed the FOUNDATION (the `CustomerCredit` ledger — grant/consume/balance fold,
+> over-spend rejected, grant idempotent per claim — + the `ReclamationProcess` saga's goodwill-credit
+> arm); its three harder integrations (**refund-resolution binding**, **checkout-consume / spend credit**,
+> **credit read-model query**) are flagged and tracked in
+> [#207](https://github.com/TheCaptainCompany/captain-food/issues/207), so #158 stays open. Each slice:
+> full ADR-0032 completeness, `make rust` green, supervised auto-merge; the two automations carry their
+> own ADRs (ADR-20260726-163737 credit-saga, ADR-20260726-171736 replacement) with sequence diagrams +
+> mockups + per-option pros/cons per the 2026-07-26 proposal convention. **Money paths verified:** refund
+> reuses the one existing path (deferred binding), credit grant is idempotent, replacement is genuinely $0
+> (no Stripe) with double-placement prevented.
+
 > 🔎 **2026-07-26 — full functional + technical architecture review; 32 issues + 5 epics + 5 proposals
 > filed.** A critical review of the whole system (domain, money, authorization, catalog, delivery,
 > event store, runtime) against `main` at `835da95`. The engineering substrate reviewed **well** —
