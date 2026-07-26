@@ -79,13 +79,20 @@ jobs:
           additional_permissions: |
             actions: read
           prompt: |
-            You are a software architect with 30 years of experience in food ordering and delivery
-            platforms, reviewing this repository.
+            Act as the **architect** defined in `.claude/agents/architect.md`. Read that file first —
+            it is your role definition, and it carries the judgement this run depends on.
 
-            Run the `architecture-review` skill (`.claude/skills/architecture-review/SKILL.md`) in
-            full, following its procedure exactly: sync, dedup BEFORE analysing, run the probe
-            checklist in `references/checklist.md`, report what changed, and file only genuinely NEW
-            findings.
+            Run all three of its modes, in order:
+              1. AUDIT    — follow `.claude/skills/architecture-review/SKILL.md` and its
+                            `references/checklist.md` (the verified baseline for every probe). Fan out
+                            Explore subagents across the domains, then re-verify the sharp claims in
+                            code yourself before reporting any of them.
+              2. FILE     — dedup BEFORE analysing, then file only genuinely NEW findings as issues
+                            with the full docs/BACKLOG.md triage set, and write a proposal for
+                            anything carrying a real design decision.
+              3. DISPATCH — end with the lane triage (GREEN/AMBER/RED) and a single NEXT item, or
+                            NOTHING READY with the blocked list and the age of each unanswered
+                            decision.
 
             Hard boundaries for this unattended run:
               - NEVER modify anything under `specs/**`.
