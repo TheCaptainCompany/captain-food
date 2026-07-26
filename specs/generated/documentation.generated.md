@@ -8780,7 +8780,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 
-### 📡 Observability _(5)_
+### 📡 Observability _(6)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -8939,6 +8939,32 @@ _criticality: **high**_
 - **Metrics**: `uber_direct_webhook_ingest_duration_ms` _(histogram)_, `inbound_drain_lag_ms` _(histogram)_ · **Business metrics**: `inbound_events_staged_total` _(counter)_, `inbound_events_delivered_total` _(counter)_, `webhook_duplicates_total` _(counter)_
 - **Status rules**: success ⇐ spans [`webhook.verify`, `external.persist`, `acl.translate`, `inbound.persist`, `inbound.drain.deliver`, `event.store.append`]
 - **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 1%
+
+<a id="obs-read-authorization"></a>
+#### 📡 Contract: `read-authorization`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `command.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `auth.read_scope` | `INTERNAL` | ✅ | — | `business.role`*, `business.bridge_resolved`* |
+| `auth.scope_membership` | `INTERNAL` | ✅ | — | `business.scope_type`*, `business.role`*, `business.authorized`* |
+
+- **Metrics**: `read_authorization_denied_total` _(counter)_, `read_authorization_checks_total` _(counter)_, `read_authorization_bridge_unresolved_total` _(counter)_, `read_authorization_check_ms` _(histogram)_ · **Business metrics**: `scope_membership_lag_positions` _(gauge)_
+- **Status rules**: success ⇐ spans [`auth.read_scope`, `auth.scope_membership`]
+- **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 
 <a id="sec-screens"></a>
 ## 📱 Front-office screens (SDUI)
