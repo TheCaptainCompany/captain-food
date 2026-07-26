@@ -493,7 +493,18 @@ fixtures:
     data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", restaurantId: "restaurant-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
   reclamationResolvedFullRefund:
     type: { $ref: 'events.yaml#/ReclamationResolved' }
-    data: { reclamationId: "recl-1", orderId: "order-1", resolution: "FULL_REFUND" }
+    data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", resolution: "FULL_REFUND" }
+  reclamationResolvedGoodwillCredit:
+    type: { $ref: 'events.yaml#/ReclamationResolved' }
+    data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", resolution: "GOODWILL_CREDIT", refundAmount: { amountCents: 500, currency: "EUR" } }
+
+  # --- Customer store-credit ledger (#158) ---
+  customerCreditGranted:
+    type: { $ref: 'events.yaml#/CustomerCreditGranted' }
+    data: { customerId: "customer-1", amount: { amountCents: 500, currency: "EUR" }, reclamationId: "recl-1" }
+  customerCreditConsumed:
+    type: { $ref: 'events.yaml#/CustomerCreditConsumed' }
+    data: { customerId: "customer-1", amount: { amountCents: 300, currency: "EUR" }, orderId: "order-1" }
   reclamationRejected:
     type: { $ref: 'events.yaml#/ReclamationRejected' }
     data: { reclamationId: "recl-1", orderId: "order-1", reason: "The delivery photo shows all items were handed over." }
@@ -3255,3 +3266,51 @@ tests:
       data: { reclamationId: "recl-1", attachmentRef: "attachment-ref-1" }
     thrown:
       - { $ref: 'errors.yaml#/ReclamationNotFound' }
+
+  # ------------------- CustomerCredit ledger (#158) ------------------
+  TestCustomerCreditGranted:
+    name: "Grants goodwill store credit to a customer, increasing the balance"
+    rules: [{ $ref: 'rules.yaml#/CreditGrantIncreasesBalance' }]
+    actor: { $ref: 'actors.yaml#/CustomerCredit' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantCustomerCredit' }
+      data: { customerId: "customer-1", amount: { amountCents: 500, currency: "EUR" }, reclamationId: "recl-1" }
+    then:
+      - { $ref: '#/fixtures/customerCreditGranted' }
+
+  TestCustomerCreditConsumed:
+    name: "Spends store credit within balance, decreasing the balance"
+    rules: [{ $ref: 'rules.yaml#/CreditConsumeDecreasesBalance' }]
+    actor: { $ref: 'actors.yaml#/CustomerCredit' }
+    given:
+      - { $ref: '#/fixtures/customerCreditGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/ConsumeCustomerCredit' }
+      data: { customerId: "customer-1", amount: { amountCents: 300, currency: "EUR" }, orderId: "order-1" }
+    then:
+      - { $ref: '#/fixtures/customerCreditConsumed' }
+
+  TestConsumeBeyondBalanceRejected:
+    name: "Spending more store credit than the available balance is rejected"
+    rules: [{ $ref: 'rules.yaml#/CreditCannotBeOverspent' }]
+    actor: { $ref: 'actors.yaml#/CustomerCredit' }
+    given:
+      - { $ref: '#/fixtures/customerCreditGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/ConsumeCustomerCredit' }
+      data: { customerId: "customer-1", amount: { amountCents: 800, currency: "EUR" }, orderId: "order-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/InsufficientCustomerCredit' }
+
+  # ------------------ ReclamationProcess (saga, #158) ----------------
+  TestReclamationProcessGrantsGoodwillCredit:
+    name: "Grants store credit when a claim is resolved as GOODWILL_CREDIT"
+    rules: [{ $ref: 'rules.yaml#/GoodwillCreditGrantedOnResolution' }]
+    actor: { $ref: 'processmanager.yaml#/ReclamationProcess' }
+    given: []
+    when:
+      type: { $ref: 'events.yaml#/ReclamationResolved' }
+      data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", resolution: "GOODWILL_CREDIT", refundAmount: { amountCents: 500, currency: "EUR" } }
+    then:
+      - { $ref: '#/fixtures/customerCreditGranted' }

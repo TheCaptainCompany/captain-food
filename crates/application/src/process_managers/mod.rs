@@ -23,6 +23,7 @@
 pub mod cart_binding;
 pub mod delivery_dispatch;
 pub mod place_order;
+pub mod reclamation;
 pub mod refund;
 
 use domain::generated::scalars::{CartId, DeliveryJobId, OrderId, RestaurantId};

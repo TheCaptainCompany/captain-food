@@ -294,6 +294,7 @@ mod tests {
         let resolved_claim = DomainEvent::ReclamationResolved(ReclamationResolved {
             reclamation_id: ReclamationId(uuid::Uuid::new_v4()),
             order_id: OrderId(NIL.parse().unwrap()),
+            customer_id: CustomerId(NIL.parse().unwrap()),
             resolution: ReclamationResolution::FULL_REFUND,
             note: None,
             refund_amount: None,

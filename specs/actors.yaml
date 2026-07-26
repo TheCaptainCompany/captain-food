@@ -786,3 +786,21 @@ Reclamation:
       emits: [{ $ref: 'events.yaml#/ReclamationEvidenceAttached' }]
       throws:
         - { $ref: 'errors.yaml#/ReclamationNotFound' }
+
+CustomerCredit:
+  type: aggregate
+  description: >
+    A per-customer store-credit ledger; id = customerId (the aggregate identity IS the customer, like a
+    Prospect is keyed by its RestaurantId). Credits (goodwill, from a resolved claim) and debits (spent at
+    checkout) are recorded as facts on the customer's ledger stream; the AVAILABLE BALANCE is a fold over
+    them (granted − consumed, never negative). No status lifecycle — a ledger has a balance, not a state.
+    GrantCustomerCredit is idempotent per reclamationId (at most one grant per resolved claim), so a
+    re-delivered ReclamationResolved from the ReclamationProcess saga never double-grants
+    (ADR-20260726-163737, #158). Both commands are saga-/checkout-driven (no public GraphQL mutation).
+  receives:
+    - message: { $ref: 'commands.yaml#/GrantCustomerCredit' }
+      emits: [{ $ref: 'events.yaml#/CustomerCreditGranted' }]
+    - message: { $ref: 'commands.yaml#/ConsumeCustomerCredit' }
+      emits: [{ $ref: 'events.yaml#/CustomerCreditConsumed' }]
+      throws:
+        - { $ref: 'errors.yaml#/InsufficientCustomerCredit' }

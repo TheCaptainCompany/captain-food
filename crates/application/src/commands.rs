@@ -131,6 +131,11 @@ use domain::generated::events::{
 };
 use domain::generated::scalars::{ReclamationId, ReclamationResolution};
 
+// Customer store-credit ledger (#158) — the CustomerCredit aggregate (id = customerId).
+use domain::customer_credit::CustomerCreditState;
+use domain::generated::commands::{ConsumeCustomerCredit, GrantCustomerCredit};
+use domain::generated::events::{CustomerCreditConsumed, CustomerCreditGranted};
+
 use crate::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
@@ -1903,6 +1908,9 @@ pub async fn resolve_reclamation(
         // claim lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155).
         order_id: state.order_id,
         resolution: cmd.resolution,
+        // The claimant rides along from fold state (established at ReclamationOpened) so the
+        // ReclamationProcess saga can grant goodwill credit without a read step (#158).
+        customer_id: state.customer_id,
         note: cmd.note,
         refund_amount: cmd.refund_amount,
     });
@@ -1996,6 +2004,64 @@ pub async fn attach_reclamation_evidence(
         attachment_ref: cmd.attachment_ref,
     });
     let stream = format!("Reclamation-{}", cmd.reclamation_id.0);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// CustomerCredit (actors.yaml#/CustomerCredit) — the per-customer store-credit ledger (#158).
+// Both commands are saga-/checkout-driven (no public GraphQL mutation). The available balance is a
+// fold over the grant/consume facts; grants are idempotent per reclamationId; a debit never drives
+// the balance negative (errors.yaml#/InsufficientCustomerCredit). ADR-20260726-163737.
+// ================================================================================================
+
+/// Handle `commands.yaml#/GrantCustomerCredit` → emit `events.yaml#/CustomerCreditGranted` on the
+/// customer's ledger stream (`CustomerCredit-<customerId>`). Idempotent per `reclamationId`: a re-grant
+/// for a claim already granted (e.g. a re-delivered `ReclamationResolved` from the ReclamationProcess
+/// saga) is a benign no-op — no second grant, no double-credit (rules.yaml#/GoodwillCreditGrantedOnResolution).
+pub async fn grant_customer_credit(
+    store: &dyn EventStore,
+    cmd: GrantCustomerCredit,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) =
+        Repository::new(store).load::<CustomerCreditState>(cmd.customer_id).await?;
+    // Idempotent grant: at most one credit per resolved claim.
+    if state.as_ref().is_some_and(|s| s.already_granted(&cmd.reclamation_id)) {
+        return Ok(());
+    }
+    let event = DomainEvent::CustomerCreditGranted(CustomerCreditGranted {
+        customer_id: cmd.customer_id,
+        amount: cmd.amount,
+        reclamation_id: cmd.reclamation_id,
+    });
+    let stream = format!("CustomerCredit-{}", cmd.customer_id.0);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ConsumeCustomerCredit` → emit `events.yaml#/CustomerCreditConsumed` on the
+/// customer's ledger stream. Spending more than the available balance is rejected
+/// (`errors.yaml#/InsufficientCustomerCredit`, rules.yaml#/CreditCannotBeOverspent) — the balance never
+/// goes negative. The available balance is `Σ granted − Σ consumed` (folded from the log).
+pub async fn consume_customer_credit(
+    store: &dyn EventStore,
+    cmd: ConsumeCustomerCredit,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) =
+        Repository::new(store).load::<CustomerCreditState>(cmd.customer_id).await?;
+    let balance = state.as_ref().map(|s| s.balance_cents).unwrap_or(0);
+    if cmd.amount.amount_cents.0 > balance {
+        return Err(reject(
+            "InsufficientCustomerCredit",
+            json!({ "customerId": cmd.customer_id }),
+        ));
+    }
+    let event = DomainEvent::CustomerCreditConsumed(CustomerCreditConsumed {
+        customer_id: cmd.customer_id,
+        amount: cmd.amount,
+        order_id: cmd.order_id,
+    });
+    let stream = format!("CustomerCredit-{}", cmd.customer_id.0);
     Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
 }
 

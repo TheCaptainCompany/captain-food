@@ -43,9 +43,11 @@ boundedContexts:
       - { $ref: 'actors.yaml#/Payment' }
       - { $ref: 'actors.yaml#/Conversation' }
       - { $ref: 'actors.yaml#/Reclamation' }
+      - { $ref: 'actors.yaml#/CustomerCredit' }
     processManagers:
       - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
       - { $ref: 'processmanager.yaml#/RefundProcess' }
+      - { $ref: 'processmanager.yaml#/ReclamationProcess' }
   customer:
     description: "Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding."
     roles: [CUSTOMER, PUBLIC]

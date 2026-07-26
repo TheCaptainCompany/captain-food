@@ -22,7 +22,7 @@ use std::time::Duration;
 use application::generated::services::DeliveryService;
 use application::ports::{is_version_conflict, NoopDeliveryService};
 use application::process_managers::{
-    cart_binding, delivery_dispatch, place_order, refund, Outcome, TriggerEnvelope,
+    cart_binding, delivery_dispatch, place_order, reclamation, refund, Outcome, TriggerEnvelope,
 };
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
@@ -44,6 +44,7 @@ enum ProcessManager {
     Refund,
     CartBinding,
     DeliveryDispatch,
+    Reclamation,
 }
 
 /// One drained unit: a process manager with its own checkpoint row and the trigger event types its
@@ -77,6 +78,11 @@ const REGISTRY: &[PmGroup] = &[
         checkpoint: "pm:CartBindingProcess",
         pm: ProcessManager::CartBinding,
         triggers: &["CustomerIdentified"],
+    },
+    PmGroup {
+        checkpoint: "pm:ReclamationProcess",
+        pm: ProcessManager::Reclamation,
+        triggers: &["ReclamationResolved"],
     },
     PmGroup {
         checkpoint: "pm:DeliveryDispatchProcess",
@@ -332,6 +338,10 @@ impl ProcessManagerRunner {
             }
             (ProcessManager::Refund, DomainEvent::PaymentRefunded(e)) => {
                 refund::on_payment_refunded(&self.refund_state, e).await
+            }
+            // --- ReclamationProcess (#158) -------------------------------------------------------
+            (ProcessManager::Reclamation, DomainEvent::ReclamationResolved(e)) => {
+                reclamation::on_reclamation_resolved(&self.store, e, env).await
             }
             // --- CartBindingProcess --------------------------------------------------------------
             (ProcessManager::CartBinding, DomainEvent::CustomerIdentified(e)) => {

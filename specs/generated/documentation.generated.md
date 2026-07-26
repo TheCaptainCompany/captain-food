@@ -3335,7 +3335,7 @@ The INTERNAL (staff-only) notes on an order's conversation — deliberately a SE
 | <a id="type-conversationinternalnotes--admininvited"></a>`adminInvited` | `boolean` | ✅ |
 | <a id="type-conversationinternalnotes--mutedparticipants"></a>`mutedParticipants` | [[📦 `MutedParticipant`](#entity-mutedparticipant)] | ✅ |
 
-### 🎭 Actors _(7)_
+### 🎭 Actors _(9)_
 
 <a id="actor-cart"></a>
 #### 🎭 Actor: `Cart`
@@ -3467,6 +3467,17 @@ stateDiagram-v2
   RESOLVED --> OPEN : ReclamationReopened
   REJECTED --> OPEN : ReclamationReopened
 ```
+
+<a id="actor-customercredit"></a>
+#### 🎭 Actor: `CustomerCredit`
+
+_🧩 aggregate_ — A per-customer store-credit ledger; id = customerId (the aggregate identity IS the customer, like a Prospect is keyed by its RestaurantId). Credits (goodwill, from a resolved claim) and debits (spent at checkout) are recorded as facts on the customer's ledger stream; the AVAILABLE BALANCE is a fold over them (granted − consumed, never negative). No status lifecycle — a ledger has a balance, not a state. GrantCustomerCredit is idempotent per reclamationId (at most one grant per resolved claim), so a re-delivered ReclamationResolved from the ReclamationProcess saga never double-grants (ADR-20260726-163737, #158). Both commands are saga-/checkout-driven (no public GraphQL mutation).
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `GrantCustomerCredit`](#command-grantcustomercredit) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted) | — |
+| [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) | [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed) | [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit) |
 
 <a id="actor-placeorderprocess"></a>
 #### 🎭 Actor: `PlaceOrderProcess`
@@ -3605,6 +3616,31 @@ sequenceDiagram
   IN->>PM: PaymentRefunded (event)
   PM->>ST: by order_id=PaymentRefunded.orderId; expect process_status=APPROVED_AWAITING_SETTLEMENT
   PM->>ST: set refund_id=PaymentRefunded.refundId, process_status=REFUNDED
+  end
+```
+
+<a id="actor-reclamationprocess"></a>
+#### 🎭 Actor: `ReclamationProcess`
+
+_⚙️ process manager_ — Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). A refund resolution (FULL_REFUND / PARTIAL_REFUND) falls through UN-automated in this slice: the branch below only acts on GOODWILL_CREDIT. WHY the refund arm is flagged, not wired: the existing refund path opens a PENDING_APPROVAL refund from a refundable fact and requires a SEPARATE explicit ApproveRefund decision (with its own state-row guard + Stripe call) to move money; a single 2-way saga branch cannot isolate credit / refund / REPLACEMENT (deferred to #159) without either blindly refunding a REPLACEMENT (a wrong money-move) or duplicating the approval mechanism (forbidden). Wiring the refund arm through the canonical RequestRefund -> RefundRequested -> RefundProcess path with correct per-resolution dispatch is the flagged follow-up. REPLACEMENT is likewise a reserved no-op here (#159).
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [⚡ `ReclamationResolved`](#event-reclamationresolved) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted) | — |
+
+Sequence (generated from the typed steps):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant IN as Inbox (trigger)
+  participant PM as ReclamationProcess (decides)
+  participant AG_CustomerCredit as CustomerCredit (aggregate)
+  rect rgb(245,245,245)
+  IN->>PM: ReclamationResolved (event)
+  PM->>AG_CustomerCredit: send GrantCustomerCredit — the aggregate validates
+  Note over PM: skip unless precondition holds
   end
 ```
 
@@ -3771,7 +3807,7 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(30)_
+### 📩 Commands _(32)_
 
 <a id="command-addcartline"></a>
 #### 📩 Command: `AddCartLine`
@@ -4065,6 +4101,36 @@ The RESTAURANT (its own orders) or an ADMIN denies a pending refund request.
 | <a id="command-denyrefund--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="command-denyrefund--reason"></a>`reason` | `string` | ✅ |  |
 
+<a id="command-grantcustomercredit"></a>
+#### 📩 Command: `GrantCustomerCredit`
+
+Grant goodwill store credit to a customer. Dispatched by the ReclamationProcess saga when a claim is resolved as GOODWILL_CREDIT; idempotent per `reclamationId` (a re-grant for the same claim is a no-op).
+
+- **Dispatched by**: — · **handled by** [🎭 `CustomerCredit`](#actor-customercredit)
+- **Emits**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
+- **Throws**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-grantcustomercredit--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="command-grantcustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to add to the customer's available balance. |
+| <a id="command-grantcustomercredit--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+
+<a id="command-consumecustomercredit"></a>
+#### 📩 Command: `ConsumeCustomerCredit`
+
+Spend a customer's available store credit at checkout (rejected if it exceeds the available balance, errors.yaml#/InsufficientCustomerCredit). Driven by the checkout flow (a flagged follow-up, #158).
+
+- **Dispatched by**: — · **handled by** [🎭 `CustomerCredit`](#actor-customercredit)
+- **Emits**: [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed)
+- **Throws**: [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-consumecustomercredit--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="command-consumecustomercredit--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ | The credit amount to spend (<= available balance). |
+| <a id="command-consumecustomercredit--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+
 <a id="command-openconversation"></a>
 #### 📩 Command: `OpenConversation`
 
@@ -4236,7 +4302,7 @@ Attach an evidence photo (opaque, framework-managed attachment ref) to an existi
 | <a id="command-attachreclamationevidence--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
 | <a id="command-attachreclamationevidence--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ✅ |  |
 
-### ⚡ Events _(37)_
+### ⚡ Events _(39)_
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -4761,16 +4827,17 @@ Birth of a customer reclamation over a delivered order (id = reclamationId; #153
 <a id="event-reclamationresolved"></a>
 #### ⚡ Event: `ReclamationResolved`
 
-A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151). `orderId` rides along (sourced from the aggregate's own fold state, established at ReclamationOpened) so the claim lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155).
+A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND or a GOODWILL_CREDIT, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151). `orderId` AND `customerId` ride along (sourced from the aggregate's own fold state, established at ReclamationOpened) so the claim lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155), and so the ReclamationProcess saga can grant goodwill credit to the claimant without a read step (ADR-20260726-163737, #158).
 
 - **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
-- **Consumed by**: —
+- **Consumed by**: [🎭 `ReclamationProcess`](#actor-reclamationprocess)
 - **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-reclamationresolved--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
 | <a id="event-reclamationresolved--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-reclamationresolved--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 | <a id="event-reclamationresolved--resolution"></a>`resolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ✅ |  |
 | <a id="event-reclamationresolved--note"></a>`note` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
 | <a id="event-reclamationresolved--refundamount"></a>`refundAmount` | [📦 `Money`](#entity-money) | ⬜ |  |
@@ -4819,6 +4886,36 @@ The customer attached an evidence photo to their claim — an opaque, framework-
 | <a id="event-reclamationevidenceattached--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
 | <a id="event-reclamationevidenceattached--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-reclamationevidenceattached--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ✅ |  |
+
+<a id="event-customercreditgranted"></a>
+#### ⚡ Event: `CustomerCreditGranted`
+
+Goodwill store credit was granted to a customer (id = customerId). Emitted by the CustomerCredit aggregate when the ReclamationProcess saga resolves a claim as GOODWILL_CREDIT. `reclamationId` is the idempotent grant key: at most one grant per resolved claim, so a re-delivered ReclamationResolved never double-grants. `amount` (Money) increases the customer's available balance.
+
+- **Emitted by**: [🎭 `CustomerCredit`](#actor-customercredit), [🎭 `ReclamationProcess`](#actor-reclamationprocess)
+- **Consumed by**: —
+- **Projected into**: _non-projected (saga/transient)_
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-customercreditgranted--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="event-customercreditgranted--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
+| <a id="event-customercreditgranted--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+
+<a id="event-customercreditconsumed"></a>
+#### ⚡ Event: `CustomerCreditConsumed`
+
+Store credit was spent by a customer at checkout (id = customerId). `amount` (Money) decreases the available balance; `orderId` is the order the credit was applied to. Consuming more than the available balance is rejected (errors.yaml#/InsufficientCustomerCredit) — the balance never goes negative. Driven by the checkout flow (a flagged follow-up, ADR-20260726-163737 §checkout-consume); recorded as a fact.
+
+- **Emitted by**: [🎭 `CustomerCredit`](#actor-customercredit)
+- **Consumed by**: —
+- **Projected into**: _non-projected (saga/transient)_
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-customercreditconsumed--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="event-customercreditconsumed--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
+| <a id="event-customercreditconsumed--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 
 ### 📦 Entities _(15)_
 
@@ -5063,7 +5160,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="scalar-reclamationstatus"></a>🔤 `ReclamationStatus` | enum (OPEN \| RESOLVED \| REJECTED) | Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).  |
 | <a id="scalar-claimtimelineeventkind"></a>🔤 `ClaimTimelineEventKind` | enum (OPENED \| RESOLVED \| REJECTED \| REOPENED \| EVIDENCE_ATTACHED) | Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).  |
 
-### ⛔ Errors _(37)_
+### ⛔ Errors _(38)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -5089,6 +5186,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-pricemismatch"></a>⛔ `PriceMismatch` | The client-submitted confirmation total (PlaceOrder.expectedTotal) differs from the total the server recomputed from the live catalog. The server is the only price authority: the checkout is rejected so the customer is never charged an amount other than the one they were shown.  | 🇬🇧 Prices have changed since you loaded the menu. Please review your cart and try again. | 🇫🇷 Les prix ont changé depuis l'affichage du menu. Veuillez vérifier votre panier et réessayer. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-priceunresolvable"></a>⛔ `PriceUnresolvable` | A cart line's price could not be resolved from the live catalog at checkout (offer or selected option no longer present). Fail-closed: the checkout is rejected — the server never falls back to a client-supplied amount.  | 🇬🇧 An item in your cart is no longer available at a known price. Please review your cart. | 🇫🇷 Un article de votre panier n'a plus de prix connu. Veuillez vérifier votre panier. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-refundnotpending"></a>⛔ `RefundNotPending` | The refund decision (ApproveRefund / DenyRefund, by the restaurant or an admin) targets an order with no refund pending approval — either no refund run exists for the order, or it was already approved, denied or settled.  | 🇬🇧 No refund is pending approval for this order. | 🇫🇷 Aucun remboursement n'est en attente d'approbation pour cette commande. | [📩 `ApproveRefund`](#command-approverefund), [📩 `DenyRefund`](#command-denyrefund) |
+| <a id="error-insufficientcustomercredit"></a>⛔ `InsufficientCustomerCredit` | A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.  | 🇬🇧 You do not have enough store credit for this. | 🇫🇷 Vous n'avez pas assez d'avoir en boutique pour cela. | [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) |
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-conversationalreadyopen"></a>⛔ `ConversationAlreadyOpen` | OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).  | 🇬🇧 A conversation is already open for this order. | 🇫🇷 Une conversation est déjà ouverte pour cette commande. | [📩 `OpenConversation`](#command-openconversation) |
 | <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage), [📩 `RecordMessageTranslation`](#command-recordmessagetranslation), [📩 `EscalateToAdmin`](#command-escalatetoadmin), [📩 `MuteParticipant`](#command-muteparticipant), [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
@@ -5105,7 +5203,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
 
-### 📐 Business rules _(36)_
+### 📐 Business rules _(40)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5359,7 +5457,35 @@ _Evidence (an attachment ref) can only be attached to an existing reclamation; a
 
 - **Verified by**: [🧪 `TestReclamationEvidenceAttached`](#test-testreclamationevidenceattached), [🧪 `TestAttachEvidenceMissingReclamationRejected`](#test-testattachevidencemissingreclamationrejected)
 
-### 🧪 Tests _(7)_
+<a id="rule-creditgrantincreasesbalance"></a>
+#### 📐 Rule: `CreditGrantIncreasesBalance`
+
+_Granting store credit to a customer increases their available balance by the granted amount (#158)._
+
+- **Verified by**: [🧪 `TestCustomerCreditGranted`](#test-testcustomercreditgranted)
+
+<a id="rule-creditconsumedecreasesbalance"></a>
+#### 📐 Rule: `CreditConsumeDecreasesBalance`
+
+_Spending store credit decreases the customer's available balance by the consumed amount (#158)._
+
+- **Verified by**: [🧪 `TestCustomerCreditConsumed`](#test-testcustomercreditconsumed)
+
+<a id="rule-creditcannotbeoverspent"></a>
+#### 📐 Rule: `CreditCannotBeOverspent`
+
+_A customer can never spend more store credit than their available balance; an over-spend is rejected and the balance never goes negative (#158)._
+
+- **Verified by**: [🧪 `TestConsumeBeyondBalanceRejected`](#test-testconsumebeyondbalancerejected)
+
+<a id="rule-goodwillcreditgrantedonresolution"></a>
+#### 📐 Rule: `GoodwillCreditGrantedOnResolution`
+
+_When a reclamation is resolved as GOODWILL_CREDIT, the ReclamationProcess saga grants the claimant store credit for the recorded amount (#158)._
+
+- **Verified by**: [🧪 `TestReclamationProcessGrantsGoodwillCredit`](#test-testreclamationprocessgrantsgoodwillcredit)
+
+### 🧪 Tests _(9)_
 
 **[🎭 `Cart`](#actor-cart)**
 
@@ -6041,6 +6167,38 @@ _Attaching evidence to a reclamation that does not exist is rejected_
 - **Thrown**: [⛔ `ReclamationNotFound`](#error-reclamationnotfound)
 - **Verifies**: [📐 `ReclamationEvidenceTargetsAnExistingClaim`](#rule-reclamationevidencetargetsanexistingclaim)
 
+**[🎭 `CustomerCredit`](#actor-customercredit)**
+
+<a id="test-testcustomercreditgranted"></a>
+#### 🧪 Test: `TestCustomerCreditGranted`
+
+_Grants goodwill store credit to a customer, increasing the balance_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantCustomerCredit`](#command-grantcustomercredit)
+- **Then**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
+- **Verifies**: [📐 `CreditGrantIncreasesBalance`](#rule-creditgrantincreasesbalance)
+
+<a id="test-testcustomercreditconsumed"></a>
+#### 🧪 Test: `TestCustomerCreditConsumed`
+
+_Spends store credit within balance, decreasing the balance_
+
+- **Given**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
+- **When**: [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit)
+- **Then**: [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed)
+- **Verifies**: [📐 `CreditConsumeDecreasesBalance`](#rule-creditconsumedecreasesbalance)
+
+<a id="test-testconsumebeyondbalancerejected"></a>
+#### 🧪 Test: `TestConsumeBeyondBalanceRejected`
+
+_Spending more store credit than the available balance is rejected_
+
+- **Given**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
+- **When**: [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit)
+- **Thrown**: [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit)
+- **Verifies**: [📐 `CreditCannotBeOverspent`](#rule-creditcannotbeoverspent)
+
 **[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
 
 <a id="test-testplaceordercreatespaymentintent"></a>
@@ -6214,6 +6372,18 @@ _A refund decision on an order with no refund pending approval is rejected_
 - **When**: [📩 `ApproveRefund`](#command-approverefund)
 - **Thrown**: [⛔ `RefundNotPending`](#error-refundnotpending)
 - **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
+
+**[🎭 `ReclamationProcess`](#actor-reclamationprocess)**
+
+<a id="test-testreclamationprocessgrantsgoodwillcredit"></a>
+#### 🧪 Test: `TestReclamationProcessGrantsGoodwillCredit`
+
+_Grants store credit when a claim is resolved as GOODWILL_CREDIT_
+
+- **Given**: _(none)_
+- **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
+- **Then**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
+- **Verifies**: [📐 `GoodwillCreditGrantedOnResolution`](#rule-goodwillcreditgrantedonresolution)
 
 ### 📡 Observability _(2)_
 
@@ -10288,7 +10458,7 @@ aggregates; components bind the aggregates they handle and the read models they 
 | --- | --- | --- |
 | 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
-| 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess) |
+| 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `ReclamationProcess`](#entity-reclamationprocess) |
 | 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
 | 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
 

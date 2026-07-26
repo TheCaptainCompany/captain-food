@@ -73,6 +73,8 @@ impl_aggregate!(crate::prospect::ProspectState, RestaurantId, "Prospect", crate:
 impl_aggregate!(crate::conversation::ConversationState, OrderId, "Conversation", crate::conversation::fold);
 // A Reclamation is keyed by its own reclamationId (MULTIPLE claims per order; #153).
 impl_aggregate!(crate::reclamation::ReclamationState, ReclamationId, "Reclamation", crate::reclamation::fold);
+// A CustomerCredit ledger is keyed by the customer it belongs to (#158) — same id type as Customer, distinct stream.
+impl_aggregate!(crate::customer_credit::CustomerCreditState, CustomerId, "CustomerCredit", crate::customer_credit::fold);
 
 #[cfg(test)]
 mod tests {

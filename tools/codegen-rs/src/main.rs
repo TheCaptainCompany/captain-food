@@ -10914,6 +10914,15 @@ fn pm_adapt(model: &Model, expr: String, src: &str, target: &str) -> String {
     if src == "Money" && target == "MoneyCents" {
         return format!("{}.amount_cents", expr);
     }
+    // A conditionally-present amount consumed on a branch that already guarantees it is present
+    // (ReclamationProcess GOODWILL_CREDIT arm: refundAmount is checked by the leg's branch guard before
+    // this send runs, ADR-20260726-163737 / #158) — unwrap on that invariant, never a silent default.
+    if src == "Option<Money>" && target == "Money" {
+        return format!(
+            "{}.clone().expect(\"saga value guaranteed present by the leg's branch guard\")",
+            expr
+        );
+    }
     if src == "Money" && target == "Option<MoneyCents>" {
         return format!("Some({}.amount_cents)", expr);
     }
@@ -12155,6 +12164,7 @@ const BT_AGGREGATES: &[(&str, &str, bool)] = &[
     ("DeliveryPartnerRegistration", "registrationId", true),
     ("Conversation", "orderId", true),   // id = orderId (a conversation's identity IS its order; #129)
     ("Reclamation", "reclamationId", true),   // id = reclamationId (its own identity; MULTIPLE claims per order; #151)
+    ("CustomerCredit", "customerId", true),   // id = customerId (a per-customer store-credit ledger; #158)
 ];
 
 fn bt_agg(actor: &str) -> Option<(&'static str, &'static str, bool)> {
@@ -12438,6 +12448,7 @@ fn bt_pm_event_call(pm: &str, event: &str) -> String {
         ("DeliveryDispatchProcess", "DeliveryOfferTimedOut") => "crate::process_managers::delivery_dispatch::on_delivery_offer_timed_out(&bed.store, &bed.dispatch_pm, &bed.delivery, &bed.dispatch_config, &ev, &support::envelope()).await".into(),
         ("DeliveryDispatchProcess", "DeliveryStatusUpdated") => "crate::process_managers::delivery_dispatch::on_delivery_status_updated(&bed.store, &bed.dispatch_pm, &ev, &support::envelope()).await".into(),
         ("DeliveryDispatchProcess", "DeliveryCompleted") => "crate::process_managers::delivery_dispatch::on_delivery_completed(&bed.store, &bed.dispatch_pm, &ev, &support::envelope()).await".into(),
+        ("ReclamationProcess", "ReclamationResolved") => "crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &ev, &support::envelope()).await".into(),
         _ => panic!("behaviour-tests: no dispatch entry for process-manager {} ← event {} — extend bt_pm_event_call", pm, event),
     }
 }

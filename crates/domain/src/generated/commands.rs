@@ -796,6 +796,24 @@ pub struct DenyRefund {
     pub reason: String,
 }
 
+/// Grant goodwill store credit to a customer. Dispatched by the ReclamationProcess saga when a claim is resolved as GOODWILL_CREDIT; idempotent per `reclamationId` (a re-grant for the same claim is a no-op).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantCustomerCredit {
+    pub customer_id: CustomerId,
+    pub amount: Money,
+    pub reclamation_id: ReclamationId,
+}
+
+/// Spend a customer's available store credit at checkout (rejected if it exceeds the available balance, errors.yaml#/InsufficientCustomerCredit). Driven by the checkout flow (a flagged follow-up, #158).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsumeCustomerCredit {
+    pub customer_id: CustomerId,
+    pub amount: Money,
+    pub order_id: OrderId,
+}
+
 /// Open the in-app conversation for an order (id = orderId; idempotent birth). Snapshots whether customer<->restaurant direct chat is enabled (default true). orderId is the client-generated, idempotent key.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

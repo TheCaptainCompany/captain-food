@@ -579,7 +579,22 @@ fn fx_reclamation_opened() -> DomainEvent {
 
 /// tests.yaml#/fixtures/reclamationResolvedFullRefund — events.yaml#/ReclamationResolved
 fn fx_reclamation_resolved_full_refund() -> DomainEvent {
-    DomainEvent::ReclamationResolved(evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: None, refund_amount: None })
+    DomainEvent::ReclamationResolved(evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: None, refund_amount: None })
+}
+
+/// tests.yaml#/fixtures/reclamationResolvedGoodwillCredit — events.yaml#/ReclamationResolved
+fn fx_reclamation_resolved_goodwill_credit() -> DomainEvent {
+    DomainEvent::ReclamationResolved(evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::GOODWILL_CREDIT, note: None, refund_amount: Some(ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }) })
+}
+
+/// tests.yaml#/fixtures/customerCreditGranted — events.yaml#/CustomerCreditGranted
+fn fx_customer_credit_granted() -> DomainEvent {
+    DomainEvent::CustomerCreditGranted(evs::CustomerCreditGranted { customer_id: sc::CustomerId(support::uid("customer-1")), amount: ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }, reclamation_id: sc::ReclamationId(support::uid("recl-1")) })
+}
+
+/// tests.yaml#/fixtures/customerCreditConsumed — events.yaml#/CustomerCreditConsumed
+fn fx_customer_credit_consumed() -> DomainEvent {
+    DomainEvent::CustomerCreditConsumed(evs::CustomerCreditConsumed { customer_id: sc::CustomerId(support::uid("customer-1")), amount: ent::Money { amount_cents: sc::MoneyCents(300), currency: sc::CurrencyCode("EUR".into()) }, order_id: sc::OrderId(support::uid("order-1")) })
 }
 
 /// tests.yaml#/fixtures/reclamationRejected — events.yaml#/ReclamationRejected
@@ -3783,5 +3798,66 @@ async fn test_attach_evidence_missing_reclamation_rejected() {
     let err = result.expect_err("TestAttachEvidenceMissingReclamationRejected: the spec expects a typed rejection");
     support::assert_thrown("TestAttachEvidenceMissingReclamationRejected", &err, &["ReclamationNotFound"]);
     bed.assert_appended("TestAttachEvidenceMissingReclamationRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCustomerCreditGranted — "Grants goodwill store credit to a customer, increasing the balance"
+/// rules: CreditGrantIncreasesBalance
+#[tokio::test]
+async fn test_customer_credit_granted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantCustomerCredit { customer_id: sc::CustomerId(support::uid("customer-1")), amount: ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }, reclamation_id: sc::ReclamationId(support::uid("recl-1")) };
+    let result = crate::commands::grant_customer_credit(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestCustomerCreditGranted: the spec expects acceptance");
+    bed.assert_appended("TestCustomerCreditGranted", &before, &[
+        (format!("CustomerCredit-{}", support::uid("customer-1")), fx_customer_credit_granted()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestCustomerCreditConsumed — "Spends store credit within balance, decreasing the balance"
+/// rules: CreditConsumeDecreasesBalance
+#[tokio::test]
+async fn test_customer_credit_consumed() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("CustomerCredit-{}", support::uid("customer-1")), vec![fx_customer_credit_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConsumeCustomerCredit { customer_id: sc::CustomerId(support::uid("customer-1")), amount: ent::Money { amount_cents: sc::MoneyCents(300), currency: sc::CurrencyCode("EUR".into()) }, order_id: sc::OrderId(support::uid("order-1")) };
+    let result = crate::commands::consume_customer_credit(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestCustomerCreditConsumed: the spec expects acceptance");
+    bed.assert_appended("TestCustomerCreditConsumed", &before, &[
+        (format!("CustomerCredit-{}", support::uid("customer-1")), fx_customer_credit_consumed()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestConsumeBeyondBalanceRejected — "Spending more store credit than the available balance is rejected"
+/// rules: CreditCannotBeOverspent
+#[tokio::test]
+async fn test_consume_beyond_balance_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("CustomerCredit-{}", support::uid("customer-1")), vec![fx_customer_credit_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConsumeCustomerCredit { customer_id: sc::CustomerId(support::uid("customer-1")), amount: ent::Money { amount_cents: sc::MoneyCents(800), currency: sc::CurrencyCode("EUR".into()) }, order_id: sc::OrderId(support::uid("order-1")) };
+    let result = crate::commands::consume_customer_credit(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestConsumeBeyondBalanceRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestConsumeBeyondBalanceRejected", &err, &["InsufficientCustomerCredit"]);
+    bed.assert_appended("TestConsumeBeyondBalanceRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReclamationProcessGrantsGoodwillCredit — "Grants store credit when a claim is resolved as GOODWILL_CREDIT"
+/// rules: GoodwillCreditGrantedOnResolution
+#[tokio::test]
+async fn test_reclamation_process_grants_goodwill_credit() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let ev = evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::GOODWILL_CREDIT, note: None, refund_amount: Some(ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }) };
+    let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &ev, &support::envelope()).await;
+    let _ = result.expect("TestReclamationProcessGrantsGoodwillCredit: the spec expects acceptance");
+    bed.assert_appended("TestReclamationProcessGrantsGoodwillCredit", &before, &[
+        (format!("CustomerCredit-{}", support::uid("customer-1")), fx_customer_credit_granted()),
+    ]);
 }
 

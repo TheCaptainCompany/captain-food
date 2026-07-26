@@ -11,7 +11,7 @@
 //! order-eligibility are cross-aggregate/temporal invariants enforced in the application layer, not here.
 
 use crate::generated::events::DomainEvent;
-use crate::generated::scalars::OrderId;
+use crate::generated::scalars::{CustomerId, OrderId};
 
 /// The lifecycle state of a reclamation. A PLAIN domain enum (not a generated scalar): this slice adds
 /// no `ReclamationStatus` scalar — the status is derived and belongs with the read model (#154).
@@ -35,6 +35,10 @@ pub struct ReclamationState {
     /// decision commands can stamp it onto their emitted events — which lets the claim lifecycle be woven
     /// into the per-order conversation thread, keyed by order (§2.5, #155), without the client re-supplying it.
     pub order_id: OrderId,
+    /// The customer whose claim this is, established at `ReclamationOpened`. Carried in state so
+    /// `ResolveReclamation` can stamp it onto `ReclamationResolved` (#155 pattern) — which lets the
+    /// ReclamationProcess saga grant goodwill credit to the claimant without a read step (#158).
+    pub customer_id: CustomerId,
 }
 
 /// Fold a Reclamation stream (events in version order) into its current state. `None` ⇔ the stream has
@@ -47,9 +51,11 @@ pub fn fold(events: &[DomainEvent]) -> Option<ReclamationState> {
 fn apply(state: Option<ReclamationState>, event: &DomainEvent) -> Option<ReclamationState> {
     match event {
         // The birth fact: establishes the reclamation OPEN, capturing the order it is about.
-        DomainEvent::ReclamationOpened(e) => {
-            Some(ReclamationState { status: ReclamationStatus::OPEN, order_id: e.order_id })
-        }
+        DomainEvent::ReclamationOpened(e) => Some(ReclamationState {
+            status: ReclamationStatus::OPEN,
+            order_id: e.order_id,
+            customer_id: e.customer_id,
+        }),
         // A decision was recorded: the reclamation is RESOLVED. Impossible without a birth.
         DomainEvent::ReclamationResolved(_) => {
             let mut s = state?;
@@ -99,6 +105,7 @@ mod tests {
         DomainEvent::ReclamationResolved(ReclamationResolved {
             reclamation_id: ReclamationId(uuid::Uuid::nil()),
             order_id: OrderId(uuid::Uuid::nil()),
+            customer_id: CustomerId(uuid::Uuid::nil()),
             resolution: ReclamationResolution::FULL_REFUND,
             note: None,
             refund_amount: None,
