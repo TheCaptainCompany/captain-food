@@ -804,6 +804,7 @@ type Reclamation {
   rejectReason: ReclamationReason
   openedAt: DateTime!
   decidedAt: DateTime
+  overdue: Boolean!
 }
 
 type Refund {
@@ -1511,6 +1512,7 @@ input DeliveryPartnerAvailabilitiesQueryInput {
 input RestaurantReclamationsQueryInput {
   status: ReclamationStatus
   category: ReclamationCategory
+  overdue: Boolean
 }
 
 input ReclamationQueryInput {

@@ -349,10 +349,22 @@ screens:
           - { value: OPEN,     label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.status.open' } }
           - { value: RESOLVED, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.status.resolved' } }
           - { value: REJECTED, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.status.rejected' } }
+      # SLA overdue toggle (#160) — a dedicated filter (overdue is orthogonal to status: it always
+      # implies OPEN). The selected value scopes restaurantReclamations(overdue) at runtime, exactly
+      # like the status chip above; "Overdue only" surfaces OPEN claims past the first-response target.
+      - type: chip_multi_select
+        id: overdue_filter
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.filter.overdue' }
+        single_select: true
+        options:
+          - { value: "false", label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.overdue.all' } }
+          - { value: "true",  label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.overdue.only' } }
       - type: list
         id: claims_list
         items: "{{ reclamations }}"
         item_action: { type: navigate, route: "/claims/{{ item.reclamationId }}" }
+        # Per-item SLA marker (#160): the overdue badge shows on any claim the read model flags overdue.
+        item_badge: { text: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.overdue.badge' }, visible_when: "item.overdue", variant: warning }
         empty_state:
           title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.empty.title' }
           body: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.empty.body' }
@@ -378,6 +390,9 @@ screens:
       - { component: staff_topbar }
       - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.title' } }
       - { type: status_chip, status: "{{ reclamation.status }}" }
+      # SLA marker (#160): shown only when the read model flags this OPEN claim overdue (past the
+      # first-response target). Bound to the computed `overdue` field on the Reclamation api type.
+      - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.overdue.badge' }, visible_when: "reclamation.overdue", variant: warning }
       - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.order_ref' }, value: "{{ reclamation.orderId }}" }
       - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.category' }, value: "{{ reclamation.category }}" }
       - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.description' }, value: "{{ reclamation.description }}" }
