@@ -1398,6 +1398,38 @@ DenyRefund:
   required: [orderId, reason]
 
 # =====================================================================
+# Customer store-credit ledger (CustomerCredit aggregate, #158)
+# Saga-/checkout-driven internal commands — no public GraphQL mutation
+# (command-no-mutation WARNING is expected, like the other internal commands).
+# =====================================================================
+
+GrantCustomerCredit:
+  description: >
+    Grant goodwill store credit to a customer. Dispatched by the ReclamationProcess saga when a claim is
+    resolved as GOODWILL_CREDIT; idempotent per `reclamationId` (a re-grant for the same claim is a no-op).
+  type: object
+  properties:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "The credit amount to add to the customer's available balance."
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+  required: [customerId, amount, reclamationId]
+
+ConsumeCustomerCredit:
+  description: >
+    Spend a customer's available store credit at checkout (rejected if it exceeds the available balance,
+    errors.yaml#/InsufficientCustomerCredit). Driven by the checkout flow (a flagged follow-up, #158).
+  type: object
+  properties:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+    amount:
+      $ref: 'entities.yaml#/Money'
+      description: "The credit amount to spend (<= available balance)."
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  required: [customerId, amount, orderId]
+
+# =====================================================================
 # Order conversations / messaging (Conversation aggregate, #129)
 # =====================================================================
 

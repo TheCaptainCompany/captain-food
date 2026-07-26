@@ -708,6 +708,16 @@ RefundNotPending:
     en: "No refund is pending approval for this order."
     fr: "Aucun remboursement n'est en attente d'approbation pour cette commande."
 
+InsufficientCustomerCredit:
+  description: >
+    A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance
+    (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.
+  context:
+    customerId: { $ref: 'scalars.yaml#/CustomerId' }
+  messages:
+    en: "You do not have enough store credit for this."
+    fr: "Vous n'avez pas assez d'avoir en boutique pour cela."
+
 CannotOrderTestRestaurant:
   description: >
     A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real

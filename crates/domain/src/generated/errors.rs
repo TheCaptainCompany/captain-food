@@ -610,6 +610,14 @@ pub const REFUND_NOT_PENDING: ErrorDef = ErrorDef {
     message_fr: "Aucun remboursement n'est en attente d'approbation pour cette commande.",
 };
 
+/// A ConsumeCustomerCredit tried to spend more store credit than the customer's available balance (rules.yaml#/CreditCannotBeOverspent, #158). The balance never goes negative.
+/// Context: `customerId`.
+pub const INSUFFICIENT_CUSTOMER_CREDIT: ErrorDef = ErrorDef {
+    code: "InsufficientCustomerCredit",
+    message_en: "You do not have enough store credit for this.",
+    message_fr: "Vous n'avez pas assez d'avoir en boutique pour cela.",
+};
+
 /// A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).
 /// Context: `restaurantId`.
 pub const CANNOT_ORDER_TEST_RESTAURANT: ErrorDef = ErrorDef {
@@ -808,6 +816,7 @@ pub const ERRORS: &[ErrorDef] = &[
     PRICE_UNRESOLVABLE,
     PAYMENT_EVENT_ORPHANED,
     REFUND_NOT_PENDING,
+    INSUFFICIENT_CUSTOMER_CREDIT,
     CANNOT_ORDER_TEST_RESTAURANT,
     CONVERSATION_ALREADY_OPEN,
     CONVERSATION_NOT_FOUND,

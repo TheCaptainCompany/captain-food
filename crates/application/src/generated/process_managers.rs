@@ -1306,3 +1306,55 @@ pub mod delivery_dispatch_process {
         Ok(leg_outcome)
     }
 }
+
+/// Generated step pipelines for `processmanager.yaml#/ReclamationProcess`.
+pub mod reclamation_process {
+
+    /// Non-structural hooks for the generated `ReclamationResolved` leg — the seams the step DSL cannot express
+    /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
+    /// On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign no-op (the refund/replacement arms are flagged follow-ups). 
+    #[async_trait::async_trait]
+    pub trait ReclamationResolvedHooks: Send + Sync {
+        /// The DSL's linear-branch decision (a mid-leg bare `skip` guard): `true` runs the steps
+        /// BEFORE the marker and ends the leg; `false` falls through to the steps after it. Resolved at
+        /// runtime (may read config, #60).
+        /// Spec note: branch: GOODWILL_CREDIT (with a recorded amount) grants credit and ends; a FULL_REFUND / PARTIAL_REFUND / REPLACEMENT resolution is a benign no-op here (refund + replacement automation are flagged follow-ups, ADR-20260726-163737 / #159).
+        async fn branch(&self, event: &domain::generated::events::ReclamationResolved) -> Result<bool, domain::shared::errors::DomainError>;
+    }
+
+    /// EVENT leg `events.yaml#/ReclamationResolved` — generated step pipeline (issue #25).
+    /// On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign no-op (the refund/replacement arms are flagged follow-ups). 
+    pub async fn on_reclamation_resolved(
+        store: &dyn crate::ports::EventStore,
+        hooks: &dyn ReclamationResolvedHooks,
+        event: &domain::generated::events::ReclamationResolved,
+        env: &crate::process_managers::TriggerEnvelope,
+    ) -> Result<crate::process_managers::Outcome, domain::shared::errors::DomainError> {
+        use crate::process_managers::Outcome;
+        let actor = crate::process_managers::saga_actor(env);
+        let mut leg_outcome = Outcome::Completed;
+        // Linear-branch marker (bare `skip` guard): the hook chooses the branch.
+        if hooks.branch(event).await? {
+            // send GrantCustomerCredit (the target validates and may reject; a rejection is logged and skipped) — GOODWILL_CREDIT arm: the CustomerCredit ledger records CustomerCreditGranted (idempotent per reclamationId).
+            let sent = domain::generated::commands::GrantCustomerCredit {
+                customer_id: event.customer_id,
+                amount: event.refund_amount.clone().expect("saga value guaranteed present by the leg's branch guard"),
+                reclamation_id: event.reclamation_id,
+            };
+            match crate::commands::grant_customer_credit(store, sent, &actor).await {
+                Ok(()) => {}
+                Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
+                Err(domain::shared::errors::DomainError::Repository(e)) => {
+                    return Err(domain::shared::errors::DomainError::Repository(e))
+                }
+                Err(rejection) => {
+                    let reason = format!("GrantCustomerCredit rejected: {rejection} — the target aggregate's own invariants stand; skipped");
+                    eprintln!("saga[ReclamationProcess]: {reason}");
+                    leg_outcome = Outcome::Skipped(reason);
+                }
+            }
+            return Ok(Outcome::Completed);
+        }
+        Ok(leg_outcome)
+    }
+}

@@ -14,6 +14,7 @@ pub mod cart;
 pub mod catalog;
 pub mod conversation;
 pub mod customer;
+pub mod customer_credit;
 pub mod delivery_job;
 pub mod delivery_partner_registration;
 pub mod generated;

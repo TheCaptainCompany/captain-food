@@ -963,12 +963,13 @@ pub struct ReclamationOpened {
     pub requested_resolution: Option<ReclamationResolution>,
 }
 
-/// A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151). `orderId` rides along (sourced from the aggregate's own fold state, established at ReclamationOpened) so the claim lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155).
+/// A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND or a GOODWILL_CREDIT, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151). `orderId` AND `customerId` ride along (sourced from the aggregate's own fold state, established at ReclamationOpened) so the claim lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155), and so the ReclamationProcess saga can grant goodwill credit to the claimant without a read step (ADR-20260726-163737, #158).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReclamationResolved {
     pub reclamation_id: ReclamationId,
     pub order_id: OrderId,
+    pub customer_id: CustomerId,
     pub resolution: ReclamationResolution,
     pub note: Option<ReclamationReason>,
     pub refund_amount: Option<Money>,
@@ -999,6 +1000,24 @@ pub struct ReclamationEvidenceAttached {
     pub reclamation_id: ReclamationId,
     pub order_id: OrderId,
     pub attachment_ref: AttachmentRef,
+}
+
+/// Goodwill store credit was granted to a customer (id = customerId). Emitted by the CustomerCredit aggregate when the ReclamationProcess saga resolves a claim as GOODWILL_CREDIT. `reclamationId` is the idempotent grant key: at most one grant per resolved claim, so a re-delivered ReclamationResolved never double-grants. `amount` (Money) increases the customer's available balance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerCreditGranted {
+    pub customer_id: CustomerId,
+    pub amount: Money,
+    pub reclamation_id: ReclamationId,
+}
+
+/// Store credit was spent by a customer at checkout (id = customerId). `amount` (Money) decreases the available balance; `orderId` is the order the credit was applied to. Consuming more than the available balance is rejected (errors.yaml#/InsufficientCustomerCredit) — the balance never goes negative. Driven by the checkout flow (a flagged follow-up, ADR-20260726-163737 §checkout-consume); recorded as a fact.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerCreditConsumed {
+    pub customer_id: CustomerId,
+    pub amount: Money,
+    pub order_id: OrderId,
 }
 
 /// Every business event as a typed, adjacently-tagged union: `{ "eventType": <name>, "payload": { … } }`.
@@ -1108,4 +1127,6 @@ pub enum DomainEvent {
     ReclamationRejected(ReclamationRejected),
     ReclamationReopened(ReclamationReopened),
     ReclamationEvidenceAttached(ReclamationEvidenceAttached),
+    CustomerCreditGranted(CustomerCreditGranted),
+    CustomerCreditConsumed(CustomerCreditConsumed),
 }

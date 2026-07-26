@@ -640,3 +640,37 @@ DeliveryDispatchProcess:
             note: "The Order validates the transition — a terminal cancelled/rejected order is never resurrected (rejection → skip)."
         - state:
             set: { process_status: { const: COMPLETED } }
+
+ReclamationProcess:
+  type: process-manager
+  description: >
+    Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit
+    automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by
+    sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger
+    dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). A refund
+    resolution (FULL_REFUND / PARTIAL_REFUND) falls through UN-automated in this slice: the branch below
+    only acts on GOODWILL_CREDIT. WHY the refund arm is flagged, not wired: the existing refund path opens
+    a PENDING_APPROVAL refund from a refundable fact and requires a SEPARATE explicit ApproveRefund
+    decision (with its own state-row guard + Stripe call) to move money; a single 2-way saga branch cannot
+    isolate credit / refund / REPLACEMENT (deferred to #159) without either blindly refunding a REPLACEMENT
+    (a wrong money-move) or duplicating the approval mechanism (forbidden). Wiring the refund arm through
+    the canonical RequestRefund -> RefundRequested -> RefundProcess path with correct per-resolution
+    dispatch is the flagged follow-up. REPLACEMENT is likewise a reserved no-op here (#159).
+  receives:
+    - message: { $ref: 'events.yaml#/ReclamationResolved' }
+      description: >
+        On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when
+        resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign
+        no-op (the refund/replacement arms are flagged follow-ups).
+      steps:
+        - send:
+            command: { $ref: 'commands.yaml#/GrantCustomerCredit' }
+            to: { $ref: 'actors.yaml#/CustomerCredit' }
+            with:
+              customerId: { from: { $ref: 'events.yaml#/ReclamationResolved/properties/customerId' } }
+              amount: { from: { $ref: 'events.yaml#/ReclamationResolved/properties/refundAmount' } }
+              reclamationId: { from: { $ref: 'events.yaml#/ReclamationResolved/properties/reclamationId' } }
+            note: "GOODWILL_CREDIT arm: the CustomerCredit ledger records CustomerCreditGranted (idempotent per reclamationId)."
+        - guard:
+            skip: true
+            note: "branch: GOODWILL_CREDIT (with a recorded amount) grants credit and ends; a FULL_REFUND / PARTIAL_REFUND / REPLACEMENT resolution is a benign no-op here (refund + replacement automation are flagged follow-ups, ADR-20260726-163737 / #159)."

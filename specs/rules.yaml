@@ -221,3 +221,13 @@ OnlyDecidedReclamationsCanBeReopened:
   description: "Only a decided (resolved or rejected) reclamation can be reopened; reopening an open reclamation is rejected (#151)."
 ReclamationEvidenceTargetsAnExistingClaim:
   description: "Evidence (an attachment ref) can only be attached to an existing reclamation; attaching to a claim that was never opened is rejected (#156)."
+
+# --- Customer store-credit ledger + ReclamationProcess saga (#158, ADR-20260726-163737) ---
+CreditGrantIncreasesBalance:
+  description: "Granting store credit to a customer increases their available balance by the granted amount (#158)."
+CreditConsumeDecreasesBalance:
+  description: "Spending store credit decreases the customer's available balance by the consumed amount (#158)."
+CreditCannotBeOverspent:
+  description: "A customer can never spend more store credit than their available balance; an over-spend is rejected and the balance never goes negative (#158)."
+GoodwillCreditGrantedOnResolution:
+  description: "When a reclamation is resolved as GOODWILL_CREDIT, the ReclamationProcess saga grants the claimant store credit for the recorded amount (#158)."
