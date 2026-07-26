@@ -26,6 +26,7 @@ pub mod referential;
 pub mod refund_queue;
 pub mod restaurant;
 pub mod restaurant_store;
+pub mod rider_store;
 pub mod scope_membership_store;
 pub mod status_bus;
 

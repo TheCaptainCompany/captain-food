@@ -23,6 +23,7 @@ pub use crate::generated::rows::OrderConversationRow;
 pub use crate::generated::rows::OrderTrackingRow;
 pub use crate::generated::rows::ProspectionPipelineRow;
 pub use crate::generated::rows::RestaurantRow;
+pub use crate::generated::rows::RiderRow;
 
 /// Optional filters for public restaurant discovery — mirrors the `restaurants` query args in api.yaml.
 /// V0 applies a subset (the rest are accepted and ignored until the read model backs them).
@@ -549,4 +550,14 @@ pub trait ScopeMembershipRepository: Send + Sync {
         scope_type: ScopeType,
         scope: &ReadScope,
     ) -> Result<Vec<uuid::Uuid>, DomainError>;
+}
+
+/// Read port over the `rider` identity-bridge table (#144). Its only caller is the edge, resolving a
+/// verified auth subject to a `RiderId` once per request — the rider half of what `CustomerReadRepository`
+/// already does via `by_auth_ref`.
+#[async_trait]
+pub trait RiderReadRepository: Send + Sync {
+    /// The bridge: auth subject → rider. `None` means no identity, which callers MUST treat as a
+    /// denial rather than as "unrestricted".
+    async fn by_auth_ref(&self, auth_ref: ExternalReference) -> Result<Option<RiderRow>, DomainError>;
 }

@@ -805,3 +805,48 @@ ScopeMembership:
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
         - { $ref: 'events.yaml#/RestaurantRegistered' }
       note: "When the membership was recorded — audit trail for 'since when could this principal see this?'."
+
+# --- Rider identity bridge (#144) ---
+
+Rider:
+  projector: app
+  aggregate: Rider
+  slice: V0
+  internal: true   # identity bridge, not a GraphQL `reads` target — no output type binds it yet
+  note: >
+    The RIDER identity bridge (#144): auth subject -> riderId, mirroring `Customer.auth_ref`. Without
+    it a rider cannot be resolved to a domain id at all, so `read_scope` returns Public and every
+    rider is DENIED — safe, but wrong. `RiderRegistered` has always carried `authRef`; it was simply
+    projected nowhere, which is why the gap was invisible until per-instance authorization needed it.
+
+    Deliberately NOT the rider's operational board (that is View_DeliveryJob, keyed by rider_id). This
+    row exists so the edge can answer one question once per request: which rider is this token?
+  rules:
+    - "`auth_ref` is the Supabase user id, NOT the riderId — the same split as Customer (a domain id must not be welded to the auth provider, or changing provider would invalidate every id already in the immutable log)."
+    - "`display_name`/`phone` take their latest carrying event (RiderRegistered, then RiderInfoUpdated); `status` follows RiderStatusChanged."
+  fedBy:
+    - { $ref: 'events.yaml#/RiderRegistered' }
+    - { $ref: 'events.yaml#/RiderInfoUpdated' }
+    - { $ref: 'events.yaml#/RiderStatusChanged' }
+  columns:
+    rider_id:
+      from: [{ $ref: 'events.yaml#/RiderRegistered/properties/riderId' }]
+      pk: true
+    auth_ref:
+      from: [{ $ref: 'events.yaml#/RiderRegistered/properties/authRef' }]
+      index: true
+      note: "The bridge: `sub` -> riderId, resolved once per request at the edge."
+    display_name:
+      type: text
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/displayName' }
+        - { $ref: 'events.yaml#/RiderInfoUpdated/properties/displayName' }
+    phone:
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/phone' }
+        - { $ref: 'events.yaml#/RiderInfoUpdated/properties/phone' }
+    status:
+      type: { $ref: 'scalars.yaml#/RiderStatus' }
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/status' }
+        - { $ref: 'events.yaml#/RiderStatusChanged/properties/status' }

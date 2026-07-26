@@ -21,7 +21,8 @@ use std::time::Duration;
 
 use application::projections::{
     project_cart, project_catalog, project_customer, project_order_conversation,
-    project_order_tracking, project_prospection_pipeline, project_restaurant, Envelope,
+    project_order_tracking, project_prospection_pipeline, project_restaurant, project_rider,
+    Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
@@ -30,17 +31,18 @@ use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
+use application::projectors::rider::RiderProjector;
 use application::projectors::scope_membership;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
-use domain::generated::scalars::{CartId, CatalogId, CustomerId, OrderId, RestaurantId};
+use domain::generated::scalars::{CartId, CatalogId, CustomerId, OrderId, RestaurantId, RiderId};
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::persistence::{
     cart_store, catalog_store, customer_store, db_err, order_conversation_store,
-    order_tracking_store, prospection_store, restaurant_store, scope_membership_store,
+    order_tracking_store, prospection_store, restaurant_store, rider_store, scope_membership_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -63,6 +65,7 @@ enum ReadModelProjector {
     OrderTracking,
     OrderConversation,
     ScopeMembership,
+    Rider,
 }
 
 impl ReadModelProjector {
@@ -153,6 +156,15 @@ impl ReadModelProjector {
                 let state = order_conversation_store::load(pool, id).await?;
                 if let Some(next) = project_order_conversation(&OrderConversationProjector, state, env) {
                     order_conversation_store::upsert(pool, &next).await?;
+                }
+            }
+            Self::Rider => {
+                // The identity bridge (#144): auth subject -> riderId. Purely mechanical columns, so
+                // the generated dispatch does the fold and RiderProjector carries no hooks.
+                let id = RiderId(aggregate_uuid_of(env, "Rider-", "riderId")?);
+                let state = rider_store::load(pool, id).await?;
+                if let Some(next) = project_rider(&RiderProjector, state, env) {
+                    rider_store::upsert(pool, &next).await?;
                 }
             }
             Self::ScopeMembership => {
@@ -288,6 +300,11 @@ const REGISTRY: &[ProjectorGroup] = &[
     // categories could interleave out of global `position` order, folding a revoke BEFORE the grant
     // it supersedes and leaving a stale grant behind — the one failure mode of an ACL cache that is
     // a silent breach rather than a visible denial. One checkpoint = one totally ordered fold.
+    ProjectorGroup {
+        checkpoint: "Rider",
+        stream_prefixes: &["Rider-"],
+        projectors: &[ReadModelProjector::Rider],
+    },
     ProjectorGroup {
         checkpoint: "ScopeMembership",
         stream_prefixes: &["Order-", "Delivery-", "Restaurant-"],

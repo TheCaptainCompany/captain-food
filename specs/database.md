@@ -420,4 +420,23 @@ SAFETY: this is an ACL cache with asymmetric failure modes. A MISSING row denies
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `Rider` · 🛶 V0 · 🔒 internal · source aggregate `Rider`
+
+- **Consumed by**: command handlers / auth resolution (no GraphQL query).
+- **Fed by**: `RiderRegistered`, `RiderInfoUpdated`, `RiderStatusChanged`
+- **Rules**: `auth_ref` is the Supabase user id, NOT the riderId — the same split as Customer (a domain id must not be welded to the auth provider, or changing provider would invalidate every id already in the immutable log). `display_name`/`phone` take their latest carrying event (RiderRegistered, then RiderInfoUpdated); `status` follows RiderStatusChanged.
+- **Note**: The RIDER identity bridge (#144): auth subject -> riderId, mirroring `Customer.auth_ref`. Without it a rider cannot be resolved to a domain id at all, so `read_scope` returns Public and every rider is DENIED — safe, but wrong. `RiderRegistered` has always carried `authRef`; it was simply projected nowhere, which is why the gap was invisible until per-instance authorization needed it.
+Deliberately NOT the rider's operational board (that is View_DeliveryJob, keyed by rider_id). This row exists so the edge can answer one question once per request: which rider is this token?
+
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `rider_id` | `RiderId` | `UUID` | PK |  |
+| `auth_ref` | `ExternalReference` | `TEXT` | index | The bridge: `sub` -> riderId, resolved once per request at the edge. |
+| `display_name` | `text` | `TEXT` | — |  |
+| `phone` | `PhoneNumber` | `TEXT` | — |  |
+| `status` | `RiderStatus` | `INTEGER` | — |  |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 <!-- GENERATED:views END -->

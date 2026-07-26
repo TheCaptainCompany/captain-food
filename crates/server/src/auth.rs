@@ -526,6 +526,7 @@ mod tests {
 pub async fn read_scope(
     principal: &Principal,
     customers: &dyn application::queries::CustomerReadRepository,
+    riders: &dyn application::queries::RiderReadRepository,
 ) -> application::queries::ReadScope {
     use application::queries::ReadScope;
     use domain::generated::scalars::{ExternalReference, RestaurantAccountId, RestaurantId};
@@ -550,10 +551,16 @@ pub async fn read_scope(
                 _ => ReadScope::Public,
             }
         }
-        // RIDER's bridge needs a Rider read model projecting RiderRegistered.authRef, which does not
-        // exist yet (#144 scope). Until it lands a rider resolves to Public — a DENIAL, which is the
-        // safe direction and visible in the authorization-denial signal rather than silent.
-        RequestRole::Rider => ReadScope::Public,
+        RequestRole::Rider => {
+            let Some(sub) = principal.user_id.as_deref() else {
+                return ReadScope::Public;
+            };
+            match riders.by_auth_ref(ExternalReference(sub.to_string())).await {
+                Ok(Some(row)) => ReadScope::Rider(row.rider_id),
+                // Same rule as the customer bridge: no row -> no identity -> denied, never a guess.
+                _ => ReadScope::Public,
+            }
+        }
         RequestRole::Public | RequestRole::External => ReadScope::Public,
     }
 }

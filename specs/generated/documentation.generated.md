@@ -7130,7 +7130,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(2)_
+### 🗄️ Views (read models) _(3)_
 
 <a id="view-view_deliveryjob"></a>
 #### 🗄️ View: `View_DeliveryJob`
@@ -7177,6 +7177,24 @@ sequenceDiagram
 | `status` | [🔤 `CityAvailabilityStatus`](#scalar-cityavailabilitystatus) | [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested), [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved), [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked) | — | Derived from the latest lifecycle event type. |
 | `requested_at` | `timestamptz` | [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested) | — | occurrence: max(occurred_at) of the birth fact. |
 | `decided_at` | `timestamptz` | [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved), [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked) | nullable | occurrence: max(occurred_at) of the latest decision (approve/revoke); null while PENDING. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+<a id="view-rider"></a>
+#### 🗄️ View: `Rider`
+
+- **Source**: [🎭 `Rider`](#actor-rider) · 🛶 V0 · 🔒 internal
+- **Note**: The RIDER identity bridge (#144): auth subject -> riderId, mirroring `Customer.auth_ref`. Without it a rider cannot be resolved to a domain id at all, so `read_scope` returns Public and every rider is DENIED — safe, but wrong. `RiderRegistered` has always carried `authRef`; it was simply projected nowhere, which is why the gap was invisible until per-instance authorization needed it. Deliberately NOT the rider's operational board (that is View_DeliveryJob, keyed by rider_id). This row exists so the edge can answer one question once per request: which rider is this token? 
+- **Rules**: `auth_ref` is the Supabase user id, NOT the riderId — the same split as Customer (a domain id must not be welded to the auth provider, or changing provider would invalidate every id already in the immutable log). `display_name`/`phone` take their latest carrying event (RiderRegistered, then RiderInfoUpdated); `status` follows RiderStatusChanged.
+- **Fed by**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderInfoUpdated`](#event-riderinfoupdated), [⚡ `RiderStatusChanged`](#event-riderstatuschanged)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `rider_id` | [🔤 `RiderId`](#scalar-riderid) _(derived)_ | [⚡ `RiderRegistered`.`riderId`](#event-riderregistered--riderid) | PK |  |
+| `auth_ref` | [🔤 `ExternalReference`](#scalar-externalreference) _(derived)_ | [⚡ `RiderRegistered`.`authRef`](#event-riderregistered--authref) | index | The bridge: `sub` -> riderId, resolved once per request at the edge. |
+| `display_name` | `text` | [⚡ `RiderRegistered`.`displayName`](#event-riderregistered--displayname), [⚡ `RiderInfoUpdated`.`displayName`](#event-riderinfoupdated--displayname) | — |  |
+| `phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) _(derived)_ | [⚡ `RiderRegistered`.`phone`](#event-riderregistered--phone), [⚡ `RiderInfoUpdated`.`phone`](#event-riderinfoupdated--phone) | — |  |
+| `status` | [🔤 `RiderStatus`](#scalar-riderstatus) | [⚡ `RiderRegistered`.`status`](#event-riderregistered--status), [⚡ `RiderStatusChanged`.`status`](#event-riderstatuschanged--status) | — |  |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -7757,7 +7775,7 @@ An independent Captain rider registered (linked to the auth provider user).
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `Rider`](#view-rider)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -7774,7 +7792,7 @@ One or more editable rider profile fields changed.
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `Rider`](#view-rider)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -7789,7 +7807,7 @@ A rider's availability/lifecycle status changed.
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `Rider`](#view-rider)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

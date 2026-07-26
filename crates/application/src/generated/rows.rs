@@ -169,3 +169,15 @@ pub struct ScopeMembershipRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
+
+/// The RIDER identity bridge (#144): auth subject -> riderId, mirroring `Customer.auth_ref`. Without it a rider cannot be resolved to a domain id at all, so `read_scope` returns Public and every rider is DENIED — safe, but wrong. `RiderRegistered` has always carried `authRef`; it was simply projected nowhere, which is why the gap was invisible until per-instance authorization needed it. Deliberately NOT the rider's operational board (that is View_DeliveryJob, keyed by rider_id). This row exists so the edge can answer one question once per request: which rider is this token? 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RiderRow {
+    pub rider_id: RiderId,
+    pub auth_ref: ExternalReference,
+    pub display_name: String,
+    pub phone: PhoneNumber,
+    pub status: RiderStatus,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}

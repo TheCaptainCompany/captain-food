@@ -603,6 +603,17 @@ CREATE TABLE ScopeMembership (
 CREATE INDEX ON ScopeMembership (principal_type, principal_id, scope_type);
 CREATE INDEX ON ScopeMembership (scope_type, scope_id);
 
+CREATE TABLE Rider (
+  rider_id UUID PRIMARY KEY,
+  auth_ref TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON Rider (auth_ref);
+
 -- all_events(): the entire log in global order — the SQL equivalent of EventStoreDB's $all stream.
 -- Inspection/replay only (projections track a checkpoint on position); never a read path.
 -- all_events()  ==  SELECT * FROM domain_events ORDER BY position

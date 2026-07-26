@@ -12,7 +12,8 @@ use domain::generated::scalars::{
     DeliveryTimeliness, GbpLinkStatus,
     InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     ProspectPipelineStatus, RefundProcessStatus, RefundStatus, RestaurantDispatchMode,
-    RestaurantListingStatus, RestaurantStatus, ScopeType, ServiceType, ThumbRating, UserType,
+    RestaurantListingStatus, RestaurantStatus, RiderStatus, ScopeType, ServiceType, ThumbRating,
+    UserType,
 };
 use domain::shared::errors::DomainError;
 
@@ -184,6 +185,8 @@ mod tests {
 // it is also the wire ordinal for `domain_events.user_type` and `command_journal.user_type`, so a
 // reordering here would silently re-label historical rows, not just this table.
 enum_ord!(ScopeType { ORDER => 0, RESTAURANT => 1 });
+// The RIDER identity bridge's status column (#144).
+enum_ord!(RiderStatus { OFFLINE => 0, AVAILABLE => 1, ON_DELIVERY => 2, SUSPENDED => 3 });
 enum_ord!(UserType {
     PUBLIC => 0,
     CUSTOMER => 1,
