@@ -442,6 +442,106 @@ Hence `active: true` on the rule: membership resolves against the job in a live 
 one. Cheap to state, and it makes the rule correct under either shape. The `[rider_id, status]` index
 already exists to serve it.
 
+### 3.4 `ScopeMembership` — a projected membership index (SUPERSEDES §3.3.4 and §3.3.5)
+
+Product-owner proposal, 2026-07-25, **adopted**: rather than resolving membership by querying whichever
+read model happens to hold the link, **project the membership itself** into one technical index.
+
+```yaml
+# specs/database/tables/projection_tables.yaml
+ScopeMembership:
+  projector: app
+  note: "Technical authorization index: who may see which scope instance. Not a business read model."
+  columns:
+    scope_type:     { type: { $ref: 'scalars.yaml#/ScopeType' } }
+    scope_id:       { type: uuid }
+    principal_type: { type: { $ref: 'scalars.yaml#/UserType' } }
+    principal_id:   { type: uuid }   # customerId | restaurantId | restaurantAccountId | riderId
+    granted_at:     { type: timestamptz }
+  pk: [scope_type, scope_id, principal_type, principal_id]
+  indexes:
+    - [principal_type, principal_id, scope_type]   # "everything this principal may see" -> list queries
+```
+
+The entire guard collapses to one index-only lookup, forever, for every scope type and role:
+
+```sql
+SELECT EXISTS(SELECT 1 FROM "ScopeMembership"
+               WHERE scope_type=$1 AND scope_id=$2 AND principal_type=$3 AND principal_id=$4);
+```
+
+#### 3.4.1 What this dissolves
+
+- **The resolution mapping (§3.3.4).** No table/column triples, no `matches:`, no property paths.
+- **The `restaurant.restaurantAccountId` hop (§3.3.1).** The projector writes an account row directly.
+- **`active: true` (§3.3.5).** Reassignment is a **`revoke` then `grant`**, an explicit projector action,
+  rather than a status predicate inferred at query time.
+- **Multiple riders per order.** Two rows. The problem disappears instead of being special-cased.
+- **The guard/filter asymmetry (§3.3.3).** The `[principal_type, principal_id, scope_type]` index answers
+  *"which orders may I see"*, so list queries can use the same mechanism as by-id checks.
+
+`principal_type` is in the pk deliberately: a **rider who is also a customer** must hold two distinct
+memberships, or their customer row would let them fetch rider-audience files.
+
+#### 3.4.2 Declaring how the projector fills it
+
+Grants and revokes, per event — the DSL the product owner asked for:
+
+```yaml
+ScopeMembership:
+  grants:
+    - on: OrderPlaced
+      scope: { type: ORDER, id: orderId }
+      principals:
+        - { type: CUSTOMER,           id: customerId }
+        - { type: RESTAURANT,         id: restaurantId }
+        - { type: RESTAURANT_ACCOUNT, id: restaurantAccountId, via: restaurant }
+    - on: DeliveryAcceptedByRider
+      scope: { type: ORDER, id: orderId, via: deliveryJob }   # see below
+      principals: [{ type: RIDER, id: riderId }]
+  revokes:
+    - on: [DeliveryCancelled, DeliveryDispatchFailed]
+      scope: { type: ORDER, id: orderId, via: deliveryJob }
+      principals: [{ type: RIDER, id: riderId }]
+```
+
+⚠️ **`via: deliveryJob` is required, not decoration.** `DeliveryAcceptedByRider` and `DeliveryCancelled`
+carry **only `deliveryJobId`** — no `orderId`. The projector must resolve job → order (it may;
+`OrderConversation` already folds cross-aggregate by `order_id`). A rule that assumed `orderId` was in
+the payload would simply never fire, granting nothing and denying every rider.
+
+#### 3.4.3 The costs, honestly
+
+This is an **ACL cache**, and the failure modes are asymmetric:
+
+- **A missing row denies** — annoying, visible, safe.
+- **A stale row grants** — a breach, silent. So the **`revokes` rules are more safety-critical than the
+  grants**, and the projector must err toward deleting. Most systems get this backwards because missing
+  grants generate support tickets and stale grants generate nothing.
+- **Same transaction.** The membership write must commit with the domain projection it derives from,
+  or there is a window where an order exists and its customer gets a spurious 403.
+- **Rebuildable.** It is a projection over `domain_events`, so drift is repaired by replay — the one
+  property that makes an ACL cache acceptable at all. A periodic consistency check against the source
+  read models is cheap insurance.
+- **Backfill.** Existing orders need a replay before the guard is switched on, or every historical order
+  becomes unreadable.
+
+#### 3.4.4 What it does NOT solve
+
+Two riders splitting a large order raises a genuine **product** question — *which rider delivered which
+items?* — that is order/delivery modelling, not authorization. `ScopeMembership` makes the authorization
+half free under any answer, but the modelling question stays open and belongs in the delivery bounded
+context (ADR-0031), not here.
+
+**A delivery job per request** (rather than mutating one job) is the right shape and is already what the
+schema permits — `View_DeliveryJob.order_id` is non-unique. It gives an attempt history and supports
+concurrent jobs, and with `ScopeMembership` it no longer complicates the guard.
+
+**Rejected: a `riderIds` JSON column.** It solves only riders, needs a JSON-containment special case in
+the one code path that must stay simple, requires read-modify-write in the projector, and leaves the
+account hop and the terminal-job problem untouched. Special cases in a security-critical generic path
+are where holes live.
+
 ## 4. Blast radius
 
 Every read port gains a parameter, and every resolver gains a `ReadScope` construction from its
@@ -486,7 +586,8 @@ spread across feature work where a missed call site hides in a diff about someth
 | **D1** | Priority relative to [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) — this is filed as a *blocker* for attachments, but on its own terms it is a live cross-tenant read exposure | treat as **higher** priority than the epic it blocks; re-prioritising is a product-owner call made in the project, so this is a recommendation only |
 | ~~**D2**~~ | ~~Restaurant staff membership model~~ | **resolved 2026-07-25**: RESTAURANT carries `restaurantId`, RESTAURANT_ACCOUNT carries `restaurantAccountId`, both as JWT claims (§3.2.2) — the two existing `UserType`s already model single-location vs chain |
 | **D9** | **RESTAURANT_ACCOUNT sees all its locations' orders**, and `restaurant_account_id` is denormalised onto `OrderTracking` (§3.3.1) | yes for orders — the account is the legal/commercial entity (HubRise connections are already keyed by it, payouts aggregate there). But keep it an **explicit** `audience` entry per file kind, not an inherited superset: "consolidated revenue view" and "doorstep photo of another location's customer" are different questions. ⚠️ Assumes an account is **one owner's sites**, not a franchise group — blanket access would leak between franchisees |
-| **D10** | Rider membership resolves against the **active** delivery job only (`active: true`, §3.3.5) | yes — without it a reassigned rider keeps access permanently, silently |
+| ~~**D10**~~ | ~~`active: true` on rider membership~~ | **superseded by D11** — reassignment becomes an explicit revoke+grant, no status predicate needed |
+| **D11** | Adopt **`ScopeMembership`**, a projected membership index (§3.4), as the single resolution mechanism | **yes** — it dissolves the resolution mapping, the account hop, `active: true`, and multi-rider, and unifies the guard with list filtering. Cost: it is an ACL cache, so `revokes` must be treated as more safety-critical than `grants` |
 | **D8** | Claim **staleness**: a `restaurantId` claim stays valid until token refresh, so removing staff does not revoke immediately (§3.2.2) | accept with a short token lifetime, **or** treat the claim as a cache over a DB membership lookup — pick one explicitly; silent staleness is the bad outcome |
 | **D3** | Scope for `Public` reads — confirm which projections are legitimately unrestricted (restaurant discovery, catalog, referential policies) | as listed; anything else defaults to scoped |
 | **D5** | Membership resolution as **DSL + codegen** (§3.3.4) vs hand-written per scope type | DSL — hand-writing is N×M statements in a security-critical path, and a new scope type should be a data change, not a code change |
