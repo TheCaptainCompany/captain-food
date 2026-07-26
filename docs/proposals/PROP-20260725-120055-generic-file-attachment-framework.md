@@ -172,7 +172,12 @@ is wrong in this domain:
 
 Freezing *roles* and resolving *membership* gives the intent ("staff of this order may see this") a
 representation that stays true as the people change. It also keeps the guard cheap: one indexed row
-read plus one membership check, no join into the conversation projection.
+read plus one **`ScopeMembership`** lookup (PROP-20260725-185140 §3.4) — no join into the conversation
+projection, and no knowledge of the order model in the file guard at all.
+
+`scope_type` + `scope_id` on the row are exactly the **binding** into that index: the file says *which
+instance it belongs to*, and `ScopeMembership` says *who belongs to that instance right now*. The two
+columns exist for no other purpose.
 
 ### 3.4 The visibility-coupling hazard (worth a rule + a test)
 
@@ -219,11 +224,16 @@ exactly the kind that photographs someone's front door.
 3. Extension in the path ≠ stored `extension` ⇒ **404**.
 4. `deleted_at IS NOT NULL` **or** `expires_at < now()` ⇒ **410 Gone** (§6.3).
 5. `principal.role ∉ audience` ⇒ **403**.
-6. `principal` is not a member of `(scope_type, scope_id)` ⇒ **403**.
-   *(member of an ORDER = its customer · staff of its restaurant · its assigned rider · any ADMIN.)*
-   Resolved **generically from `scope_type`**, not hard-coded to ORDER: the rules are declared in
-   `specs/database/scope_membership.yaml` and compiled to static queries (PROP-20260725-185140 §3.3),
-   so a new `FileScopeType` is a data change, not new code in the guard.
+6. `principal` is not a member of `(scope_type, scope_id)` ⇒ **403** — one index-only lookup against
+   the **`ScopeMembership`** projection (PROP-20260725-185140 §3.4):
+
+   ```sql
+   SELECT EXISTS(SELECT 1 FROM "ScopeMembership"
+                  WHERE scope_type=$1 AND scope_id=$2 AND principal_type=$3 AND principal_id=$4);
+   ```
+
+   The guard never learns what an order *is*. A new `FileScopeType` is a projector rule, not new code
+   in the guard — and `/files` shares the mechanism with every GraphQL read rather than owning a copy.
 7. Serve (§4.4).
 
 ### 4.3 Response hardening — where user-supplied bytes bite
@@ -294,48 +304,51 @@ enum ReadScope { Public, Customer(CustomerId), Restaurant(RestaurantId), Rider(R
 //   constructible ONLY from a verified Principal
 ```
 
-Each `Pg*Repository` turns the scope into a predicate (`AND customer_id = $2`, `AND restaurant_id = $2`,
-a join to `View_DeliveryJob` for rider, nothing for admin). **Filter, don't check**: pushing it into the
-`WHERE` makes list queries correct by construction, leaks no existence on collections, and costs one
-round trip instead of two. A review rule catches this most of the time; a type signature catches it
-every time.
+Each `Pg*Repository` turns the scope into a predicate against **`ScopeMembership`**. **Filter, don't
+check**: pushing it into the `WHERE` makes list queries correct by construction, leaks no existence on
+collections, and costs one round trip instead of two. A review rule catches this most of the time; a
+type signature catches it every time.
 
 **Two distinct gates, both required** — `@auth`/`@public` (api.yaml, at the role path) answers *may this
 **role** call this operation?*; `ReadScope` answers *may this **principal** see this row?* The former
 structurally cannot express the latter: the schema does not know which order is being asked for.
 
-`/files` uses the same application-layer port rather than its own logic — which is why `ScopeMembership`
-belongs in `crates/application/ports`: one implementation, two transports. It is the direct-fetch case,
-so it returns a status rather than filtering; **403, not 404**, because the id is an unguessable UUIDv7
-only obtainable from a thread the caller already had access to (negligible existence leak), and
-collapsing both cases to 404 would destroy the probing signal of §7.
+`/files` is the **direct-fetch** case: one object, nothing to filter, so it returns a status —
+**403, not 404**, because the id is an unguessable UUIDv7 only obtainable from a thread the caller
+already had access to (negligible existence leak), and collapsing both cases to 404 would destroy the
+probing signal of §7. It is mounted as an **Axum middleware**; the GraphQL side uses an async-graphql
+`Guard`/`Extension`, because an HTTP layer runs before the GraphQL body is parsed and cannot see which
+query was selected (PROP-20260725-185140 §3.3.2). Same check, two mounting points.
 
-#### 4.5.2 The prerequisite: two of four roles cannot be resolved today
+#### 4.5.2 The prerequisite: `ScopeMembership` and its projector rules
 
-| role | resolution | status |
-|---|---|---|
-| ADMIN | role alone, no lookup | ✅ |
-| CUSTOMER | `sub` → `Customer.auth_ref` → `customer_id` = `OrderTracking.customer_id` | ✅ both columns exist |
-| RIDER | `sub` → `riderId` = `View_DeliveryJob.rider_id WHERE order_id = $scope` | ⚠️ `RiderRegistered.authRef` exists (`events.yaml`) but is **projected nowhere** |
-| RESTAURANT | `sub` → `restaurant_id` = `OrderTracking.restaurant_id` | ❌ **no auth bridge exists at all** |
+The membership answer comes from the **`ScopeMembership`** projection
+(PROP-20260725-185140 §3.4) — `(scope_type, scope_id, principal_type, principal_id)`, maintained by an
+app-layer projector through declared `grants`/`revokes` per event. `/files` does not resolve membership
+itself; it asks that index, exactly as every GraphQL read does.
 
-Only `Customer` has an `auth_ref` bridge. Nothing maps an auth subject to a restaurant, and no read
-model projects the rider's. This is **not** a files-specific gap: ADR-0047 gates the *role path* but
-explicitly defers per-field `@auth`, and the resolvers are thin read models, so nothing has yet had to
-enforce *which* restaurant a staff user belongs to. `/files` is simply the first surface that does,
-because it is the first one serving personal data outside the GraphQL ACL.
+That projection does not exist yet, and neither do two of the four identity bridges it needs
+(`RiderRegistered.authRef` is projected nowhere; nothing maps an auth subject to a restaurant — though
+the RESTAURANT/RESTAURANT_ACCOUNT **JWT claims** now cover the common case). This is **not** a
+files-specific gap: ADR-0047 gates the *role path* but explicitly defers per-field `@auth`, and the
+resolvers are thin read models, so nothing has yet had to enforce *which* restaurant a staff user
+belongs to. `/files` is simply the first surface that does, because it is the first one serving
+personal data outside the GraphQL ACL.
 
 > ⚠️ **Do not resolve the restaurant from the `Host` header.** The tenant middleware maps
 > `{slug}.captain.food` → restaurant, and reusing it here looks free — but it identifies the storefront
 > being *viewed*, not the restaurant the user *works for*. Staff visiting a competitor's subdomain would
 > authorize as that competitor's staff. Host is tenant routing, never authorization.
 
-**Consequence for this proposal:** cross-cutting read authorization (`ReadScope` + the identity bridges)
-is a **blocking prerequisite**, tracked separately because the whole back office needs it, not just
-attachments. Shipping `/files` with CUSTOMER + ADMIN only and failing RESTAURANT/RIDER closed was
-considered and rejected: it would 403 the restaurant on the order photo it had just uploaded.
+**Consequence for this proposal:** cross-cutting read authorization (`ScopeMembership` + its projector
+rules + the bridges) is a **blocking prerequisite**, tracked separately because the whole back office
+needs it, not just attachments. Two operational conditions before the guard goes live: the membership
+**backfill replay** must have run (otherwise every historical order's files 403), and membership writes
+must commit in the **same transaction** as the projections they derive from. Shipping `/files` with
+CUSTOMER + ADMIN only and failing RESTAURANT/RIDER closed was considered and rejected: it would 403 the
+restaurant on the order photo it had just uploaded.
 
-**Caching:** memoize membership per `(sub, scope_id)` in request extensions — a thread rendering 5
+**Caching:** memoize membership per `(scope_type, scope_id)` in request extensions — a thread rendering 5
 images then costs 1 check, not 5. Beyond the request, cache **negatives** freely but **positives**
 briefly or not at all: the point of §3.3 is that reassignment revokes instantly, and a 60-second
 positive cache hands the previous rider a 60-second window after they are off the job.
@@ -487,8 +500,9 @@ latency; sweep deletions per kind; bucket bytes per tenant (cost).
 ## 10. Scope of the implementation slice
 
 **Blocked on:** [#144 "Read-side per-instance authorization: ReadScope on the read ports + RESTAURANT/RIDER identity bridges"](https://github.com/TheCaptainCompany/captain-food/issues/144), designed in [PROP-20260725-185140](PROP-20260725-185140-read-side-per-instance-authorization.md) — cross-cutting read authorization — `ReadScope` on the read ports + the RESTAURANT/RIDER
-identity bridges + the `ScopeMembership` port (§4.5). Tracked separately; `/files` cannot enforce §3.3
-for two of its four roles until it lands.
+identity bridges + the **`ScopeMembership`** projection and its projector rules (§4.5). Tracked
+separately; `/files` cannot enforce §3.3 for two of its four roles until it lands, and needs the
+membership backfill replay done before the guard is switched on.
 
 **In:** `specs/database/tables/files.yaml` + the three scalar enums · the `FileRetentionWorker` (daily,
 object-only) · `POST /files` + `GET /files/<uuid7>.<ext>` in `crates/server` ·
