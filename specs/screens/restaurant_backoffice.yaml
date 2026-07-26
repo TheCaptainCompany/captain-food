@@ -40,6 +40,10 @@ resolvers:
   # share the `conversation` data namespace (first segment), so their fields merge under `{{ conversation.* }}`.
   conversation.byOrder:       { query: { $ref: 'api.yaml#/queries/orderConversation' } }
   conversation.internalNotes: { query: { $ref: 'api.yaml#/queries/orderConversationInternalNotes' } }
+  # #157 — the claims queue (this restaurant's customer claims, filterable by status/category) + one
+  # claim's detail. `reclamationId` for the detail comes from the route `:reclamationId` (same-name).
+  reclamations.queue: { query: { $ref: 'api.yaml#/queries/restaurantReclamations' } }
+  reclamation.byId:   { query: { $ref: 'api.yaml#/queries/reclamation' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATA LAYER — ACTIONS (writes + client behaviours). All mutations exist in api.yaml already.
@@ -63,6 +67,11 @@ actions:
   post_message:      { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/postMessage' } }
   escalate_to_admin: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/escalateToAdmin' } }
   mute_participant:  { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/muteParticipant' } }
+  # #157 — claims queue decisions. resolve serves FULL_REFUND / PARTIAL_REFUND / REPLACEMENT /
+  # GOODWILL_CREDIT (never REJECTED — reject is a separate control with a REQUIRED reason). A
+  # PARTIAL_REFUND carries a nested Money `refundAmount` (built like the tip_order amount, #62).
+  resolve_reclamation: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/resolveReclamation' } }
+  reject_reclamation:  { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/rejectReclamation' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GLOBAL CHROME — the staff top bar (shared across the four screens).
@@ -88,6 +97,7 @@ global_components:
       - { id: orders,       label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.orders' },       icon: receipt, route: "/" }
       - { id: deliveries,   label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.deliveries' },   icon: truck,   route: "/deliveries" }
       - { id: refunds,      label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.refunds' },      icon: coin,    route: "/refunds" }
+      - { id: claims,       label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.claims' },       icon: life_buoy, route: "/claims" }
       - { id: satisfaction, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.satisfaction' }, icon: star,    route: "/satisfaction" }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -315,4 +325,117 @@ screens:
                 mutedRole: "{{ mute_role.value }}"
                 reason: "{{ mute_reason.value }}"
 
+      - { component: staff_nav }
+
+  # SCREEN 6 — Claims queue (#157): the restaurant's customer claims, beside the refunds queue. A status
+  # filter (the chip's selected value scopes the list at runtime) + claim cards (order · customer ·
+  # category · status), tapping through to the resolve panel. Empty state when nothing is outstanding.
+  - id: claims_queue
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    route: "/claims"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [reclamations.queue]
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.title' } }
+      # Status filter — the selected value scopes restaurantReclamations(status) at runtime.
+      - type: chip_multi_select
+        id: status_filter
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.filter.label' }
+        single_select: true
+        options:
+          - { value: OPEN,     label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.status.open' } }
+          - { value: RESOLVED, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.status.resolved' } }
+          - { value: REJECTED, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.status.rejected' } }
+      - type: list
+        id: claims_list
+        items: "{{ reclamations }}"
+        item_action: { type: navigate, route: "/claims/{{ item.reclamationId }}" }
+        empty_state:
+          title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.empty.title' }
+          body: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.empty.body' }
+      - { component: staff_nav }
+
+  # SCREEN 7 — Resolve panel (#157): one claim, every resolution. A resolution chip (FULL_REFUND /
+  # PARTIAL_REFUND / REPLACEMENT / GOODWILL_CREDIT — NOT REJECTED, which is the separate Reject control
+  # below with a REQUIRED reason). An amount picker (tip_amount_selector — a Money-cents picker, #62)
+  # shown for the amount resolutions; its own action confirms a PARTIAL_REFUND with the nested Money
+  # `refundAmount` built exactly like tip_order. The main Resolve button covers the no-amount
+  # resolutions. Arg `reclamationId` from the route `:reclamationId`.
+  - id: claim_resolve
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT]
+    route: "/claims/:reclamationId"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [reclamation.byId]
+    actions_used: [resolve_reclamation, reject_reclamation]
+    gaps:
+      - "refundAmount currency is hard-coded EUR (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel). PARTIAL_REFUND is fully wired via the amount picker's own action; a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0)."
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.title' } }
+      - { type: status_chip, status: "{{ reclamation.status }}" }
+      - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.order_ref' }, value: "{{ reclamation.orderId }}" }
+      - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.category' }, value: "{{ reclamation.category }}" }
+      - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.description' }, value: "{{ reclamation.description }}" }
+
+      # Resolve — a resolution chip + optional note. The main button submits the no-amount resolutions.
+      - type: chip_multi_select
+        id: resolution
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.label' }
+        single_select: true
+        options:
+          - { value: FULL_REFUND,     label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolution.full_refund' } }
+          - { value: PARTIAL_REFUND,  label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolution.partial_refund' } }
+          - { value: REPLACEMENT,     label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolution.replacement' } }
+          - { value: GOODWILL_CREDIT, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolution.goodwill_credit' } }
+      - { type: text_input, id: note, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.note_ph' } }
+      # Amount picker — for PARTIAL_REFUND (and GOODWILL_CREDIT). Its OWN action confirms the partial
+      # refund with a nested Money `refundAmount` (amountCents from the picker, currency EUR), so the
+      # partial-refund path is fully wired without conditional variables on the main button.
+      - type: tip_amount_selector
+        id: refund_amount
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.title' }
+        subtitle: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.subtitle' }
+        visible_when: "resolution.value in ['PARTIAL_REFUND','GOODWILL_CREDIT']"
+        presets_cents: [200, 450, 500, 1000]
+        custom_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.custom' }
+        action:
+          type: resolve_reclamation
+          variables:
+            reclamationId: "{{ reclamation.reclamationId }}"
+            resolution: "PARTIAL_REFUND"
+            note: "{{ note.value }}"
+            refundAmount: { amountCents: "{{ refund_amount.value }}", currency: "EUR" }
+      - type: button
+        id: resolve_btn
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.submit' }
+        variant: primary
+        # No refundAmount here: this covers FULL_REFUND / REPLACEMENT / GOODWILL_CREDIT (recorded intent).
+        # PARTIAL_REFUND is confirmed through the amount picker's own action above.
+        action:
+          type: resolve_reclamation
+          variables:
+            reclamationId: "{{ reclamation.reclamationId }}"
+            resolution: "{{ resolution.value }}"
+            note: "{{ note.value }}"
+
+      # Reject — a REQUIRED reason (the write model rejects an empty one via RejectionReasonRequired).
+      - type: section
+        id: reject
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.reject.label' }
+        content:
+          - { type: text_input, id: reject_reason, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.reject.reason_ph' } }
+          - type: button
+            id: reject_btn
+            label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.reject.label' }
+            variant: outline
+            action:
+              type: reject_reclamation
+              variables:
+                reclamationId: "{{ reclamation.reclamationId }}"
+                reason: "{{ reject_reason.value }}"
       - { component: staff_nav }

@@ -195,6 +195,98 @@
     "en": "Public reply",
     "fr": "Réponse publique"
   },
+  "back.claims.amount.custom": {
+    "en": "Other amount",
+    "fr": "Autre montant"
+  },
+  "back.claims.amount.subtitle": {
+    "en": "Choose the amount to refund or credit.",
+    "fr": "Choisissez le montant à rembourser ou à créditer."
+  },
+  "back.claims.amount.title": {
+    "en": "Amount",
+    "fr": "Montant"
+  },
+  "back.claims.category": {
+    "en": "Problem",
+    "fr": "Problème"
+  },
+  "back.claims.description": {
+    "en": "Details",
+    "fr": "Détails"
+  },
+  "back.claims.empty.body": {
+    "en": "Customer claims on your orders appear here.",
+    "fr": "Les réclamations des clients sur vos commandes apparaissent ici."
+  },
+  "back.claims.empty.title": {
+    "en": "No claims",
+    "fr": "Aucune réclamation"
+  },
+  "back.claims.filter.label": {
+    "en": "Status",
+    "fr": "Statut"
+  },
+  "back.claims.note_ph": {
+    "en": "Note (optional)",
+    "fr": "Note (facultatif)"
+  },
+  "back.claims.order_ref": {
+    "en": "Order",
+    "fr": "Commande"
+  },
+  "back.claims.reject.label": {
+    "en": "Reject",
+    "fr": "Rejeter"
+  },
+  "back.claims.reject.reason_ph": {
+    "en": "Reason (required)",
+    "fr": "Motif (obligatoire)"
+  },
+  "back.claims.resolution.full_refund": {
+    "en": "Full refund",
+    "fr": "Remboursement total"
+  },
+  "back.claims.resolution.goodwill_credit": {
+    "en": "Goodwill credit",
+    "fr": "Geste commercial"
+  },
+  "back.claims.resolution.partial_refund": {
+    "en": "Partial refund",
+    "fr": "Remboursement partiel"
+  },
+  "back.claims.resolution.replacement": {
+    "en": "Replacement",
+    "fr": "Remplacement"
+  },
+  "back.claims.resolve.label": {
+    "en": "Resolve as",
+    "fr": "Résoudre en"
+  },
+  "back.claims.resolve.submit": {
+    "en": "Resolve",
+    "fr": "Résoudre"
+  },
+  "back.claims.resolve.title": {
+    "en": "Resolve claim",
+    "fr": "Résoudre la réclamation"
+  },
+  "back.claims.status.open": {
+    "en": "Open",
+    "fr": "Ouvertes"
+  },
+  "back.claims.status.rejected": {
+    "en": "Rejected",
+    "fr": "Rejetées"
+  },
+  "back.claims.status.resolved": {
+    "en": "Resolved",
+    "fr": "Résolues"
+  },
+  "back.claims.title": {
+    "en": "Claims",
+    "fr": "Réclamations"
+  },
   "back.deliveries.delivered": {
     "en": "Mark delivered",
     "fr": "Marquer livrée"
@@ -214,6 +306,10 @@
   "back.deliveries.title": {
     "en": "Delivery board",
     "fr": "Tableau des livraisons"
+  },
+  "back.nav.claims": {
+    "en": "Claims",
+    "fr": "Réclamations"
   },
   "back.nav.deliveries": {
     "en": "Deliveries",
@@ -422,6 +518,130 @@
   "checkout.title": {
     "en": "Checkout",
     "fr": "Paiement"
+  },
+  "claim.category.damaged": {
+    "en": "Damaged",
+    "fr": "Endommagé"
+  },
+  "claim.category.label": {
+    "en": "What went wrong?",
+    "fr": "Que s'est-il passé ?"
+  },
+  "claim.category.late_delivery": {
+    "en": "Late delivery",
+    "fr": "Livraison en retard"
+  },
+  "claim.category.missing_item": {
+    "en": "Missing item",
+    "fr": "Article manquant"
+  },
+  "claim.category.not_delivered": {
+    "en": "Not delivered",
+    "fr": "Non livré"
+  },
+  "claim.category.other": {
+    "en": "Other",
+    "fr": "Autre"
+  },
+  "claim.category.quality": {
+    "en": "Quality",
+    "fr": "Qualité"
+  },
+  "claim.category.wrong_item": {
+    "en": "Wrong item",
+    "fr": "Mauvais article"
+  },
+  "claim.description_ph": {
+    "en": "Tell us more…",
+    "fr": "Dites-nous en plus…"
+  },
+  "claim.detail.category": {
+    "en": "Problem",
+    "fr": "Problème"
+  },
+  "claim.detail.description": {
+    "en": "Details",
+    "fr": "Détails"
+  },
+  "claim.detail.open_thread": {
+    "en": "Open the conversation",
+    "fr": "Ouvrir la conversation"
+  },
+  "claim.detail.reason": {
+    "en": "Reason",
+    "fr": "Motif"
+  },
+  "claim.detail.resolution": {
+    "en": "Resolution",
+    "fr": "Résolution"
+  },
+  "claim.detail.title": {
+    "en": "Claim",
+    "fr": "Réclamation"
+  },
+  "claim.evidence.add": {
+    "en": "Attach",
+    "fr": "Joindre"
+  },
+  "claim.evidence.label": {
+    "en": "Add a photo (optional)",
+    "fr": "Ajouter une photo (facultatif)"
+  },
+  "claim.evidence.ref_ph": {
+    "en": "Photo reference",
+    "fr": "Référence de la photo"
+  },
+  "claim.mine.empty.body": {
+    "en": "You haven't reported a problem with any order.",
+    "fr": "Vous n'avez signalé aucun problème sur vos commandes."
+  },
+  "claim.mine.empty.title": {
+    "en": "No claims",
+    "fr": "Aucune réclamation"
+  },
+  "claim.mine.title": {
+    "en": "My claims",
+    "fr": "Mes réclamations"
+  },
+  "claim.open.submit": {
+    "en": "Submit claim",
+    "fr": "Envoyer la réclamation"
+  },
+  "claim.open.title": {
+    "en": "Report a problem",
+    "fr": "Signaler un problème"
+  },
+  "claim.order_ref": {
+    "en": "Order",
+    "fr": "Commande"
+  },
+  "claim.reopen.label": {
+    "en": "Reopen",
+    "fr": "Rouvrir"
+  },
+  "claim.reopen.reason_ph": {
+    "en": "Why are you reopening? (optional)",
+    "fr": "Pourquoi rouvrez-vous ? (facultatif)"
+  },
+  "claim.requested.label": {
+    "en": "What would resolve this? (optional)",
+    "fr": "Comment résoudre cela ? (facultatif)"
+  },
+  "claim.resolution.full_refund": {
+    "en": "Full refund",
+    "fr": "Remboursement total"
+  },
+  "claim.resolution.goodwill_credit": {
+    "en": "Goodwill credit",
+    "fr": "Geste commercial"
+  },
+  "claim.resolution.partial_refund": {
+    "en": "Partial refund",
+    "fr": "Remboursement partiel"
+  },
+  "claim.resolution.replacement": {
+    "en": "Replacement",
+    "fr": "Remplacement"
   },
   "common.action.apply": {
     "en": "Apply",

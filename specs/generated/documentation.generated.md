@@ -9634,6 +9634,56 @@ _Surface_ **`restaurant_backoffice.yaml`**
 | write | `escalate_to_admin` | [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) |
 | write | `mute_participant` | [✏️ `muteParticipant`](#mutation-muteparticipant) |
 
+<a id="screen-claims_queue"></a>
+### 📱 `claims_queue` · `/claims` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Claims                                   │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Claims                     │
+│ chip_multi_select — Status               │
+│ list                                     │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `reclamations.queue` | [🔎 `restaurantReclamations`](#query-restaurantreclamations) |
+
+<a id="screen-claim_resolve"></a>
+### 📱 `claim_resolve` · `/claims/:reclamationId` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Resolve claim                            │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Resolve claim              │
+│ status_chip                              │
+│ info_row — Order                         │
+│ info_row — Problem                       │
+│ info_row — Details                       │
+│ chip_multi_select — Resolve as           │
+│ text_input — Note (optional)             │
+│ tip_amount_selector — Amount             │
+│ button — Resolve                         │
+│ section — Reject                         │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `reclamation.byId` | [🔎 `reclamation`](#query-reclamation) |
+| write | `resolve_reclamation` | [✏️ `resolveReclamation`](#mutation-resolvereclamation) |
+| write | `reject_reclamation` | [✏️ `rejectReclamation`](#mutation-rejectreclamation) |
+
+**Gaps**
+- ⚠️ refundAmount currency is hard-coded EUR (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel). PARTIAL_REFUND is fully wired via the amount picker's own action; a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0).
+
 _Surface_ **`restaurant_frontoffice.yaml`**
 
 <a id="screen-restaurant"></a>
@@ -9783,6 +9833,79 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | read | `conversation.byOrder` | [🔎 `orderConversation`](#query-orderconversation) |
 | write | `post_message` | [✏️ `postMessage`](#mutation-postmessage) |
 
+<a id="screen-open_claim"></a>
+### 📱 `open_claim` · `/orders/:orderId/claim` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Report a problem                         │
+├──────────────────────────────────────────┤
+│ back_button_header — Report a problem    │
+│ info_row — Order                         │
+│ chip_multi_select — What went wrong?     │
+│ text_input — Tell us more…               │
+│ chip_multi_select — What would resolve … │
+│ button — Submit claim                    │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `order.byId` | [🔎 `order`](#query-order) |
+| write | `open_reclamation` | [✏️ `openReclamation`](#mutation-openreclamation) |
+
+**Gaps**
+- ⚠️ Evidence photo is added AFTER the claim exists (attach needs the reclamationId): the `attach_reclamation_evidence` affordance lives on `claim_detail`, not here. A real in-form photo picker is #134-deferred.
+
+<a id="screen-my_claims"></a>
+### 📱 `my_claims` · `/claims` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ My claims                                │
+├──────────────────────────────────────────┤
+│ «topbar»                                 │
+│ page_header — My claims                  │
+│ list                                     │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `reclamations.mine` | [🔎 `myReclamations`](#query-myreclamations) |
+
+<a id="screen-claim_detail"></a>
+### 📱 `claim_detail` · `/claims/:reclamationId` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Claim                                    │
+├──────────────────────────────────────────┤
+│ back_button_header — Claim               │
+│ status_chip                              │
+│ info_row — Order                         │
+│ info_row — Problem                       │
+│ info_row — Details                       │
+│ info_row — Resolution                    │
+│ info_row — Reason                        │
+│ section — Reopen                         │
+│ section — Add a photo (optional)         │
+│ button — Open the conversation           │
+│ «bottom_nav»                             │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `reclamation.byId` | [🔎 `reclamation`](#query-reclamation) |
+| write | `reopen_reclamation` | [✏️ `reopenReclamation`](#mutation-reopenreclamation) |
+| write | `attach_reclamation_evidence` | [✏️ `attachReclamationEvidence`](#mutation-attachreclamationevidence) |
+
+**Gaps**
+- ⚠️ Evidence: a real photo picker is #134-deferred — the `attach_reclamation_evidence` affordance takes an opaque attachmentRef in a text field; the command models the domain fact with the opaque ref only (#156).
+
 <a id="screen-account"></a>
 ### 📱 `account` · `/account` · 📱 SDUI · 🔒 auth
 
@@ -9900,6 +10023,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-nav-orders"></a>`back.nav.orders` | — | Orders | Commandes |
 | <a id="translation-back-nav-deliveries"></a>`back.nav.deliveries` | — | Deliveries | Livraisons |
 | <a id="translation-back-nav-refunds"></a>`back.nav.refunds` | — | Refunds | Remboursements |
+| <a id="translation-back-nav-claims"></a>`back.nav.claims` | — | Claims | Réclamations |
 | <a id="translation-back-nav-satisfaction"></a>`back.nav.satisfaction` | — | Satisfaction | Satisfaction |
 | <a id="translation-back-orders-title"></a>`back.orders.title` | — | Order queue | File des commandes |
 | <a id="translation-back-orders-tab-incoming"></a>`back.orders.tab.incoming` | — | Incoming | Entrantes |
@@ -9949,6 +10073,29 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-chat-mute-role-customer"></a>`back.chat.mute.role.customer` | — | Customer | Client |
 | <a id="translation-back-chat-mute-role-rider"></a>`back.chat.mute.role.rider` | — | Rider | Livreur |
 | <a id="translation-back-chat-mute-reason_ph"></a>`back.chat.mute.reason_ph` | — | Reason (required) | Motif (obligatoire) |
+| <a id="translation-back-claims-title"></a>`back.claims.title` | — | Claims | Réclamations |
+| <a id="translation-back-claims-filter-label"></a>`back.claims.filter.label` | — | Status | Statut |
+| <a id="translation-back-claims-status-open"></a>`back.claims.status.open` | — | Open | Ouvertes |
+| <a id="translation-back-claims-status-resolved"></a>`back.claims.status.resolved` | — | Resolved | Résolues |
+| <a id="translation-back-claims-status-rejected"></a>`back.claims.status.rejected` | — | Rejected | Rejetées |
+| <a id="translation-back-claims-empty-title"></a>`back.claims.empty.title` | — | No claims | Aucune réclamation |
+| <a id="translation-back-claims-empty-body"></a>`back.claims.empty.body` | — | Customer claims on your orders appear here. | Les réclamations des clients sur vos commandes apparaissent ici. |
+| <a id="translation-back-claims-order_ref"></a>`back.claims.order_ref` | — | Order | Commande |
+| <a id="translation-back-claims-category"></a>`back.claims.category` | — | Problem | Problème |
+| <a id="translation-back-claims-description"></a>`back.claims.description` | — | Details | Détails |
+| <a id="translation-back-claims-note_ph"></a>`back.claims.note_ph` | — | Note (optional) | Note (facultatif) |
+| <a id="translation-back-claims-resolve-title"></a>`back.claims.resolve.title` | — | Resolve claim | Résoudre la réclamation |
+| <a id="translation-back-claims-resolve-label"></a>`back.claims.resolve.label` | — | Resolve as | Résoudre en |
+| <a id="translation-back-claims-resolve-submit"></a>`back.claims.resolve.submit` | — | Resolve | Résoudre |
+| <a id="translation-back-claims-resolution-full_refund"></a>`back.claims.resolution.full_refund` | — | Full refund | Remboursement total |
+| <a id="translation-back-claims-resolution-partial_refund"></a>`back.claims.resolution.partial_refund` | — | Partial refund | Remboursement partiel |
+| <a id="translation-back-claims-resolution-replacement"></a>`back.claims.resolution.replacement` | — | Replacement | Remplacement |
+| <a id="translation-back-claims-resolution-goodwill_credit"></a>`back.claims.resolution.goodwill_credit` | — | Goodwill credit | Geste commercial |
+| <a id="translation-back-claims-amount-title"></a>`back.claims.amount.title` | — | Amount | Montant |
+| <a id="translation-back-claims-amount-subtitle"></a>`back.claims.amount.subtitle` | — | Choose the amount to refund or credit. | Choisissez le montant à rembourser ou à créditer. |
+| <a id="translation-back-claims-amount-custom"></a>`back.claims.amount.custom` | — | Other amount | Autre montant |
+| <a id="translation-back-claims-reject-label"></a>`back.claims.reject.label` | — | Reject | Rejeter |
+| <a id="translation-back-claims-reject-reason_ph"></a>`back.claims.reject.reason_ph` | — | Reason (required) | Motif (obligatoire) |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |
@@ -10071,6 +10218,37 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-account-legal"></a>`account.legal` | — | Terms & Privacy | Conditions et confidentialité |
 | <a id="translation-account-sign_out"></a>`account.sign_out` | — | Sign out | Se déconnecter |
 | <a id="translation-account-coins_badge"></a>`account.coins_badge` | `points` | {points} pts | {points} pts |
+| <a id="translation-claim-open-title"></a>`claim.open.title` | — | Report a problem | Signaler un problème |
+| <a id="translation-claim-open-submit"></a>`claim.open.submit` | — | Submit claim | Envoyer la réclamation |
+| <a id="translation-claim-order_ref"></a>`claim.order_ref` | — | Order | Commande |
+| <a id="translation-claim-category-label"></a>`claim.category.label` | — | What went wrong? | Que s'est-il passé ? |
+| <a id="translation-claim-category-missing_item"></a>`claim.category.missing_item` | — | Missing item | Article manquant |
+| <a id="translation-claim-category-wrong_item"></a>`claim.category.wrong_item` | — | Wrong item | Mauvais article |
+| <a id="translation-claim-category-quality"></a>`claim.category.quality` | — | Quality | Qualité |
+| <a id="translation-claim-category-late_delivery"></a>`claim.category.late_delivery` | — | Late delivery | Livraison en retard |
+| <a id="translation-claim-category-damaged"></a>`claim.category.damaged` | — | Damaged | Endommagé |
+| <a id="translation-claim-category-not_delivered"></a>`claim.category.not_delivered` | — | Not delivered | Non livré |
+| <a id="translation-claim-category-other"></a>`claim.category.other` | — | Other | Autre |
+| <a id="translation-claim-description_ph"></a>`claim.description_ph` | — | Tell us more… | Dites-nous en plus… |
+| <a id="translation-claim-requested-label"></a>`claim.requested.label` | — | What would resolve this? (optional) | Comment résoudre cela ? (facultatif) |
+| <a id="translation-claim-resolution-full_refund"></a>`claim.resolution.full_refund` | — | Full refund | Remboursement total |
+| <a id="translation-claim-resolution-partial_refund"></a>`claim.resolution.partial_refund` | — | Partial refund | Remboursement partiel |
+| <a id="translation-claim-resolution-replacement"></a>`claim.resolution.replacement` | — | Replacement | Remplacement |
+| <a id="translation-claim-resolution-goodwill_credit"></a>`claim.resolution.goodwill_credit` | — | Goodwill credit | Geste commercial |
+| <a id="translation-claim-evidence-label"></a>`claim.evidence.label` | — | Add a photo (optional) | Ajouter une photo (facultatif) |
+| <a id="translation-claim-evidence-add"></a>`claim.evidence.add` | — | Attach | Joindre |
+| <a id="translation-claim-evidence-ref_ph"></a>`claim.evidence.ref_ph` | — | Photo reference | Référence de la photo |
+| <a id="translation-claim-mine-title"></a>`claim.mine.title` | — | My claims | Mes réclamations |
+| <a id="translation-claim-mine-empty-title"></a>`claim.mine.empty.title` | — | No claims | Aucune réclamation |
+| <a id="translation-claim-mine-empty-body"></a>`claim.mine.empty.body` | — | You haven't reported a problem with any order. | Vous n'avez signalé aucun problème sur vos commandes. |
+| <a id="translation-claim-detail-title"></a>`claim.detail.title` | — | Claim | Réclamation |
+| <a id="translation-claim-detail-category"></a>`claim.detail.category` | — | Problem | Problème |
+| <a id="translation-claim-detail-description"></a>`claim.detail.description` | — | Details | Détails |
+| <a id="translation-claim-detail-resolution"></a>`claim.detail.resolution` | — | Resolution | Résolution |
+| <a id="translation-claim-detail-reason"></a>`claim.detail.reason` | — | Reason | Motif |
+| <a id="translation-claim-detail-open_thread"></a>`claim.detail.open_thread` | — | Open the conversation | Ouvrir la conversation |
+| <a id="translation-claim-reopen-label"></a>`claim.reopen.label` | — | Reopen | Rouvrir |
+| <a id="translation-claim-reopen-reason_ph"></a>`claim.reopen.reason_ph` | — | Why are you reopening? (optional) | Pourquoi rouvrez-vous ? (facultatif) |
 | <a id="translation-rider-title"></a>`rider.title` | — | Captain Rider | Captain Rider |
 | <a id="translation-rider-go_online"></a>`rider.go_online` | — | Go online | Passer en ligne |
 | <a id="translation-rider-jobs-title"></a>`rider.jobs.title` | — | My deliveries | Mes courses |
