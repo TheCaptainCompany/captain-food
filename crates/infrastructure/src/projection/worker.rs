@@ -129,9 +129,11 @@ impl ReadModelProjector {
             Self::OrderConversation => {
                 // Cross-stream feed: the conversation's own events live on `Conversation-{orderId}`
                 // (the aggregate is keyed by order_id), while the folded order STATUS arrives on the
-                // `Order-{orderId}` stream — same checkpoint, so the two categories fold in global
-                // `position` order. Both key the row from the order id: the stream uuid for
-                // Conversation-%, the payload's `orderId` for the Order-% status events.
+                // `Order-{orderId}` stream AND the woven claim lifecycle on `Reclamation-{reclamationId}`
+                // streams (§2.5, #155) — same checkpoint, so all three categories fold in global
+                // `position` order. Both cross-stream feeds key the row from the payload's `orderId`
+                // (every Reclamation* event carries it, sourced from the aggregate's fold state); the
+                // Conversation-% events key from the stream uuid.
                 let uuid = if env.stream_name.starts_with("Conversation-") {
                     aggregate_uuid_of(env, "Conversation-", "orderId")?
                 } else {
@@ -201,14 +203,15 @@ const REGISTRY: &[ProjectorGroup] = &[
         stream_prefixes: &["Order-", "Payment-"],
         projectors: &[ReadModelProjector::OrderTracking],
     },
-    // The OrderConversation read model (#131, epic #129) folds BOTH the conversation's own messaging
-    // events (`Conversation-{orderId}` streams) AND the order status lifecycle (`Order-%`), so the
-    // group slices both categories under one checkpoint — keeping the message timeline and the folded
-    // status ordered by global `position`. The row is keyed by order_id (the Conversation aggregate
-    // id and the Order events' payload `orderId`).
+    // The OrderConversation read model (#131, epic #129) folds the conversation's own messaging events
+    // (`Conversation-{orderId}` streams), the order status lifecycle (`Order-%`), AND the claim lifecycle
+    // woven into the thread (`Reclamation-%`, §2.5, #155), so the group slices all three categories under
+    // one checkpoint — keeping the message timeline, folded status and claim entries ordered by global
+    // `position`. The row is keyed by order_id (the Conversation aggregate id; the Order and Reclamation
+    // events' payload `orderId`).
     ProjectorGroup {
         checkpoint: "OrderConversation",
-        stream_prefixes: &["Conversation-", "Order-"],
+        stream_prefixes: &["Conversation-", "Order-", "Reclamation-"],
         projectors: &[ReadModelProjector::OrderConversation],
     },
 ];

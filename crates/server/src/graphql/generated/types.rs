@@ -368,6 +368,28 @@ pub struct MutedParticipant {
     pub until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// One reclamation-lifecycle entry woven into the per-order conversation thread (read-model array element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED); `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/ `refundAmount` from a resolution, `reason` from a rejection or reopen. `at` is the fact's occurred-at. Customer-visible — it is the customer's own claim shown inline in their order thread.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimTimelineEntry {
+    #[graphql(name = "kind")]
+    pub kind: ClaimTimelineEventKind,
+    #[graphql(name = "reclamationId")]
+    pub reclamation_id: ReclamationId,
+    #[graphql(name = "category")]
+    pub category: Option<ReclamationCategory>,
+    #[graphql(name = "requestedResolution")]
+    pub requested_resolution: Option<ReclamationResolution>,
+    #[graphql(name = "resolution")]
+    pub resolution: Option<ReclamationResolution>,
+    #[graphql(name = "refundAmount")]
+    pub refund_amount: Option<Money>,
+    #[graphql(name = "reason")]
+    pub reason: Option<ReclamationReason>,
+    #[graphql(name = "at")]
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
 /// A restaurant (public discovery + single-restaurant header). Navigates to its catalogs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -965,6 +987,9 @@ pub struct OrderConversation {
     #[graphql(name = "messages")]
     #[serde(default)]
     pub messages: Vec<ConversationMessage>,
+    #[graphql(name = "claimEvents")]
+    #[serde(default)]
+    pub claim_events: Vec<ClaimTimelineEntry>,
 }
 
 /// The INTERNAL (staff-only) notes on an order's conversation — deliberately a SEPARATE type from OrderConversation and absent from the CUSTOMER schema; that separation IS the visibility guarantee (#129).
@@ -1178,8 +1203,9 @@ impl From<(OrderTrackingRow, RestaurantRow)> for Order {
 
 /// Read-model row → API type: the OrderConversation projection row → the PUBLIC thread
 /// (#131, epic #129). The customer-visible `messages` jsonb deserializes into the typed
-/// ConversationMessage list; the folded order `status` and `customer_chat_enabled` ride along. The
-/// INTERNAL notes stay in the separate `ConversationInternalNotes` type (the visibility guarantee).
+/// ConversationMessage list; the woven claim lifecycle `claim_events` jsonb into the ClaimTimelineEntry
+/// list (§2.5, #155); the folded order `status` and `customer_chat_enabled` ride along. The INTERNAL
+/// notes stay in the separate `ConversationInternalNotes` type (the visibility guarantee).
 impl From<OrderConversationRow> for OrderConversation {
     fn from(row: OrderConversationRow) -> Self {
         Self {
@@ -1189,6 +1215,7 @@ impl From<OrderConversationRow> for OrderConversation {
             customer_chat_enabled: row.customer_chat_enabled,
             opened_at: row.opened_at,
             messages: serde_json::from_value(row.messages).unwrap_or_default(),
+            claim_events: serde_json::from_value(row.claim_events).unwrap_or_default(),
         }
     }
 }

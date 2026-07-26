@@ -493,13 +493,13 @@ fixtures:
     data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", restaurantId: "restaurant-1", category: "MISSING_ITEM", description: "The drinks were missing from my order." }
   reclamationResolvedFullRefund:
     type: { $ref: 'events.yaml#/ReclamationResolved' }
-    data: { reclamationId: "recl-1", resolution: "FULL_REFUND" }
+    data: { reclamationId: "recl-1", orderId: "order-1", resolution: "FULL_REFUND" }
   reclamationRejected:
     type: { $ref: 'events.yaml#/ReclamationRejected' }
-    data: { reclamationId: "recl-1", reason: "The delivery photo shows all items were handed over." }
+    data: { reclamationId: "recl-1", orderId: "order-1", reason: "The delivery photo shows all items were handed over." }
   reclamationReopened:
     type: { $ref: 'events.yaml#/ReclamationReopened' }
-    data: { reclamationId: "recl-1", reason: "Customer sent a photo; taking another look." }
+    data: { reclamationId: "recl-1", orderId: "order-1", reason: "Customer sent a photo; taking another look." }
 
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test

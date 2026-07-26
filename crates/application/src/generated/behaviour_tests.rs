@@ -579,17 +579,17 @@ fn fx_reclamation_opened() -> DomainEvent {
 
 /// tests.yaml#/fixtures/reclamationResolvedFullRefund — events.yaml#/ReclamationResolved
 fn fx_reclamation_resolved_full_refund() -> DomainEvent {
-    DomainEvent::ReclamationResolved(evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: None, refund_amount: None })
+    DomainEvent::ReclamationResolved(evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: None, refund_amount: None })
 }
 
 /// tests.yaml#/fixtures/reclamationRejected — events.yaml#/ReclamationRejected
 fn fx_reclamation_rejected() -> DomainEvent {
-    DomainEvent::ReclamationRejected(evs::ReclamationRejected { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: sc::ReclamationReason("The delivery photo shows all items were handed over.".into()) })
+    DomainEvent::ReclamationRejected(evs::ReclamationRejected { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), reason: sc::ReclamationReason("The delivery photo shows all items were handed over.".into()) })
 }
 
 /// tests.yaml#/fixtures/reclamationReopened — events.yaml#/ReclamationReopened
 fn fx_reclamation_reopened() -> DomainEvent {
-    DomainEvent::ReclamationReopened(evs::ReclamationReopened { reclamation_id: sc::ReclamationId(support::uid("recl-1")), reason: Some(sc::ReclamationReason("Customer sent a photo; taking another look.".into())) })
+    DomainEvent::ReclamationReopened(evs::ReclamationReopened { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), reason: Some(sc::ReclamationReason("Customer sent a photo; taking another look.".into())) })
 }
 
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and

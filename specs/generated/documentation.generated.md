@@ -3310,6 +3310,7 @@ The per-order in-app conversation: the PUBLIC (customer-visible) message timelin
 | <a id="type-orderconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |
 | <a id="type-orderconversation--openedat"></a>`openedAt` | `string` _date-time_ | ✅ |
 | <a id="type-orderconversation--messages"></a>`messages` | [[📦 `ConversationMessage`](#entity-conversationmessage)] | ✅ |
+| <a id="type-orderconversation--claimevents"></a>`claimEvents` | [[📦 `ClaimTimelineEntry`](#entity-claimtimelineentry)] | ✅ |
 
 <a id="type-conversationinternalnotes"></a>
 #### 🧩 Type: `ConversationInternalNotes`
@@ -3743,7 +3744,7 @@ sequenceDiagram
 
 - **Source**: [🎭 `Conversation`](#actor-conversation) · 🛶 V0
 - **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes). 
-- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded), [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation), [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
+- **Fed by**: [⚡ `ConversationOpened`](#event-conversationopened), [⚡ `MessagePosted`](#event-messageposted), [⚡ `MessageTranslationAdded`](#event-messagetranslationadded), [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation), [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved), [⚡ `ReclamationRejected`](#event-reclamationrejected), [⚡ `ReclamationReopened`](#event-reclamationreopened)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -3757,6 +3758,7 @@ sequenceDiagram
 | `admin_invited` | `boolean` | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | — | True once an admin was pulled in by a reasoned escalation (#129). |
 | `escalation_reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | [⚡ `AdminInvitedToConversation`.`reason`](#event-admininvitedtoconversation--reason) | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
 | `muted` | `jsonb` | [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted) | — | current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector. |
+| `claim_events` | `jsonb` | [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved), [⚡ `ReclamationRejected`](#event-reclamationrejected), [⚡ `ReclamationReopened`](#event-reclamationreopened) | — | ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status shows inline in the per-order conversation (§2.5, #155). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -4721,7 +4723,7 @@ Birth of a customer reclamation over a delivered order (id = reclamationId; #153
 
 - **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation)
+- **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4736,15 +4738,16 @@ Birth of a customer reclamation over a delivered order (id = reclamationId; #153
 <a id="event-reclamationresolved"></a>
 #### ⚡ Event: `ReclamationResolved`
 
-A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151).
+A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151). `orderId` rides along (sourced from the aggregate's own fold state, established at ReclamationOpened) so the claim lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155).
 
 - **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation)
+- **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-reclamationresolved--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="event-reclamationresolved--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-reclamationresolved--resolution"></a>`resolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ✅ |  |
 | <a id="event-reclamationresolved--note"></a>`note` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
 | <a id="event-reclamationresolved--refundamount"></a>`refundAmount` | [📦 `Money`](#entity-money) | ⬜ |  |
@@ -4752,32 +4755,34 @@ A reclamation was decided (resolved). Carries the chosen `resolution` and, for a
 <a id="event-reclamationrejected"></a>
 #### ⚡ Event: `ReclamationRejected`
 
-A reclamation was rejected (the claim was declined) with a recorded reason (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).
+A reclamation was rejected (the claim was declined) with a recorded reason (rules.yaml#/ReclamationRejectionCarriesAReason) (#151). `orderId` rides along (from the aggregate's fold state) so the claim lifecycle weaves into the per-order conversation thread, keyed by order (#155).
 
 - **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation)
+- **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-reclamationrejected--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="event-reclamationrejected--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-reclamationrejected--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ✅ |  |
 
 <a id="event-reclamationreopened"></a>
 #### ⚡ Event: `ReclamationReopened`
 
-A previously decided (resolved or rejected) reclamation was reopened for another look (rules.yaml#/OnlyDecidedReclamationsCanBeReopened). `reason` is optional — a reopen need not state why — mirroring the optional command input (there is no reason-required guard on reopen, unlike reject) (#151).
+A previously decided (resolved or rejected) reclamation was reopened for another look (rules.yaml#/OnlyDecidedReclamationsCanBeReopened). `reason` is optional — a reopen need not state why — mirroring the optional command input (there is no reason-required guard on reopen, unlike reject) (#151). `orderId` rides along (from the aggregate's fold state) so the claim lifecycle weaves into the per-order conversation thread, keyed by order (#155).
 
 - **Emitted by**: [🎭 `Reclamation`](#actor-reclamation)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation)
+- **Projected into**: [🗄️ `View_Reclamation`](#view-view_reclamation), [🗄️ `OrderConversation`](#view-orderconversation)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-reclamationreopened--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="event-reclamationreopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-reclamationreopened--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
 
-### 📦 Entities _(14)_
+### 📦 Entities _(15)_
 
 <a id="entity-money"></a>
 #### 📦 Entity: `Money`
@@ -4964,7 +4969,23 @@ A role currently muted in an order conversation (read-model array element; #129)
 | <a id="entity-mutedparticipant--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ✅ |  |
 | <a id="entity-mutedparticipant--until"></a>`until` | `string` _date-time_ | ⬜ |  |
 
-### 🔤 Scalars _(33)_
+<a id="entity-claimtimelineentry"></a>
+#### 📦 Entity: `ClaimTimelineEntry`
+
+One reclamation-lifecycle entry woven into the per-order conversation thread (read-model array element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED); `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/ `refundAmount` from a resolution, `reason` from a rejection or reopen. `at` is the fact's occurred-at. Customer-visible — it is the customer's own claim shown inline in their order thread.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="entity-claimtimelineentry--kind"></a>`kind` | [🔤 `ClaimTimelineEventKind`](#scalar-claimtimelineeventkind) | ✅ |  |
+| <a id="entity-claimtimelineentry--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
+| <a id="entity-claimtimelineentry--category"></a>`category` | [🔤 `ReclamationCategory`](#scalar-reclamationcategory) | ⬜ |  |
+| <a id="entity-claimtimelineentry--requestedresolution"></a>`requestedResolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ⬜ |  |
+| <a id="entity-claimtimelineentry--resolution"></a>`resolution` | [🔤 `ReclamationResolution`](#scalar-reclamationresolution) | ⬜ |  |
+| <a id="entity-claimtimelineentry--refundamount"></a>`refundAmount` | [📦 `Money`](#entity-money) | ⬜ |  |
+| <a id="entity-claimtimelineentry--reason"></a>`reason` | [🔤 `ReclamationReason`](#scalar-reclamationreason) | ⬜ |  |
+| <a id="entity-claimtimelineentry--at"></a>`at` | `string` _date-time_ | ✅ |  |
+
+### 🔤 Scalars _(34)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -5001,6 +5022,7 @@ A role currently muted in an order conversation (read-model array element; #129)
 | <a id="scalar-reclamationdescription"></a>🔤 `ReclamationDescription` | string | Free-text description of the problem the customer is claiming about the order (#151). |
 | <a id="scalar-reclamationreason"></a>🔤 `ReclamationReason` | string | Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).  |
 | <a id="scalar-reclamationstatus"></a>🔤 `ReclamationStatus` | enum (OPEN \| RESOLVED \| REJECTED) | Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).  |
+| <a id="scalar-claimtimelineeventkind"></a>🔤 `ClaimTimelineEventKind` | enum (OPENED \| RESOLVED \| REJECTED \| REOPENED) | Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected) or REOPENED (ReclamationReopened). Lets the order thread show a claim's status inline without copying the reclamation's own read model (§2.5, #155).  |
 
 ### ⛔ Errors _(37)_
 

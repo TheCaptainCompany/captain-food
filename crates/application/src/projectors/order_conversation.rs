@@ -121,6 +121,64 @@ impl OrderConversationCompute for OrderConversationProjector {
         }
         Value::Array(arr)
     }
+
+    /// The claim-lifecycle timeline woven into the order thread (§2.5, #155): appends one
+    /// `ClaimTimelineEntry` per Reclamation* event, with `kind` derived from the event type and the
+    /// per-kind fields carried through (category/requestedResolution on OPENED, resolution/refundAmount/
+    /// note on RESOLVED, reason on REJECTED/REOPENED). `at` is the envelope's occurred_at (ADR-0041). All
+    /// keys are always emitted (nulls where a kind does not carry them) so the read-model deserialization
+    /// is total, mirroring `message_json`/`muted`. The row is keyed by the event's `orderId` upstream, so
+    /// entries land on the right order thread; entries are appended in global `position` order.
+    fn claim_events(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> Value {
+        let mut arr = prev_array(prev.map(|r| &r.claim_events));
+        let entry = match &env.event {
+            DomainEvent::ReclamationOpened(e) => Some(json!({
+                "kind": "OPENED",
+                "reclamationId": e.reclamation_id,
+                "category": e.category,
+                "requestedResolution": e.requested_resolution,
+                "resolution": Value::Null,
+                "refundAmount": Value::Null,
+                "reason": Value::Null,
+                "at": env.occurred_at,
+            })),
+            DomainEvent::ReclamationResolved(e) => Some(json!({
+                "kind": "RESOLVED",
+                "reclamationId": e.reclamation_id,
+                "category": Value::Null,
+                "requestedResolution": Value::Null,
+                "resolution": e.resolution,
+                "refundAmount": e.refund_amount,
+                "reason": e.note,
+                "at": env.occurred_at,
+            })),
+            DomainEvent::ReclamationRejected(e) => Some(json!({
+                "kind": "REJECTED",
+                "reclamationId": e.reclamation_id,
+                "category": Value::Null,
+                "requestedResolution": Value::Null,
+                "resolution": Value::Null,
+                "refundAmount": Value::Null,
+                "reason": e.reason,
+                "at": env.occurred_at,
+            })),
+            DomainEvent::ReclamationReopened(e) => Some(json!({
+                "kind": "REOPENED",
+                "reclamationId": e.reclamation_id,
+                "category": Value::Null,
+                "requestedResolution": Value::Null,
+                "resolution": Value::Null,
+                "refundAmount": Value::Null,
+                "reason": e.reason,
+                "at": env.occurred_at,
+            })),
+            _ => None,
+        };
+        if let Some(entry) = entry {
+            arr.push(entry);
+        }
+        Value::Array(arr)
+    }
 }
 
 #[cfg(test)]
@@ -128,10 +186,12 @@ mod tests {
     use super::*;
     use crate::projections::project_order_conversation;
     use domain::generated::events::{
-        ConversationOpened, MessagePosted, OrderAcceptedByRestaurant,
+        ConversationOpened, MessagePosted, OrderAcceptedByRestaurant, ReclamationOpened,
+        ReclamationResolved,
     };
     use domain::generated::scalars::{
-        ConversationAuthorRole, ConversationMessageId, Locale, MessageBody, OrderId, RestaurantId,
+        ConversationAuthorRole, ConversationMessageId, CustomerId, Locale, MessageBody, OrderId,
+        ReclamationCategory, ReclamationId, ReclamationResolution, RestaurantId,
     };
 
     const NIL: &str = "00000000-0000-0000-0000-000000000000";
@@ -191,5 +251,42 @@ mod tests {
         });
         let row = project_order_conversation(&c, Some(row), &env(accepted)).unwrap();
         assert_eq!(row.status, OrderStatus::ACCEPTED);
+    }
+
+    /// A claim opened then resolved appends two `claim_events` entries, in order, on the order thread
+    /// (§2.5, #155). The Reclamation* events are keyed onto the order row by the worker; here we drive the
+    /// projector directly to prove the fold appends and preserves order.
+    #[test]
+    fn claim_lifecycle_weaves_into_the_thread() {
+        let c = OrderConversationProjector;
+        let row = project_order_conversation(&c, None, &env(opened())).unwrap();
+        assert_eq!(row.claim_events.as_array().unwrap().len(), 0);
+
+        let opened_claim = DomainEvent::ReclamationOpened(ReclamationOpened {
+            reclamation_id: ReclamationId(uuid::Uuid::new_v4()),
+            order_id: OrderId(NIL.parse().unwrap()),
+            customer_id: CustomerId(NIL.parse().unwrap()),
+            restaurant_id: RestaurantId(NIL.parse().unwrap()),
+            category: ReclamationCategory::MISSING_ITEM,
+            description: domain::generated::scalars::ReclamationDescription("Drinks missing.".into()),
+            requested_resolution: Some(ReclamationResolution::FULL_REFUND),
+        });
+        let row = project_order_conversation(&c, Some(row), &env(opened_claim)).unwrap();
+
+        let resolved_claim = DomainEvent::ReclamationResolved(ReclamationResolved {
+            reclamation_id: ReclamationId(uuid::Uuid::new_v4()),
+            order_id: OrderId(NIL.parse().unwrap()),
+            resolution: ReclamationResolution::FULL_REFUND,
+            note: None,
+            refund_amount: None,
+        });
+        let row = project_order_conversation(&c, Some(row), &env(resolved_claim)).unwrap();
+
+        let claims = row.claim_events.as_array().unwrap();
+        assert_eq!(claims.len(), 2);
+        assert_eq!(claims[0].get("kind").unwrap(), "OPENED");
+        assert_eq!(claims[0].get("requestedResolution").unwrap(), "FULL_REFUND");
+        assert_eq!(claims[1].get("kind").unwrap(), "RESOLVED");
+        assert_eq!(claims[1].get("resolution").unwrap(), "FULL_REFUND");
     }
 }

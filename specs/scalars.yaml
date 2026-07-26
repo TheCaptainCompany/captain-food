@@ -847,3 +847,12 @@ ReclamationStatus:
     OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on
     ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in
     `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).
+
+ClaimTimelineEventKind:
+  type: string
+  enum: [OPENED, RESOLVED, REJECTED, REOPENED]
+  description: >
+    Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order
+    conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED
+    (ReclamationRejected) or REOPENED (ReclamationReopened). Lets the order thread show a claim's status
+    inline without copying the reclamation's own read model (§2.5, #155).

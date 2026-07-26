@@ -709,3 +709,13 @@ pub enum ReclamationStatus {
     RESOLVED,
     REJECTED,
 }
+
+/// Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected) or REOPENED (ReclamationReopened). Lets the order thread show a claim's status inline without copying the reclamation's own read model (§2.5, #155).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ClaimTimelineEventKind {
+    OPENED,
+    RESOLVED,
+    REJECTED,
+    REOPENED,
+}

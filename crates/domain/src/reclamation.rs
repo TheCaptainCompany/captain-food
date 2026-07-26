@@ -11,6 +11,7 @@
 //! order-eligibility are cross-aggregate/temporal invariants enforced in the application layer, not here.
 
 use crate::generated::events::DomainEvent;
+use crate::generated::scalars::OrderId;
 
 /// The lifecycle state of a reclamation. A PLAIN domain enum (not a generated scalar): this slice adds
 /// no `ReclamationStatus` scalar — the status is derived and belongs with the read model (#154).
@@ -30,6 +31,10 @@ pub enum ReclamationStatus {
 pub struct ReclamationState {
     /// Lifecycle status — OPEN on birth, RESOLVED/REJECTED once decided, OPEN again after a reopen.
     pub status: ReclamationStatus,
+    /// The order this claim is about, established at `ReclamationOpened` (#153). Carried in state so the
+    /// decision commands can stamp it onto their emitted events — which lets the claim lifecycle be woven
+    /// into the per-order conversation thread, keyed by order (§2.5, #155), without the client re-supplying it.
+    pub order_id: OrderId,
 }
 
 /// Fold a Reclamation stream (events in version order) into its current state. `None` ⇔ the stream has
@@ -41,8 +46,10 @@ pub fn fold(events: &[DomainEvent]) -> Option<ReclamationState> {
 /// Apply one event — a pure transition, total over the whole event union.
 fn apply(state: Option<ReclamationState>, event: &DomainEvent) -> Option<ReclamationState> {
     match event {
-        // The birth fact: establishes the reclamation OPEN.
-        DomainEvent::ReclamationOpened(_) => Some(ReclamationState { status: ReclamationStatus::OPEN }),
+        // The birth fact: establishes the reclamation OPEN, capturing the order it is about.
+        DomainEvent::ReclamationOpened(e) => {
+            Some(ReclamationState { status: ReclamationStatus::OPEN, order_id: e.order_id })
+        }
         // A decision was recorded: the reclamation is RESOLVED. Impossible without a birth.
         DomainEvent::ReclamationResolved(_) => {
             let mut s = state?;
@@ -91,6 +98,7 @@ mod tests {
     fn resolved() -> DomainEvent {
         DomainEvent::ReclamationResolved(ReclamationResolved {
             reclamation_id: ReclamationId(uuid::Uuid::nil()),
+            order_id: OrderId(uuid::Uuid::nil()),
             resolution: ReclamationResolution::FULL_REFUND,
             note: None,
             refund_amount: None,
@@ -99,12 +107,14 @@ mod tests {
     fn rejected() -> DomainEvent {
         DomainEvent::ReclamationRejected(ReclamationRejected {
             reclamation_id: ReclamationId(uuid::Uuid::nil()),
+            order_id: OrderId(uuid::Uuid::nil()),
             reason: ReclamationReason("All items were delivered.".into()),
         })
     }
     fn reopened() -> DomainEvent {
         DomainEvent::ReclamationReopened(ReclamationReopened {
             reclamation_id: ReclamationId(uuid::Uuid::nil()),
+            order_id: OrderId(uuid::Uuid::nil()),
             reason: None,
         })
     }

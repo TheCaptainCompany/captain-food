@@ -963,29 +963,32 @@ pub struct ReclamationOpened {
     pub requested_resolution: Option<ReclamationResolution>,
 }
 
-/// A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151).
+/// A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded decision. The aggregate records the DECISION only; it performs no money-move (#151). `orderId` rides along (sourced from the aggregate's own fold state, established at ReclamationOpened) so the claim lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReclamationResolved {
     pub reclamation_id: ReclamationId,
+    pub order_id: OrderId,
     pub resolution: ReclamationResolution,
     pub note: Option<ReclamationReason>,
     pub refund_amount: Option<Money>,
 }
 
-/// A reclamation was rejected (the claim was declined) with a recorded reason (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).
+/// A reclamation was rejected (the claim was declined) with a recorded reason (rules.yaml#/ReclamationRejectionCarriesAReason) (#151). `orderId` rides along (from the aggregate's fold state) so the claim lifecycle weaves into the per-order conversation thread, keyed by order (#155).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReclamationRejected {
     pub reclamation_id: ReclamationId,
+    pub order_id: OrderId,
     pub reason: ReclamationReason,
 }
 
-/// A previously decided (resolved or rejected) reclamation was reopened for another look (rules.yaml#/OnlyDecidedReclamationsCanBeReopened). `reason` is optional — a reopen need not state why — mirroring the optional command input (there is no reason-required guard on reopen, unlike reject) (#151).
+/// A previously decided (resolved or rejected) reclamation was reopened for another look (rules.yaml#/OnlyDecidedReclamationsCanBeReopened). `reason` is optional — a reopen need not state why — mirroring the optional command input (there is no reason-required guard on reopen, unlike reject) (#151). `orderId` rides along (from the aggregate's fold state) so the claim lifecycle weaves into the per-order conversation thread, keyed by order (#155).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReclamationReopened {
     pub reclamation_id: ReclamationId,
+    pub order_id: OrderId,
     pub reason: Option<ReclamationReason>,
 }
 

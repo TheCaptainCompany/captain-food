@@ -1,11 +1,11 @@
-//! The 12-column `orderconversation` table ↔ [`OrderConversationRow`] mapping, both directions —
+//! The 13-column `orderconversation` table ↔ [`OrderConversationRow`] mapping, both directions —
 //! shared by the read repository (decode) and the projection worker (load current state + upsert the
-//! folded row). (#131, epic #129.)
+//! folded row). (#131, epic #129; `claim_events` woven in per §2.5, #155.)
 //!
 //! Column conventions (ADR-0037/0040): `status` is an INTEGER ordinal (see [`crate::persistence::enum_sql`]);
-//! `messages`/`internal_notes`/`muted` are NOT-NULL jsonb columns carrying `serde_json::Value` arrays;
-//! `escalation_reason` is a nullable TEXT column widened into the `EscalationReason` newtype;
-//! `customer_chat_enabled`/`admin_invited` are BOOLEAN columns.
+//! `messages`/`internal_notes`/`muted`/`claim_events` are NOT-NULL jsonb columns carrying
+//! `serde_json::Value` arrays; `escalation_reason` is a nullable TEXT column widened into the
+//! `EscalationReason` newtype; `customer_chat_enabled`/`admin_invited` are BOOLEAN columns.
 
 use application::queries::OrderConversationRow;
 use domain::generated::scalars::{EscalationReason, OrderId, RestaurantId};
@@ -18,7 +18,8 @@ use super::enum_sql::EnumOrd;
 
 /// The full column list, in `OrderConversationRow` field order — keep SELECTs and the upsert in sync with it.
 pub(crate) const COLUMNS: &str = "order_id, restaurant_id, customer_chat_enabled, status, messages, \
-     internal_notes, opened_at, admin_invited, escalation_reason, muted, created_at, updated_at";
+     internal_notes, opened_at, admin_invited, escalation_reason, muted, created_at, updated_at, \
+     claim_events";
 
 /// Decode one `orderconversation` row into the generated read-model DTO.
 pub(crate) fn decode(row: &PgRow) -> Result<OrderConversationRow, DomainError> {
@@ -38,6 +39,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<OrderConversationRow, DomainError> {
         muted: row.try_get("muted").map_err(db_err)?,
         created_at: row.try_get("created_at").map_err(db_err)?,
         updated_at: row.try_get("updated_at").map_err(db_err)?,
+        claim_events: row.try_get("claim_events").map_err(db_err)?,
     })
 }
 
@@ -52,7 +54,7 @@ pub async fn load(pool: &PgPool, id: OrderId) -> Result<Option<OrderConversation
 pub async fn upsert(pool: &PgPool, row: &OrderConversationRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO orderconversation ({COLUMNS}) VALUES \
-         ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) \
+         ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
          ON CONFLICT (order_id) DO UPDATE SET \
          restaurant_id = EXCLUDED.restaurant_id, \
          customer_chat_enabled = EXCLUDED.customer_chat_enabled, \
@@ -64,7 +66,8 @@ pub async fn upsert(pool: &PgPool, row: &OrderConversationRow) -> Result<(), Dom
          escalation_reason = EXCLUDED.escalation_reason, \
          muted = EXCLUDED.muted, \
          created_at = EXCLUDED.created_at, \
-         updated_at = EXCLUDED.updated_at"
+         updated_at = EXCLUDED.updated_at, \
+         claim_events = EXCLUDED.claim_events"
     );
     sqlx::query(&sql)
         .bind(row.order_id.0)
@@ -79,6 +82,7 @@ pub async fn upsert(pool: &PgPool, row: &OrderConversationRow) -> Result<(), Dom
         .bind(row.muted.clone())
         .bind(row.created_at)
         .bind(row.updated_at)
+        .bind(row.claim_events.clone())
         .execute(pool)
         .await
         .map_err(db_err)?;
