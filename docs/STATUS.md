@@ -1,7 +1,46 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-25. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-26. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 🔎 **2026-07-26 — full functional + technical architecture review; 32 issues + 5 epics + 5 proposals
+> filed.** A critical review of the whole system (domain, money, authorization, catalog, delivery,
+> event store, runtime) against `main` at `835da95`. The engineering substrate reviewed **well** —
+> event log, typed rejections, command-journal idempotency, webhook signature verification (all six
+> adapters, fail-closed), server-side price authority, 560 tests, a real prod smoke moving Stripe test
+> money end to end. The gaps cluster in three places, and they are structural rather than unpolished:
+> **(1) the operational loop does not close** — no notification of any kind exists, so a paid order
+> produces no signal anywhere and the back office declares no subscription; nothing times out an
+> unaccepted order; there is no order detail screen and no catalog UI. **(2) the money model is a
+> placeholder** — `pricing.rs` hard-zeroes every fee/split leg (0% take, no delivery fee), there is no
+> Stripe Connect or payout destination of any kind, VAT is stored and never computed, and no invoice
+> exists. **(3) authorization is per-role but not per-instance or per-tenant** — already tracked
+> read-side by [#144](https://github.com/TheCaptainCompany/captain-food/issues/144); the **write** half
+> ([#178](https://github.com/TheCaptainCompany/captain-food/issues/178)) was untracked, and restaurant
+> A can accept restaurant B's orders today. Plus three runtime bugs: the projection/saga drains can
+> **permanently skip events** (`position` is allocated before commit, no visibility guard,
+> [#189](https://github.com/TheCaptainCompany/captain-food/issues/189)); `/projector` lag is computed
+> as `head - head` so it is **structurally always 0** ([#190](https://github.com/TheCaptainCompany/captain-food/issues/190));
+> and poison events advance the checkpoint with **no reprojection tooling** to repair them. Two
+> compliance blockers with no owner: **allergens do not exist** anywhere in the model (EU FIC
+> 1169/2011 governs distance selling, [#184](https://github.com/TheCaptainCompany/captain-food/issues/184))
+> and **GDPR erasure has no technical answer** for PII in the immutable log
+> ([#194](https://github.com/TheCaptainCompany/captain-food/issues/194) — [#18](https://github.com/TheCaptainCompany/captain-food/issues/18)
+> deliberately excluded it). One **meta-finding worth acting on first**: `make validate` proves the API
+> answers the UI on the read side, but never checks that a screen action's `variables` satisfy the
+> mutation's `required` fields — which is exactly why four back-office buttons cannot submit
+> (reject/cancel omit `reason`; both refund buttons send a `refundId` neither command accepts) while
+> the gate reports 0 errors ([#168](https://github.com/TheCaptainCompany/captain-food/issues/168),
+> [#169](https://github.com/TheCaptainCompany/captain-food/issues/169)). Filed as
+> [#166](https://github.com/TheCaptainCompany/captain-food/issues/166)–[#197](https://github.com/TheCaptainCompany/captain-food/issues/197)
+> with five epics ([#198](https://github.com/TheCaptainCompany/captain-food/issues/198) operational
+> safety · [#199](https://github.com/TheCaptainCompany/captain-food/issues/199) economics ·
+> [#200](https://github.com/TheCaptainCompany/captain-food/issues/200) catalog ·
+> [#201](https://github.com/TheCaptainCompany/captain-food/issues/201) event log ·
+> [#202](https://github.com/TheCaptainCompany/captain-food/issues/202) observability/scale) and five
+> proposals in [docs/proposals/](proposals/) carrying the option analysis. **Prioritisation is a
+> product-owner decision in the GitHub Project — nothing here is self-started.** Recurring check: a
+> daily 07:00 Europe/Paris routine re-runs this review against `main` and reports only *new* drift.
 
 > ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging:
 > functional customer send + the restaurant staff screen.** Two more green PRs finish the usable loop.
