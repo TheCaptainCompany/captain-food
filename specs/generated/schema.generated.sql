@@ -156,6 +156,10 @@ INSERT INTO ref_message_visibility (value, sort_order) VALUES ('PUBLIC',0),('INT
 CREATE TABLE ref_conversation_author_role(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_conversation_author_role (value, sort_order) VALUES ('CUSTOMER',0),('RESTAURANT',1),('RIDER',2),('ADMIN',3);
 
+-- ScopeType
+CREATE TABLE ref_scope_type(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_scope_type (value, sort_order) VALUES ('ORDER',0),('RESTAURANT',1);
+
 CREATE TABLE domain_events (
   position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   id UUID NOT NULL UNIQUE,
@@ -585,6 +589,19 @@ CREATE TABLE OrderConversation (
   updated_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX ON OrderConversation (restaurant_id);
+
+CREATE TABLE ScopeMembership (
+  membership_id UUID PRIMARY KEY,
+  scope_type INTEGER NOT NULL,
+  scope_id UUID NOT NULL,
+  principal_type INTEGER NOT NULL,
+  principal_id UUID NOT NULL,
+  granted_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON ScopeMembership (principal_type, principal_id, scope_type);
+CREATE INDEX ON ScopeMembership (scope_type, scope_id);
 
 -- all_events(): the entire log in global order — the SQL equivalent of EventStoreDB's $all stream.
 -- Inspection/replay only (projections track a checkpoint on position); never a read path.

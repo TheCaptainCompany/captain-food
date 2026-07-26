@@ -800,3 +800,17 @@ TranslatedText:
   description: >
     A conversation message body translated into one target locale — the cached (persisted) translation
     reused across readers (translate once, reuse; #129).
+
+# --- Authorization scopes (#144, PROP-20260725-185140) ---
+
+ScopeType:
+  type: string
+  enum:
+    - ORDER       # one order and everything hanging off it (conversation, attachments)
+    - RESTAURANT  # one restaurant location (back-office reads, restaurant-owned documents)
+  description: >
+    The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names
+    exactly one protected instance: `ScopeMembership` records who belongs to it, and the `files` row
+    carries the pair as its access binding. Read-side per-instance authorization asks one question of
+    this vocabulary — "is this principal a member of (scopeType, scopeId)?" — for every role and every
+    surface, so the guard never learns what an order or a restaurant is.

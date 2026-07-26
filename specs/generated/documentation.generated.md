@@ -982,7 +982,7 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3495,7 +3495,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(5)_
+### 🗄️ Views (read models) _(6)_
 
 <a id="view-view_deliverysatisfaction"></a>
 #### 🗄️ View: `View_DeliverySatisfaction`
@@ -3628,6 +3628,25 @@ sequenceDiagram
 | `admin_invited` | `boolean` | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | — | True once an admin was pulled in by a reasoned escalation (#129). |
 | `escalation_reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | [⚡ `AdminInvitedToConversation`.`reason`](#event-admininvitedtoconversation--reason) | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
 | `muted` | `jsonb` | [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted) | — | current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+<a id="view-scopemembership"></a>
+#### 🗄️ View: `ScopeMembership`
+
+- **Source**: [🎭 `Order`](#actor-order) · 🛶 V0 · 🔒 internal
+- **Note**: WHO may see WHICH protected instance (#144). One row per (scope, principal): the single index every read-side authorization question resolves against, for every role and every surface — `SELECT EXISTS(... WHERE membership_id = $1)`. The guard never learns what an order is, so a new ScopeType is a projector rule rather than new code in the guard. Adopting this index replaced four separate mechanisms (PROP-20260725-185140 §3.4): per-role table/column resolution, the restaurant -> account hop, an `active` predicate on rider membership, and multi-rider-per-order special cases. Reassignment needs no special handling: it is a REVOKE followed by a GRANT, so the previous rider loses access the moment the new one is recorded. SAFETY: this is an ACL cache with asymmetric failure modes. A MISSING row denies (visible, safe); a STALE row grants (a silent breach). The revoke rules are therefore more safety-critical than the grants, and the projector errs toward deleting. Drift is repairable by replay, which is the property that makes the cache acceptable at all. 
+- **Rules**: GRANT on OrderPlaced: the order's customer, its restaurant, and that restaurant's account. These are PERMANENT — order history must stay readable forever (product-owner decision, 2026-07-25). GRANT on DeliveryAcceptedByRider: the accepting rider, resolved to its order via the delivery job (the event carries only deliveryJobId). REVOKE on DeliveryCancelled / DeliveryDispatchFailed: the rider row for that job's order. The ONLY revoke in V0 — riders are the only membership that ends. GRANT on RestaurantRegistered: the restaurant itself and its owning account, scope_type RESTAURANT. ADMIN holds NO rows — the guard short-circuits on the role. Storing them would mean a row per admin per instance, unbounded and pointless. membership_id is UUIDv5 over (scope_type, scope_id, principal_type, principal_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern). The revoke events (DeliveryCancelled / DeliveryDispatchFailed) map `from` NO column, because they DELETE a row rather than write one — so the validator reports the same `view-fedby-unused` design-hole warning it already reports for View_RestaurantAccount's RestaurantAccountDeleted tombstone. Intentional, not drift. The built-in `tombstone:` marker does not fit: it is singular and drops the row by the view's own pk, whereas a revoke must resolve deliveryJobId -> orderId and then derive the RIDER principal's membership_id.
+- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `membership_id` | `uuid` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered) | PK | UUIDv5(scope_type|scope_id|principal_type|principal_id) — derived, never random, so a replayed grant upserts onto itself. |
+| `scope_type` | [🔤 `ScopeType`](#scalar-scopetype) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `RestaurantRegistered`](#event-restaurantregistered) | — | Which KIND of instance — ORDER or RESTAURANT. Constant per grant rule, not read from a payload. |
+| `scope_id` | `uuid` | [⚡ `OrderPlaced`.`orderId`](#event-orderplaced--orderid), [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid) | — | The protected instance: an OrderId or a RestaurantId. Rider grants resolve it from the delivery job, whose event carries only deliveryJobId. |
+| `principal_type` | [🔤 `UserType`](#scalar-usertype) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered) | — | In the key deliberately: a rider who is ALSO a customer must hold two distinct memberships, or their customer row would let them fetch rider-audience data.  |
+| `principal_id` | `uuid` | [⚡ `OrderPlaced`.`customerId`](#event-orderplaced--customerid), [⚡ `OrderPlaced`.`restaurantId`](#event-orderplaced--restaurantid), [⚡ `DeliveryAcceptedByRider`.`riderId`](#event-deliveryacceptedbyrider--riderid), [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid) | — | The DOMAIN id (customerId / restaurantId / restaurantAccountId / riderId), never the auth subject — the sub->domain bridge happens once per request at the edge. |
+| `granted_at` | `timestamptz` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered) | — | When the membership was recorded — audit trail for 'since when could this principal see this?'. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -4115,7 +4134,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 
 - **Emitted by**: [🎭 `Order`](#actor-order), [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Consumed by**: [🎭 `Order`](#actor-order)
-- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation)
+- **Projected into**: [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `OrderConversation`](#view-orderconversation), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4709,7 +4728,7 @@ A role currently muted in an order conversation (read-model array element; #129)
 | <a id="entity-mutedparticipant--reason"></a>`reason` | [🔤 `MuteReason`](#scalar-mutereason) | ✅ |  |
 | <a id="entity-mutedparticipant--until"></a>`until` | `string` _date-time_ | ⬜ |  |
 
-### 🔤 Scalars _(27)_
+### 🔤 Scalars _(29)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -4732,6 +4751,7 @@ A role currently muted in an order conversation (read-model array element; #129)
 | <a id="scalar-paymentstatus"></a>🔤 `PaymentStatus` | enum (PENDING \| CAPTURED \| FAILED \| REFUNDED) | Order payment state, folded from Stripe facts (PaymentIntentCreated/Captured/Failed/Refunded). |
 | <a id="scalar-refundstatus"></a>🔤 `RefundStatus` | enum (REQUESTED \| APPROVED \| DENIED \| REFUNDED) | Lifecycle of a refund request as read models fold it from the domain facts (View_PendingRefunds): REQUESTED on RefundOpened (awaiting a restaurant/admin decision), APPROVED on RefundApproved (Stripe refund requested), DENIED on RefundDenied, REFUNDED once Stripe settles (PaymentRefunded). Distinct from RefundProcessStatus, the RefundProcess state-table run status.  |
 | <a id="scalar-comparisonbasis"></a>🔤 `ComparisonBasis` | enum (ESTIMATED \| REAL) | Provenance of an Uber Eats comparison amount: REAL (the restaurant's own Uber prices, shared via HubRise after explicit opt-in — ADR-0023) or ESTIMATED (coefficient-based, always labelled — ADR-0024).  |
+| <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 | <a id="scalar-conversationmessageid"></a>🔤 `ConversationMessageId` | string _uuid_ | Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the command_journal submission id); this identifies the business message itself (#129).  |
 | <a id="scalar-messagevisibility"></a>🔤 `MessageVisibility` | enum (PUBLIC \| INTERNAL) | Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).  |
 | <a id="scalar-conversationauthorrole"></a>🔤 `ConversationAuthorRole` | enum (CUSTOMER \| RESTAURANT \| RIDER \| ADMIN) | Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).  |
@@ -4740,6 +4760,7 @@ A role currently muted in an order conversation (read-model array element; #129)
 | <a id="scalar-mutereason"></a>🔤 `MuteReason` | string | The REQUIRED justification recorded when a participant is muted in an order conversation; a mute without one is rejected (rules.yaml#/MuteRequiresAReason) (#129).  |
 | <a id="scalar-escalationreason"></a>🔤 `EscalationReason` | string | Why an admin was pulled into an order conversation — the reason recorded when the restaurant or rider escalates the thread (rules.yaml#/AdminJoinsByReasonedEscalation) (#129).  |
 | <a id="scalar-translatedtext"></a>🔤 `TranslatedText` | string | A conversation message body translated into one target locale — the cached (persisted) translation reused across readers (translate once, reuse; #129).  |
+| <a id="scalar-scopetype"></a>🔤 `ScopeType` | enum (ORDER \| RESTAURANT) | The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names exactly one protected instance: `ScopeMembership` records who belongs to it, and the `files` row carries the pair as its access binding. Read-side per-instance authorization asks one question of this vocabulary — "is this principal a member of (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an order or a restaurant is.  |
 
 ### ⛔ Errors _(31)_
 
@@ -7449,7 +7470,7 @@ An independent Captain rider accepted the delivery job.
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -7492,7 +7513,7 @@ A delivery job was cancelled before delivery (e.g. by the restaurant or admin).
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -7506,7 +7527,7 @@ Dispatch failed terminally: the delivery partner declined the job at every offer
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
 - **Consumed by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
-- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -8681,7 +8702,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(41)_
+### 🔤 Scalars _(40)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -8725,7 +8746,6 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-restaurantdispatchmode"></a>🔤 `RestaurantDispatchMode` | enum (CAPTAIN \| RESTAURANT) | Who is responsible for fulfilling a restaurant's deliveries (restaurant-scoped config, resolved at runtime; #60). Default CAPTAIN keeps today's behaviour. |
 | <a id="scalar-deliverychannelkind"></a>🔤 `DeliveryChannelKind` | enum (POOL \| PARTNER) | Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60). |
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
-| <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 
 ### ⛔ Errors _(10)_
 
