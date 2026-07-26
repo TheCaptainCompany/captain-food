@@ -30,6 +30,16 @@ chose what we chose.
 - Body = the proposal as presented for approval: context, the recommended approach, **alternatives
   considered and why they lost**, scope decisions the approver made (e.g. AskUserQuestion answers),
   and the verification plan.
+- **Every proposal MUST include (product-owner directive, 2026-07-26):**
+  - **Screen mockups — one per use case** (low-fidelity ASCII wireframes are enough): what each
+    actor sees and which command/query the controls map to. Fixes the shape before the visual design.
+  - **Sequence diagrams — one per load-bearing flow** (mermaid), drawn faithfully to the hexagonal
+    architecture (the aggregate/PM *decides* — pure — saved through the `Repository`, appended by
+    `PgEventStore`; docs/claude/mermaid.md). Show the acceptance-first + request/report splits where they apply.
+  - **Per-option pros / cons for every decision** the proposal surfaces — each option gets its
+    trade-offs (a small table is ideal), and the chosen option is marked. Never present a bare
+    "A vs B" without the trade-offs that justify the pick.
+  - PROP-20260726-013207 (reclamation) is the reference example for all three.
 - The file is a HISTORICAL RECORD once approved — do not rewrite it to match what was eventually
   built; divergences are noted in the realizing PR/ADR/STATUS instead (the honest-residuals rule).
 - Plan-mode flow: the plan written for approval IS the proposal — commit it here verbatim when

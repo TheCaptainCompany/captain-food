@@ -121,6 +121,10 @@ mutation/query is reached by a story step, and every test↔rule link holds both
   approver's scope choices, status header linking the realizing PR/ADR. Approved proposals are
   historical records: never rewritten to match what was built; divergences go in the realizing
   change. A session-local plan file is NOT a substitute — the rationale must survive the session.
+  **Every proposal MUST include** (product-owner directive, 2026-07-26): **per-use-case screen
+  mockups**, **per-flow sequence diagrams** (mermaid, hexagonal-faithful), and **per-option pros/cons**
+  for every decision it surfaces (a bare "A vs B" without trade-offs is incomplete) — see
+  [docs/proposals/README.md](docs/proposals/README.md); `PROP-20260726-013207` is the reference example.
   **Every proposal has a tracking issue** (ADR-20260724-143000): create it before/with the proposal
   if missing, name it in the header, keep the two in step — an issue-less proposal is invisible to
   the prioritised backlog and gets lost.

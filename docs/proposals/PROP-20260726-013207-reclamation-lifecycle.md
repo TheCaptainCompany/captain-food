@@ -106,6 +106,255 @@ already in — no second inbox.
 (`PROP-20260725-120055`), which already reserves the `RECLAMATION` kind with a **180-day** retention
 (a claim/chargeback can run months). No bespoke storage here.
 
+## 2b. Sequence diagrams
+
+The load-bearing flows, drawn faithfully to the hexagonal architecture (the aggregate/PM **decides** the
+facts — pure, no I/O — saved **through the `Repository`**, appended by its one adapter `PgEventStore`;
+ADR-20260719-031136 / docs/claude/mermaid.md).
+
+**(a) Open a claim — acceptance-first; folds into the queue + the order thread.** The mutation journals
+the command and returns immediately (ADR-20260720-015500); the outcome is polled via `operationStatus`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Customer client
+    box edge adapter
+        participant BFF as BFF GraphQL (/customer)
+    end
+    box application core
+        participant REC as Reclamation aggregate (decides, pure)
+        participant REPO as Repository
+    end
+    box infrastructure adapter
+        participant PG as PgEventStore (domain_events)
+    end
+    U->>BFF: openReclamation(order, category, description, evidence?) with X-SESSION-ID
+    BFF->>BFF: journal command (command_journal, idempotent)
+    BFF-->>U: MutationAcceptance(reclamationId, ACCEPTED)
+    Note over BFF,REC: async handling (acceptance-first)
+    BFF->>REC: handle OpenReclamation
+    REC->>REC: id unused (+ app layer: order eligible, within 14 days)
+    REC-->>REPO: save(ReclamationOpened)
+    REPO->>PG: append ReclamationOpened
+    Note over PG: projected into the claims queue AND woven into the order conversation timeline
+    U->>BFF: operationStatus(reclamationId)
+    BFF-->>U: SUCCEEDED
+```
+
+**(b) Resolve as refund — REUSE the existing refund path; request vs report split.** The claim decision
+triggers the refund command we already have; Stripe **reports** the settled refund inbound.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor R as Restaurant/admin client
+    box edge adapter
+        participant BFF as BFF GraphQL
+    end
+    box application core
+        participant REC as Reclamation aggregate
+        participant PM as ReclamationProcess (saga)
+        participant RF as Refund path (existing)
+        participant REPO as Repository
+    end
+    box infrastructure adapters
+        participant PG as PgEventStore
+        participant ST as Stripe (external)
+    end
+    R->>BFF: resolveReclamation(id, FULL_REFUND or PARTIAL_REFUND amount)
+    BFF->>REC: handle ResolveReclamation
+    REC-->>REPO: save(ReclamationResolved with resolution and amount)
+    REPO->>PG: append
+    Note over PM: reacts to ReclamationResolved(refund)
+    PM->>RF: drive the EXISTING refund command (the restaurant decision IS the approval)
+    RF-->>REPO: save(RefundApproved)
+    REPO->>PG: append
+    Note over RF,ST: request vs report split (CLAUDE.md)
+    ST->>BFF: webhook PaymentRefunded (inbound fact)
+    BFF->>RF: record inbound PaymentRefunded
+    RF-->>REPO: save(PaymentRefunded)
+    REPO->>PG: append
+```
+
+**(c) Resolve as replacement — a no-charge replacement order ([#159](https://github.com/TheCaptainCompany/captain-food/issues/159)).**
+The saga places a new order linked to the original, at no charge, which enters normal fulfilment.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor R as Restaurant/admin client
+    box edge adapter
+        participant BFF as BFF GraphQL
+    end
+    box application core
+        participant REC as Reclamation aggregate
+        participant PM as ReclamationProcess (saga)
+        participant ORD as Order aggregate (new)
+        participant REPO as Repository
+    end
+    box infrastructure adapter
+        participant PG as PgEventStore
+    end
+    R->>BFF: resolveReclamation(id, REPLACEMENT)
+    BFF->>REC: handle ResolveReclamation
+    REC-->>REPO: save(ReclamationResolved REPLACEMENT)
+    REPO->>PG: append
+    Note over PM: reacts to ReclamationResolved(REPLACEMENT)
+    PM->>ORD: place a NO-CHARGE replacement order (same items, replacementOf = original)
+    ORD-->>REPO: save(OrderPlaced without payment)
+    REPO->>PG: append
+    Note over ORD: enters the normal fulfilment + dispatch flow
+```
+
+**(d) Resolve as goodwill credit — grant to the customer balance, applied later at checkout
+([#158](https://github.com/TheCaptainCompany/captain-food/issues/158)).**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor R as Restaurant/admin client
+    actor C as Customer (later checkout)
+    box edge adapter
+        participant BFF as BFF GraphQL
+    end
+    box application core
+        participant REC as Reclamation aggregate
+        participant PM as ReclamationProcess (saga)
+        participant CR as CustomerCredit ledger
+        participant REPO as Repository
+    end
+    box infrastructure adapter
+        participant PG as PgEventStore
+    end
+    R->>BFF: resolveReclamation(id, GOODWILL_CREDIT amount)
+    BFF->>REC: handle ResolveReclamation
+    REC-->>REPO: save(ReclamationResolved GOODWILL_CREDIT amount)
+    REPO->>PG: append
+    Note over PM: reacts to ReclamationResolved(GOODWILL_CREDIT)
+    PM->>CR: grant credit to the customer balance
+    CR-->>REPO: save(CustomerCreditGranted)
+    REPO->>PG: append
+    Note over C,CR: later — at checkout the available balance reduces the PaymentIntent
+    C->>BFF: placeOrder (credit applied)
+    BFF->>CR: consume credit
+    CR-->>REPO: save(CustomerCreditConsumed)
+    REPO->>PG: append
+```
+
+**(e) Reject, then reopen within the 14-day window.**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor R as Restaurant/admin client
+    actor C as Customer client
+    box edge adapter
+        participant BFF as BFF GraphQL
+    end
+    box application core
+        participant REC as Reclamation aggregate
+        participant REPO as Repository
+    end
+    box infrastructure adapter
+        participant PG as PgEventStore
+    end
+    R->>BFF: rejectReclamation(id, reason)
+    BFF->>REC: handle RejectReclamation
+    REC->>REC: require OPEN and a non-empty reason
+    REC-->>REPO: save(ReclamationRejected)
+    REPO->>PG: append
+    Note over C: the rejection shows in the order conversation thread
+    C->>BFF: reopenReclamation(id, reason)
+    BFF->>REC: handle ReopenReclamation
+    REC->>REC: require decided (+ app layer: within 14 days)
+    REC-->>REPO: save(ReclamationReopened)
+    REPO->>PG: append
+```
+
+## 2c. Screen mockups (wireframes)
+
+Low-fidelity, per use case — to fix the shape, not the visual design. Rendered by the SDUI component
+vocabulary; only a category picker and a claims-list card are plausibly new component kinds.
+
+**Customer — open a claim** (from an order). Category + description + evidence photo (#134) + the
+optional *requested* resolution.
+
+```
++-------------------------------------------+
+|  <  Back        Report a problem - A1B2    |
++-------------------------------------------+
+|  What went wrong?                          |
+|   ( ) Missing item    ( ) Wrong item       |   <- ReclamationCategory
+|   ( ) Quality         ( ) Late delivery    |
+|   ( ) Damaged         ( ) Not delivered    |
+|   (o) Other                                |
+|                                            |
+|  Tell us more                              |
+|  [ The drinks were missing____________ ]   |   <- description
+|                                            |
+|  [ + Add a photo ]      [ photo ]          |   <- RECLAMATION evidence (#134)
+|                                            |
+|  What would resolve this? (optional)       |
+|   ( ) Refund   ( ) Replacement  ( ) Credit |   <- requestedResolution (the ask)
+|                                            |
+|                        [ Submit claim ]    |   -> openReclamation
++-------------------------------------------+
+```
+
+**Customer — my claims** (list) and a **claim detail** (deep-links into the order thread).
+
+```
++-------------------------------------------+        +-------------------------------------------+
+|  My claims                                 |        |  <  Claim - order A1B2        [ OPEN ]     |
++-------------------------------------------+        +-------------------------------------------+
+|  A1B2  Chez Marco        [ OPEN ]          |        |  Missing item                             |
+|  Missing item - 2h ago                     |        |  "The drinks were missing"   [ photo ]    |
+|  ---------------------------------------   |  tap-> |   * Opened              14:02             |   <- woven into the
+|  9F3C  Sushi Bar     [ RESOLVED ]          |        |   Chez Marco            14:20             |      order thread (#129)
+|  Quality - refunded 4.50 EUR               |        |   "So sorry - refunding the drinks"       |
+|  ---------------------------------------   |        |                                           |
+|  77KK  Pizza Co      [ REJECTED ]          |        |  [ Open the conversation -> ]             |   -> #129 thread
+|  Late delivery       [ Reopen ]            |        |                                           |
++-------------------------------------------+        +-------------------------------------------+
+     ^ Reopen shows only within 14 days (decision 4)
+```
+
+**Restaurant/admin — claims queue** (beside the refunds queue; overdue-flagged, #160).
+
+```
++-------------------------------------------------+
+|  Claims  [ Open ] [ Overdue ] [ All ]  | Refunds |
++-------------------------------------------------+
+|  (!) A1B2  Marie D.  Missing item   OPEN  4h     |   <- (!) = past the SLA first-response target (#160)
+|      K3M9  Paul R.   Quality        OPEN  20m     |
+|      77KK  Ana S.    Late delivery  REJECTED      |
+|  ---------------------------------------------    |
+|  Filter:  category [ any v ]   status [ open v ]  |
++-------------------------------------------------+
+```
+
+**Restaurant/admin — resolve panel** (one control, every resolution).
+
+```
++-------------------------------------------------+
+|  Claim - order A1B2 - Marie D.        [ OPEN ]  |
++-------------------------------------------------+
+|  Missing item                                   |
+|  "The drinks were missing"     [ order photo ]  |
+|                                                 |
+|  Resolve as:                                    |
+|   ( ) Full refund                               |   -> resolveReclamation FULL_REFUND  (reuses the refund path)
+|   (o) Partial refund   amount [ 4.50 ]          |   -> PARTIAL_REFUND + refundAmount
+|   ( ) Replacement (send a new order)            |   -> REPLACEMENT  (#159 no-charge order)
+|   ( ) Goodwill credit  amount [ 5.00 ]          |   -> GOODWILL_CREDIT (#158 balance)
+|   ( ) Reject           reason [ __________ ]    |   -> rejectReclamation (reason REQUIRED)
+|                                                 |
+|  Note (optional) [ ___________________ ]        |
+|                              [ Cancel ][ OK ]   |
++-------------------------------------------------+
+```
+
 ## 3. Read model + queries
 
 A `Reclamation` read model (a `View_*` fold or a projection table if it carries the discussion) backing:
@@ -157,20 +406,51 @@ hand-off (a claim-driven refund must correlate to its `RefundProcess` run).
 
 ## 9. Decisions this proposal asks the product owner to make
 
-1. **Identity/cardinality:** `reclamationId` (allow **several claims per order** — recommended, real
-   orders have multiple issues) vs. one-claim-per-order (simpler, but conflates distinct issues).
-2. **V0 resolution set:** ship **FULL_REFUND / PARTIAL_REFUND / REJECTED** first (all expressible via the
-   existing refund path + a reason), with **REPLACEMENT / GOODWILL_CREDIT as recorded intents** (no
-   automated re-order or credit ledger yet)? Or build the credit-balance / replacement-order automation
-   up front (much larger)?
-3. **Discussion:** reuse the **order conversation thread** (recommended, §2.5) vs. a dedicated per-claim
-   thread.
-4. **Reopen window:** how long after delivery/rejection may a customer open/reopen a claim (e.g. 14/30/180
-   days — align with the `RECLAMATION` 180-day evidence retention and the chargeback tail)?
-5. **Who may open:** customer only, or also restaurant/admin filing on the customer's behalf (phone claim)?
-6. **SLA:** in V0 (a first-response clock + overdue flag) or deferred?
-7. **Phasing:** V0 or post-V0? Refunds already exist, so a **minimal "claim → refund/reject with category
-   + reason"** could ride close to V0; the non-refund resolutions and SLA are clearly post-V0.
+Each decision lists its options with **pros / cons**; the product owner's choice (2026-07-26) is marked
+**→ CHOSEN** and recorded in [ADR-20260726-124204](../adr/ADR-20260726-124204-reclamation-lifecycle.md).
+
+**9.1 Identity / cardinality**
+| Option | Pros | Cons |
+|---|---|---|
+| **Several claims per order** (`reclamationId`) **→ CHOSEN** | Matches reality (one order can have several distinct issues); each claim has its own status/resolution/audit | Slightly more read-model work (list per order); UI must group by order |
+| One claim per order (keyed by `orderId`) | Simplest; no grouping | Conflates distinct issues; a second problem can't be filed without reopening/overwriting the first |
+
+**9.2 V0 resolution set**
+| Option | Pros | Cons |
+|---|---|---|
+| Refund + reject first; **REPLACEMENT / GOODWILL_CREDIT as recorded intents** | Smallest V0; reuses the existing refund path only; ships fast | Two of the four resolutions don't actually *do* anything — staff act out-of-band; feels half-built to customers |
+| **Build the credit-ledger + replacement-order automation up front → CHOSEN** | The full customer promise is real (a claim can end in credit or a remake, not just money-back); differentiator | Two substantial new sub-systems (a financial balance; a no-charge order flow), each its own ADR — a much larger V0 |
+
+**9.3 Discussion channel**
+| Option | Pros | Cons |
+|---|---|---|
+| **Reuse the order conversation thread (#129) → CHOSEN** | No second inbox; the claim sits where the customer already talks to the restaurant; status folds into one timeline for free | The thread mixes general chat and claim-specific messages (mitigated by the structured claim overlay) |
+| A dedicated per-claim thread | Clean separation of claim discussion from general chat | A second inbox splits the customer's context; duplicates identity/ACL/notifications for no V0 gain |
+
+**9.4 Reopen window** (how long after delivery/rejection a customer may open/reopen)
+| Option | Pros | Cons |
+|---|---|---|
+| **14 days → CHOSEN** | Tight enough to bound restaurant liability + fraud; covers the normal "noticed it later" case | May feel short for a card-chargeback that surfaces months later (evidence still retained 180 days, so a manual/admin path can still act) |
+| 30 days | More customer-generous | Longer liability tail for restaurants |
+| 180 days (align to evidence retention / chargeback) | Covers the full chargeback tail automatically | Large open-liability window; invites stale/low-signal claims |
+
+**9.5 Who may open**
+| Option | Pros | Cons |
+|---|---|---|
+| **Customer only → CHOSEN** | Simplest ACL; the claim is authentically the customer's; no impersonation surface | A phone/in-person complaint can't be filed by staff on the customer's behalf in V0 (deferred) |
+| Also restaurant/admin on behalf | Captures off-app complaints | Needs an on-behalf-of / impersonation model + audit; larger ACL surface |
+
+**9.6 SLA**
+| Option | Pros | Cons |
+|---|---|---|
+| **First-response clock + overdue flag in V0 → CHOSEN** | Claims don't rot silently; the queue surfaces overdue ones; a real service signal | A little extra read-model + observability work; needs a target value set |
+| Deferred | Less to build now | No pressure/visibility on unanswered claims — the classic support-black-hole |
+
+**9.7 Phasing**
+| Option | Pros | Cons |
+|---|---|---|
+| **V0 → CHOSEN** ("the minimal thing we build for customers") | A credible complaint experience is table-stakes for ordering; refunds already exist to build on | With 9.2's automations promoted to V0, the epic is large — sequenced (core loop first, then the two automations) |
+| Post-V0 | Focus V0 purely on order→pay→track | Ships without any structured way to handle "my order was wrong" beyond a raw refund |
 
 ## 10. Decomposition into sub-issues (created on approval)
 
