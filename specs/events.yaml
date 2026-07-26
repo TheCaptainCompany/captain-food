@@ -898,7 +898,12 @@ OrderPlaced:
       $ref: 'scalars.yaml#/RestaurantId'
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
-      nullable: true
+      description: >
+        The identified customer. REQUIRED (#144): checkout requires a verified phone
+        (PRODUCT_SPEC_WEB_CLIENT.md), which registers or resolves the Customer, and OrderPlaced is
+        emitted ONLY by PlaceOrderProcess — there is no import path that could produce an order
+        without one. Previously nullable, which let the schema permit what the prose forbade and
+        left an "order nobody owns" class the authorization index (ScopeMembership) could not grant.
     customerContact:
       $ref: 'entities.yaml#/CustomerContact'
     serviceType:
@@ -924,6 +929,7 @@ OrderPlaced:
   required:
     - orderId
     - restaurantId
+    - customerId
     - customerContact
     - serviceType
     - items
@@ -1161,7 +1167,7 @@ PaymentIntentCreated:
       $ref: 'scalars.yaml#/RestaurantId'
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
-      nullable: true
+      description: "REQUIRED (#144) - derived from PlaceOrder, whose customerId is now required."
     amount:
       $ref: 'entities.yaml#/Money'
     checkout:
@@ -1170,6 +1176,7 @@ PaymentIntentCreated:
   required:
     - paymentIntentId
     - restaurantId
+    - customerId
     - amount
     - checkout
 

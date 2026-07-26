@@ -174,7 +174,7 @@ fn placed(service_type: ServiceType) -> DomainEvent {
         order_id: order_id(),
         r#ref: None,
         restaurant_id: restaurant_id(),
-        customer_id: None,
+        customer_id: CustomerId(uuid::Uuid::nil()),
         customer_contact: CustomerContact {
             display_name: CustomerDisplayName("Johnny".into()),
             email: None,

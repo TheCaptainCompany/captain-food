@@ -300,8 +300,9 @@ pub struct CheckoutSnapshot {
     pub cart_id: CartId,
     #[graphql(name = "restaurantId")]
     pub restaurant_id: RestaurantId,
+    /// REQUIRED (#144) - frozen from PlaceOrder, whose customerId is now required.
     #[graphql(name = "customerId")]
-    pub customer_id: Option<CustomerId>,
+    pub customer_id: CustomerId,
     #[graphql(name = "mode")]
     pub mode: Option<Mode>,
     #[graphql(name = "ref")]

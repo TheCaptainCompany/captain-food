@@ -485,7 +485,7 @@ pub struct OrderPlaced {
     pub order_id: OrderId,
     pub r#ref: Option<ExternalReference>,
     pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
+    pub customer_id: CustomerId,
     pub customer_contact: CustomerContact,
     pub service_type: ServiceType,
     pub delivery_address: Option<Address>,
@@ -614,7 +614,7 @@ pub struct RefundRequested {
 pub struct PaymentIntentCreated {
     pub payment_intent_id: PaymentIntentId,
     pub restaurant_id: RestaurantId,
-    pub customer_id: Option<CustomerId>,
+    pub customer_id: CustomerId,
     pub amount: Money,
     pub checkout: CheckoutSnapshot,
 }

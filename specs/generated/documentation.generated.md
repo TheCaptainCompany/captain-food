@@ -3714,7 +3714,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 | <a id="command-placeorder--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ | Client-generated id for the order the saga will materialize on payment capture. |
 | <a id="command-placeorder--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-placeorder--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ | The OPEN cart to check out; its lines become the order's line items. |
-| <a id="command-placeorder--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ | Resolved from the now-authenticated session; bound onto the cart at checkout. |
+| <a id="command-placeorder--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | Resolved from the now-authenticated session; bound onto the cart at checkout. REQUIRED (#144) — the description above already asserted the customer has verified their phone by this point, but the field was nullable and absent from `required`, so nothing enforced it. Non-null makes it a structural (GraphQL) rejection rather than a domain invariant: the client cannot submit an unidentified checkout at all, so no new errors.yaml code is needed.  |
 | <a id="command-placeorder--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
 | <a id="command-placeorder--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
 | <a id="command-placeorder--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
@@ -4142,7 +4142,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 | <a id="event-orderplaced--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-orderplaced--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="event-orderplaced--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-orderplaced--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="event-orderplaced--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | The identified customer. REQUIRED (#144): checkout requires a verified phone (PRODUCT_SPEC_WEB_CLIENT.md), which registers or resolves the Customer, and OrderPlaced is emitted ONLY by PlaceOrderProcess — there is no import path that could produce an order without one. Previously nullable, which let the schema permit what the prose forbade and left an "order nobody owns" class the authorization index (ScopeMembership) could not grant.  |
 | <a id="event-orderplaced--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
 | <a id="event-orderplaced--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
 | <a id="event-orderplaced--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
@@ -4349,7 +4349,7 @@ A payment intent was created at checkout for a pending order. Carries the full p
 | --- | --- | --- | --- |
 | <a id="event-paymentintentcreated--paymentintentid"></a>`paymentIntentId` | [🔤 `PaymentIntentId`](#scalar-paymentintentid) | ✅ |  |
 | <a id="event-paymentintentcreated--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-paymentintentcreated--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="event-paymentintentcreated--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | REQUIRED (#144) - derived from PlaceOrder, whose customerId is now required. |
 | <a id="event-paymentintentcreated--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="event-paymentintentcreated--checkout"></a>`checkout` | [📦 `CheckoutSnapshot`](#entity-checkoutsnapshot) | ✅ | The full priced checkout frozen at intent creation (rebuilds OrderPlaced/CartCheckedOut on capture). |
 
@@ -4662,7 +4662,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-checkoutsnapshot--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="entity-checkoutsnapshot--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ |  |
 | <a id="entity-checkoutsnapshot--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="entity-checkoutsnapshot--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="entity-checkoutsnapshot--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | REQUIRED (#144) - frozen from PlaceOrder, whose customerId is now required. |
 | <a id="entity-checkoutsnapshot--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="entity-checkoutsnapshot--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="entity-checkoutsnapshot--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
@@ -4682,7 +4682,7 @@ The validated, server-priced checkout PlaceOrderProcess freezes onto events.yaml
 | <a id="entity-order--id"></a>`id` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="entity-order--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="entity-order--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="entity-order--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
+| <a id="entity-order--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | REQUIRED (#144), mirroring OrderPlaced: an Order is only ever born from that event, which now always carries an identified customer. Leaving the entity looser than the event it is folded from would reintroduce the "order nobody owns" class at the aggregate level.  |
 | <a id="entity-order--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
 | <a id="entity-order--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
 | <a id="entity-order--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |

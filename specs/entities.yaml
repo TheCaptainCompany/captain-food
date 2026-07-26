@@ -658,7 +658,7 @@ CheckoutSnapshot:
       $ref: 'scalars.yaml#/RestaurantId'
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
-      nullable: true
+      description: "REQUIRED (#144) - frozen from PlaceOrder, whose customerId is now required."
     mode:
       $ref: 'scalars.yaml#/Mode'
       nullable: true
@@ -688,6 +688,7 @@ CheckoutSnapshot:
     - orderId
     - cartId
     - restaurantId
+    - customerId
     - customerContact
     - serviceType
     - items
@@ -714,7 +715,10 @@ Order:
       $ref: 'scalars.yaml#/RestaurantId'
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
-      nullable: true
+      description: >
+        REQUIRED (#144), mirroring OrderPlaced: an Order is only ever born from that event, which now
+        always carries an identified customer. Leaving the entity looser than the event it is folded
+        from would reintroduce the "order nobody owns" class at the aggregate level.
     customerContact:
       $ref: '#/CustomerContact'
     serviceType:
@@ -737,6 +741,7 @@ Order:
   required:
     - id
     - restaurantId
+    - customerId
     - customerContact
     - serviceType
     - items

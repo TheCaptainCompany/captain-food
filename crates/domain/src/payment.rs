@@ -14,7 +14,7 @@
 use crate::generated::events::DomainEvent;
 use crate::generated::entities::Money;
 pub use crate::generated::lifecycles::payment as lifecycle;
-use crate::generated::scalars::{OrderId, PaymentIntentId, PaymentStatus, RefundId, RestaurantId};
+use crate::generated::scalars::{CustomerId, OrderId, PaymentIntentId, PaymentStatus, RefundId, RestaurantId};
 
 /// The stream-category prefix; the stream is `"Payment-<paymentIntentId>"`.
 pub const CATEGORY: &str = "Payment";
@@ -151,13 +151,13 @@ mod tests {
         DomainEvent::PaymentIntentCreated(PaymentIntentCreated {
             payment_intent_id: pi(),
             restaurant_id: restaurant_id(),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             amount: money(1000),
             checkout: CheckoutSnapshot {
                 order_id: order_id(),
                 cart_id: CartId(uuid::Uuid::nil()),
                 restaurant_id: restaurant_id(),
-                customer_id: None,
+                customer_id: CustomerId(uuid::Uuid::nil()),
                 mode: None,
                 r#ref: None,
                 customer_contact: CustomerContact {

@@ -66,7 +66,7 @@ fn apply(state: Option<OrderState>, event: &DomainEvent) -> Option<OrderState> {
             return Some(OrderState {
                 status,
                 restaurant_id: e.restaurant_id,
-                customer_id: e.customer_id,
+                customer_id: Some(e.customer_id),
                 delivery_rated: false,
                 restaurant_rated: false,
                 delivery_satisfaction_recorded: false,
@@ -114,7 +114,7 @@ mod tests {
             order_id: oid(),
             r#ref: None,
             restaurant_id: rid(),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             customer_contact: CustomerContact {
                 display_name: CustomerDisplayName("Jo".into()),
                 email: None,

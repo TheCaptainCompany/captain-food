@@ -244,6 +244,7 @@ fixtures:
     data:
       orderId: "order-1"
       restaurantId: "resto-1"
+      customerId: "cust-1"
       customerContact: { displayName: "Johnny", phone: "+33612345678" }
       serviceType: "DELIVERY"
       deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -283,22 +284,22 @@ fixtures:
     data: { orderId: "order-1", restaurantId: "resto-1", reason: "Kitchen closed" }
   orderRated:
     type: { $ref: 'events.yaml#/OrderRated' }
-    data: { orderId: "order-1", restaurantId: "resto-1", riderThumb: "UP" }
+    data: { orderId: "order-1", restaurantId: "resto-1", customerId: "cust-1", riderThumb: "UP" }
   restaurantRated:
     type: { $ref: 'events.yaml#/RestaurantRated' }
-    data: { orderId: "order-1", restaurantId: "resto-1", stars: 5, comment: "Excellent!" }
+    data: { orderId: "order-1", restaurantId: "resto-1", customerId: "cust-1", stars: 5, comment: "Excellent!" }
   deliverySatisfactionRecorded:
     type: { $ref: 'events.yaml#/DeliverySatisfactionRecorded' }
     data: { orderId: "order-1", restaurantId: "resto-1", timeliness: "ON_TIME" }
   orderTipped:
     type: { $ref: 'events.yaml#/OrderTipped' }
-    data: { orderId: "order-1", restaurantId: "resto-1", tippedBy: "CUSTOMER", tips: [{ recipient: "RIDER", amount: { amountCents: 200, currency: "EUR" } }, { recipient: "RESTAURANT", amount: { amountCents: 100, currency: "EUR" } }, { recipient: "CAPTAIN", amount: { amountCents: 50, currency: "EUR" } }] }
+    data: { orderId: "order-1", restaurantId: "resto-1", tippedBy: "CUSTOMER", customerId: "cust-1", tips: [{ recipient: "RIDER", amount: { amountCents: 200, currency: "EUR" } }, { recipient: "RESTAURANT", amount: { amountCents: 100, currency: "EUR" } }, { recipient: "CAPTAIN", amount: { amountCents: 50, currency: "EUR" } }] }
   orderTippedByRestaurant:
     type: { $ref: 'events.yaml#/OrderTipped' }
     data: { orderId: "order-1", restaurantId: "resto-1", tippedBy: "RESTAURANT", tips: [{ recipient: "RIDER", amount: { amountCents: 300, currency: "EUR" } }] }
   refundRequested:
     type: { $ref: 'events.yaml#/RefundRequested' }
-    data: { orderId: "order-1", restaurantId: "resto-1", reason: "Late delivery" }
+    data: { orderId: "order-1", restaurantId: "resto-1", customerId: "cust-1", reason: "Late delivery" }
 
   # --- Payments (saga) ---
   paymentIntentCreated:
@@ -306,11 +307,13 @@ fixtures:
     data:
       paymentIntentId: "pi_123"
       restaurantId: "resto-1"
+      customerId: "cust-1"
       amount: { amountCents: 1960, currency: "EUR" }
       checkout:
         orderId: "order-1"
         cartId: "cart-1"
         restaurantId: "resto-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -331,11 +334,13 @@ fixtures:
     data:
       paymentIntentId: "pi_123"
       restaurantId: "resto-1"
+      customerId: "cust-1"
       amount: { amountCents: 1960, currency: "EUR" }
       checkout:
         orderId: "order-1"
         cartId: "cart-1"
         restaurantId: "resto-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
         items:
@@ -1883,6 +1888,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -1907,6 +1913,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
         expectedTotal: { amountCents: 1960, currency: "EUR" }
@@ -1931,6 +1938,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
         expectedTotal: { amountCents: 100, currency: "EUR" }
@@ -1955,6 +1963,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "COLLECTION"
         paymentMethodId: "pm_123"
@@ -1975,6 +1984,7 @@ tests:
         orderId: "order-1"
         restaurantId: "resto-1"
         cartId: "cart-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         paymentMethodId: "pm_declined"
@@ -2001,6 +2011,7 @@ tests:
         restaurantId: "resto-1"
         cartId: "cart-1"
         mode: "LIVE"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         deliveryAddress: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }
@@ -2353,6 +2364,7 @@ tests:
       data:
         orderId: "order-1"
         restaurantId: "resto-1"
+        customerId: "cust-1"
         customerContact: { displayName: "Johnny", phone: "+33612345678" }
         serviceType: "DELIVERY"
         deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }
@@ -2383,11 +2395,13 @@ tests:
       data:
         paymentIntentId: "pi_123"
         restaurantId: "resto-1"
+        customerId: "cust-1"
         amount: { amountCents: 1960, currency: "EUR" }
         checkout:
           orderId: "order-1"
           cartId: "cart-1"
           restaurantId: "resto-1"
+          customerId: "cust-1"
           customerContact: { displayName: "Johnny", phone: "+33612345678" }
           serviceType: "DELIVERY"
           deliveryAddress: { line1: "9 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }

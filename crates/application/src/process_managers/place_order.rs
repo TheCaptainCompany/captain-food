@@ -152,7 +152,7 @@ mod tests {
             order_id: OrderId(uid(1)),
             cart_id: CartId(uid(2)),
             restaurant_id: RestaurantId(uid(3)),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             mode: None,
             r#ref: None,
             customer_contact: CustomerContact {
@@ -203,7 +203,7 @@ mod tests {
         vec![DomainEvent::PaymentIntentCreated(PaymentIntentCreated {
             payment_intent_id: PaymentIntentId("pi_123".into()),
             restaurant_id: RestaurantId(uid(3)),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             amount: eur(1960),
             checkout: snapshot(),
         })]

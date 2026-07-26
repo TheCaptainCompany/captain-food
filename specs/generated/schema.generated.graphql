@@ -498,7 +498,7 @@ type CheckoutSnapshot {
   orderId: OrderId!
   cartId: CartId!
   restaurantId: RestaurantId!
-  customerId: CustomerId
+  customerId: CustomerId!
   mode: Mode
   ref: ExternalReference
   customerContact: CustomerContact!
@@ -1146,7 +1146,7 @@ input PlaceOrderInput {
   orderId: OrderId!
   restaurantId: RestaurantId!
   cartId: CartId!
-  customerId: CustomerId
+  customerId: CustomerId!
   customerContact: CustomerContactInput!
   serviceType: ServiceType!
   deliveryAddress: AddressInput

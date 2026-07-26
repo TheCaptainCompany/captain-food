@@ -503,7 +503,7 @@ pub struct PlaceOrder {
     pub order_id: OrderId,
     pub restaurant_id: RestaurantId,
     pub cart_id: CartId,
-    pub customer_id: Option<CustomerId>,
+    pub customer_id: CustomerId,
     pub customer_contact: CustomerContact,
     pub service_type: ServiceType,
     pub delivery_address: Option<Address>,

@@ -272,7 +272,7 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
             order_id: e.order_id.clone(),
             r#ref: e.r#ref.clone().unwrap_or_default(),
             restaurant_id: e.restaurant_id.clone(),
-            customer_id: e.customer_id.clone(),
+            customer_id: Some(e.customer_id.clone()),
             status: c.status(None, env),
             service_type: e.service_type.clone(),
             items: serde_json::to_value(&e.items).unwrap_or(serde_json::Value::Null),

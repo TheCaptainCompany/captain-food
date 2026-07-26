@@ -1997,11 +1997,13 @@ pub async fn place_order(
             payment_intent_id: intent.payment_intent_id.clone(),
             process_status: PaymentProcessStatus::AWAITING_PAYMENT_RESULT,
             payment_status: PaymentStatus::PENDING,
-            // Initiator scope + credential for the paymentStatus read (ADR-20260720-015500): the
-            // customer when identified, and ALWAYS the dispatch-layer anonymous session when the
-            // header was present — a guest checkout survives an app restart on the session scope
-            // alone (#12, ADR-20260720-213000).
-            customer_id: cmd.customer_id,
+            // Initiator scope + credential for the paymentStatus read (ADR-20260720-015500). The
+            // customer is now ALWAYS present (PlaceOrder.customerId is required as of #144 —
+            // checkout verifies a phone, which registers or resolves the Customer), so this is a
+            // widening, not a maybe. The anonymous session is still recorded when the header was
+            // present: it is a second, device-scoped credential that survives an app restart
+            // (#12, ADR-20260720-213000), not a fallback for an unidentified buyer.
+            customer_id: Some(cmd.customer_id),
             session_id,
             client_secret: Some(intent.client_secret.clone()),
             last_processed_stripe_event_id: None,

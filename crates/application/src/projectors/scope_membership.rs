@@ -68,18 +68,16 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
             let order_id = e.order_id.0;
             let mut out = Vec::with_capacity(3);
 
-            // `customer_id` is optional, so an order may carry no Captain customer at all. This is
-            // NOT guest checkout — the product requires a verified phone at checkout, which creates
-            // the Customer — it is the externally-originated order. No Captain identity, nothing to
-            // grant; the restaurant grant below still applies.
-            if let Some(c) = &e.customer_id {
-                out.push(MembershipChange::Grant {
-                    scope_type: ScopeType::ORDER,
-                    scope_id: order_id,
-                    principal_type: UserType::CUSTOMER,
-                    principal_id: c.0,
-                });
-            }
+            // `customer_id` is REQUIRED as of #144 — checkout registers or resolves the Customer, and
+            // OrderPlaced is emitted only by PlaceOrderProcess, so every order has one by
+            // construction. The authorization index is therefore complete: there is no "order nobody
+            // owns" class the guard would have to deny.
+            out.push(MembershipChange::Grant {
+                scope_type: ScopeType::ORDER,
+                scope_id: order_id,
+                principal_type: UserType::CUSTOMER,
+                principal_id: e.customer_id.0,
+            });
             out.push(MembershipChange::Grant {
                 scope_type: ScopeType::ORDER,
                 scope_id: order_id,
@@ -173,10 +171,11 @@ mod tests {
         serde_json::json!({ "amountCents": 0, "currency": "EUR" })
     }
 
-    fn order_placed(order: Uuid, restaurant: Uuid, customer: Option<Uuid>) -> DomainEvent {
+    fn order_placed(order: Uuid, restaurant: Uuid, customer: Uuid) -> DomainEvent {
         let mut e: OrderPlaced = serde_json::from_value(serde_json::json!({
             "orderId": order,
             "restaurantId": restaurant,
+            "customerId": customer,
             "customerContact": { "displayName": "T", "phone": "+33600000000" },
             "serviceType": "DELIVERY",
             "items": [],
@@ -189,7 +188,6 @@ mod tests {
             "paymentIntentId": "pi_test",
         }))
         .expect("OrderPlaced fixture");
-        e.customer_id = customer.map(CustomerId);
         DomainEvent::OrderPlaced(e)
     }
 
@@ -227,7 +225,7 @@ mod tests {
     #[test]
     fn order_placed_grants_customer_restaurant_and_account() {
         let changes = membership_changes(
-            &env(order_placed(ORDER, RESTAURANT, Some(CUSTOMER))),
+            &env(order_placed(ORDER, RESTAURANT, CUSTOMER)),
             &Resolved { order_id: None, restaurant_account_id: Some(ACCOUNT) },
         );
         assert_eq!(changes.len(), 3);
@@ -251,22 +249,25 @@ mod tests {
         }));
     }
 
-    /// An order with NO Captain customer. Not guest checkout — the product spec requires a verified
-    /// phone at checkout (PRODUCT_SPEC_WEB_CLIENT.md §3.5), which creates the Customer, so the Captain
-    /// flow always has one. `customerId` is optional for orders that originate OUTSIDE that flow
-    /// (externally-channeled / imported). Granting no CUSTOMER membership there is correct, not a gap:
-    /// someone who ordered through the restaurant's own channel has no Captain identity to grant to.
-    /// The order still grants the restaurant — an unidentified order is not an unowned one.
+    /// The customer grant is unconditional now. `OrderPlaced.customerId` became REQUIRED in this
+    /// branch, so the earlier "order with no Captain customer" case is unrepresentable — the test
+    /// that covered it was deleted rather than left asserting an impossible state. What replaces it
+    /// is this: every order yields a CUSTOMER grant, so the authorization index is complete by
+    /// construction and the guard has no "order nobody owns" class to deny.
     #[test]
-    fn order_without_a_captain_customer_grants_no_customer_membership() {
+    fn every_order_grants_its_customer() {
         let changes = membership_changes(
-            &env(order_placed(ORDER, RESTAURANT, None)),
-            &Resolved { order_id: None, restaurant_account_id: None },
+            &env(order_placed(ORDER, RESTAURANT, CUSTOMER)),
+            &Resolved::default(),
         );
-        assert!(!changes
-            .iter()
-            .any(|c| matches!(c, MembershipChange::Grant { principal_type: UserType::CUSTOMER, .. })));
-        assert_eq!(changes.len(), 1, "only the restaurant is granted");
+        assert!(changes.contains(&MembershipChange::Grant {
+            scope_type: ScopeType::ORDER,
+            scope_id: ORDER,
+            principal_type: UserType::CUSTOMER,
+            principal_id: CUSTOMER,
+        }));
+        // No account resolved -> customer + restaurant only.
+        assert_eq!(changes.len(), 2);
     }
 
     /// THE REASSIGNMENT PAIR. Asserting only that the new rider is granted would pass against a

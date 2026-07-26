@@ -90,13 +90,13 @@ mod tests {
         DomainEvent::PaymentIntentCreated(PaymentIntentCreated {
             payment_intent_id: intent(),
             restaurant_id: RestaurantId(uid(3)),
-            customer_id: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
             amount: eur(1960),
             checkout: CheckoutSnapshot {
                 order_id: OrderId(uid(1)),
                 cart_id: CartId(uid(2)),
                 restaurant_id: RestaurantId(uid(3)),
-                customer_id: None,
+                customer_id: CustomerId(uuid::Uuid::nil()),
                 mode: None,
                 r#ref: None,
                 customer_contact: CustomerContact {
