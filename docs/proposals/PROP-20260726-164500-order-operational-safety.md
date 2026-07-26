@@ -230,6 +230,62 @@ sequenceDiagram
     end
 ```
 
+## 5bis. Ordering flexibility — scheduling and modification ([#197](https://github.com/TheCaptainCompany/captain-food/issues/197))
+
+Two gaps that belong to the same operational story, tracked separately because they are features
+rather than safety fixes.
+
+**Every order is implicitly immediate.** `scheduledFor`, `requestedAt`, `preorder`, `leadTime`,
+`deliverAt` and `pickupAt` return **zero hits** in the domain; `PlaceOrder`, `OrderPlaced` and the
+`Order` entity carry no time field. That disproportionately affects two named V0 audiences: office
+lunch pre-orders, and **food trucks** with fixed service windows.
+
+**An order cannot be changed after placement.** There is no `ModifyOrder`/`AddOrderLine`/
+`ChangeDeliveryAddress` command; line editing exists only on the `Cart` while `OPEN`, and the cart is
+terminal once `CHECKED_OUT`. There is no partial cancellation, and the customer can only cancel from
+`PLACED` — so after acceptance, "I ordered to the wrong address" has no path except the conversation
+thread and a claim.
+
+### D6 — Scheduling window
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Same-day slots only** ✅ **recommended** | Comfortably inside a card authorization's ~7-day life (see D2 interaction below); simple capacity model; covers the lunch and food-truck cases | No "order Friday's dinner on Monday" |
+| Up to 7 days ahead | Broader use cases | Approaches the authorization expiry; needs re-authorization handling |
+| Beyond 7 days | Full flexibility | Requires stored payment methods and off-session charging — neither exists ([#175](https://github.com/TheCaptainCompany/captain-food/issues/175), `SetCustomerPaymentMethod` is V1) |
+
+**Interaction worth naming:** if [#175](https://github.com/TheCaptainCompany/captain-food/issues/175)
+moves checkout to authorize-then-capture, a card authorization typically expires in about seven days.
+That bounds scheduling directly, so the two decisions must be taken together rather than discovered in
+sequence.
+
+### D7 — Order modification scope
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Address correction before `PREPARING` + restaurant-initiated line removal** ✅ **recommended** | Covers the two most common real cases; line removal routes through the existing partial-refund path | Line removal needs the refund re-key ([#177](https://github.com/TheCaptainCompany/captain-food/issues/177)) first |
+| Full customer-side editing | Best experience | Re-pricing, re-authorization and kitchen-state races — large for the value |
+| None (status quo) | No work | Every ordinary mistake becomes a reclamation instead of a self-service fix |
+
+A short **customer cancellation grace window after acceptance** is also worth considering: it is the
+category norm and is cheaper than the reclamation it otherwise becomes.
+
+### Sequence — a scheduled order
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant PM as PlaceOrderProcess
+    participant W as ScheduledReleaseWorker (new)
+    participant R as Restaurant
+
+    C->>PM: placeOrder(requestedFor = 12:30)
+    Note over PM: validate against opening hours (#180)<br/>and capacity (#186); authorize now (D2)
+    PM->>PM: order held, not yet in the kitchen queue
+    W->>R: release at (requestedFor - prepTime - travel)
+    Note over W,R: normal accept / prepare / ready flow follows
+```
+
 ## 6. Alternatives considered for the cluster as a whole
 
 | Approach | Pros | Cons |
@@ -265,7 +321,11 @@ All slices: `make rust` green, `make validate` 0 errors, `check-drift` clean.
 3. **D3** — ship in-app + SMS now rather than waiting for [#127](https://github.com/TheCaptainCompany/captain-food/issues/127)? (recommended: yes)
 4. **D4** — timed pause with auto-resume? (recommended: yes)
 5. **D5** — model exception days now? (recommended: yes)
-6. Is a **supervised pilot on #166 alone** an acceptable interim, ahead of the rest?
+6. **D6** — same-day scheduling slots only, decided together with the capture-timing choice in
+   [#175](https://github.com/TheCaptainCompany/captain-food/issues/175)? (recommended: yes)
+7. **D7** — address correction before `PREPARING` plus restaurant-initiated line removal, and a
+   post-acceptance cancellation grace window? (recommended: yes)
+8. Is a **supervised pilot on #166 alone** an acceptable interim, ahead of the rest?
 
 ## 9. Refs
 

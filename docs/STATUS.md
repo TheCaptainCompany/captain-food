@@ -42,6 +42,23 @@
 > product-owner decision in the GitHub Project — nothing here is self-started.** Recurring check: a
 > daily 07:00 Europe/Paris routine re-runs this review against `main` and reports only *new* drift.
 
+> 🔁 **2026-07-26 (follow-up) — the review is now a repeatable capability, not a one-off.** Three
+> more proposals close the findings that had no proposal home: **PROP-20260726-171500** write-side
+> per-instance authorization (extends PROP-20260725-185140 / [#144](https://github.com/TheCaptainCompany/captain-food/issues/144)
+> to commands — [#178](https://github.com/TheCaptainCompany/captain-food/issues/178), tracking
+> [#205](https://github.com/TheCaptainCompany/captain-food/issues/205)); **PROP-20260726-172000**
+> spec-to-UI contract integrity ([#203](https://github.com/TheCaptainCompany/captain-food/issues/203));
+> **PROP-20260726-172500** delivery execution ([#204](https://github.com/TheCaptainCompany/captain-food/issues/204)).
+> Scheduling + order modification ([#197](https://github.com/TheCaptainCompany/captain-food/issues/197))
+> folded into PROP-20260726-164500 §5bis. **All 40 issues (#166–#205) now carry the full triage set** —
+> Type, `impact/*` label, and the org fields Priority + Value Size + Impact + Effort per
+> [docs/BACKLOG.md](BACKLOG.md) (Effort projected from Impact: XS/S→Low, M→Medium, L/XL→High; Priority
+> is the documented default value bucket — **row order in the Project stays a product-owner decision**).
+> New skill **`.claude/skills/architecture-review/`** encodes the whole procedure — dedup table against
+> #144/#151/#127/#134 and the epics, a probe checklist recording the 2026-07-26 baseline for every
+> check, the triage rules, and the proposal template — so the review is reproducible by any session and
+> the daily run needs no prompt engineering.
+
 > ✅ **2026-07-25 — [#129](https://github.com/TheCaptainCompany/captain-food/issues/129) messaging:
 > functional customer send + the restaurant staff screen.** Two more green PRs finish the usable loop.
 > **[#147](https://github.com/TheCaptainCompany/captain-food/issues/147) (PR #148) — functional send:**
