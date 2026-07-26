@@ -255,11 +255,21 @@ Two forms of `principal:`, and the difference is the identity bridge (§3.2):
 - **`principal: restaurantId` / `restaurantAccountId`** — read directly from the verified JWT claims,
   no bridge (§3.2.2).
 
-`matches: restaurant.restaurantAccountId` is **one hop**, and it is required: `OrderTracking` carries
-`restaurant_id` but **no** `restaurant_account_id`, while `Restaurant.restaurant_account_id` exists with
-a declared `fk` to `View_RestaurantAccount`. Codegen resolves the hop through that FK. (Alternative:
-denormalise `restaurant_account_id` onto `OrderTracking` for a join-free check — a projection change,
-worth it only if the join shows up in practice.)
+**`restaurant_account_id` should be denormalised onto `OrderTracking`** (product-owner direction,
+2026-07-25) rather than resolved by a hop. Today `OrderTracking` carries `restaurant_id` but **no**
+`restaurant_account_id`; `Restaurant.restaurant_account_id` exists with a declared `fk`, so a hop *works*
+— but the column is better for three reasons, only one of which is performance:
+
+1. **Account-scoped list queries become indexable.** A chain's consolidated order view is
+   `WHERE restaurant_account_id = $1`, not a join to `Restaurant` on every page.
+2. **The guard stays join-free** on a path that runs for every file request.
+3. **It is a snapshot, and a snapshot is the *correct* semantics.** If a restaurant is later sold to
+   another account, a live join would retroactively rewrite who owned every past order — wrong for
+   accounting and for audit. Orders should keep the account that owned them **at the time**.
+
+`OrderPlaced` carries `restaurantId` but not `restaurantAccountId`, so the projector resolves it from
+the `Restaurant` read model at projection time — allowed, since `OrderTracking` is `projector: app`.
+With the column present the rule simplifies to `matches: restaurantAccountId`.
 
 The three parameters of the check come from three different places, which is what makes one function
 serve every surface:
@@ -344,9 +354,9 @@ ORDER:
   description: "Membership in one order."
   ADMIN:              { always: true }
   CUSTOMER:           { principal: userId,              matches: customerId }
-  RIDER:              { principal: userId,              matches: riderId }
+  RIDER:              { principal: userId,              matches: riderId, active: true }   # see 3.3.5
   RESTAURANT:         { principal: restaurantId,        matches: restaurantId }
-  RESTAURANT_ACCOUNT: { principal: restaurantAccountId, matches: restaurant.restaurantAccountId }
+  RESTAURANT_ACCOUNT: { principal: restaurantAccountId, matches: restaurantAccountId }
 
 RESTAURANT:
   description: "Membership in one restaurant (KYC documents, cover photos)."
@@ -402,6 +412,36 @@ Resolving the principal to a domain id **once per request** is what keeps step 2
 membership check compares two ids against an index, rather than re-joining `Customer.auth_ref` on every
 file in the thread.
 
+#### 3.3.5 Rider reassignment is self-healing — but only against the **active** job
+
+Reassignment needs no special handling *by design*: the check reads current state, so the moment the read
+model names a new rider, the new rider gains access and the previous one loses it. Nothing is written to
+the `files` table, no grant is revoked, no backfill runs. That is the payoff of matching on rules rather
+than freezing people (PROP-20260725-120055 §3.3).
+
+**One condition makes or breaks it: the rule must target the order's *active* delivery job.**
+`View_DeliveryJob.order_id` is `index: true`, **not unique** — `delivery_job_id` is the pk. So an order
+can accumulate several jobs (`DeliveryCancelled`, `DeliveryDispatchFailed`, the reoffer policy of
+ADR-20260720-004556 all produce terminal jobs that a fresh `DeliveryRequested` succeeds).
+
+If reassignment mints a **new** job row, then a naive
+
+```sql
+EXISTS(SELECT 1 FROM "View_DeliveryJob" WHERE order_id = $1 AND rider_id = $2)   -- WRONG
+```
+
+also matches the **previous rider's cancelled job** — so the old rider keeps access to the customer's
+doorstep photos permanently. That is the exact opposite of the intent, and it fails silently: the new
+rider works, nobody notices the old one still does.
+
+If instead reassignment reuses the same job (a second `DeliveryAcceptedByRider` folding `rider_id` to the
+latest), the naive form is already correct. **The model permits both shapes and does not pin one** —
+there is no `ReassignRider` command or event today.
+
+Hence `active: true` on the rule: membership resolves against the job in a live status, never a terminal
+one. Cheap to state, and it makes the rule correct under either shape. The `[rider_id, status]` index
+already exists to serve it.
+
 ## 4. Blast radius
 
 Every read port gains a parameter, and every resolver gains a `ReadScope` construction from its
@@ -445,6 +485,8 @@ spread across feature work where a missed call site hides in a diff about someth
 |---|---|---|
 | **D1** | Priority relative to [#134](https://github.com/TheCaptainCompany/captain-food/issues/134) — this is filed as a *blocker* for attachments, but on its own terms it is a live cross-tenant read exposure | treat as **higher** priority than the epic it blocks; re-prioritising is a product-owner call made in the project, so this is a recommendation only |
 | ~~**D2**~~ | ~~Restaurant staff membership model~~ | **resolved 2026-07-25**: RESTAURANT carries `restaurantId`, RESTAURANT_ACCOUNT carries `restaurantAccountId`, both as JWT claims (§3.2.2) — the two existing `UserType`s already model single-location vs chain |
+| **D9** | **RESTAURANT_ACCOUNT sees all its locations' orders**, and `restaurant_account_id` is denormalised onto `OrderTracking` (§3.3.1) | yes for orders — the account is the legal/commercial entity (HubRise connections are already keyed by it, payouts aggregate there). But keep it an **explicit** `audience` entry per file kind, not an inherited superset: "consolidated revenue view" and "doorstep photo of another location's customer" are different questions. ⚠️ Assumes an account is **one owner's sites**, not a franchise group — blanket access would leak between franchisees |
+| **D10** | Rider membership resolves against the **active** delivery job only (`active: true`, §3.3.5) | yes — without it a reassigned rider keeps access permanently, silently |
 | **D8** | Claim **staleness**: a `restaurantId` claim stays valid until token refresh, so removing staff does not revoke immediately (§3.2.2) | accept with a short token lifetime, **or** treat the claim as a cache over a DB membership lookup — pick one explicitly; silent staleness is the bad outcome |
 | **D3** | Scope for `Public` reads — confirm which projections are legitimately unrestricted (restaurant discovery, catalog, referential policies) | as listed; anything else defaults to scoped |
 | **D5** | Membership resolution as **DSL + codegen** (§3.3.4) vs hand-written per scope type | DSL — hand-writing is N×M statements in a security-critical path, and a new scope type should be a data change, not a code change |
@@ -461,8 +503,9 @@ spread across feature work where a missed call site hides in a diff about someth
     or `mode: filter` (repository-enforced). An operation with neither is a hole, and the validator is the
     only thing that can see it, since both failure modes are silent at runtime (§3.3.3).
 - **Behaviour tests** per role, and the **negatives are the point**: customer → another customer's order;
-  restaurant → another restaurant's order; rider → an unassigned job. A test that only proves the happy
-  path proves nothing here.
+  restaurant → another restaurant's order; rider → an unassigned job; and **the reassignment pair** —
+  after reassignment the new rider is allowed *and the previous rider is denied* (§3.3.5). Asserting only
+  the first half of that pair would pass against the broken rule.
 - **Observability**: authorization-denial rate as an operator signal — a spike is enumeration, not user
   error.
 
