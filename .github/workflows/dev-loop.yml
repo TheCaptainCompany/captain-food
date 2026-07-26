@@ -1,0 +1,109 @@
+# Continuous development loop (issue #210, PROP-20260726-193000).
+#
+# One bounded run = architect picks ONE ready item -> executor delivers it as a ready-for-review PR.
+#
+# ============================ CURRENTLY MANUAL-ONLY ============================
+# There is deliberately NO `schedule:` trigger yet. The autonomy decisions in PROP-20260726-193000 §3
+# (D1 merge posture, D2 spec posture, D3 cadence, D4 concurrency) are unanswered, so nothing runs on
+# its own. To make it a real loop once decided, add:
+#
+#     schedule:
+#       - cron: "37 6 * * 1-5"    # weekday mornings, off the :00 rush
+#
+# ...and set the budget ceiling in `.claude/loop-budget.json` (30 min/week today cannot complete one
+# issue). Until then, run it by hand from the Actions tab.
+# ==============================================================================
+#
+# DEFAULTS CHOSEN (safe, reversible; change via the inputs below or the agent definitions):
+#   - PR-only. The executor opens a ready PR and stops; a human merges, because `main` -> CI image ->
+#     deploy hook -> Render production, so an autonomous merge is an autonomous production deploy.
+#   - GREEN lane only. `specs/**` is frozen for autonomous loops (CLAUDE.md, non-negotiable), and this
+#     workflow ENFORCES it with a hard diff check rather than trusting the prompt.
+#   - One item per run. Concurrent sessions exist; the claim protocol assumes no collisions.
+name: dev-loop
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Issue number to work (blank = let the architect choose the next ready item)"
+        required: false
+        type: string
+      dry_run:
+        description: "Architect only — dispatch, do not implement"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+  id-token: write
+
+concurrency:
+  group: dev-loop            # one run at a time -- the claim protocol assumes no collisions
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Record the pre-run tree
+        run: git rev-parse HEAD > /tmp/base_sha
+
+      - name: Architect + executor
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          prompt: |
+            Run one bounded development iteration on this repository.
+
+            STEP 1 — ARCHITECT (mode 3, DISPATCH only; skip the audit this run).
+            Read `.claude/agents/architect.md` and act as it. Decide the next ready item using its
+            lane triage. ${{ inputs.issue && format('The product owner has named issue #{0} — verify it is GREEN, unclaimed and unblocked, and dispatch it; if it is not, say why and stop.', inputs.issue) || 'Pick the first GREEN, unblocked, unclaimed item in Priority order.' }}
+            If nothing is ready, output NOTHING READY with the blocked list and the age of each
+            unanswered decision, then STOP — do not invent work.
+
+            STEP 2 — EXECUTOR.
+            ${{ inputs.dry_run && 'SKIPPED this run (dry_run = true). Output the dispatch and stop.' || 'Read `.claude/agents/executor.md` and act as it. Deliver the dispatched item end to end under the documented claim protocol: claim (label + comment), branch, DRAFT PR with `Closes #NN`, implement, `make rust` green, update docs/STATUS.md if substantive, then mark the PR ready for review and STOP.' }}
+
+            NON-NEGOTIABLE for this unattended run:
+              - NEVER edit anything under `specs/**`. If the work needs a DSL change it is AMBER:
+                comment that on the PR, leave it in draft, and stop. A CI step below hard-fails the
+                run if `specs/**` was touched, so this is enforced, not merely asked.
+              - PR-ONLY: do NOT enable auto-merge. A human merges.
+              - ONE item. Never a second, never one claimed by another session.
+              - Never weaken a gate to get green. If a behaviour test fails, fix the runtime.
+          claude_args: '--max-turns 150'
+
+      - name: Enforce the specs/** freeze
+        if: always()
+        run: |
+          BASE=$(cat /tmp/base_sha)
+          # Anything committed on any branch during this run must not touch specs/**.
+          CHANGED=$(git log --name-only --pretty=format: "$BASE"..HEAD -- specs/ 2>/dev/null | sort -u | sed '/^$/d' || true)
+          DIRTY=$(git status --porcelain -- specs/ | sed '/^$/d' || true)
+          if [ -n "$CHANGED" ] || [ -n "$DIRTY" ]; then
+            echo "::error::the loop modified specs/** -- forbidden for autonomous runs (CLAUDE.md)"
+            echo "committed:"; echo "$CHANGED"
+            echo "working tree:"; echo "$DIRTY"
+            exit 1
+          fi
+          echo "specs/** untouched -- ok"
