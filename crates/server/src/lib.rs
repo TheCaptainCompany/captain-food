@@ -101,7 +101,9 @@ pub fn wire() -> HealthDto {
 /// inbound ingestor stages verified facts into it, so the app must not serve without the table.
 /// `20260725000000` = the `orderconversation` projection table (#131, epic #129): the projection worker
 /// upserts folded conversation rows into it, so the app must not serve without the table.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260725000000;
+/// `20260726000000` = the `orderconversation.claim_events` column (§2.5, epic #151; #155): the projector
+/// upserts the woven claim-lifecycle timeline into it, so the app must not serve without the column.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260726000000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see

@@ -374,6 +374,13 @@ enum ReclamationStatus {
   REJECTED
 }
 
+enum ClaimTimelineEventKind {
+  OPENED
+  RESOLVED
+  REJECTED
+  REOPENED
+}
+
 # ==============================================================================
 # Directives — ACL (@auth/@public) + declared links (@command/@reads)
 # ==============================================================================
@@ -552,6 +559,17 @@ type MutedParticipant {
   role: ConversationAuthorRole!
   reason: MuteReason!
   until: DateTime
+}
+
+type ClaimTimelineEntry {
+  kind: ClaimTimelineEventKind!
+  reclamationId: ReclamationId!
+  category: ReclamationCategory
+  requestedResolution: ReclamationResolution
+  resolution: ReclamationResolution
+  refundAmount: Money
+  reason: ReclamationReason
+  at: DateTime!
 }
 
 type Restaurant {
@@ -840,6 +858,7 @@ type OrderConversation {
   customerChatEnabled: Boolean!
   openedAt: DateTime!
   messages: [ConversationMessage!]!
+  claimEvents: [ClaimTimelineEntry!]!
 }
 
 type ConversationInternalNotes {

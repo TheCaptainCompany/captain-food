@@ -1745,10 +1745,13 @@ ReclamationResolved:
   description: >
     A reclamation was decided (resolved). Carries the chosen `resolution` and, for a PARTIAL_REFUND, the
     `refundAmount` — so the downstream refund/credit/replacement slices can react to the recorded
-    decision. The aggregate records the DECISION only; it performs no money-move (#151).
+    decision. The aggregate records the DECISION only; it performs no money-move (#151). `orderId` rides
+    along (sourced from the aggregate's own fold state, established at ReclamationOpened) so the claim
+    lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155).
   type: object
   properties:
     reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
     resolution: { $ref: 'scalars.yaml#/ReclamationResolution' }
     note:
       $ref: 'scalars.yaml#/ReclamationReason'
@@ -1756,28 +1759,32 @@ ReclamationResolved:
     refundAmount:
       $ref: 'entities.yaml#/Money'
       nullable: true
-  required: [reclamationId, resolution]
+  required: [reclamationId, orderId, resolution]
 
 ReclamationRejected:
   description: >
     A reclamation was rejected (the claim was declined) with a recorded reason
-    (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).
+    (rules.yaml#/ReclamationRejectionCarriesAReason) (#151). `orderId` rides along (from the aggregate's
+    fold state) so the claim lifecycle weaves into the per-order conversation thread, keyed by order (#155).
   type: object
   properties:
     reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
     reason: { $ref: 'scalars.yaml#/ReclamationReason' }
-  required: [reclamationId, reason]
+  required: [reclamationId, orderId, reason]
 
 ReclamationReopened:
   description: >
     A previously decided (resolved or rejected) reclamation was reopened for another look
     (rules.yaml#/OnlyDecidedReclamationsCanBeReopened). `reason` is optional — a reopen need not state why
     — mirroring the optional command input (there is no reason-required guard on reopen, unlike reject)
-    (#151).
+    (#151). `orderId` rides along (from the aggregate's fold state) so the claim lifecycle weaves into the
+    per-order conversation thread, keyed by order (#155).
   type: object
   properties:
     reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
     reason:
       $ref: 'scalars.yaml#/ReclamationReason'
       nullable: true
-  required: [reclamationId]
+  required: [reclamationId, orderId]

@@ -669,6 +669,10 @@ OrderConversation:
     - { $ref: 'events.yaml#/OrderRejectedByRestaurant' }
     - { $ref: 'events.yaml#/OrderCancelledByCustomer' }
     - { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
+    - { $ref: 'events.yaml#/ReclamationOpened' }
+    - { $ref: 'events.yaml#/ReclamationResolved' }
+    - { $ref: 'events.yaml#/ReclamationRejected' }
+    - { $ref: 'events.yaml#/ReclamationReopened' }
   columns:
     order_id:
       from: [{ $ref: 'events.yaml#/ConversationOpened/properties/orderId' }]
@@ -721,3 +725,11 @@ OrderConversation:
         - { $ref: 'events.yaml#/ParticipantMuted' }
         - { $ref: 'events.yaml#/ParticipantUnmuted' }
       note: "current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector."
+    claim_events:
+      type: jsonb
+      from:
+        - { $ref: 'events.yaml#/ReclamationOpened' }
+        - { $ref: 'events.yaml#/ReclamationResolved' }
+        - { $ref: 'events.yaml#/ReclamationRejected' }
+        - { $ref: 'events.yaml#/ReclamationReopened' }
+      note: "ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status shows inline in the per-order conversation (§2.5, #155)."

@@ -153,6 +153,7 @@ pub struct OrderConversationRow {
     pub admin_invited: bool,
     pub escalation_reason: Option<EscalationReason>,
     pub muted: serde_json::Value,
+    pub claim_events: serde_json::Value,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

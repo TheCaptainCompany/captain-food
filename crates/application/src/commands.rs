@@ -1897,6 +1897,9 @@ pub async fn resolve_reclamation(
     }
     let event = DomainEvent::ReclamationResolved(ReclamationResolved {
         reclamation_id: cmd.reclamation_id,
+        // The order rides along from the aggregate's fold state (established at ReclamationOpened) so the
+        // claim lifecycle can be woven into the per-order conversation thread, keyed by order (§2.5, #155).
+        order_id: state.order_id,
         resolution: cmd.resolution,
         note: cmd.note,
         refund_amount: cmd.refund_amount,
@@ -1933,6 +1936,8 @@ pub async fn reject_reclamation(
     };
     let event = DomainEvent::ReclamationRejected(ReclamationRejected {
         reclamation_id: cmd.reclamation_id,
+        // Order rides along from fold state so the claim weaves into the order thread, keyed by order (#155).
+        order_id: state.order_id,
         reason,
     });
     let stream = format!("Reclamation-{}", cmd.reclamation_id.0);
@@ -1960,6 +1965,8 @@ pub async fn reopen_reclamation(
     }
     let event = DomainEvent::ReclamationReopened(ReclamationReopened {
         reclamation_id: cmd.reclamation_id,
+        // Order rides along from fold state so the claim weaves into the order thread, keyed by order (#155).
+        order_id: state.order_id,
         reason: cmd.reason,
     });
     let stream = format!("Reclamation-{}", cmd.reclamation_id.0);

@@ -344,6 +344,7 @@ pub trait OrderConversationCompute {
     fn internal_notes(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> serde_json::Value;
     fn admin_invited(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> bool;
     fn muted(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> serde_json::Value;
+    fn claim_events(&self, prev: Option<&OrderConversationRow>, env: &Envelope) -> serde_json::Value;
 }
 
 pub fn project_order_conversation<C: OrderConversationCompute>(c: &C, state: Option<OrderConversationRow>, env: &Envelope) -> Option<OrderConversationRow> {
@@ -360,6 +361,7 @@ pub fn project_order_conversation<C: OrderConversationCompute>(c: &C, state: Opt
             admin_invited: c.admin_invited(None, env),
             escalation_reason: None,
             muted: c.muted(None, env),
+            claim_events: c.claim_events(None, env),
             created_at: env.occurred_at,
             updated_at: env.occurred_at,
         }),
@@ -376,6 +378,10 @@ pub fn project_order_conversation<C: OrderConversationCompute>(c: &C, state: Opt
         DomainEvent::OrderRejectedByRestaurant(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::OrderCancelledByCustomer(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
         DomainEvent::OrderCancelledByRestaurant(_) => { let mut row = state?; let v = c.status(Some(&row), env); row.status = v; Some(row) },
+        DomainEvent::ReclamationOpened(_) => { let mut row = state?; let v = c.claim_events(Some(&row), env); row.claim_events = v; Some(row) },
+        DomainEvent::ReclamationResolved(_) => { let mut row = state?; let v = c.claim_events(Some(&row), env); row.claim_events = v; Some(row) },
+        DomainEvent::ReclamationRejected(_) => { let mut row = state?; let v = c.claim_events(Some(&row), env); row.claim_events = v; Some(row) },
+        DomainEvent::ReclamationReopened(_) => { let mut row = state?; let v = c.claim_events(Some(&row), env); row.claim_events = v; Some(row) },
         _ => return state,
     };
     next.map(|mut row| {

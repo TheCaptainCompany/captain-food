@@ -168,6 +168,10 @@ INSERT INTO ref_reclamation_resolution (value, sort_order) VALUES ('FULL_REFUND'
 CREATE TABLE ref_reclamation_status(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
 INSERT INTO ref_reclamation_status (value, sort_order) VALUES ('OPEN',0),('RESOLVED',1),('REJECTED',2);
 
+-- ClaimTimelineEventKind
+CREATE TABLE ref_claim_timeline_event_kind(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
+INSERT INTO ref_claim_timeline_event_kind (value, sort_order) VALUES ('OPENED',0),('RESOLVED',1),('REJECTED',2),('REOPENED',3);
+
 CREATE TABLE domain_events (
   position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   id UUID NOT NULL UNIQUE,
@@ -593,6 +597,7 @@ CREATE TABLE OrderConversation (
   admin_invited BOOLEAN NOT NULL,
   escalation_reason TEXT,
   muted JSONB NOT NULL,
+  claim_events JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );

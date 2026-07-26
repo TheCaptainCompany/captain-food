@@ -379,3 +379,17 @@ pub struct MutedParticipant {
     pub reason: MuteReason,
     pub until: Option<String>,
 }
+
+/// One reclamation-lifecycle entry woven into the per-order conversation thread (read-model array element; §2.5, #155). `kind` says which fact it records (OPENED/RESOLVED/REJECTED/REOPENED); `reclamationId` correlates entries of the same claim (multiple claims may exist per order). The remaining fields ride along per kind: `category`/`requestedResolution` from the opening, `resolution`/ `refundAmount` from a resolution, `reason` from a rejection or reopen. `at` is the fact's occurred-at. Customer-visible — it is the customer's own claim shown inline in their order thread.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimTimelineEntry {
+    pub kind: ClaimTimelineEventKind,
+    pub reclamation_id: ReclamationId,
+    pub category: Option<ReclamationCategory>,
+    pub requested_resolution: Option<ReclamationResolution>,
+    pub resolution: Option<ReclamationResolution>,
+    pub refund_amount: Option<Money>,
+    pub reason: Option<ReclamationReason>,
+    pub at: String,
+}

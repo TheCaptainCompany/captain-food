@@ -389,6 +389,7 @@ types:
       customerChatEnabled: { type: boolean }
       openedAt: { type: string, format: date-time }
       messages: { $ref: 'entities.yaml#/ConversationMessage', array: true }   # PUBLIC timeline
+      claimEvents: { $ref: 'entities.yaml#/ClaimTimelineEntry', array: true }   # reclamation lifecycle woven into the thread (§2.5, #155)
 
   ConversationInternalNotes:
     description: >

@@ -403,7 +403,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `OrderConversation` · 🛶 V0 · source aggregate `Conversation`
 
-- **Fed by**: `ConversationOpened`, `MessagePosted`, `MessageTranslationAdded`, `AdminInvitedToConversation`, `ParticipantMuted`, `ParticipantUnmuted`, `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`
+- **Fed by**: `ConversationOpened`, `MessagePosted`, `MessageTranslationAdded`, `AdminInvitedToConversation`, `ParticipantMuted`, `ParticipantUnmuted`, `OrderPlaced`, `OrderAcceptedByRestaurant`, `OrderPreparationStarted`, `OrderMarkedReady`, `OrderDelivered`, `OrderRejectedByRestaurant`, `OrderCancelledByCustomer`, `OrderCancelledByRestaurant`, `ReclamationOpened`, `ReclamationResolved`, `ReclamationRejected`, `ReclamationReopened`
 - **Note**: The per-order conversation read model (#129). Folds the conversation's own messages AND the order's status lifecycle events (cross-aggregate, correlated by order_id) into one timeline, so order status participates in the thread with no status copied into a message. The projector appends each MessagePosted, splitting PUBLIC (messages) from INTERNAL (internal_notes).
 
 
@@ -419,6 +419,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `admin_invited` | `boolean` | `BOOLEAN` | — | True once an admin was pulled in by a reasoned escalation (#129). |
 | `escalation_reason` | `EscalationReason` | `TEXT` | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
 | `muted` | `jsonb` | `JSONB` | — | current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector. |
+| `claim_events` | `jsonb` | `JSONB` | — | ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status shows inline in the per-order conversation (§2.5, #155). |
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
