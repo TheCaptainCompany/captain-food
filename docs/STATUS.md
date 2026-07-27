@@ -1,7 +1,22 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-26. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-27. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-07-27 — [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) reclamation
+> epic COMPLETE — the #158 credit/refund integrations landed (#207 closed).** With PR #213 (refund
+> binding) + PR #214 (credit visible + spendable), all three flagged #158 integrations are done, so
+> **#158 and #207 are closed**: a FULL/PARTIAL_REFUND resolution now **executes** a real refund via the
+> one existing refund path (open→approve driven from the saga — the resolution IS the approval;
+> idempotent, amount-capped at captured, `RefundProcess` the sole Stripe driver); goodwill credit is now
+> **visible** (`customerCredit` balance query, a materialized `CustomerCreditBalance` projection) and
+> **spendable** (applied at `placeOrder` — `min(balance, total)`, PaymentIntent reduced, exactly-once by
+> `orderId`: consume no-ops if the order was already debited, `credit_to_apply` retry-stable, no double-
+> spend). A generated-projector correctness bug was caught + fixed en route (a second creation-arm event
+> reset the row — the emitter now threads `state.as_ref()`, protecting all 6 projections). Deferred
+> (noted): the applied-credit receipt line + credit release on abandoned checkout. All money paths
+> verified; migrations `20260727000000` applied. **The whole reclamation subject (open → discuss →
+> resolve as refund/replacement/goodwill-credit/reject, evidence, timeline, SLA) is now live end to end.**
 
 > ✅ **2026-07-26 — [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) reclamation
 > (claim/dispute) epic — 7 of 8 slices done (ADR-20260726-124204).** A first-class `Reclamation`
