@@ -23,8 +23,8 @@
 //!   `x-internal-token` header; the server rejects the ping without it.
 
 use sirene_ingest::{
-    french_departments, restauration_query, upsert_staging_row, SireneClient, SireneScope,
-    MAX_PAGE_SIZE,
+    french_departments, restauration_query, upsert_staging_batch, SireneClient, SireneScope,
+    MAX_PAGE_SIZE, STAGING_BATCH_SIZE,
 };
 
 /// The new INSEE portal's public quota is ~30 requests/minute — pace page fetches accordingly.
@@ -39,7 +39,7 @@ async fn main() {
 
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(2)
+        .max_connections(5)
         .acquire_timeout(std::time::Duration::from_secs(15))
         .connect(&url)
         .await
@@ -82,14 +82,14 @@ async fn main() {
                 }
             };
             department_fetched += page.records.len();
-            for record in &page.records {
-                match upsert_staging_row(&pool, record, department, sync_run_id).await {
-                    Ok(()) => upserted += 1,
-                    Err(e) => {
-                        failed_rows += 1;
-                        eprintln!("sirene_ingest: {e}");
-                    }
-                }
+            // Batch the staging write: each page is UPSERTed in chunks of STAGING_BATCH_SIZE in one
+            // round-trip each (with a row-by-row fallback inside `upsert_staging_batch` on batch error),
+            // instead of one round-trip per record — the fix for the throughput bottleneck (#215). The
+            // `upserted`/`failed_rows` tallies keep their exact meaning.
+            for chunk in page.records.chunks(STAGING_BATCH_SIZE) {
+                let counts = upsert_staging_batch(&pool, chunk, department, sync_run_id).await;
+                upserted += counts.upserted;
+                failed_rows += counts.failed_rows;
             }
             match page.next_cursor {
                 Some(next) => {
