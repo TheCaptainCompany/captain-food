@@ -564,3 +564,26 @@ pub async fn read_scope(
         RequestRole::Public | RequestRole::External => ReadScope::Public,
     }
 }
+
+/// The two identity bridges the edge needs to turn a verified `Principal` into a [`ReadScope`] (#144).
+///
+/// Provided as an Axum `Extension` rather than pulled out of the GraphQL schema, because the bridge
+/// must run BEFORE the schema executes — resolving it once per request is the property that keeps a
+/// thread rendering N attachments from paying for N lookups.
+#[derive(Clone, Default)]
+pub struct ScopeResolver {
+    pub customers: Option<std::sync::Arc<dyn application::queries::CustomerReadRepository>>,
+    pub riders: Option<std::sync::Arc<dyn application::queries::RiderReadRepository>>,
+}
+
+impl ScopeResolver {
+    /// Resolve a principal. With no bridges wired (no database) every caller degrades to `Public`,
+    /// which sees no tenant rows — the safe direction. A resolver that returned "unrestricted" here
+    /// would turn a missing dependency into a data leak.
+    pub async fn resolve(&self, principal: &Principal) -> application::queries::ReadScope {
+        let (Some(customers), Some(riders)) = (&self.customers, &self.riders) else {
+            return application::queries::ReadScope::Public;
+        };
+        read_scope(principal, customers.as_ref(), riders.as_ref()).await
+    }
+}

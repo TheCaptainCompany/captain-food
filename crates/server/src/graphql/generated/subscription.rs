@@ -176,6 +176,8 @@ impl SubscriptionRoot {
     async fn order_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OrderStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Order>>> {
         let bus = ctx.data::<infrastructure::EventBus>()?.clone();
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?.clone();
+        // Per-instance authorization (#144). A subscription resolves its scope ONCE at subscribe time, from the same context the query path uses — the stream must not widen what a query would refuse.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?.clone();
         // Tracked by orderId (#14, ADR-20260720-220000) — the key the confirmation screen has —
         // replacing the pre-acceptance-first correlationId convention.
@@ -236,7 +238,7 @@ impl SubscriptionRoot {
                     if attempt > 0 {
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     }
-                    let row = match orders.by_id(order_id).await {
+                    let row = match orders.by_id(order_id, &scope).await {
                         Ok(Some(row)) => row,
                         Ok(None) => continue, // not projected yet — re-poll
                         Err(e) => {

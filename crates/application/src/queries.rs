@@ -248,10 +248,28 @@ pub struct OrderFilter {
 /// GraphQL queries — the single canonical Order read model (history + back-office queue + tracking).
 #[async_trait]
 pub trait OrderReadRepository: Send + Sync {
-    /// Orders honouring the filter, most recently placed first.
-    async fn list(&self, filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError>;
-    /// A single order by id (tracking), or `None` if absent.
-    async fn by_id(&self, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError>;
+    /// Orders honouring the filter, most recently placed first, **restricted to `scope`** (#144).
+    ///
+    /// FILTERED, not checked: rows outside the scope are absent, not denied — so a list cannot leak
+    /// existence and cannot "forget" to be scoped. The `scope` parameter is mandatory precisely so
+    /// that an unscoped list is not expressible; before #144 it was, and a customer who knew an order
+    /// id could read anyone's order.
+    async fn list(
+        &self,
+        filter: OrderFilter,
+        scope: &ReadScope,
+    ) -> Result<Vec<OrderTrackingRow>, DomainError>;
+
+    /// A single order by id, or `None` — **including when it exists but is outside `scope`** (#144).
+    ///
+    /// Returning `None` rather than a distinct "forbidden" keeps the read side free of an existence
+    /// oracle; the by-id GraphQL surface renders it as "not found". The `/files` route is the case
+    /// that deliberately differs (403, to preserve the probing signal) — see PROP-20260725-185140.
+    async fn by_id(
+        &self,
+        id: OrderId,
+        scope: &ReadScope,
+    ) -> Result<Option<OrderTrackingRow>, DomainError>;
 }
 
 /// Read port over the `OrderConversation` projection table (ADR-0040; #131, epic #129). Backs the
@@ -513,6 +531,13 @@ pub enum ReadScope {
     Rider(RiderId),
     /// Unrestricted by role alone — ADMIN holds no membership rows at all, by design.
     Admin,
+    /// The system itself: a process manager or worker acting with no user principal (#144).
+    ///
+    /// Deliberately NOT `Admin`. A saga is not an administrator, and conflating them would mean that
+    /// the day admin reads become audited or restricted, every process manager silently inherits the
+    /// restriction — or, worse, silently evades the audit. Same predicate today, different meaning,
+    /// and the difference is the kind that only bites once.
+    System,
 }
 
 impl ReadScope {
@@ -524,7 +549,7 @@ impl ReadScope {
             ReadScope::Restaurant(id) => Some((UserType::RESTAURANT, id.0)),
             ReadScope::RestaurantAccount(id) => Some((UserType::RESTAURANT_ACCOUNT, id.0)),
             ReadScope::Rider(id) => Some((UserType::RIDER, id.0)),
-            ReadScope::Admin | ReadScope::Public => None,
+            ReadScope::Admin | ReadScope::System | ReadScope::Public => None,
         }
     }
 }

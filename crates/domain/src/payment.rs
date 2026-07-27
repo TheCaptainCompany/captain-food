@@ -14,7 +14,7 @@
 use crate::generated::events::DomainEvent;
 use crate::generated::entities::Money;
 pub use crate::generated::lifecycles::payment as lifecycle;
-use crate::generated::scalars::{CustomerId, OrderId, PaymentIntentId, PaymentStatus, RefundId, RestaurantId};
+use crate::generated::scalars::{OrderId, PaymentIntentId, PaymentStatus, RefundId, RestaurantId};
 
 /// The stream-category prefix; the stream is `"Payment-<paymentIntentId>"`.
 pub const CATEGORY: &str = "Payment";

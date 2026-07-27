@@ -15,6 +15,7 @@
 //! - the DeliveryJob fold predicates (birth exists / not already FAILED).
 
 use domain::generated::entities::Address;
+use crate::queries::ReadScope;
 use domain::generated::events::{
     DeliveryAcceptedByPartner, DeliveryCompleted, DeliveryDispatchFailed, DeliveryEscalationRequested,
     DeliveryOfferTimedOut, DeliveryRejectedByPartner, DeliveryRequested, DeliveryStatusUpdated,
@@ -103,7 +104,7 @@ impl<'a> DispatchOpenHooks<'a> {
 #[async_trait::async_trait]
 impl delivery_dispatch_process::OrderMarkedReadyHooks for DispatchOpenHooks<'_> {
     async fn read_order(&self, order_id: OrderId) -> Result<HookOutcome<OrderRead>, DomainError> {
-        let Some(order) = self.orders.by_id(order_id).await? else {
+        let Some(order) = self.orders.by_id(order_id, &ReadScope::System).await? else {
             return Ok(HookOutcome::Skip(format!(
                 "order {} is not in the OrderTracking read model yet — cannot dispatch its delivery",
                 order_id.0

@@ -179,6 +179,8 @@ pub fn router() -> Router {
     // constructed unconditionally so the schema always carries one.
     let operation_status_bus = infrastructure::OperationStatusBus::default();
     let mut read_deps: Option<ReadDeps> = None;
+    // The edge's ReadScope bridges (#144); None without a database — the handler then fails CLOSED.
+    let mut scope_resolver: Option<auth::ScopeResolver> = None;
     // The host fallback's tenant lookup (#98): decides registered-vs-unclaimed for {slug} hosts.
     let mut tenant_lookup = hosts::TenantLookup(None);
     // Cookie-pickup parking (#112): the real Pg store when DB + AUTH_SESSION_KEY are set, else the
@@ -249,6 +251,12 @@ pub fn router() -> Router {
                     Arc::new(infrastructure::PgOrderConversationRepository::new(pool.clone()));
                 let customers: Arc<dyn CustomerReadRepository> =
                     Arc::new(PgCustomerRepository::new(pool.clone()));
+                // The RIDER identity bridge (#144) — the rider half of what `customers.by_auth_ref`
+                // already does. Held here (not only inside the schema) because the ReadScope must be
+                // resolved at the edge, before the schema executes.
+                let riders: Arc<dyn application::queries::RiderReadRepository> =
+                    Arc::new(infrastructure::persistence::rider_store::PgRiderRepository::new(pool.clone()));
+                scope_resolver = Some(auth::ScopeResolver { customers: Some(customers.clone()), riders: Some(riders) });
                 let deliveries: Arc<dyn DeliveryReadRepository> =
                     Arc::new(PgDeliveryRepository::new(pool.clone()));
                 let refunds: Arc<dyn RefundReadRepository> =
@@ -651,6 +659,11 @@ pub fn router() -> Router {
         // API auth (ADR-0047): the Supabase-JWT verifier, available to the `/{role}/graphql` handler which
         // gates every non-public path. Shared as an Extension so the JWKS cache is process-wide.
         .layer(Extension(auth::AuthContext::from_env()))
+        // Per-instance authorization bridges (#144): the sub -> domain-id lookups the edge needs to
+        // build a ReadScope. `unwrap_or_default()` supplies an EMPTY resolver without a database, and
+        // an empty resolver resolves every caller to Public — no tenant rows. Fail closed: a missing
+        // bridge must never widen access.
+        .layer(Extension(scope_resolver.unwrap_or_default()))
         // Outer layer: stamp every response with its server-side build time.
         .layer(middleware::from_fn(response_timing))
 }

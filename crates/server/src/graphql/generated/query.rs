@@ -198,6 +198,8 @@ impl QueryRoot {
     async fn orders(&self, ctx: &async_graphql::Context<'_>, input: Option<OrdersQueryInput>) -> async_graphql::Result<Vec<Order>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         let filter = input
             .map(|i| application::queries::OrderFilter {
                 customer_id: i.customer_id.map(Into::into),
@@ -205,7 +207,7 @@ impl QueryRoot {
                 status: i.status.map(Into::into),
             })
             .unwrap_or_default();
-        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let rows = repo.list(filter, &scope).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         // The non-null `restaurant` navigation field: join against the Restaurant read model in memory
         // (an order is only ever placed against a projected restaurant, so a match always exists).
         let by_id: std::collections::HashMap<_, _> = restaurants
@@ -225,7 +227,9 @@ impl QueryRoot {
     async fn order(&self, ctx: &async_graphql::Context<'_>, input: OrderQueryInput) -> async_graphql::Result<Option<Order>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let Some(row) = repo.by_id(input.id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+        // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
+        let Some(row) = repo.by_id(input.id.into(), &scope).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
             return Ok(None);
         };
         let restaurant = restaurants
@@ -241,11 +245,13 @@ impl QueryRoot {
         let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         let Some(job) = deliveries.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
             return Ok(None);
         };
         let order = orders
-            .by_id(job.order_id)
+            .by_id(job.order_id, &scope)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
             .ok_or_else(|| async_graphql::Error::new("delivery references an unknown order"))?;
@@ -273,6 +279,8 @@ impl QueryRoot {
         let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         let rows = deliveries
             .for_rider(domain::generated::scalars::RiderId(rider_id), input.and_then(|i| i.status).map(Into::into))
             .await
@@ -281,7 +289,7 @@ impl QueryRoot {
         // projected order+restaurant, so a missing target simply drops the job).
         let mut out = Vec::new();
         for job in rows {
-            let Some(order) = orders.by_id(job.order_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else { continue };
+            let Some(order) = orders.by_id(job.order_id, &scope).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else { continue };
             let Some(restaurant) = restaurants.by_id(job.restaurant_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else { continue };
             out.push(DeliveryJob::from((job, order, restaurant)));
         }
@@ -293,6 +301,8 @@ impl QueryRoot {
         let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        // Per-instance authorization (#144): the ReadScope was resolved ONCE at the edge from the verified Principal and injected into the context. Absent (schema executed outside a request) => Public, i.e. no tenant rows -- fail closed.
+        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
         let restaurant_id: domain::generated::scalars::RestaurantId = input.restaurant_id.into();
         let rows = deliveries
             .by_restaurant(restaurant_id, input.status.map(Into::into))
@@ -309,7 +319,7 @@ impl QueryRoot {
             .ok_or_else(|| async_graphql::Error::new("delivery references an unknown restaurant"))?;
         let mut out = Vec::new();
         for job in rows {
-            let Some(order) = orders.by_id(job.order_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else { continue };
+            let Some(order) = orders.by_id(job.order_id, &scope).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else { continue };
             out.push(DeliveryJob::from((job, order, restaurant.clone())));
         }
         Ok(out)

@@ -13,6 +13,7 @@
 
 use domain::generated::commands::ApproveRefund;
 use domain::generated::entities::Money;
+use crate::queries::ReadScope;
 use domain::generated::events::{
     DomainEvent, OrderCancelledByCustomer, OrderCancelledByRestaurant, OrderRejectedByRestaurant,
     PaymentRefunded, RefundApproved, RefundDenied, RefundOpened, RefundRequested,
@@ -47,7 +48,7 @@ impl RefundOpenHooks<'_> {
     /// The shared `read order` body: OrderTracking by id, coerced to the generated sink types
     /// (`total_amount_cents` carries the full [`Money`] the RefundOpened amount needs).
     async fn load_order(&self, order_id: OrderId) -> Result<HookOutcome<OrderRead>, DomainError> {
-        let Some(o) = self.orders.by_id(order_id).await? else {
+        let Some(o) = self.orders.by_id(order_id, &ReadScope::System).await? else {
             return Ok(HookOutcome::Skip(format!(
                 "order {} is not in the OrderTracking read model — nothing captured to refund",
                 order_id.0

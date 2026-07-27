@@ -143,7 +143,8 @@ impl ScopeMembershipRepository for PgScopeMembershipRepository {
     ) -> Result<bool, DomainError> {
         match scope {
             // ADMIN holds no rows by design — storing them would be a row per admin per instance.
-            ReadScope::Admin => Ok(true),
+            // SYSTEM is a process manager/worker: unrestricted, but deliberately a distinct meaning.
+            ReadScope::Admin | ReadScope::System => Ok(true),
             // An unauthenticated caller is never a member of anything. Public read models are reached
             // by not asking this question at all, not by answering it `true`.
             ReadScope::Public => Ok(false),
@@ -168,5 +169,33 @@ impl ScopeMembershipRepository for PgScopeMembershipRepository {
             return Ok(Vec::new());
         };
         scopes_for(&self.pool, principal_type, principal_id, scope_type).await
+    }
+}
+
+/// How a [`ReadScope`] restricts a query — the ONE place the four cases are decided, so no adapter
+/// invents its own interpretation of `Admin` or `Public` (#144).
+///
+/// `Public` mapping to [`ScopePredicate::None`] rather than to "no restriction" is the whole point:
+/// an unauthenticated caller reaching a tenant read model must get an EMPTY result, never everything.
+/// That inversion is the classic authorization bug, so it is decided here once and not per adapter.
+pub enum ScopePredicate {
+    /// No restriction (ADMIN — it holds no membership rows by design).
+    All,
+    /// Nothing is visible (PUBLIC on a tenant read model).
+    None,
+    /// Restricted to rows whose scope this principal is a member of: `(principal_type_ord, principal_id)`.
+    Member(i32, Uuid),
+}
+
+pub fn scope_predicate(scope: &ReadScope) -> ScopePredicate {
+    match scope {
+        ReadScope::Admin | ReadScope::System => ScopePredicate::All,
+        ReadScope::Public => ScopePredicate::None,
+        _ => match scope.principal() {
+            Some((principal_type, principal_id)) => {
+                ScopePredicate::Member(principal_type.to_ord(), principal_id)
+            }
+            None => ScopePredicate::None,
+        },
     }
 }

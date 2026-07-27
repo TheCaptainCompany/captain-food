@@ -132,6 +132,7 @@ async fn inbound_drain(
 async fn graphql_handler(
     State(schema): State<CaptainSchema>,
     Extension(auth): Extension<Arc<AuthContext>>,
+    scopes: Option<Extension<crate::auth::ScopeResolver>>,
     Path(role_seg): Path<String>,
     headers: HeaderMap,
     req: GraphQLRequest,
@@ -156,8 +157,25 @@ async fn graphql_handler(
         Err(_) => return (StatusCode::BAD_REQUEST, "invalid X-SESSION-ID (must be a UUID)").into_response(),
     };
     let trace = crate::graphql::session::trace_context(&headers);
+    // Per-instance authorization (#144): resolve the verified Principal to a ReadScope ONCE here, not
+    // per resolver and not per row. The bridge (auth `sub` -> domain id) is the only part that costs a
+    // lookup; every membership test downstream is a primary-key hit. Injected into the GraphQL context
+    // so the GENERATED resolvers can pass it into the read ports without any hand-written plumbing.
+    // The resolver is always layered; without a database its bridges are empty and every caller
+    // degrades to Public — no tenant rows. Fail closed by construction, not by a branch here.
+    let scope = match scopes {
+        Some(Extension(r)) => r.resolve(&principal).await,
+        None => application::queries::ReadScope::Public,
+    };
     let resp: GraphQLResponse = schema
-        .execute(req.into_inner().data(role).data(principal).data(session).data(trace))
+        .execute(
+            req.into_inner()
+                .data(role)
+                .data(principal)
+                .data(session)
+                .data(trace)
+                .data(scope),
+        )
         .await
         .into();
     resp.into_response()
