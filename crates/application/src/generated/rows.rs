@@ -157,3 +157,13 @@ pub struct OrderConversationRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
+
+/// The per-customer store-credit BALANCE read model (#158, Part B of #207). One row per customer with a ledger; the projector keeps `balance_cents` as the running SUM over the ledger stream (`CustomerCredit-{customerId}`): += on CustomerCreditGranted, −= on CustomerCreditConsumed. Serves the `customerCredit` query (the customer sees their spendable goodwill balance) and mirrors the pure write-side fold in `crates/domain/src/customer_credit.rs`. The balance is never negative (the write side rejects an overspend, errors.yaml#/InsufficientCustomerCredit). 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomerCreditBalanceRow {
+    pub customer_id: CustomerId,
+    pub balance_cents: MoneyCents,
+    pub currency: CurrencyCode,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}

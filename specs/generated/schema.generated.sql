@@ -603,6 +603,14 @@ CREATE TABLE OrderConversation (
 );
 CREATE INDEX ON OrderConversation (restaurant_id);
 
+CREATE TABLE CustomerCreditBalance (
+  customer_id UUID PRIMARY KEY,
+  balance_cents BIGINT NOT NULL,
+  currency TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
 -- all_events(): the entire log in global order — the SQL equivalent of EventStoreDB's $all stream.
 -- Inspection/replay only (projections track a checkpoint on position); never a read path.
 -- all_events()  ==  SELECT * FROM domain_events ORDER BY position

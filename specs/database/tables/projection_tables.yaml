@@ -735,3 +735,35 @@ OrderConversation:
         - { $ref: 'events.yaml#/ReclamationReopened' }
         - { $ref: 'events.yaml#/ReclamationEvidenceAttached' }
       note: "ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED/EVIDENCE_ATTACHED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status and evidence show inline in the per-order conversation (§2.5, #155, #156)."
+
+CustomerCreditBalance:
+  projector: app   # balance is a SUM (Σ granted − Σ consumed) — NOT foldable into a View_* (a fold view is a per-column state-fold, not an aggregate); the materialized-projector pattern (#158, ADR-20260726-163737) maintains it
+  aggregate: CustomerCredit
+  slice: V0
+  note: >
+    The per-customer store-credit BALANCE read model (#158, Part B of #207). One row per customer with a
+    ledger; the projector keeps `balance_cents` as the running SUM over the ledger stream
+    (`CustomerCredit-{customerId}`): += on CustomerCreditGranted, −= on CustomerCreditConsumed. Serves the
+    `customerCredit` query (the customer sees their spendable goodwill balance) and mirrors the pure
+    write-side fold in `crates/domain/src/customer_credit.rs`. The balance is never negative (the write
+    side rejects an overspend, errors.yaml#/InsufficientCustomerCredit).
+  fedBy:
+    - { $ref: 'events.yaml#/CustomerCreditGranted' }
+    - { $ref: 'events.yaml#/CustomerCreditConsumed' }
+  rules:
+    - "`balance_cents` is COMPUTED by the projector as Σ granted − Σ consumed (a SUM, not a fold-view column); the row is born on the first CustomerCreditGranted (a consume before any grant never materializes a ledger, mirroring the domain fold)."
+    - "`currency` is set from the first grant's amount and stays fixed (a customer's ledger is single-currency — their local currency, EUR for Tours V0)."
+  columns:
+    customer_id:
+      from: [{ $ref: 'events.yaml#/CustomerCreditGranted/properties/customerId' }]
+      pk: true
+    balance_cents:
+      type: { $ref: 'scalars.yaml#/MoneyCents' }
+      from:
+        - { $ref: 'events.yaml#/CustomerCreditGranted/properties/amount' }
+        - { $ref: 'events.yaml#/CustomerCreditConsumed/properties/amount' }
+      note: "Σ granted − Σ consumed (minor units), never negative. amountCents of the grant/consume Money, summed by the projector."
+    currency:
+      type: { $ref: 'scalars.yaml#/CurrencyCode' }
+      from: [{ $ref: 'events.yaml#/CustomerCreditGranted/properties/amount' }]
+      note: "The ledger currency, from the first grant's amount (single-currency per customer)."

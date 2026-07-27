@@ -14,6 +14,7 @@
 pub mod cart;
 pub mod catalog;
 pub mod customer;
+pub mod customer_credit_balance;
 pub mod order_conversation;
 pub mod order_tracking;
 pub mod prospection_pipeline;

@@ -423,4 +423,19 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `CustomerCreditBalance` · 🛶 V0 · source aggregate `CustomerCredit`
+
+- **Fed by**: `CustomerCreditGranted`, `CustomerCreditConsumed`
+- **Rules**: `balance_cents` is COMPUTED by the projector as Σ granted − Σ consumed (a SUM, not a fold-view column); the row is born on the first CustomerCreditGranted (a consume before any grant never materializes a ledger, mirroring the domain fold). `currency` is set from the first grant's amount and stays fixed (a customer's ledger is single-currency — their local currency, EUR for Tours V0).
+- **Note**: The per-customer store-credit BALANCE read model (#158, Part B of #207). One row per customer with a ledger; the projector keeps `balance_cents` as the running SUM over the ledger stream (`CustomerCredit-{customerId}`): += on CustomerCreditGranted, −= on CustomerCreditConsumed. Serves the `customerCredit` query (the customer sees their spendable goodwill balance) and mirrors the pure write-side fold in `crates/domain/src/customer_credit.rs`. The balance is never negative (the write side rejects an overspend, errors.yaml#/InsufficientCustomerCredit).
+
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `customer_id` | `CustomerId` | `UUID` | PK |  |
+| `balance_cents` | `MoneyCents` | `BIGINT` | — | Σ granted − Σ consumed (minor units), never negative. amountCents of the grant/consume Money, summed by the projector. |
+| `currency` | `CurrencyCode` | `TEXT` | — | The ledger currency, from the first grant's amount (single-currency per customer). |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 <!-- GENERATED:views END -->

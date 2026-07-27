@@ -807,6 +807,12 @@ type Reclamation {
   overdue: Boolean!
 }
 
+type CustomerCredit {
+  customerId: CustomerId!
+  balanceCents: MoneyCents!
+  currency: CurrencyCode!
+}
+
 type Refund {
   orderId: OrderId!
   restaurantId: RestaurantId!
@@ -1693,6 +1699,7 @@ type Query {
   pendingRefunds(input: PendingRefundsQueryInput): [Refund!]! @auth(requires: [RESTAURANT, ADMIN]) @reads(views: ["View_PendingRefunds"])
   deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
   myReclamations: [Reclamation!]! @auth(requires: [CUSTOMER]) @reads(views: ["View_Reclamation"])
+  customerCredit: CustomerCredit @auth(requires: [CUSTOMER]) @reads(views: ["CustomerCreditBalance"])
   restaurantReclamations(input: RestaurantReclamationsQueryInput): [Reclamation!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_Reclamation"])
   reclamation(input: ReclamationQueryInput!): Reclamation @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @reads(views: ["View_Reclamation"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])

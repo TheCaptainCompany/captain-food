@@ -229,6 +229,8 @@ CreditConsumeDecreasesBalance:
   description: "Spending store credit decreases the customer's available balance by the consumed amount (#158)."
 CreditCannotBeOverspent:
   description: "A customer can never spend more store credit than their available balance; an over-spend is rejected and the balance never goes negative (#158)."
+CreditConsumedAtMostOncePerOrder:
+  description: "Store credit is consumed at most once per order: the debit is keyed by the client-minted orderId, so a re-delivered or retried consume for an order already debited is a benign no-op — the same order never spends credit twice (#158, Part B of #207)."
 GoodwillCreditGrantedOnResolution:
   description: "When a reclamation is resolved as GOODWILL_CREDIT, the ReclamationProcess saga grants the claimant store credit for the recorded amount (#158)."
 ReplacementOrderPlacedOnResolution:

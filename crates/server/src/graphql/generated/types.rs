@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
-use application::projections::{CartRow, CatalogRow, CustomerRow, OrderConversationRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
+use application::projections::{CartRow, CatalogRow, CustomerCreditBalanceRow, CustomerRow, OrderConversationRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
 use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, PricingPolicyRow, ReclamationRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
@@ -880,6 +880,18 @@ pub struct Reclamation {
     pub overdue: bool,
 }
 
+/// The authenticated customer's store-credit balance (#158, Part B of #207): the spendable goodwill credit (from resolved claims) the customer can apply at checkout. One row per customer with a ledger; `balanceCents` is the projector's running SUM (Σ granted − Σ consumed), never negative.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerCredit {
+    #[graphql(name = "customerId")]
+    pub customer_id: CustomerId,
+    #[graphql(name = "balanceCents")]
+    pub balance_cents: MoneyCents,
+    #[graphql(name = "currency")]
+    pub currency: CurrencyCode,
+}
+
 /// A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin decides, then APPROVED (Stripe refund requested) or DENIED, and REFUNDED once Stripe settles. Serves the restaurant's and admin's refund queue (filter status = REQUESTED for pending ones).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -1343,6 +1355,18 @@ impl From<ReclamationRow> for Reclamation {
             opened_at: row.opened_at,
             decided_at: row.decided_at,
             overdue: row.overdue,
+        }
+    }
+}
+
+/// Read-model row → API type: the `CustomerCreditBalance` projection row (#158, Part B of #207) →
+/// the customer's spendable store-credit balance (Σ granted − Σ consumed, never negative).
+impl From<CustomerCreditBalanceRow> for CustomerCredit {
+    fn from(row: CustomerCreditBalanceRow) -> Self {
+        Self {
+            customer_id: row.customer_id.into(),
+            balance_cents: row.balance_cents.into(),
+            currency: row.currency.into(),
         }
     }
 }

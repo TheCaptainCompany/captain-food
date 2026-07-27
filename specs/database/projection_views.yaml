@@ -78,8 +78,8 @@ nonProjectedEvents:
   - { $ref: 'events.yaml#/RefundRequested' }        # saga trigger consumed by RefundProcess; the settled PaymentRefunded fact is what gets projected
   - { $ref: 'events.yaml#/DeliveryEscalationRequested' }   # internal dispatch mechanics (#60); advances the ranked walk, feeds no View_*
   - { $ref: 'events.yaml#/DeliveryOfferTimedOut' }         # internal dispatch mechanics (#60); advances the ranked walk, feeds no View_*
-  - { $ref: 'events.yaml#/CustomerCreditGranted' }         # store-credit ledger (#158); the balance read model is a materialized-projector follow-up (a SUM is not foldable into a View_*), flagged in ADR-20260726-163737
-  - { $ref: 'events.yaml#/CustomerCreditConsumed' }        # store-credit ledger (#158); same — the balance read model + customerCredit query are a flagged follow-up
+  # CustomerCreditGranted / CustomerCreditConsumed are now PROJECTED into the materialized
+  # CustomerCreditBalance table (a SUM read model, tables/projection_tables.yaml; #158 Part B of #207).
 
 # NOTE: OrdersByRestaurant and OrdersByCustomer were folded into the single canonical Order read model
 # (OrderTracking, now tables/projection_tables.yaml) — queried by id / customer / restaurant+status via its

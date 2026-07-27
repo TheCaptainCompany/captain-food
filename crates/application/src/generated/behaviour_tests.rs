@@ -3874,6 +3874,20 @@ async fn test_consume_beyond_balance_rejected() {
     bed.assert_appended("TestConsumeBeyondBalanceRejected", &before, &[]);
 }
 
+/// tests.yaml#/tests/TestConsumeSameOrderTwiceIsNoOp — "Consuming store credit again for the same order is a benign no-op (exactly-once per order)"
+/// rules: CreditConsumedAtMostOncePerOrder
+#[tokio::test]
+async fn test_consume_same_order_twice_is_no_op() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("CustomerCredit-{}", support::uid("customer-1")), vec![fx_customer_credit_granted(), fx_customer_credit_consumed()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConsumeCustomerCredit { customer_id: sc::CustomerId(support::uid("customer-1")), amount: ent::Money { amount_cents: sc::MoneyCents(300), currency: sc::CurrencyCode("EUR".into()) }, order_id: sc::OrderId(support::uid("order-1")) };
+    let result = crate::commands::consume_customer_credit(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestConsumeSameOrderTwiceIsNoOp: the spec expects acceptance");
+    bed.assert_appended("TestConsumeSameOrderTwiceIsNoOp", &before, &[]);
+}
+
 /// tests.yaml#/tests/TestReclamationProcessGrantsGoodwillCredit — "Grants store credit when a claim is resolved as GOODWILL_CREDIT"
 /// rules: GoodwillCreditGrantedOnResolution
 #[tokio::test]

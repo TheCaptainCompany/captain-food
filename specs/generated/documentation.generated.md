@@ -78,6 +78,7 @@ An authenticated person who orders food via Captain.Food.
 |  | SetAddress | [✏️ `setCustomerAddress`](#mutation-setcustomeraddress) |
 |  | RemoveAddress | [✏️ `removeCustomerAddress`](#mutation-removecustomeraddress) |
 |  | SetPaymentMethod | [✏️ `setCustomerPaymentMethod`](#mutation-setcustomerpaymentmethod) |
+|  | ViewMyCredit | [🔎 `customerCredit`](#query-customercredit) |
 | 🧭 **MessageAboutMyOrder** | OpenThread | [✏️ `openConversation`](#mutation-openconversation) |
 |  | SendMessage | [✏️ `postMessage`](#mutation-postmessage) |
 |  | TranslateMessage | [✏️ `recordMessageTranslation`](#mutation-recordmessagetranslation) |
@@ -3185,7 +3186,7 @@ Order status change events for ONE order, tracked by orderId — what the confir
 - **Streams**: [🧩 `Order`](#type-order)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
 
-### 🧩 Output types _(7)_
+### 🧩 Output types _(8)_
 
 <a id="type-cart"></a>
 #### 🧩 Type: `Cart`
@@ -3282,6 +3283,20 @@ A customer claim/dispute over a delivered order (aggregate Reclamation, id = rec
 | <a id="type-reclamation--openedat"></a>`openedAt` | `string` _date-time_ | ✅ |
 | <a id="type-reclamation--decidedat"></a>`decidedAt` | `string` _date-time_ | ⬜ |
 | <a id="type-reclamation--overdue"></a>`overdue` | `boolean` | ✅ |
+
+<a id="type-customercredit"></a>
+#### 🧩 Type: `CustomerCredit`
+
+The authenticated customer's store-credit balance (#158, Part B of #207): the spendable goodwill credit (from resolved claims) the customer can apply at checkout. One row per customer with a ledger; `balanceCents` is the projector's running SUM (Σ granted − Σ consumed), never negative.
+
+
+- **Read model**: [🗄️ `CustomerCreditBalance`](#view-customercreditbalance)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-customercredit--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |
+| <a id="type-customercredit--balancecents"></a>`balanceCents` | [🔤 `MoneyCents`](#scalar-moneycents) | ✅ |
+| <a id="type-customercredit--currency"></a>`currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | ✅ |
 
 <a id="type-refund"></a>
 #### 🧩 Type: `Refund`
@@ -3646,7 +3661,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(6)_
+### 🗄️ Views (read models) _(7)_
 
 <a id="view-view_deliverysatisfaction"></a>
 #### 🗄️ View: `View_DeliverySatisfaction`
@@ -3806,6 +3821,22 @@ sequenceDiagram
 | `escalation_reason` | [🔤 `EscalationReason`](#scalar-escalationreason) | [⚡ `AdminInvitedToConversation`.`reason`](#event-admininvitedtoconversation--reason) | nullable | The reason recorded on the latest escalation; null until an admin is invited. |
 | `muted` | `jsonb` | [⚡ `ParticipantMuted`](#event-participantmuted), [⚡ `ParticipantUnmuted`](#event-participantunmuted) | — | current MutedParticipant[] (entities.yaml#/MutedParticipant), applied per mute/unmute by the projector. |
 | `claim_events` | `jsonb` | [⚡ `ReclamationOpened`](#event-reclamationopened), [⚡ `ReclamationResolved`](#event-reclamationresolved), [⚡ `ReclamationRejected`](#event-reclamationrejected), [⚡ `ReclamationReopened`](#event-reclamationreopened), [⚡ `ReclamationEvidenceAttached`](#event-reclamationevidenceattached) | — | ClaimTimelineEntry[] (entities.yaml#/ClaimTimelineEntry) — weaves the Reclamation lifecycle into the order thread: the projector appends one entry per Reclamation* event (kind OPENED/RESOLVED/REJECTED/REOPENED/EVIDENCE_ATTACHED), keyed onto the order row by the event's orderId (cross-aggregate, correlated by order_id), so a claim's status and evidence show inline in the per-order conversation (§2.5, #155, #156). |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+<a id="view-customercreditbalance"></a>
+#### 🗄️ View: `CustomerCreditBalance`
+
+- **Source**: [🎭 `CustomerCredit`](#actor-customercredit) · 🛶 V0
+- **Note**: The per-customer store-credit BALANCE read model (#158, Part B of #207). One row per customer with a ledger; the projector keeps `balance_cents` as the running SUM over the ledger stream (`CustomerCredit-{customerId}`): += on CustomerCreditGranted, −= on CustomerCreditConsumed. Serves the `customerCredit` query (the customer sees their spendable goodwill balance) and mirrors the pure write-side fold in `crates/domain/src/customer_credit.rs`. The balance is never negative (the write side rejects an overspend, errors.yaml#/InsufficientCustomerCredit). 
+- **Rules**: `balance_cents` is COMPUTED by the projector as Σ granted − Σ consumed (a SUM, not a fold-view column); the row is born on the first CustomerCreditGranted (a consume before any grant never materializes a ledger, mirroring the domain fold). `currency` is set from the first grant's amount and stays fixed (a customer's ledger is single-currency — their local currency, EUR for Tours V0).
+- **Fed by**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted), [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ | [⚡ `CustomerCreditGranted`.`customerId`](#event-customercreditgranted--customerid) | PK |  |
+| `balance_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `CustomerCreditGranted`.`amount`](#event-customercreditgranted--amount), [⚡ `CustomerCreditConsumed`.`amount`](#event-customercreditconsumed--amount) | — | Σ granted − Σ consumed (minor units), never negative. amountCents of the grant/consume Money, summed by the projector. |
+| `currency` | [🔤 `CurrencyCode`](#scalar-currencycode) | [⚡ `CustomerCreditGranted`.`amount`](#event-customercreditgranted--amount) | — | The ledger currency, from the first grant's amount (single-currency per customer). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -4912,7 +4943,7 @@ Goodwill store credit was granted to a customer (id = customerId). Emitted by th
 
 - **Emitted by**: [🎭 `CustomerCredit`](#actor-customercredit), [🎭 `ReclamationProcess`](#actor-reclamationprocess)
 - **Consumed by**: —
-- **Projected into**: _non-projected (saga/transient)_
+- **Projected into**: [🗄️ `CustomerCreditBalance`](#view-customercreditbalance)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4927,7 +4958,7 @@ Store credit was spent by a customer at checkout (id = customerId). `amount` (Mo
 
 - **Emitted by**: [🎭 `CustomerCredit`](#actor-customercredit)
 - **Consumed by**: —
-- **Projected into**: _non-projected (saga/transient)_
+- **Projected into**: [🗄️ `CustomerCreditBalance`](#view-customercreditbalance)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5221,7 +5252,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
 
-### 📐 Business rules _(43)_
+### 📐 Business rules _(44)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5495,6 +5526,13 @@ _Spending store credit decreases the customer's available balance by the consume
 _A customer can never spend more store credit than their available balance; an over-spend is rejected and the balance never goes negative (#158)._
 
 - **Verified by**: [🧪 `TestConsumeBeyondBalanceRejected`](#test-testconsumebeyondbalancerejected)
+
+<a id="rule-creditconsumedatmostonceperorder"></a>
+#### 📐 Rule: `CreditConsumedAtMostOncePerOrder`
+
+_Store credit is consumed at most once per order: the debit is keyed by the client-minted orderId, so a re-delivered or retried consume for an order already debited is a benign no-op — the same order never spends credit twice (#158, Part B of #207)._
+
+- **Verified by**: [🧪 `TestConsumeSameOrderTwiceIsNoOp`](#test-testconsumesameordertwiceisnoop)
 
 <a id="rule-goodwillcreditgrantedonresolution"></a>
 #### 📐 Rule: `GoodwillCreditGrantedOnResolution`
@@ -6248,6 +6286,16 @@ _Spending more store credit than the available balance is rejected_
 - **Thrown**: [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit)
 - **Verifies**: [📐 `CreditCannotBeOverspent`](#rule-creditcannotbeoverspent)
 
+<a id="test-testconsumesameordertwiceisnoop"></a>
+#### 🧪 Test: `TestConsumeSameOrderTwiceIsNoOp`
+
+_Consuming store credit again for the same order is a benign no-op (exactly-once per order)_
+
+- **Given**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted), [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed)
+- **When**: [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `CreditConsumedAtMostOncePerOrder`](#rule-creditconsumedatmostonceperorder)
+
 **[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
 
 <a id="test-testplaceordercreatespaymentintent"></a>
@@ -6565,7 +6613,7 @@ _criticality: **medium**_
 
 _Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding._
 
-### 🧰 API operations _(20)_
+### 🧰 API operations _(21)_
 
 <a id="query-paymentstatus"></a>
 #### 🔎 Query: `paymentStatus`
@@ -6612,6 +6660,16 @@ The authenticated customer's own reclamations (claims/disputes), newest-first (#
 
 - **Input**: _(none)_
 - **Returns**: [🧩 `Reclamation`](#type-reclamation) (list) · **reads** [🗄️ `View_Reclamation`](#view-view_reclamation)
+- **Roles**: CUSTOMER · **slice** V1
+
+<a id="query-customercredit"></a>
+#### 🔎 Query: `customerCredit`
+
+The authenticated customer's store-credit balance (#158, Part B of #207). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row, the same me-pattern as myReclamations); an anonymous caller, or a customer with no ledger yet, sees null (no credit).
+
+
+- **Input**: _(none)_
+- **Returns**: [🧩 `CustomerCredit`](#type-customercredit) · **reads** [🗄️ `CustomerCreditBalance`](#view-customercreditbalance)
 - **Roles**: CUSTOMER · **slice** V1
 
 <a id="mutation-requestphoneverification"></a>

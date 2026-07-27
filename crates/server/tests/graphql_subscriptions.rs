@@ -161,6 +161,15 @@ impl application::queries::OrderConversationReadRepository for Empty {
     }
 }
 #[async_trait]
+impl application::queries::CustomerCreditReadRepository for Empty {
+    async fn by_customer(
+        &self,
+        _c: ds::CustomerId,
+    ) -> Result<Option<application::queries::CustomerCreditBalanceRow>, DomainError> {
+        Ok(None)
+    }
+}
+#[async_trait]
 impl application::queries::RefundReadRepository for Empty {
     async fn list(
         &self,
@@ -313,6 +322,7 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
             reclamations: Arc::new(Empty),
+            customer_credit: Arc::new(Empty),
         }),
         None,
         Some(bus),

@@ -2049,6 +2049,14 @@ pub async fn consume_customer_credit(
 ) -> Result<(), DomainError> {
     let (state, version) =
         Repository::new(store).load::<CustomerCreditState>(cmd.customer_id).await?;
+    // Exactly-once per order (rules.yaml#/CreditConsumedAtMostOncePerOrder): the debit is keyed by the
+    // client-minted `orderId`, so a re-delivered / retried consume for an order already debited is a
+    // benign no-op — the credit is never spent twice on the same order (a placeOrder retry with the
+    // same orderId consumes nothing more). Checked BEFORE the balance guard: a replay must not read as
+    // an overspend just because the balance already fell on the first (recorded) consume.
+    if state.as_ref().and_then(|s| s.consumed_for(&cmd.order_id)).is_some() {
+        return Ok(());
+    }
     let balance = state.as_ref().map(|s| s.balance_cents).unwrap_or(0);
     if cmd.amount.amount_cents.0 > balance {
         return Err(reject(
@@ -2063,6 +2071,34 @@ pub async fn consume_customer_credit(
     });
     let stream = format!("CustomerCredit-{}", cmd.customer_id.0);
     Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+/// The store credit (minor units) to apply to a checkout, read cross-aggregate from the customer's
+/// `CustomerCredit` ledger (#158, Part B of #207). RETRY-STABLE: if this order (client-minted `orderId`)
+/// was ALREADY debited, reuse that exact amount — never recompute against a now-lower balance, so a
+/// placeOrder retry applies the same credit and consumes nothing more. Otherwise apply
+/// `min(available balance, order total)`, and ONLY when the ledger currency matches the order currency
+/// (never convert). Zero for a guest checkout (no `customerId`) or a customer with no ledger. The
+/// returned amount is `0 ≤ applied ≤ order_total`, so the buyer total (gross − applied) is never
+/// negative — money stays exact.
+pub(crate) async fn credit_to_apply(
+    store: &dyn EventStore,
+    customer_id: Option<CustomerId>,
+    order_id: &OrderId,
+    order_total: &Money,
+) -> Result<i64, DomainError> {
+    let Some(customer_id) = customer_id else { return Ok(0) };
+    let (state, _version) = Repository::new(store).load::<CustomerCreditState>(customer_id).await?;
+    let Some(state) = state else { return Ok(0) };
+    // Retry-stable: a re-submitted checkout for the same order reuses the amount already consumed.
+    if let Some(already) = state.consumed_for(order_id) {
+        return Ok(already.clamp(0, order_total.amount_cents.0));
+    }
+    // Currency must match (no conversion); otherwise no credit applies.
+    if state.currency.as_ref() != Some(&order_total.currency) {
+        return Ok(0);
+    }
+    Ok(state.balance_cents.clamp(0, order_total.amount_cents.0))
 }
 
 // ================================================================================================
@@ -2257,15 +2293,28 @@ pub async fn place_order(
             ));
         }
     }
-    let amount = priced.total_amount.clone();
-    // Create the Stripe PaymentIntent through the generated service port FOR THE RECOMPUTED AMOUNT;
-    // a synchronous decline surfaces as the canonical `PaymentDeclined` rejection. The
+    let gross = priced.total_amount.clone();
+    // Store credit (goodwill) is SPENT at checkout (#158, Part B of #207): the available balance reduces
+    // the CASH the buyer pays, up to the order total (currency-matched, never negative), keyed by the
+    // order for exactly-once spend. The PaymentIntent is created for the REDUCED buyer total; the order's
+    // OWN value (the frozen snapshot / breakdown / totalAmount below) stays the GROSS — the credit is a
+    // tender covering part of it, recorded as CustomerCreditConsumed on the ledger. Surfacing the
+    // applied line on the order receipt (an OrderTracking column) is a flagged follow-up
+    // (ADR-20260726-163737 §checkout-consume); the balance drop (queries/customerCredit) is the
+    // customer-visible proof today.
+    let applied_credit = credit_to_apply(store, cmd.customer_id, &cmd.order_id, &gross).await?;
+    let buyer_total = Money {
+        amount_cents: domain::generated::scalars::MoneyCents(gross.amount_cents.0 - applied_credit),
+        currency: gross.currency.clone(),
+    };
+    // Create the Stripe PaymentIntent through the generated service port FOR THE BUYER TOTAL (gross −
+    // applied credit); a synchronous decline surfaces as the canonical `PaymentDeclined` rejection. The
     // `orderId`/`restaurantId`/`cartId` refs are the ENVELOPE the Stripe ACL copies onto the intent's
     // `metadata` so the inbound webhook facts can be mapped back onto our aggregates (issue #26).
     let intent = payments
         .request(
             PaymentRequestInput {
-                amount: amount.clone(),
+                amount: buyer_total.clone(),
                 payment_method_id: domain::generated::scalars::PaymentMethodId(cmd.payment_method_id.clone()),
             },
             &ServiceCallMeta::new(actor.correlation_id)
@@ -2274,6 +2323,27 @@ pub async fn place_order(
                 .with_ref("cartId", cmd.cart_id.0.to_string()),
         )
         .await?;
+    // The gateway accepted (no synchronous decline) — SPEND the credit now, exactly-once per order
+    // (idempotent on a retry with the same orderId; the ledger fold rejects/ignores a second consume).
+    // Done AFTER the intent so a declined checkout never consumes credit; the balance guard in the
+    // handler still holds should the balance have fallen since it was read (a rare same-customer race).
+    if applied_credit > 0 {
+        if let Some(customer_id) = cmd.customer_id {
+            consume_customer_credit(
+                store,
+                ConsumeCustomerCredit {
+                    customer_id,
+                    amount: Money {
+                        amount_cents: domain::generated::scalars::MoneyCents(applied_credit),
+                        currency: gross.currency.clone(),
+                    },
+                    order_id: cmd.order_id,
+                },
+                actor,
+            )
+            .await?;
+        }
+    }
     // Freeze the priced checkout onto the event so PlaceOrderProcess can rebuild OrderPlaced +
     // CartCheckedOut from the log on capture (rules.yaml#/CheckoutSnapshotFrozenAtIntent): the
     // server-priced items, total and breakdown — all recomputed above from the live catalog
@@ -2289,7 +2359,9 @@ pub async fn place_order(
         service_type: cmd.service_type,
         delivery_address: cmd.delivery_address.clone(),
         items: priced.items.clone(),
-        total_amount: amount.clone(),
+        // The order's OWN value is the GROSS server-priced total; applied store credit reduces only the
+        // Stripe charge (buyer_total above), not what the order is worth (rules.yaml#/CreditReducesCheckoutTotal).
+        total_amount: gross.clone(),
         breakdown: priced.breakdown.clone(),
         note: cmd.note.clone(),
     };
@@ -2301,7 +2373,9 @@ pub async fn place_order(
         payment_intent_id: intent.payment_intent_id.clone(),
         restaurant_id: cmd.restaurant_id,
         customer_id: cmd.customer_id,
-        amount,
+        // The PaymentIntent charges the BUYER TOTAL (gross − applied store credit); the frozen `checkout`
+        // above keeps the gross order value the capture leg materializes OrderPlaced from.
+        amount: buyer_total,
         checkout,
     });
     Repository::new(store)
@@ -3262,4 +3336,244 @@ pub async fn set_customer_payment_method(
         payment_method_id: cmd.payment_method_id,
     });
     Repository::new(store).save(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// Tests — customer store-credit at checkout (#158, Part B of #207): the exactly-once, currency-matched,
+// never-negative money math (`credit_to_apply`) and the end-to-end place_order spend (PaymentIntent
+// reduced by the applied credit + CustomerCreditConsumed emitted, keyed by orderId).
+// ================================================================================================
+#[cfg(test)]
+mod credit_checkout_tests {
+    use super::{credit_to_apply, place_order};
+    use crate::behaviour_support::{actor, eur, TestBed};
+    use crate::process_managers::test_support::MemStore;
+    use crate::queries::OfferView;
+    use domain::generated::commands::PlaceOrder;
+    use domain::generated::entities::{Address, CartLineItem as Line, CustomerContact, Money};
+    use domain::generated::events::{
+        CartLineAdded, CartStarted, CustomerCreditConsumed as ConsumedEv,
+        CustomerCreditGranted as GrantedEv, DomainEvent, RestaurantActivated, RestaurantRegistered,
+    };
+    use domain::generated::scalars::{
+        AddressLine, CartId, CartLineId, CatalogItemAvailability, CityName, CountryCode, CurrencyCode,
+        CustomerDisplayName, CustomerId, MoneyCents, OfferId, OfferName, OrderId, PhoneNumber,
+        PostalCode, ProductId, ProductName, ReclamationId, RestaurantDisplayName, RestaurantId,
+        RestaurantListingStatus, ServiceType, SessionId, Slug, StockStatus,
+    };
+
+    fn cid() -> CustomerId {
+        CustomerId(uuid::Uuid::from_u128(0xC1))
+    }
+    fn credit_stream() -> String {
+        format!("CustomerCredit-{}", cid().0)
+    }
+    fn grant(cents: i64, recl: u128) -> DomainEvent {
+        DomainEvent::CustomerCreditGranted(GrantedEv {
+            customer_id: cid(),
+            amount: eur(cents),
+            reclamation_id: ReclamationId(uuid::Uuid::from_u128(recl)),
+        })
+    }
+    fn consumed(cents: i64, ord: u128) -> DomainEvent {
+        DomainEvent::CustomerCreditConsumed(ConsumedEv {
+            customer_id: cid(),
+            amount: eur(cents),
+            order_id: OrderId(uuid::Uuid::from_u128(ord)),
+        })
+    }
+    fn order(n: u128) -> OrderId {
+        OrderId(uuid::Uuid::from_u128(n))
+    }
+
+    /// Applies min(balance, order total): a balance below the total applies in full…
+    #[tokio::test]
+    async fn applies_balance_up_to_the_order_total() {
+        let store = MemStore::default();
+        store.seed(&credit_stream(), vec![grant(300, 1)]);
+        let applied = credit_to_apply(&store, Some(cid()), &order(9), &eur(1000)).await.unwrap();
+        assert_eq!(applied, 300);
+    }
+
+    /// …and a balance above the total is capped at the total (buyer pays 0, never negative).
+    #[tokio::test]
+    async fn caps_applied_credit_at_the_order_total() {
+        let store = MemStore::default();
+        store.seed(&credit_stream(), vec![grant(1500, 1)]);
+        let applied = credit_to_apply(&store, Some(cid()), &order(9), &eur(1000)).await.unwrap();
+        assert_eq!(applied, 1000);
+    }
+
+    /// A currency mismatch never applies credit (no conversion).
+    #[tokio::test]
+    async fn currency_mismatch_applies_nothing() {
+        let store = MemStore::default();
+        store.seed(&credit_stream(), vec![grant(300, 1)]); // ledger EUR
+        let usd = Money { amount_cents: MoneyCents(1000), currency: CurrencyCode("USD".into()) };
+        let applied = credit_to_apply(&store, Some(cid()), &order(9), &usd).await.unwrap();
+        assert_eq!(applied, 0);
+    }
+
+    /// A guest checkout (no customer) and a customer with no ledger apply nothing.
+    #[tokio::test]
+    async fn guest_or_no_ledger_applies_nothing() {
+        let store = MemStore::default();
+        assert_eq!(credit_to_apply(&store, None, &order(9), &eur(1000)).await.unwrap(), 0);
+        assert_eq!(credit_to_apply(&store, Some(cid()), &order(9), &eur(1000)).await.unwrap(), 0);
+    }
+
+    /// RETRY-STABLE: once an order was debited, the SAME applied amount is reused — never recomputed
+    /// against the now-lower balance (so a placeOrder retry reduces the intent identically).
+    #[tokio::test]
+    async fn already_consumed_order_reuses_the_exact_amount() {
+        let store = MemStore::default();
+        store.seed(&credit_stream(), vec![grant(1000, 1), consumed(300, 9)]);
+        // Balance is now 700, but order 9 already applied 300 — reuse 300, not min(700, total).
+        let applied = credit_to_apply(&store, Some(cid()), &order(9), &eur(1000)).await.unwrap();
+        assert_eq!(applied, 300);
+    }
+
+    // --- End-to-end place_order spend --------------------------------------------------------------
+
+    fn resto() -> RestaurantId {
+        RestaurantId(uuid::Uuid::from_u128(0x1001))
+    }
+    fn cart() -> CartId {
+        CartId(uuid::Uuid::from_u128(0x2002))
+    }
+    fn offer() -> OfferId {
+        OfferId(uuid::Uuid::from_u128(0x3003))
+    }
+    fn address() -> Address {
+        Address {
+            line1: AddressLine("9 Rue Colbert".into()),
+            line2: None,
+            postal_code: PostalCode("37000".into()),
+            city: CityName("Tours".into()),
+            country: CountryCode("FR".into()),
+        }
+    }
+
+    /// place_order with store credit reduces the Stripe PaymentIntent by the applied credit and emits
+    /// CustomerCreditConsumed for it (keyed by orderId), while the frozen checkout keeps the GROSS order
+    /// value. Offer 1000, credit 300 → buyer pays 700, 300 consumed.
+    #[tokio::test]
+    async fn place_order_spends_credit_and_reduces_the_payment_intent() {
+        let bed = TestBed::new();
+        bed.seed(
+            &format!("Restaurant-{}", resto().0),
+            vec![
+                DomainEvent::RestaurantRegistered(RestaurantRegistered {
+                    mode: None,
+                    restaurant_id: resto(),
+                    account_id: None,
+                    listing_status: RestaurantListingStatus::ACTIVE_PARTNER,
+                    r#ref: None,
+                    external_identifiers: Vec::new(),
+                    slug: Slug("resto".into()),
+                    display_name: RestaurantDisplayName("Resto".into()),
+                    contact: None,
+                    website: None,
+                    tags: Vec::new(),
+                    margin_rate: None,
+                    cuisine_category: None,
+                    uber_prices_opt_in: None,
+                    address: address(),
+                    location: None,
+                    timezone: None,
+                    preparation_time_minutes: None,
+                    opening_hours: Vec::new(),
+                }),
+                DomainEvent::RestaurantActivated(RestaurantActivated {
+                    restaurant_id: resto(),
+                    reason: None,
+                }),
+            ],
+        )
+        .await;
+        // Live catalog offer (priced by checkout via the read port).
+        bed.catalogs.add_offer(
+            resto(),
+            OfferView {
+                offer_id: offer(),
+                product_id: ProductId(uuid::Uuid::from_u128(0x4004)),
+                product_name: ProductName("Burger".into()),
+                offer_name: OfferName("Solo".into()),
+                price: eur(1000),
+                availability: CatalogItemAvailability::AVAILABLE,
+                stock_status: StockStatus::IN_STOCK,
+                stock_quantity: None,
+                option_lists: Vec::new(),
+            },
+        );
+        // OPEN cart with one line for that offer.
+        bed.seed(
+            &format!("Cart-{}", cart().0),
+            vec![
+                DomainEvent::CartStarted(CartStarted {
+                    cart_id: cart(),
+                    restaurant_id: resto(),
+                    session_id: SessionId(uuid::Uuid::from_u128(0x5005)),
+                    customer_id: None,
+                }),
+                DomainEvent::CartLineAdded(CartLineAdded {
+                    cart_id: cart(),
+                    line: Line {
+                        cart_line_id: CartLineId(uuid::Uuid::from_u128(0x6006)),
+                        offer_id: offer(),
+                        quantity: 1,
+                        selected_option_ids: Vec::new(),
+                    },
+                }),
+            ],
+        )
+        .await;
+        // The customer's store-credit ledger: 300 available.
+        bed.seed(&credit_stream(), vec![grant(300, 1)]).await;
+
+        let cmd = PlaceOrder {
+            mode: None,
+            order_id: order(0x7007),
+            restaurant_id: resto(),
+            cart_id: cart(),
+            customer_id: Some(cid()),
+            customer_contact: CustomerContact {
+                display_name: CustomerDisplayName("Jo".into()),
+                email: None,
+                phone: PhoneNumber("+33612345678".into()),
+            },
+            service_type: ServiceType::DELIVERY,
+            delivery_address: Some(address()),
+            note: None,
+            payment_method_id: "pm_123".into(),
+            expected_total: None,
+        };
+        place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &actor())
+            .await
+            .expect("checkout accepted");
+
+        // The PaymentIntent charges the BUYER TOTAL (1000 − 300 = 700); the frozen checkout keeps gross.
+        let payment = bed.store.stream("Payment-pi_123");
+        let intent = payment
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::PaymentIntentCreated(p) => Some(p.clone()),
+                _ => None,
+            })
+            .expect("PaymentIntentCreated");
+        assert_eq!(intent.amount, eur(700), "PaymentIntent = gross − applied credit");
+        assert_eq!(intent.checkout.total_amount, eur(1000), "frozen checkout keeps the gross order value");
+
+        // The credit is spent exactly once, keyed by the order.
+        let ledger = bed.store.stream(&credit_stream());
+        let debit = ledger
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::CustomerCreditConsumed(c) => Some(c.clone()),
+                _ => None,
+            })
+            .expect("CustomerCreditConsumed appended");
+        assert_eq!(debit.amount, eur(300));
+        assert_eq!(debit.order_id, order(0x7007));
+    }
 }

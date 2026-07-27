@@ -322,6 +322,16 @@ types:
       openedAt: { type: string, format: date-time }
       decidedAt: { type: string, format: date-time, nullable: true }
       overdue: { type: boolean }   # #160 first-response SLA: computed AT READ TIME (not stored) — status OPEN and opened_at older than the target (RECLAMATION_FIRST_RESPONSE_TARGET_HOURS); the fold-view generator can't express a now()-dependent column, so the read repo computes it
+  CustomerCredit:
+    description: >
+      The authenticated customer's store-credit balance (#158, Part B of #207): the spendable goodwill
+      credit (from resolved claims) the customer can apply at checkout. One row per customer with a
+      ledger; `balanceCents` is the projector's running SUM (Σ granted − Σ consumed), never negative.
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/CustomerCreditBalance' }]
+    properties:
+      customerId: { $ref: 'scalars.yaml#/CustomerId' }
+      balanceCents: { $ref: 'scalars.yaml#/MoneyCents' }
+      currency: { $ref: 'scalars.yaml#/CurrencyCode' }
   Refund:
     description: >
       A refund opened for decision on a paid order (RefundProcess): REQUESTED until the restaurant/admin
@@ -636,6 +646,16 @@ queries:
       scoped server-side to the caller's Customer identity (the verified session principal → Customer
       row); an anonymous caller sees an empty list.
     returns: { $ref: '#/types/Reclamation', array: true }
+    roles: [CUSTOMER]
+    slice: V1
+
+  customerCredit:
+    description: >
+      The authenticated customer's store-credit balance (#158, Part B of #207). No args — scoped
+      server-side to the caller's Customer identity (the verified session principal → Customer row, the
+      same me-pattern as myReclamations); an anonymous caller, or a customer with no ledger yet, sees
+      null (no credit).
+    returns: { $ref: '#/types/CustomerCredit', nullable: true }
     roles: [CUSTOMER]
     slice: V1
 

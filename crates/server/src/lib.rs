@@ -40,7 +40,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
 use application::queries::{
-    CartReadRepository, CatalogReadRepository, CustomerReadRepository,
+    CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
     DeliveryReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
@@ -49,7 +49,7 @@ use application::queries::{
 };
 use infrastructure::{
     EventBus, FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
-    PgCartRepository, PgCatalogRepository, PgCustomerRepository,
+    PgCartRepository, PgCatalogRepository, PgCustomerCreditRepository, PgCustomerRepository,
     PgDeliveryPartnerAvailabilityRepository, PgDeliveryRepository, PgDeliverySatisfactionRepository,
     PgEventStore,
     PgOrderRepository, PgPricingPolicyRepository, PgProspectionRepository, PgReclamationRepository,
@@ -103,7 +103,9 @@ pub fn wire() -> HealthDto {
 /// upserts folded conversation rows into it, so the app must not serve without the table.
 /// `20260726000000` = the `orderconversation.claim_events` column (§2.5, epic #151; #155): the projector
 /// upserts the woven claim-lifecycle timeline into it, so the app must not serve without the column.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260726000000;
+/// `20260727000000` = the `customercreditbalance` projection table (#158, Part B of #207): the projection
+/// worker upserts the folded store-credit balance into it, so the app must not serve without the table.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260727000000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -263,6 +265,8 @@ pub fn router() -> Router {
                     Arc::new(PgDeliveryPartnerAvailabilityRepository::new(pool.clone()));
                 let reclamations: Arc<dyn ReclamationReadRepository> =
                     Arc::new(PgReclamationRepository::new(pool.clone()));
+                let customer_credit: Arc<dyn CustomerCreditReadRepository> =
+                    Arc::new(PgCustomerCreditRepository::new(pool.clone()));
                 read_deps = Some(ReadDeps {
                     restaurants,
                     prospection,
@@ -279,6 +283,7 @@ pub fn router() -> Router {
                     delivery_satisfaction,
                     delivery_partner_availabilities,
                     reclamations,
+                    customer_credit,
                 });
 
                 // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
