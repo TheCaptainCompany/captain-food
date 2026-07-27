@@ -3624,12 +3624,12 @@ sequenceDiagram
 <a id="actor-reclamationprocess"></a>
 #### 🎭 Actor: `ReclamationProcess`
 
-_⚙️ process manager_ — Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). A refund resolution (FULL_REFUND / PARTIAL_REFUND) falls through UN-automated in this slice: the branch below only acts on GOODWILL_CREDIT. WHY the refund arm is flagged, not wired: the existing refund path opens a PENDING_APPROVAL refund from a refundable fact and requires a SEPARATE explicit ApproveRefund decision (with its own state-row guard + Stripe call) to move money; a single 2-way saga branch cannot isolate credit / refund / REPLACEMENT (deferred to #159) without either blindly refunding a REPLACEMENT (a wrong money-move) or duplicating the approval mechanism (forbidden). Wiring the refund arm through the canonical RequestRefund -> RefundRequested -> RefundProcess path with correct per-resolution dispatch is the flagged follow-up. REPLACEMENT arm (WIRED, ADR-20260726-171736 / #159): on a REPLACEMENT resolution the saga places a NO-CHARGE replacement order — it reads the ORIGINAL order (cross-aggregate, by orderId) and sends PlaceReplacementOrder to the Order aggregate, which remakes the same items as a new linked order with a $0 buyer total and no paymentIntentId (OrderPlaced.replacementOf). The generated linear-branch below still isolates only the GOODWILL_CREDIT credit grant; the REPLACEMENT dispatch (a cross-aggregate read + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
+_⚙️ process manager_ — Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). REFUND arm (WIRED, ADR-20260727-090000 / #207): on a FULL_REFUND / PARTIAL_REFUND resolution the saga drives the EXISTING refund path (RefundProcess) to a SETTLED Stripe refund -- the restaurant's resolution IS the approval, so the refund settles WITHOUT a separate manual ApproveRefund. In one reaction the saga reads the order (cross-aggregate, by orderId) for the captured total + payment intent, then drives RefundProcess's two application legs in order: on_refund_requested OPENS the PENDING_APPROVAL run (delivering RefundOpened to the Payment so View_PendingRefunds folds it) and then, because the resolution IS the approval, approve_refund drives the Stripe refund (delivering RefundApproved, run -> APPROVED_AWAITING_SETTLEMENT); the inbound PaymentRefunded later settles it via the normal RefundProcess leg. RefundProcess stays the ONE Stripe-driving mechanism -- nothing is duplicated. FULL_REFUND refunds the captured total; PARTIAL_REFUND the recorded amount, rejected with errors.yaml#/RefundExceedsCaptured when it exceeds the captured total (rules.yaml#/RefundResolutionCappedAtCaptured). Idempotent per reclamationId: a re-delivered resolution finds the run already APPROVED/settled (the RefundProcess state-row admission guard) and RefundOpened/RefundApproved already recorded (the Payment's own fold), so it never opens or settles a second refund. REPLACEMENT arm (WIRED, ADR-20260726-171736 / #159): on a REPLACEMENT resolution the saga places a NO-CHARGE replacement order — it reads the ORIGINAL order (cross-aggregate, by orderId) and sends PlaceReplacementOrder to the Order aggregate, which remakes the same items as a new linked order with a $0 buyer total and no paymentIntentId (OrderPlaced.replacementOf). The generated linear-branch below still isolates only the GOODWILL_CREDIT credit grant; the REPLACEMENT dispatch (a cross-aggregate read + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
 
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [⚡ `ReclamationResolved`](#event-reclamationresolved) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted) | — |
+| [⚡ `ReclamationResolved`](#event-reclamationresolved) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted), [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved) | [⛔ `RefundExceedsCaptured`](#error-refundexceedscaptured) |
 
 Sequence (generated from the typed steps):
 
@@ -4689,7 +4689,7 @@ A captured payment was refunded (e.g. after rejection or cancellation).
 
 A refundable fact on a paid order (rejection, cancellation, customer request) opened a refund for a restaurant/admin decision. Delivered by RefundProcess to the Payment aggregate ONLY when the payment is CAPTURED, so the refund queue (View_PendingRefunds) folds from the log, not from PM state. `amount` is the captured order total eligible for refund (an approval may still be partial).
 
-- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
+- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess)
 - **Consumed by**: [🎭 `Payment`](#actor-payment)
 - **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
 
@@ -4705,7 +4705,7 @@ A refundable fact on a paid order (rejection, cancellation, customer request) op
 
 The restaurant or an admin approved a refund; the RefundProcess will drive the Stripe refund for this amount.
 
-- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess)
+- **Emitted by**: [🎭 `Payment`](#actor-payment), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess)
 - **Consumed by**: [🎭 `Payment`](#actor-payment)
 - **Projected into**: [🗄️ `View_PendingRefunds`](#view-view_pendingrefunds)
 
@@ -5221,7 +5221,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
 
-### 📐 Business rules _(41)_
+### 📐 Business rules _(43)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5509,6 +5509,20 @@ _When a reclamation is resolved as GOODWILL_CREDIT, the ReclamationProcess saga 
 _When a reclamation is resolved as REPLACEMENT, a no-charge replacement order is placed with the SAME line items as the original, a $0 buyer total and no payment (no Stripe PaymentIntent), linked to the original via OrderPlaced.replacementOf — so it enters the normal fulfilment/dispatch flow. Idempotent per reclamationId: a re-delivered resolution never places a second replacement (#159, ADR-20260726-171736)._
 
 - **Verified by**: [🧪 `TestPlaceReplacementOrderCopiesItems`](#test-testplacereplacementordercopiesitems)
+
+<a id="rule-refundsettledonresolution"></a>
+#### 📐 Rule: `RefundSettledOnResolution`
+
+_When a reclamation is resolved as FULL_REFUND or PARTIAL_REFUND, the ReclamationProcess drives the EXISTING refund path (RefundProcess) to a settled Stripe refund — the restaurant's resolution IS the approval, so the refund settles without a separate manual ApproveRefund. FULL_REFUND refunds the order's captured total; PARTIAL_REFUND refunds the recorded amount. RefundProcess remains the single Stripe-driving mechanism (no parallel money path). Idempotent per reclamationId: a re-delivered resolution never opens or settles a second refund (#207, ADR-20260727-090000)._
+
+- **Verified by**: [🧪 `TestReclamationProcessSettlesFullRefund`](#test-testreclamationprocesssettlesfullrefund), [🧪 `TestReclamationProcessSettlesPartialRefund`](#test-testreclamationprocesssettlespartialrefund)
+
+<a id="rule-refundresolutioncappedatcaptured"></a>
+#### 📐 Rule: `RefundResolutionCappedAtCaptured`
+
+_A refund resolution can never refund more than the order's captured total; a PARTIAL_REFUND amount over the captured total is rejected before any Stripe refund is driven (#207)._
+
+- **Verified by**: [🧪 `TestReclamationProcessRefundOverCapturedRejected`](#test-testreclamationprocessrefundovercapturedrejected)
 
 ### 🧪 Tests _(9)_
 
@@ -6419,6 +6433,36 @@ _Grants store credit when a claim is resolved as GOODWILL_CREDIT_
 - **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
 - **Then**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
 - **Verifies**: [📐 `GoodwillCreditGrantedOnResolution`](#rule-goodwillcreditgrantedonresolution)
+
+<a id="test-testreclamationprocesssettlesfullrefund"></a>
+#### 🧪 Test: `TestReclamationProcessSettlesFullRefund`
+
+_Settles a full Stripe refund when a claim is resolved as FULL_REFUND (resolution IS the approval)_
+
+- **Given**: _(none)_
+- **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved)
+- **Verifies**: [📐 `RefundSettledOnResolution`](#rule-refundsettledonresolution)
+
+<a id="test-testreclamationprocesssettlespartialrefund"></a>
+#### 🧪 Test: `TestReclamationProcessSettlesPartialRefund`
+
+_Settles a partial Stripe refund when a claim is resolved as PARTIAL_REFUND_
+
+- **Given**: _(none)_
+- **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved)
+- **Verifies**: [📐 `RefundSettledOnResolution`](#rule-refundsettledonresolution)
+
+<a id="test-testreclamationprocessrefundovercapturedrejected"></a>
+#### 🧪 Test: `TestReclamationProcessRefundOverCapturedRejected`
+
+_Rejects a partial refund resolution that exceeds the order's captured total_
+
+- **Given**: _(none)_
+- **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
+- **Thrown**: [⛔ `RefundExceedsCaptured`](#error-refundexceedscaptured)
+- **Verifies**: [📐 `RefundResolutionCappedAtCaptured`](#rule-refundresolutioncappedatcaptured)
 
 ### 📡 Observability _(3)_
 
@@ -9494,7 +9538,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
 
-### ⛔ Errors _(10)_
+### ⛔ Errors _(11)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -9508,6 +9552,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
+| <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
 ### 📡 Observability _(5)_
 

@@ -417,6 +417,26 @@ fn fx_refund_denied() -> DomainEvent {
     DomainEvent::RefundDenied(evs::RefundDenied { order_id: sc::OrderId(support::uid("order-1")), reason: "Outside the refund window".to_string() })
 }
 
+/// tests.yaml#/fixtures/refundOpenedOnReclamation — events.yaml#/RefundOpened
+fn fx_refund_opened_on_reclamation() -> DomainEvent {
+    DomainEvent::RefundOpened(evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order arrived damaged".to_string()) })
+}
+
+/// tests.yaml#/fixtures/refundApprovedOnReclamation — events.yaml#/RefundApproved
+fn fx_refund_approved_on_reclamation() -> DomainEvent {
+    DomainEvent::RefundApproved(evs::RefundApproved { order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("Order arrived damaged".to_string()) })
+}
+
+/// tests.yaml#/fixtures/refundOpenedOnReclamationPartial — events.yaml#/RefundOpened
+fn fx_refund_opened_on_reclamation_partial() -> DomainEvent {
+    DomainEvent::RefundOpened(evs::RefundOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), amount: ent::Money { amount_cents: sc::MoneyCents(1960), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("One dish was missing".to_string()) })
+}
+
+/// tests.yaml#/fixtures/refundApprovedOnReclamationPartial — events.yaml#/RefundApproved
+fn fx_refund_approved_on_reclamation_partial() -> DomainEvent {
+    DomainEvent::RefundApproved(evs::RefundApproved { order_id: sc::OrderId(support::uid("order-1")), amount: ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }, reason: Some("One dish was missing".to_string()) })
+}
+
 /// tests.yaml#/fixtures/deliveryRequested — events.yaml#/DeliveryRequested
 fn fx_delivery_requested() -> DomainEvent {
     DomainEvent::DeliveryRequested(evs::DeliveryRequested { mode: None, delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), pickup: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, dropoff: ent::Address { line1: sc::AddressLine("9 Rue Colbert".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, provider: None })
@@ -3862,11 +3882,57 @@ async fn test_reclamation_process_grants_goodwill_credit() {
     spec_baseline(&bed).await;
     let before = bed.snapshot();
     let ev = evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::GOODWILL_CREDIT, note: None, refund_amount: Some(ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }) };
-    let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &ev, &support::envelope()).await;
+    let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &bed.refund_pm, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
     let _ = result.expect("TestReclamationProcessGrantsGoodwillCredit: the spec expects acceptance");
     bed.assert_appended("TestReclamationProcessGrantsGoodwillCredit", &before, &[
         (format!("CustomerCredit-{}", support::uid("customer-1")), fx_customer_credit_granted()),
     ]);
+}
+
+/// tests.yaml#/tests/TestReclamationProcessSettlesFullRefund — "Settles a full Stripe refund when a claim is resolved as FULL_REFUND (resolution IS the approval)"
+/// rules: RefundSettledOnResolution
+#[tokio::test]
+async fn test_reclamation_process_settles_full_refund() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let ev = evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::FULL_REFUND, note: Some(sc::ReclamationReason("Order arrived damaged".into())), refund_amount: None };
+    let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &bed.refund_pm, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let _ = result.expect("TestReclamationProcessSettlesFullRefund: the spec expects acceptance");
+    bed.assert_appended("TestReclamationProcessSettlesFullRefund", &before, &[
+        ("Payment-pi_123".to_string(), fx_refund_opened_on_reclamation()),
+        ("Payment-pi_123".to_string(), fx_refund_approved_on_reclamation()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestReclamationProcessSettlesPartialRefund — "Settles a partial Stripe refund when a claim is resolved as PARTIAL_REFUND"
+/// rules: RefundSettledOnResolution
+#[tokio::test]
+async fn test_reclamation_process_settles_partial_refund() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let ev = evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::PARTIAL_REFUND, note: Some(sc::ReclamationReason("One dish was missing".into())), refund_amount: Some(ent::Money { amount_cents: sc::MoneyCents(500), currency: sc::CurrencyCode("EUR".into()) }) };
+    let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &bed.refund_pm, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let _ = result.expect("TestReclamationProcessSettlesPartialRefund: the spec expects acceptance");
+    bed.assert_appended("TestReclamationProcessSettlesPartialRefund", &before, &[
+        ("Payment-pi_123".to_string(), fx_refund_opened_on_reclamation_partial()),
+        ("Payment-pi_123".to_string(), fx_refund_approved_on_reclamation_partial()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestReclamationProcessRefundOverCapturedRejected — "Rejects a partial refund resolution that exceeds the order's captured total"
+/// rules: RefundResolutionCappedAtCaptured
+#[tokio::test]
+async fn test_reclamation_process_refund_over_captured_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let ev = evs::ReclamationResolved { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), customer_id: sc::CustomerId(support::uid("customer-1")), resolution: sc::ReclamationResolution::PARTIAL_REFUND, note: Some(sc::ReclamationReason("Over the captured total".into())), refund_amount: Some(ent::Money { amount_cents: sc::MoneyCents(5000), currency: sc::CurrencyCode("EUR".into()) }) };
+    let result = crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &bed.refund_pm, &bed.orders, &bed.payments, &ev, &support::envelope()).await;
+    let err = result.expect_err("TestReclamationProcessRefundOverCapturedRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestReclamationProcessRefundOverCapturedRejected", &err, &["RefundExceedsCaptured"]);
+    bed.assert_appended("TestReclamationProcessRefundOverCapturedRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestPlaceReplacementOrderCopiesItems — "Places a no-charge replacement order copying the original's items, linked via replacementOf"

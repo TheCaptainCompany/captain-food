@@ -738,6 +738,14 @@ pub const PARTIAL_REFUND_AMOUNT_REQUIRED: ErrorDef = ErrorDef {
     message_fr: "Un montant de remboursement est requis pour un remboursement partiel.",
 };
 
+/// A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).
+/// Context: `reclamationId`, `orderId`, `requestedAmountCents`, `capturedAmountCents`.
+pub const REFUND_EXCEEDS_CAPTURED: ErrorDef = ErrorDef {
+    code: "RefundExceedsCaptured",
+    message_en: "The refund amount exceeds the order's captured total.",
+    message_fr: "Le montant du remboursement dépasse le total encaissé de la commande.",
+};
+
 /// Every anticipated error, in errors.yaml order.
 pub const ERRORS: &[ErrorDef] = &[
     UNAUTHORIZED,
@@ -832,6 +840,7 @@ pub const ERRORS: &[ErrorDef] = &[
     RECLAMATION_NOT_REOPENABLE,
     REJECTION_REASON_REQUIRED,
     PARTIAL_REFUND_AMOUNT_REQUIRED,
+    REFUND_EXCEEDS_CAPTURED,
 ];
 
 /// Look up an anticipated error by its stable PascalCase code.

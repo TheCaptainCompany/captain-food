@@ -1312,18 +1312,18 @@ pub mod reclamation_process {
 
     /// Non-structural hooks for the generated `ReclamationResolved` leg — the seams the step DSL cannot express
     /// (reads, computed payloads, idempotency predicates, envelope fix-ups).
-    /// On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign no-op (the refund/replacement arms are flagged follow-ups). 
+    /// On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign no-op (the refund arm, #207, and the replacement arm, #159, are handled by the wrapper seam before this pipeline runs). 
     #[async_trait::async_trait]
     pub trait ReclamationResolvedHooks: Send + Sync {
         /// The DSL's linear-branch decision (a mid-leg bare `skip` guard): `true` runs the steps
         /// BEFORE the marker and ends the leg; `false` falls through to the steps after it. Resolved at
         /// runtime (may read config, #60).
-        /// Spec note: branch: GOODWILL_CREDIT (with a recorded amount) grants credit and ends; a FULL_REFUND / PARTIAL_REFUND / REPLACEMENT resolution is a benign no-op here (refund + replacement automation are flagged follow-ups, ADR-20260726-163737 / #159).
+        /// Spec note: branch: GOODWILL_CREDIT (with a recorded amount) grants credit via the generated linear branch; FULL_REFUND / PARTIAL_REFUND (refund arm, #207) and REPLACEMENT (#159) are driven by the hand-written wrapper seam BEFORE this pipeline runs, so they never reach this branch; any other resolution is a benign no-op.
         async fn branch(&self, event: &domain::generated::events::ReclamationResolved) -> Result<bool, domain::shared::errors::DomainError>;
     }
 
     /// EVENT leg `events.yaml#/ReclamationResolved` — generated step pipeline (issue #25).
-    /// On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign no-op (the refund/replacement arms are flagged follow-ups). 
+    /// On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign no-op (the refund arm, #207, and the replacement arm, #159, are handled by the wrapper seam before this pipeline runs). 
     pub async fn on_reclamation_resolved(
         store: &dyn crate::ports::EventStore,
         hooks: &dyn ReclamationResolvedHooks,

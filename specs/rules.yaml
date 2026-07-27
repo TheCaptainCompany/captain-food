@@ -237,3 +237,15 @@ ReplacementOrderPlacedOnResolution:
     line items as the original, a $0 buyer total and no payment (no Stripe PaymentIntent), linked to the
     original via OrderPlaced.replacementOf — so it enters the normal fulfilment/dispatch flow. Idempotent
     per reclamationId: a re-delivered resolution never places a second replacement (#159, ADR-20260726-171736).
+RefundSettledOnResolution:
+  description: >
+    When a reclamation is resolved as FULL_REFUND or PARTIAL_REFUND, the ReclamationProcess drives the
+    EXISTING refund path (RefundProcess) to a settled Stripe refund — the restaurant's resolution IS the
+    approval, so the refund settles without a separate manual ApproveRefund. FULL_REFUND refunds the
+    order's captured total; PARTIAL_REFUND refunds the recorded amount. RefundProcess remains the single
+    Stripe-driving mechanism (no parallel money path). Idempotent per reclamationId: a re-delivered
+    resolution never opens or settles a second refund (#207, ADR-20260727-090000).
+RefundResolutionCappedAtCaptured:
+  description: >
+    A refund resolution can never refund more than the order's captured total; a PARTIAL_REFUND amount
+    over the captured total is rejected before any Stripe refund is driven (#207).
