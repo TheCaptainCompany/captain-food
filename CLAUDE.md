@@ -4,6 +4,32 @@ Local-first food ordering and delivery platform for independent restaurants and 
 V0 target: validate product–market fit in **Tours**, with a mobile-first web UX and a backend
 that can evolve towards CQRS + event log.
 
+## Domain lens — this is a food-delivery product, not a generic CRUD app
+
+Apply this judgement to every task, whatever its size. It is what a senior food-and-delivery architect
+would bring, and it is not derivable from the code:
+
+- **The ETA is the product.** The estimate a customer sees before ordering is the number they decide
+  on. Anything that degrades or omits it is a conversion problem, not a polish item.
+- **A paid order that nobody is told about is the worst failure mode there is** — worse than a crash,
+  because the money moved. Anything touching order placement must answer: who gets told, and what
+  happens if nobody acts?
+- **Oversell and un-accepted orders lose both sides of the marketplace at once** — the customer who
+  paid and the restaurant that looks incompetent.
+- **Peak is Friday/Saturday 19:00–21:30.** "Does this hold at peak?" is a fair question of any change
+  to checkout, dispatch, projections or hosting.
+- **Some things are legal preconditions in France, not backlog items**: allergen declaration for
+  distance selling (EU FIC 1169/2011), VAT computation and a compliant receipt, GDPR erasure, and
+  who holds customer funds (payment-agent posture). Flag these rather than deferring them silently.
+- **Availability, stock and orderability are three different things** — see the conventions below.
+- **A control that renders but does nothing is worse than no control.** Screens here legitimately
+  declare `gaps`; shipping a live widget bound to one is not the same thing.
+
+For a full critical audit — findings, triaged issues, proposals, and what to do next — use the
+**`architect` agent** (`.claude/agents/architect.md`), which carries this lens plus the review
+procedure in `.claude/skills/architecture-review/`. The open-decision queue it feeds is
+[docs/proposals/DECISIONS.md](docs/proposals/DECISIONS.md).
+
 ## Specifications — read before any task
 
 The [specs/](specs/) folder is the **source of truth** for the domain and architecture.
