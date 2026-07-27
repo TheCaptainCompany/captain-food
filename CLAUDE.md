@@ -185,7 +185,9 @@ mutation/query is reached by a story step, and every test↔rule link holds both
 - **Issue workflow — claim ⇒ draft PR immediately; finish ⇒ supervised auto-merge**
   (ADR-20260720-233000 + ADR-20260721-042018 + ADR-20260721-044613, method in
   [docs/BACKLOG.md](docs/BACKLOG.md)): when asked to work an issue, FIRST claim it
-  (`status/in-progress` label + claim comment naming the `NN-slug` branch), create the `NN-slug`
+  (`status/in-progress` label + claim comment naming the `NN-slug` branch **and carrying the session
+  link** `https://claude.ai/code/session_<id>` — a claim comment is the first artifact of an issue and
+  predates any commit, so it must be traceable to its run), create the `NN-slug`
   branch from `main`, and open a **draft PR** whose body starts with `Closes #NN` — branch, PR and
   issue are linked before any code is written. **Never enable auto-merge at this point** — a
   claim-time PR is a near-empty diff and would pass CI trivially. When the work is done and local

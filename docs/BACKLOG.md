@@ -74,6 +74,12 @@ isn't enough.
 1. **Claim = label + comment + branch + draft PR, immediately** (before any implementation work):
    - add the **`status/in-progress`** label AND post a claim comment naming the **`NN-slug`**
      branch (issue number first). The label is the atomic, API-visible claim.
+   - **The claim comment MUST carry the session link** (product-owner directive, 2026-07-27):
+     `https://claude.ai/code/session_<id>`. Without it a claim is anonymous — you can see that an
+     issue is taken but not by which run, so a stalled claim cannot be traced back to the session
+     that made it, and a human cannot open the transcript to see what was already tried. Commits
+     already carry `Claude-Session:` in their trailer; the claim comment is the FIRST artifact of an
+     issue and must carry it too, because it exists before any commit does.
    - create branch `NN-slug` from latest `main`, push it, and **open a draft PR
      `NN-slug → main` right away** — body starting with **`Closes #NN`** plus the intended
      approach. From minute one the Development sidebar shows the branch + PR, the board flips to
