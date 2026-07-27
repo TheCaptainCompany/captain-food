@@ -400,6 +400,20 @@ fixtures:
   refundDenied:
     type: { $ref: 'events.yaml#/RefundDenied' }
     data: { orderId: "order-1", reason: "Outside the refund window" }
+  # Reclamation refund arm (#207): a FULL_REFUND resolution opens then approves the captured total; a
+  # PARTIAL_REFUND opens the full eligible total (RefundOpened) but approves only the recorded amount.
+  refundOpenedOnReclamation:
+    type: { $ref: 'events.yaml#/RefundOpened' }
+    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order arrived damaged" }
+  refundApprovedOnReclamation:
+    type: { $ref: 'events.yaml#/RefundApproved' }
+    data: { orderId: "order-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "Order arrived damaged" }
+  refundOpenedOnReclamationPartial:
+    type: { $ref: 'events.yaml#/RefundOpened' }
+    data: { orderId: "order-1", restaurantId: "resto-1", amount: { amountCents: 1960, currency: "EUR" }, reason: "One dish was missing" }
+  refundApprovedOnReclamationPartial:
+    type: { $ref: 'events.yaml#/RefundApproved' }
+    data: { orderId: "order-1", amount: { amountCents: 500, currency: "EUR" }, reason: "One dish was missing" }
 
   # --- Delivery (ADR-0031) ---
   deliveryRequested:
@@ -3337,6 +3351,41 @@ tests:
       data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", resolution: "GOODWILL_CREDIT", refundAmount: { amountCents: 500, currency: "EUR" } }
     then:
       - { $ref: '#/fixtures/customerCreditGranted' }
+
+  TestReclamationProcessSettlesFullRefund:
+    name: "Settles a full Stripe refund when a claim is resolved as FULL_REFUND (resolution IS the approval)"
+    rules: [{ $ref: 'rules.yaml#/RefundSettledOnResolution' }]
+    actor: { $ref: 'processmanager.yaml#/ReclamationProcess' }
+    given: []
+    when:
+      type: { $ref: 'events.yaml#/ReclamationResolved' }
+      data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", resolution: "FULL_REFUND", note: "Order arrived damaged" }
+    then:
+      - { $ref: '#/fixtures/refundOpenedOnReclamation' }    # opens the run (RefundOpened on the Payment)
+      - { $ref: '#/fixtures/refundApprovedOnReclamation' }  # then approves + drives Stripe (RefundApproved)
+
+  TestReclamationProcessSettlesPartialRefund:
+    name: "Settles a partial Stripe refund when a claim is resolved as PARTIAL_REFUND"
+    rules: [{ $ref: 'rules.yaml#/RefundSettledOnResolution' }]
+    actor: { $ref: 'processmanager.yaml#/ReclamationProcess' }
+    given: []
+    when:
+      type: { $ref: 'events.yaml#/ReclamationResolved' }
+      data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", resolution: "PARTIAL_REFUND", refundAmount: { amountCents: 500, currency: "EUR" }, note: "One dish was missing" }
+    then:
+      - { $ref: '#/fixtures/refundOpenedOnReclamationPartial' }    # opens for the full eligible total
+      - { $ref: '#/fixtures/refundApprovedOnReclamationPartial' }  # approves only the recorded partial amount
+
+  TestReclamationProcessRefundOverCapturedRejected:
+    name: "Rejects a partial refund resolution that exceeds the order's captured total"
+    rules: [{ $ref: 'rules.yaml#/RefundResolutionCappedAtCaptured' }]
+    actor: { $ref: 'processmanager.yaml#/ReclamationProcess' }
+    given: []
+    when:
+      type: { $ref: 'events.yaml#/ReclamationResolved' }
+      data: { reclamationId: "recl-1", orderId: "order-1", customerId: "customer-1", resolution: "PARTIAL_REFUND", refundAmount: { amountCents: 5000, currency: "EUR" }, note: "Over the captured total" }
+    thrown:
+      - { $ref: 'errors.yaml#/RefundExceedsCaptured' }
 
   # ------------- Replacement order (Order aggregate, #159) -----------
   TestPlaceReplacementOrderCopiesItems:

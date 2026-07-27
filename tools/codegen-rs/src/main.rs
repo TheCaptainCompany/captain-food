@@ -666,6 +666,11 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("processmanager.yaml", "*.state_table",                            &[Kind::PmStateTable]),
     ("processmanager.yaml", "*.ports.*",                                &[Kind::Service]),
     ("processmanager.yaml", "*.receives[*].message",                    &[Kind::Command, Kind::Event]),
+    // Wrapper-seam arms a linear step pipeline cannot express (REPLACEMENT/REFUND, #159/#207): a leg may
+    // DECLARE the events it emits / errors it throws from its hand-written wrapper, merged with the
+    // step-derived set, so the behaviour-test coverage checks (test-then-not-emitted / -thrown) see them.
+    ("processmanager.yaml", "*.receives[*].emits[*]",                   &[Kind::Event]),
+    ("processmanager.yaml", "*.receives[*].throws[*]",                  &[Kind::Error]),
     ("processmanager.yaml", "*.receives[*].steps[*].read.model",        &[Kind::ProjectionTable, Kind::ProjectionView]),
     ("processmanager.yaml", "*.receives[*].steps[*].read.where.*.from", &[Kind::MessageProperty]),
     ("processmanager.yaml", "*.receives[*].steps[*].guard.throws",      &[Kind::Error]),
@@ -3486,6 +3491,19 @@ fn parse_actors(model: &Model) -> Vec<Actor> {
                                     }
                                 }
                             }
+                        }
+                    }
+                    // Wrapper-seam arms (#159/#207): a leg may DECLARE additional emits/throws its
+                    // hand-written wrapper produces (events/errors a linear step pipeline cannot express),
+                    // merged with the step-derived set so behaviour-test coverage sees the full inbox.
+                    for ev in ref_strings(e.get("emits")) {
+                        if !emits.contains(&ev) {
+                            emits.push(ev);
+                        }
+                    }
+                    for er in ref_strings(e.get("throws")) {
+                        if !throws.contains(&er) {
+                            throws.push(er);
                         }
                     }
                     let effect = e.get("description").and_then(|x| x.as_str()).map(|s| s.to_string());
@@ -12448,7 +12466,7 @@ fn bt_pm_event_call(pm: &str, event: &str) -> String {
         ("DeliveryDispatchProcess", "DeliveryOfferTimedOut") => "crate::process_managers::delivery_dispatch::on_delivery_offer_timed_out(&bed.store, &bed.dispatch_pm, &bed.delivery, &bed.dispatch_config, &ev, &support::envelope()).await".into(),
         ("DeliveryDispatchProcess", "DeliveryStatusUpdated") => "crate::process_managers::delivery_dispatch::on_delivery_status_updated(&bed.store, &bed.dispatch_pm, &ev, &support::envelope()).await".into(),
         ("DeliveryDispatchProcess", "DeliveryCompleted") => "crate::process_managers::delivery_dispatch::on_delivery_completed(&bed.store, &bed.dispatch_pm, &ev, &support::envelope()).await".into(),
-        ("ReclamationProcess", "ReclamationResolved") => "crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &ev, &support::envelope()).await".into(),
+        ("ReclamationProcess", "ReclamationResolved") => "crate::process_managers::reclamation::on_reclamation_resolved(&bed.store, &bed.refund_pm, &bed.orders, &bed.payments, &ev, &support::envelope()).await".into(),
         _ => panic!("behaviour-tests: no dispatch entry for process-manager {} ← event {} — extend bt_pm_event_call", pm, event),
     }
 }

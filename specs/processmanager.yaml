@@ -647,15 +647,21 @@ ReclamationProcess:
     Reacts to a resolved reclamation (ReclamationResolved) and binds the DECISION to its money/credit
     automation (ADR-20260726-163737, #158). GOODWILL_CREDIT grants the claimant real store credit by
     sending GrantCustomerCredit to the CustomerCredit ledger (idempotent per reclamationId — the ledger
-    dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). A refund
-    resolution (FULL_REFUND / PARTIAL_REFUND) falls through UN-automated in this slice: the branch below
-    only acts on GOODWILL_CREDIT. WHY the refund arm is flagged, not wired: the existing refund path opens
-    a PENDING_APPROVAL refund from a refundable fact and requires a SEPARATE explicit ApproveRefund
-    decision (with its own state-row guard + Stripe call) to move money; a single 2-way saga branch cannot
-    isolate credit / refund / REPLACEMENT (deferred to #159) without either blindly refunding a REPLACEMENT
-    (a wrong money-move) or duplicating the approval mechanism (forbidden). Wiring the refund arm through
-    the canonical RequestRefund -> RefundRequested -> RefundProcess path with correct per-resolution
-    dispatch is the flagged follow-up.
+    dedups, so a re-delivered ReclamationResolved never double-grants; no state row needed). REFUND arm (WIRED, ADR-20260727-090000 / #207): on a FULL_REFUND / PARTIAL_REFUND resolution the saga
+    drives the EXISTING refund path (RefundProcess) to a SETTLED Stripe refund -- the restaurant's
+    resolution IS the approval, so the refund settles WITHOUT a separate manual ApproveRefund. In one
+    reaction the saga reads the order (cross-aggregate, by orderId) for the captured total + payment
+    intent, then drives RefundProcess's two application legs in order: on_refund_requested OPENS the
+    PENDING_APPROVAL run (delivering RefundOpened to the Payment so View_PendingRefunds folds it) and then,
+    because the resolution IS the approval, approve_refund drives the Stripe refund (delivering
+    RefundApproved, run -> APPROVED_AWAITING_SETTLEMENT); the inbound PaymentRefunded later settles it via
+    the normal RefundProcess leg. RefundProcess stays the ONE Stripe-driving mechanism -- nothing is
+    duplicated. FULL_REFUND refunds the captured total; PARTIAL_REFUND the recorded amount, rejected with
+    errors.yaml#/RefundExceedsCaptured when it exceeds the captured total
+    (rules.yaml#/RefundResolutionCappedAtCaptured). Idempotent per reclamationId: a re-delivered
+    resolution finds the run already APPROVED/settled (the RefundProcess state-row admission guard) and
+    RefundOpened/RefundApproved already recorded (the Payment's own fold), so it never opens or settles a
+    second refund.
     REPLACEMENT arm (WIRED, ADR-20260726-171736 / #159): on a REPLACEMENT resolution the saga places a
     NO-CHARGE replacement order — it reads the ORIGINAL order (cross-aggregate, by orderId) and sends
     PlaceReplacementOrder to the Order aggregate, which remakes the same items as a new linked order with a
@@ -669,7 +675,17 @@ ReclamationProcess:
       description: >
         On a GOODWILL_CREDIT resolution, grant the claimant store credit. The branch hook acts only when
         resolution = GOODWILL_CREDIT and a credit amount was recorded; every other resolution is a benign
-        no-op (the refund/replacement arms are flagged follow-ups).
+        no-op (the refund arm, #207, and the replacement arm, #159, are handled by the wrapper seam before this pipeline runs).
+      emits:
+        # Wrapper-seam REFUND arm (#207, ADR-20260727-090000): a FULL_REFUND / PARTIAL_REFUND
+        # resolution drives RefundProcess to a settled refund, delivering these to the Payment
+        # (RefundProcess stays the one Stripe-driving mechanism). Not step-derived -- carried in
+        # the hand-written wrapper seam, declared here so behaviour-test coverage sees them.
+        - { $ref: 'events.yaml#/RefundOpened' }
+        - { $ref: 'events.yaml#/RefundApproved' }
+      throws:
+        # Amount safety (rules.yaml#/RefundResolutionCappedAtCaptured): a PARTIAL over the captured total.
+        - { $ref: 'errors.yaml#/RefundExceedsCaptured' }
       steps:
         - send:
             command: { $ref: 'commands.yaml#/GrantCustomerCredit' }
@@ -681,4 +697,4 @@ ReclamationProcess:
             note: "GOODWILL_CREDIT arm: the CustomerCredit ledger records CustomerCreditGranted (idempotent per reclamationId)."
         - guard:
             skip: true
-            note: "branch: GOODWILL_CREDIT (with a recorded amount) grants credit and ends; a FULL_REFUND / PARTIAL_REFUND / REPLACEMENT resolution is a benign no-op here (refund + replacement automation are flagged follow-ups, ADR-20260726-163737 / #159)."
+            note: "branch: GOODWILL_CREDIT (with a recorded amount) grants credit via the generated linear branch; FULL_REFUND / PARTIAL_REFUND (refund arm, #207) and REPLACEMENT (#159) are driven by the hand-written wrapper seam BEFORE this pipeline runs, so they never reach this branch; any other resolution is a benign no-op."

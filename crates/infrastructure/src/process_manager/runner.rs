@@ -19,7 +19,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use application::generated::services::DeliveryService;
+use application::generated::services::{DeliveryService, PaymentService};
 use application::ports::{is_version_conflict, NoopDeliveryService};
 use application::process_managers::{
     cart_binding, delivery_dispatch, place_order, reclamation, refund, Outcome, TriggerEnvelope,
@@ -123,6 +123,10 @@ pub struct ProcessManagerRunner {
     /// DeliveryDispatchProcess's outbound port — the generated `delivery` service (services.yaml,
     /// issue #26); no-op stand-in until the avelo37 ACL lands.
     partner: Arc<dyn DeliveryService>,
+    /// ReclamationProcess's refund arm (#207) drives the Stripe refund through the SAME `payment`
+    /// service the GraphQL `approveRefund` mutation uses; fail-closed stand-in until the composition
+    /// root injects the real Stripe adapter (the STRIPE_SECRET_KEY env-gate pattern).
+    payments: Arc<dyn PaymentService>,
     status: Arc<Mutex<ProcessManagerStatus>>,
 }
 
@@ -138,6 +142,7 @@ impl ProcessManagerRunner {
             carts: PgCartRepository::new(pool.clone()),
             dispatch_config: PgDispatchStrategy::new(pool.clone()),
             partner: Arc::new(NoopDeliveryService),
+            payments: Arc::new(crate::integrations::payments::FailClosedPaymentGateway),
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
         }
@@ -146,6 +151,13 @@ impl ProcessManagerRunner {
     /// Replace the delivery-partner port (the composition root injects the real ACL when it lands).
     pub fn with_partner(mut self, partner: Arc<dyn DeliveryService>) -> Self {
         self.partner = partner;
+        self
+    }
+
+    /// Replace the payment port (the composition root injects the real Stripe gateway — the SAME one
+    /// the GraphQL write side uses — so the ReclamationProcess refund arm drives real refunds).
+    pub fn with_payments(mut self, payments: Arc<dyn PaymentService>) -> Self {
+        self.payments = payments;
         self
     }
 
@@ -341,7 +353,15 @@ impl ProcessManagerRunner {
             }
             // --- ReclamationProcess (#158) -------------------------------------------------------
             (ProcessManager::Reclamation, DomainEvent::ReclamationResolved(e)) => {
-                reclamation::on_reclamation_resolved(&self.store, e, env).await
+                reclamation::on_reclamation_resolved(
+                    &self.store,
+                    &self.refund_state,
+                    &self.orders,
+                    self.payments.as_ref(),
+                    e,
+                    env,
+                )
+                .await
             }
             // --- CartBindingProcess --------------------------------------------------------------
             (ProcessManager::CartBinding, DomainEvent::CustomerIdentified(e)) => {

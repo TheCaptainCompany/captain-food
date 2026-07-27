@@ -875,3 +875,17 @@ PartialRefundAmountRequired:
   messages:
     en: "A refund amount is required for a partial refund."
     fr: "Un montant de remboursement est requis pour un remboursement partiel."
+
+RefundExceedsCaptured:
+  description: >
+    A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the
+    ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is
+    rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).
+  context:
+    reclamationId: { $ref: 'scalars.yaml#/ReclamationId' }
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+    requestedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+    capturedAmountCents: { $ref: 'scalars.yaml#/MoneyCents' }
+  messages:
+    en: "The refund amount exceeds the order's captured total."
+    fr: "Le montant du remboursement dépasse le total encaissé de la commande."

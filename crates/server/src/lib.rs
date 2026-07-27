@@ -402,7 +402,22 @@ pub fn router() -> Router {
                         Arc::new(gateway)
                     })
                     .expect("delivery service binding (services.yaml)");
-                    let runner = ProcessManagerRunner::new(pool.clone()).with_partner(partner);
+                    // The `payment` service for the ReclamationProcess refund arm (#207) — the SAME
+                    // Stripe binding the GraphQL write side uses, resolved through the generated topology
+                    // binding: the real Stripe adapter when STRIPE_SECRET_KEY is set, else the
+                    // fail-closed stand-in (a claim-resolution refund declines rather than moving money).
+                    let saga_payments = infrastructure::generated::service_bindings::payment_service(|| {
+                        match std::env::var("STRIPE_SECRET_KEY") {
+                            Ok(key) if !key.is_empty() => {
+                                Arc::new(stripe_adapter::StripePaymentGateway::new(key))
+                            }
+                            _ => Arc::new(FailClosedPaymentGateway),
+                        }
+                    })
+                    .expect("payment service binding (services.yaml)");
+                    let runner = ProcessManagerRunner::new(pool.clone())
+                        .with_partner(partner)
+                        .with_payments(saga_payments);
                     saga_status = Some(runner.status());
                     tokio::spawn(runner.run_loop());
                     println!("saga runner: running in-process (set RUN_PROCESS_MANAGERS=false to disable)");
