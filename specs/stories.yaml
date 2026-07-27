@@ -88,6 +88,7 @@ customer:
         SetAddress: { $ref: 'api.yaml#/mutations/setCustomerAddress' }
         RemoveAddress: { $ref: 'api.yaml#/mutations/removeCustomerAddress' }
         SetPaymentMethod: { $ref: 'api.yaml#/mutations/setCustomerPaymentMethod' }
+        ViewMyCredit: { $ref: 'api.yaml#/queries/customerCredit' }   # my spendable store-credit balance (#158, Part B of #207)
     MessageAboutMyOrder:
       description: As a customer, I message the restaurant about my order and read the thread (#129).
       steps:

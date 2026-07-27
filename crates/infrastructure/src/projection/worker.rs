@@ -20,12 +20,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use application::projections::{
-    project_cart, project_catalog, project_customer, project_order_conversation,
-    project_order_tracking, project_prospection_pipeline, project_restaurant, Envelope,
+    project_cart, project_catalog, project_customer, project_customer_credit_balance,
+    project_order_conversation, project_order_tracking, project_prospection_pipeline,
+    project_restaurant, Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
 use application::projectors::customer::CustomerProjector;
+use application::projectors::customer_credit_balance::CustomerCreditBalanceProjector;
 use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
@@ -37,8 +39,8 @@ use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 
 use crate::persistence::{
-    cart_store, catalog_store, customer_store, db_err, order_conversation_store,
-    order_tracking_store, prospection_store, restaurant_store,
+    cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
+    order_conversation_store, order_tracking_store, prospection_store, restaurant_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -60,6 +62,7 @@ enum ReadModelProjector {
     Cart,
     OrderTracking,
     OrderConversation,
+    CustomerCreditBalance,
 }
 
 impl ReadModelProjector {
@@ -154,6 +157,17 @@ impl ReadModelProjector {
                     order_conversation_store::upsert(pool, &next).await?;
                 }
             }
+            Self::CustomerCreditBalance => {
+                // Single-stream: the ledger lives on `CustomerCredit-{customerId}`; both fed events
+                // carry customerId, so the row key resolves from the stream uuid (payload fallback).
+                let id = CustomerId(aggregate_uuid_of(env, "CustomerCredit-", "customerId")?);
+                let state = customer_credit_balance_store::load(pool, id).await?;
+                if let Some(next) =
+                    project_customer_credit_balance(&CustomerCreditBalanceProjector, state, env)
+                {
+                    customer_credit_balance_store::upsert(pool, &next).await?;
+                }
+            }
         }
         Ok(())
     }
@@ -213,6 +227,14 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "OrderConversation",
         stream_prefixes: &["Conversation-", "Order-", "Reclamation-"],
         projectors: &[ReadModelProjector::OrderConversation],
+    },
+    // The CustomerCreditBalance read model (#158, Part B of #207): the per-customer store-credit
+    // balance, folded from the ledger stream `CustomerCredit-{customerId}` (CustomerCreditGranted /
+    // CustomerCreditConsumed). Single-stream, keyed by the customer uuid.
+    ProjectorGroup {
+        checkpoint: "CustomerCreditBalance",
+        stream_prefixes: &["CustomerCredit-"],
+        projectors: &[ReadModelProjector::CustomerCreditBalance],
     },
 ];
 

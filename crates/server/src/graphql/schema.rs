@@ -14,7 +14,7 @@ use application::pm_state::{PaymentProcessStateStore, RefundProcessStateStore};
 use application::generated::services::{IdentityService, PaymentService};
 use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
 use application::queries::{
-    CartReadRepository, CatalogReadRepository, CustomerReadRepository,
+    CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
     DeliveryReadRepository, OrderConversationReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
@@ -48,6 +48,7 @@ pub struct ReadDeps {
     pub delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository>,
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
     pub reclamations: Arc<dyn ReclamationReadRepository>,
+    pub customer_credit: Arc<dyn CustomerCreditReadRepository>,
 }
 
 /// Write-side ports injected into the mutation resolvers' context (ADR-0035 composition root): the
@@ -106,6 +107,7 @@ pub fn build_schema(
         builder = builder.data(d.delivery_satisfaction);
         builder = builder.data(d.delivery_partner_availabilities);
         builder = builder.data(d.reclamations);
+        builder = builder.data(d.customer_credit);
     }
     if let Some(w) = writes {
         builder = builder.data(w.event_store);

@@ -3340,6 +3340,18 @@ tests:
     thrown:
       - { $ref: 'errors.yaml#/InsufficientCustomerCredit' }
 
+  TestConsumeSameOrderTwiceIsNoOp:
+    name: "Consuming store credit again for the same order is a benign no-op (exactly-once per order)"
+    rules: [{ $ref: 'rules.yaml#/CreditConsumedAtMostOncePerOrder' }]
+    actor: { $ref: 'actors.yaml#/CustomerCredit' }
+    given:
+      - { $ref: '#/fixtures/customerCreditGranted' }
+      - { $ref: '#/fixtures/customerCreditConsumed' }
+    when:
+      type: { $ref: 'commands.yaml#/ConsumeCustomerCredit' }
+      data: { customerId: "customer-1", amount: { amountCents: 300, currency: "EUR" }, orderId: "order-1" }
+    then: []
+
   # ------------------ ReclamationProcess (saga, #158) ----------------
   TestReclamationProcessGrantsGoodwillCredit:
     name: "Grants store credit when a claim is resolved as GOODWILL_CREDIT"

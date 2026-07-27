@@ -19,6 +19,7 @@ use domain::shared::errors::DomainError;
 
 pub use crate::generated::rows::CartRow;
 pub use crate::generated::rows::CatalogRow;
+pub use crate::generated::rows::CustomerCreditBalanceRow;
 pub use crate::generated::rows::CustomerRow;
 pub use crate::generated::rows::OrderConversationRow;
 pub use crate::generated::rows::OrderTrackingRow;
@@ -486,6 +487,18 @@ pub trait ReclamationReadRepository: Send + Sync {
 
     /// A single reclamation by id (claim detail); `None` when unknown.
     async fn by_id(&self, id: ReclamationId) -> Result<Option<ReclamationRow>, DomainError>;
+}
+
+/// Read port over the `CustomerCreditBalance` projection table (ADR-0040; #158, Part B of #207). Backs
+/// the `customerCredit` GraphQL query — the customer's spendable store-credit balance, scoped to the
+/// caller's Customer identity (the me-pattern, like `myReclamations`).
+#[async_trait]
+pub trait CustomerCreditReadRepository: Send + Sync {
+    /// A customer's store-credit balance row, or `None` when they have no ledger yet (no grant).
+    async fn by_customer(
+        &self,
+        customer_id: CustomerId,
+    ) -> Result<Option<CustomerCreditBalanceRow>, DomainError>;
 }
 
 /// Optional filters for the admin prospection pipeline — mirrors the `prospectionPipeline` query args
