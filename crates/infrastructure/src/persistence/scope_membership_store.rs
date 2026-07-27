@@ -199,3 +199,69 @@ pub fn scope_predicate(scope: &ReadScope) -> ScopePredicate {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId, RiderId};
+
+    fn member_of(scope: &ReadScope) -> Option<(i32, Uuid)> {
+        match scope_predicate(scope) {
+            ScopePredicate::Member(t, id) => Some((t, id)),
+            _ => None,
+        }
+    }
+
+    /// THE authorization inversion, pinned. An unauthenticated caller reaching a tenant read model
+    /// must see NOTHING. The tempting bug is to treat "no principal" as "no restriction" — which
+    /// turns the most exposed caller into the most privileged one.
+    #[test]
+    fn public_sees_nothing_rather_than_everything() {
+        assert!(matches!(scope_predicate(&ReadScope::Public), ScopePredicate::None));
+    }
+
+    /// ADMIN and SYSTEM are unrestricted — and hold no membership rows, which is why they must
+    /// short-circuit rather than be looked up (a lookup would deny them).
+    #[test]
+    fn admin_and_system_are_unrestricted_without_a_lookup() {
+        assert!(matches!(scope_predicate(&ReadScope::Admin), ScopePredicate::All));
+        assert!(matches!(scope_predicate(&ReadScope::System), ScopePredicate::All));
+    }
+
+    /// Each tenant role resolves to its OWN principal_type ordinal. A shared ordinal would let one
+    /// role's membership satisfy another's check — the reason principal_type is in the key at all.
+    #[test]
+    fn every_tenant_role_maps_to_a_distinct_principal_type() {
+        let id = Uuid::from_u128(7);
+        let types: Vec<i32> = [
+            ReadScope::Customer(CustomerId(id)),
+            ReadScope::Restaurant(RestaurantId(id)),
+            ReadScope::RestaurantAccount(RestaurantAccountId(id)),
+            ReadScope::Rider(RiderId(id)),
+        ]
+        .iter()
+        .map(|s| member_of(s).expect("tenant role is a member scope").0)
+        .collect();
+
+        let mut sorted = types.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), types.len(), "two roles share a principal_type ordinal");
+        // And they carry the SAME id through — the scope must not rewrite the principal.
+        for scope in [ReadScope::Customer(CustomerId(id)), ReadScope::Rider(RiderId(id))] {
+            assert_eq!(member_of(&scope).unwrap().1, id);
+        }
+    }
+
+    /// The ordinals are the wire format of `UserType`, shared with `domain_events.user_type`.
+    /// Pinning them here makes a reordering of scalars.yaml fail loudly instead of silently
+    /// re-labelling both this index and historical event rows.
+    #[test]
+    fn principal_type_ordinals_match_the_usertype_declaration_order() {
+        let id = Uuid::from_u128(1);
+        assert_eq!(member_of(&ReadScope::Customer(CustomerId(id))).unwrap().0, 1);
+        assert_eq!(member_of(&ReadScope::RestaurantAccount(RestaurantAccountId(id))).unwrap().0, 2);
+        assert_eq!(member_of(&ReadScope::Restaurant(RestaurantId(id))).unwrap().0, 3);
+        assert_eq!(member_of(&ReadScope::Rider(RiderId(id))).unwrap().0, 4);
+    }
+}
