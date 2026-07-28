@@ -103,6 +103,10 @@ fn eur(cents: i64) -> serde_json::Value {
 #[tokio::test]
 async fn refund_lifecycle_events_serve_the_refund_queue() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP refund_lifecycle_events_serve_the_refund_queue: DATABASE_URL not set");
         return;
     };

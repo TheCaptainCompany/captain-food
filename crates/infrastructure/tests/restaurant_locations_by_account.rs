@@ -22,7 +22,8 @@ async fn reset_schema(pool: &PgPool) {
           listing_status INTEGER NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
-          slug TEXT NOT NULL UNIQUE,
+          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
+          slug TEXT UNIQUE,
           display_name TEXT NOT NULL,
           description TEXT,
           tags JSONB,
@@ -80,6 +81,10 @@ async fn seed_restaurant(
 #[tokio::test]
 async fn by_account_returns_only_the_accounts_locations() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP by_account_returns_only_the_accounts_locations: DATABASE_URL not set");
         return;
     };

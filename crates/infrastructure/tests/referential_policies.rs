@@ -64,6 +64,10 @@ async fn reset_schema(pool: &PgPool) {
 #[tokio::test]
 async fn seeded_policy_tables_round_trip_through_the_read_repositories() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!(
             "SKIP seeded_policy_tables_round_trip_through_the_read_repositories: DATABASE_URL not set"
         );

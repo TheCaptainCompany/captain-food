@@ -44,7 +44,8 @@ async fn reset_schema(pool: &PgPool) {
           listing_status INTEGER NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
-          slug TEXT NOT NULL UNIQUE,
+          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
+          slug TEXT UNIQUE,
           display_name TEXT NOT NULL,
           description TEXT,
           tags JSONB,
@@ -134,6 +135,10 @@ fn register_restaurant_cmd(restaurant_id: uuid::Uuid) -> RegisterRestaurant {
 #[tokio::test]
 async fn command_appends_event_and_projects_the_restaurant_row() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP command_appends_event_and_projects_the_restaurant_row: DATABASE_URL not set");
         return;
     };
@@ -201,7 +206,9 @@ async fn command_appends_event_and_projects_the_restaurant_row() {
     assert_eq!(user_type, 5);
     assert_eq!(event_type, "RestaurantRegistered");
     assert_eq!(payload["restaurantId"], serde_json::json!(restaurant_id));
-    assert_eq!(payload["slug"], serde_json::json!("chez-marco"));
+    // No slug in the fact: registration and the storefront address are separate lifecycles since
+    // #220 — a listing gets its slug from ConfigureRestaurantSlug, not from being registered.
+    assert!(payload.get("slug").is_none());
     assert_eq!(payload["listingStatus"], serde_json::json!("NON_PARTNER")); // spec default
     assert!(payload.get("userId").is_none()); // …never a payload field
     assert!(payload.get("occurredAt").is_none());
@@ -209,21 +216,20 @@ async fn command_appends_event_and_projects_the_restaurant_row() {
     // 3) The existing projection worker folds it into the materialized `restaurant` table.
     let worker = ProjectionWorker::new(pool.clone());
     worker.run_once().await.expect("run_once");
-    let (slug, display_name, status, listing_status): (String, String, i32, i32) = sqlx::query_as(
-        "SELECT slug, display_name, status, listing_status FROM restaurant WHERE restaurant_id = $1",
-    )
-    .bind(restaurant_id)
-    .fetch_one(&pool)
-    .await
-    .expect("projected restaurant row");
-    assert_eq!(slug, "chez-marco");
+    let (slug, display_name, status, listing_status): (Option<String>, String, i32, i32) =
+        sqlx::query_as(
+            "SELECT slug, display_name, status, listing_status FROM restaurant WHERE restaurant_id = $1",
+        )
+        .bind(restaurant_id)
+        .fetch_one(&pool)
+        .await
+        .expect("projected restaurant row");
+    assert_eq!(slug, None, "no storefront address until one is configured (#220)");
     assert_eq!(display_name, "Chez Marco");
     assert_eq!(status, 0); // RestaurantStatus::DRAFT
     assert_eq!(listing_status, 0); // RestaurantListingStatus::NON_PARTNER
 
     // 4) Idempotent replay: same client-generated id → version clash absorbed as Ok, no duplicate fact.
-    //    The slug row projected in (3) belongs to the SAME restaurant id, so the SlugAlreadyTaken check
-    //    lets the replay through instead of rejecting it.
     register_restaurant(&store, &restaurants, register_restaurant_cmd(restaurant_id), &actor)
         .await
         .expect("register_restaurant replay is idempotent");

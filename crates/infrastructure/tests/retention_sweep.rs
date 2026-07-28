@@ -224,6 +224,10 @@ async fn count(pool: &PgPool, table: &str) -> i64 {
 #[tokio::test]
 async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP retention_sweep: DATABASE_URL not set");
         return;
     };

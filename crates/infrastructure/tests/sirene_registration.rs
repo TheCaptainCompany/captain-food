@@ -40,7 +40,8 @@ async fn reset_schema(pool: &PgPool) {
           listing_status INTEGER NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
-          slug TEXT NOT NULL UNIQUE,
+          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
+          slug TEXT UNIQUE,
           display_name TEXT NOT NULL,
           description TEXT,
           tags JSONB,
@@ -116,6 +117,10 @@ fn sample_etablissement() -> Etablissement {
 #[tokio::test]
 async fn sirene_mapped_command_flows_through_the_write_path_idempotently() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!(
             "SKIP sirene_mapped_command_flows_through_the_write_path_idempotently: DATABASE_URL not set"
         );
@@ -152,14 +157,14 @@ async fn sirene_mapped_command_flows_through_the_write_path_idempotently() {
 
     // 2) The EXISTING projection worker materializes the prospect row.
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once");
-    let (slug, display_name, listing_status): (String, String, i32) = sqlx::query_as(
+    let (slug, display_name, listing_status): (Option<String>, String, i32) = sqlx::query_as(
         "SELECT slug, display_name, listing_status FROM restaurant WHERE restaurant_id = $1",
     )
     .bind(restaurant_id)
     .fetch_one(&pool)
     .await
     .expect("projected restaurant row");
-    assert_eq!(slug, "chez-marco-00021");
+    assert_eq!(slug, None, "a registry prospect has no storefront address until one is configured (#220)");
     assert_eq!(display_name, "CHEZ MARCO");
     assert_eq!(listing_status, 0); // RestaurantListingStatus::NON_PARTNER ordinal
 

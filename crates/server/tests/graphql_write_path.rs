@@ -77,7 +77,8 @@ async fn reset_schema(pool: &PgPool) {
           listing_status INTEGER NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
-          slug TEXT NOT NULL UNIQUE,
+          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
+          slug TEXT UNIQUE,
           display_name TEXT NOT NULL,
           description TEXT,
           tags JSONB,
@@ -241,6 +242,10 @@ async fn poll_operation(
 #[tokio::test]
 async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP acceptance_first_write_path: DATABASE_URL not set");
         return;
     };
@@ -256,7 +261,6 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
         r#"mutation {{
             registerRestaurant(input: {{
                 restaurantId: "{restaurant_id}",
-                slug: "chez-marco",
                 displayName: "Chez Marco",
                 address: {{ line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }}
             }}) {{ messageId correlationId sessionId operationStatus duplicate }}
@@ -302,7 +306,9 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
         Some(message_id.as_str()),
         "domain_events.cause_id = the command's messageId"
     );
-    assert_eq!(payload["slug"], serde_json::json!("chez-marco"));
+    // No slug in the fact: the storefront address is its own lifecycle since #220
+    // (ConfigureRestaurantSlug), so registration neither takes nor emits one.
+    assert!(payload.get("slug").is_none());
     assert_eq!(payload["listingStatus"], serde_json::json!("NON_PARTNER")); // spec default
 
     // 2) Idempotent replay: the SAME messageId with the SAME input acknowledges against the original
@@ -311,7 +317,6 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
         r#"mutation {{
             registerRestaurant(input: {{
                 restaurantId: "{restaurant_id}",
-                slug: "chez-marco",
                 displayName: "Chez Marco",
                 address: {{ line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }}
             }}, metadata: {{ messageId: "{message_id}" }}) {{ messageId operationStatus duplicate }}
@@ -331,7 +336,6 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
         r#"mutation {{
             registerRestaurant(input: {{
                 restaurantId: "{restaurant_id}",
-                slug: "other-slug",
                 displayName: "Someone Else",
                 address: {{ line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }}
             }}, metadata: {{ messageId: "{message_id}" }}) {{ messageId }}

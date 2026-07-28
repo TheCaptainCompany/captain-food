@@ -1,12 +1,26 @@
-//! Integration test for the ADR-0045 staging→worker slice: a raw INSEE row in
-//! `external_sirene_restaurants` → `SireneSyncWorker::run_once` → ACL → `register_restaurant` →
-//! a `RestaurantRegistered` row in `domain_events` + `processed_at` set → a re-run is a no-op →
-//! an explicit `etat=F` refresh closes the NON_PARTNER prospect via `MarkRestaurantClosed`.
+//! Integration test for the ADR-0045 staging→worker slice, post-#227 (ADR-20260728-011344 D4): a raw
+//! INSEE row in `external_sirene_restaurants` → `SireneSyncWorker::run_once` → ACL → an inbound FACT in
+//! `inbound_events` (INSEE cannot be told "no", so registrations are recorded, not requested) →
+//! `InboundEventsDrainWorker` delivers it through the normal write path and the AGGREGATE decides →
+//! the verdict is reconciled back onto the mirror (`STAGED` → `SYNCED`/`FAILED`, #231). The explicit
+//! `etat=F` closure stays a COMMAND (`MarkRestaurantClosed` — our inference, refusable), so that half
+//! still journals through `command_journal`.
 //! Needs a real Postgres: set `DATABASE_URL` (see restaurant_write_path.rs for a throwaway docker
 //! one-liner). Without it the test SKIPS so `cargo test` stays green offline.
 
+use std::sync::Arc;
+
+use application::ports::{Actor, EventStore};
+use domain::generated::entities::Address;
+use domain::generated::events::{DomainEvent, RestaurantRegistered};
+use domain::generated::scalars::{
+    AddressLine, CityName, CountryCode, PostalCode, RestaurantDisplayName, RestaurantId,
+    RestaurantListingStatus,
+};
 use infrastructure::integrations::sirene::restaurant_id_for_siret;
-use infrastructure::SireneSyncWorker;
+use infrastructure::{
+    InboundEventsDrainWorker, PgCommandJournal, PgEventStore, PgInboundEvents, SireneSyncWorker,
+};
 use sqlx::PgPool;
 
 /// The tests in this file share one DATABASE_URL and reset the same tables — serialize them.
@@ -98,7 +112,8 @@ async fn reset_schema(pool: &PgPool) {
           listing_status INTEGER NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
-          slug TEXT NOT NULL UNIQUE,
+          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
+          slug TEXT UNIQUE,
           display_name TEXT NOT NULL,
           description TEXT,
           tags JSONB,
@@ -199,6 +214,10 @@ async fn stage_row_with_payload(pool: &PgPool, siret: &str, payload: serde_json:
 #[tokio::test]
 async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map: DATABASE_URL not set");
         return;
     };
@@ -264,9 +283,23 @@ async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map(
     assert_eq!(still_pending, 0, "keeping a payload is not the same as leaving the row pending");
 }
 
+/// The real delivery half (ADR-20260720-015400), wired over the same pool — so these tests assert what
+/// production does with a staged fact, not a hand-simulated verdict.
+fn drain_worker(pool: &PgPool) -> Arc<InboundEventsDrainWorker> {
+    Arc::new(InboundEventsDrainWorker::new(
+        Arc::new(PgInboundEvents::new(pool.clone())),
+        Arc::new(PgCommandJournal::new(pool.clone())),
+        Arc::new(PgEventStore::new(pool.clone())),
+    ))
+}
+
 #[tokio::test]
 async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_closes_prospects() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!(
             "SKIP worker_drains_staging_rows_through_the_write_path_idempotently_and_closes_prospects: DATABASE_URL not set"
         );
@@ -278,40 +311,53 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     let restaurant_id = restaurant_id_for_siret("85242109900021").0;
     let worker = SireneSyncWorker::new(pool.clone());
 
-    // 1) A pending staged row drains into ONE RestaurantRegistered on the aggregate stream and the
-    //    row's processed_at checkpoint is set (no longer pending).
+    // 1) A pending staged row is handed over as ONE inbound registry FACT — and nothing more. No
+    //    command (INSEE cannot be told "no", ADR-20260728-011344 D4), and no domain event yet: the
+    //    hand-over is not the delivery, and the aggregate has not decided anything.
     stage_row(&pool, "A").await;
     let summary = worker.run_once().await.expect("first drain");
     assert_eq!(summary.processed, 1);
-    assert_eq!(summary.registered, 1);
+    assert_eq!(summary.registered, 1, "one registry fact handed to the inbox");
     assert_eq!(summary.failed, 0);
 
-    let (stream, event_type, user_type, payload): (String, String, i32, serde_json::Value) =
-        sqlx::query_as("SELECT stream_name, event_type, user_type, payload FROM domain_events")
-            .fetch_one(&pool)
-            .await
-            .expect("one event row");
-    assert_eq!(stream, format!("Restaurant-{restaurant_id}"));
-    assert_eq!(event_type, "RestaurantRegistered");
-    assert_eq!(user_type, 6); // EXTERNAL envelope stamp (ADR-0041)
-    assert_eq!(payload["ref"], serde_json::json!("85242109900021"));
-    assert_eq!(payload["listingStatus"], serde_json::json!("NON_PARTNER"));
-
-    // The send converged on command_journal (channel WORKER=1, status SUCCEEDED=1, #15), and the
-    // appended event's cause_id is the journal row's message_id — the full causal chain holds.
-    let (message_id, channel, status): (uuid::Uuid, i32, i32) = sqlx::query_as(
-        "SELECT message_id, channel, status FROM command_journal WHERE command_type = 'RegisterRestaurant'",
+    let (inbound_event_id, source, external_id, event_type, inbound_status): (
+        uuid::Uuid,
+        String,
+        String,
+        String,
+        i32,
+    ) = sqlx::query_as(
+        "SELECT inbound_event_id, source, external_id, event_type, status FROM inbound_events",
     )
     .fetch_one(&pool)
     .await
-    .expect("one RegisterRestaurant journal row");
-    assert_eq!((channel, status), (1, 1));
-    let (event_cause,): (Option<uuid::Uuid>,) =
-        sqlx::query_as("SELECT cause_id FROM domain_events WHERE event_type = 'RestaurantRegistered'")
-            .fetch_one(&pool)
-            .await
-            .expect("registered event cause");
-    assert_eq!(event_cause, Some(message_id));
+    .expect("one inbound fact");
+    assert_eq!(source, "sirene");
+    // The stable dedupe key: the staged version is identified by WHAT the record says
+    // (`{siret}:{payload_hash}`), not by WHEN it was seen — which is what lets a later sweep
+    // re-see the same content without re-staging it.
+    let staged_hash: String = sqlx::query_scalar(
+        "SELECT payload_hash FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("staged hash");
+    assert_eq!(external_id, format!("85242109900021:{staged_hash}"));
+    assert_eq!(event_type, "RestaurantRegistered");
+    assert_eq!(inbound_status, 0, "RECEIVED — awaiting the drain");
+
+    let register_journal: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM command_journal WHERE command_type = 'RegisterRestaurant'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count register journal rows");
+    assert_eq!(register_journal, 0, "a fact is recorded, not requested — no command is journaled");
+    let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM domain_events")
+        .fetch_one(&pool)
+        .await
+        .expect("count events");
+    assert_eq!(events, 0, "hand-over is not delivery — nothing on the log yet");
 
     let pending: bool = sqlx::query_scalar(
         "SELECT processed_at IS NULL OR processed_at < last_seen_at \
@@ -322,39 +368,77 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     .expect("pending flag");
     assert!(!pending, "a drained row must carry its processed_at checkpoint");
 
-    // 2) Re-running the worker with nothing new staged is a complete no-op.
-    let replay = worker.run_once().await.expect("no-op drain");
-    assert_eq!(replay.processed, 0);
-    let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM domain_events")
-        .fetch_one(&pool)
-        .await
-        .expect("count events");
-    assert_eq!(events, 1, "an idempotent re-run must not append events");
+    // 2) The REAL drain worker delivers the fact through the normal write path: ONE
+    //    RestaurantRegistered on the deterministic UUIDv5(SIRET) stream, stamped EXTERNAL, and
+    //    caused by the exact inbound record that carried it.
+    let drain = drain_worker(&pool);
+    let delivered = drain.run_once().await.expect("single-flight");
+    assert_eq!(delivered.delivered, 1);
+    assert_eq!(delivered.failed, 0);
 
-    // 3) A re-ingested row (same SIRET, refreshed last_seen_at) is pending again but the deterministic
-    //    UUIDv5 id makes the registration replay a no-op.
+    let (stream, event_type, user_type, cause_id, payload): (
+        String,
+        String,
+        i32,
+        Option<uuid::Uuid>,
+        serde_json::Value,
+    ) = sqlx::query_as(
+        "SELECT stream_name, event_type, user_type, cause_id, payload FROM domain_events",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("one event row");
+    assert_eq!(stream, format!("Restaurant-{restaurant_id}"));
+    assert_eq!(event_type, "RestaurantRegistered");
+    assert_eq!(user_type, 6); // EXTERNAL envelope stamp (ADR-0041)
+    assert_eq!(cause_id, Some(inbound_event_id), "the fact chains to the inbound record");
+    assert_eq!(payload["ref"], serde_json::json!("85242109900021"));
+    assert_eq!(payload["listingStatus"], serde_json::json!("NON_PARTNER"));
+
+    // 3) The aggregate's verdict is reconciled onto the mirror by the next pass — which is otherwise
+    //    a complete no-op — and only THERE does the row become SYNCED and lose its payload (#231).
+    let replay = worker.run_once().await.expect("reconcile pass");
+    assert_eq!(replay.processed, 0, "nothing pending — an idempotent re-run drains nothing");
+    assert_eq!(replay.resolved, 1, "the DELIVERED verdict lands on the mirror");
+    let (mirror_status, synced_at, mirror_payload): (
+        String,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<serde_json::Value>,
+    ) = sqlx::query_as(
+        "SELECT status, synced_at, payload FROM external_sirene_restaurants \
+          WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("reconciled row");
+    assert_eq!(mirror_status, "SYNCED");
+    assert!(synced_at.is_some(), "the sync's completion is timestamped");
+    assert!(mirror_payload.is_none(), "confirmed — the payload is finally released");
+
+    // 4) A re-ingested row (same SIRET, same content, refreshed last_seen_at) is pending again, but
+    //    the stable (source, external_id) key absorbs it: nothing new staged, nothing appended, and
+    //    the already-recorded verdict re-confirms the row within the same pass.
     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     stage_row(&pool, "A").await;
     let refresh = worker.run_once().await.expect("refresh drain");
     assert_eq!(refresh.processed, 1);
-    assert_eq!(refresh.registered, 1); // Ok covers the idempotent replay of a known SIRET
+    assert_eq!(refresh.registered, 0, "the same fact is not re-staged");
+    assert_eq!(refresh.skipped, 1, "it deduplicates on the inbox instead");
+    assert_eq!(refresh.resolved, 1, "and the known verdict re-confirms the row in the same pass");
+    let inbound_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inbound_events")
+        .fetch_one(&pool)
+        .await
+        .expect("count inbound rows");
+    assert_eq!(inbound_rows, 1, "one fact, however many times the sweep re-sees it");
     let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM domain_events")
         .fetch_one(&pool)
         .await
         .expect("count events after replay");
     assert_eq!(events, 1);
-    // The refreshed staged version (bumped last_seen_at) journals as a NEW send — the aggregate
-    // no-op is still a SUCCEEDED submission, visible per delivery.
-    let register_rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM command_journal WHERE command_type = 'RegisterRestaurant'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("count register journal rows");
-    assert_eq!(register_rows, 2);
 
-    // 4) Deletion reconciliation (ADR-0045): an explicit etat=F refresh closes the NON_PARTNER
-    //    prospect via the ordinary MarkRestaurantClosed handler…
+    // 5) Deletion reconciliation (ADR-0045): an explicit etat=F refresh closes the NON_PARTNER
+    //    prospect via the ordinary MarkRestaurantClosed handler. Closure IS still a command — the
+    //    closure is our inference and can be refused — so this half journals (WORKER channel, #15)…
     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     stage_row(&pool, "F").await;
     let closing = worker.run_once().await.expect("closing drain");
@@ -415,12 +499,18 @@ async fn seed_projection_row(pool: &PgPool, id: uuid::Uuid, slug: &str, identifi
     .expect("seed projection row");
 }
 
-/// Production predates the UUIDv5(SIRET) derivation: the projection row carrying the SIRET names the
-/// real aggregate, so the worker must adopt ITS id (register replay + close both target it) instead
-/// of deriving a slug-colliding sibling and retrying forever.
+/// Production predates the UUIDv5(SIRET) derivation, so legacy listings live under other aggregate
+/// ids and the projection row carrying the SIRET is the only thing that NAMES them. Since #227 the
+/// adoption survives on the CLOSE path only: the register path derives its id deterministically and
+/// never asks the read model, but a closure aimed at the derived id would close a sibling that does
+/// not exist — leaving the real, legacy-id listing open and orderable, which is the worse failure.
 #[tokio::test]
 async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_siret() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP worker_adopts_the_legacy_aggregate_id...: DATABASE_URL not set");
         return;
     };
@@ -429,6 +519,46 @@ async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_
     reset_schema(&pool).await;
     let legacy_id = uuid::Uuid::new_v4();
     assert_ne!(legacy_id, restaurant_id_for_siret("85242109900021").0);
+
+    // The legacy aggregate EXISTS in the log under its pre-derivation id, and the projection row
+    // carrying the SIRET names it — exactly the shape production inherited.
+    let store = PgEventStore::new(pool.clone());
+    let registered = DomainEvent::RestaurantRegistered(RestaurantRegistered {
+        mode: None,
+        restaurant_id: RestaurantId(legacy_id),
+        account_id: None,
+        listing_status: RestaurantListingStatus::NON_PARTNER,
+        r#ref: None,
+        external_identifiers: vec![],
+        display_name: RestaurantDisplayName("CHEZ MARCO".into()),
+        contact: None,
+        website: None,
+        tags: vec![],
+        margin_rate: None,
+        cuisine_category: None,
+        uber_prices_opt_in: None,
+        address: Address {
+            line1: AddressLine("12 RUE NATIONALE".into()),
+            line2: None,
+            postal_code: PostalCode("37000".into()),
+            city: CityName("TOURS".into()),
+            country: CountryCode("FR".into()),
+        },
+        location: None,
+        timezone: None,
+        preparation_time_minutes: None,
+        opening_hours: vec![],
+    });
+    let actor = Actor {
+        user_id: uuid::Uuid::nil(),
+        user_type: 6,
+        correlation_id: uuid::Uuid::new_v4(),
+        cause_id: None,
+    };
+    store
+        .append(&format!("Restaurant-{legacy_id}"), 0, std::slice::from_ref(&registered), &actor)
+        .await
+        .expect("seed the legacy aggregate");
     seed_projection_row(
         &pool,
         legacy_id,
@@ -438,77 +568,110 @@ async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_
     .await;
     let worker = SireneSyncWorker::new(pool.clone());
 
-    // The register replay adopts the legacy id — no SlugAlreadyTaken, no derived sibling.
-    stage_row(&pool, "A").await;
-    let summary = worker.run_once().await.expect("adoption drain");
-    assert_eq!((summary.registered, summary.skipped, summary.failed), (1, 0, 0));
-    let (stream,): (String,) =
-        sqlx::query_as("SELECT stream_name FROM domain_events ORDER BY position LIMIT 1")
-            .fetch_one(&pool)
-            .await
-            .expect("registered event");
-    assert_eq!(stream, format!("Restaurant-{legacy_id}"));
-
-    // The close path resolves the SAME id, so legacy listings are closable too.
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    // An explicit closure signal for that SIRET must close the aggregate the projection NAMES,
+    // not a derived sibling.
     stage_row(&pool, "F").await;
     let closing = worker.run_once().await.expect("closing drain");
     assert_eq!(closing.closed, 1);
+    assert_eq!(closing.failed, 0);
     let (stream, event_type): (String, String) = sqlx::query_as(
         "SELECT stream_name, event_type FROM domain_events ORDER BY position DESC LIMIT 1",
     )
     .fetch_one(&pool)
     .await
     .expect("close event");
-    assert_eq!((stream.as_str(), event_type.as_str()), (format!("Restaurant-{legacy_id}").as_str(), "RestaurantMarkedClosed"));
+    assert_eq!(
+        (stream.as_str(), event_type.as_str()),
+        (format!("Restaurant-{legacy_id}").as_str(), "RestaurantMarkedClosed")
+    );
+    // And the register-path contrast (#227): a closure needs no inbound fact — nothing was staged.
+    let inbound_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inbound_events")
+        .fetch_one(&pool)
+        .await
+        .expect("count inbound rows");
+    assert_eq!(inbound_rows, 0, "closing is a command, not an inbound fact");
 }
 
-/// A catalogued rejection (here a REAL slug conflict — same slug, different establishment) is
-/// deterministic: the worker must mark the row processed and move on, not retry it every pass
-/// (the production 605-row SlugAlreadyTaken log storm).
+/// The modern shape of the retired "deterministically rejected row" test. Since #227 the register
+/// path has no rejections — a slug is not even validated (the worker stages a FACT; a prospect has no
+/// slug until one is configured). What remains deterministic is a DELIVERY failure: a staged fact the
+/// write path cannot apply. That verdict must (a) leave a durable, queryable trace instead of an
+/// eprintln nobody reads, (b) reconcile onto the mirror as FAILED with the payload KEPT (it is the
+/// only original if re-translation is needed), and (c) not be retried every pass — the production
+/// 605-row SlugAlreadyTaken log storm was exactly the retry-forever shape this guards against.
+/// Recovery needs no operator action: a changed record from INSEE re-pends the row.
 #[tokio::test]
-async fn worker_marks_a_deterministically_rejected_row_processed_instead_of_retrying_forever() {
+async fn a_failed_delivery_leaves_a_durable_trace_and_is_not_retried_forever() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("SKIP worker_marks_a_deterministically_rejected_row...: DATABASE_URL not set");
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
+        eprintln!("SKIP a_failed_delivery_leaves_a_durable_trace...: DATABASE_URL not set");
         return;
     };
     let _guard = db_lock().lock().await;
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
-    // The slug is owned by a DIFFERENT establishment (different SIRET identifier): a true conflict
-    // the sync can never resolve by itself.
-    seed_projection_row(
-        &pool,
-        uuid::Uuid::new_v4(),
-        "chez-marco-00021",
-        serde_json::json!([{ "key": "siret", "value": "11111111100021" }]),
-    )
-    .await;
     let worker = SireneSyncWorker::new(pool.clone());
 
     stage_row(&pool, "A").await;
-    let summary = worker.run_once().await.expect("rejected drain");
-    assert_eq!((summary.registered, summary.skipped, summary.failed), (0, 1, 0));
+    let summary = worker.run_once().await.expect("stage the fact");
+    assert_eq!(summary.registered, 1);
+
+    // Break the staged fact the way an ACL/schema drift would: the payload no longer parses as a
+    // DomainEvent. The REAL drain worker then records the verdict — this is not simulated.
+    sqlx::query(
+        "UPDATE inbound_events SET payload = '{\"eventType\":\"NotAnEvent\"}'::jsonb \
+          WHERE source = 'sirene'",
+    )
+    .execute(&pool)
+    .await
+    .expect("corrupt the staged fact");
+    let drain = drain_worker(&pool);
+    let delivered = drain.run_once().await.expect("single-flight");
+    assert_eq!(delivered.failed, 1);
+    assert_eq!(delivered.delivered, 0);
+
+    // (a) The verdict is durable and queryable — support can answer "what happened to this row".
+    let (inbound_status, error): (i32, Option<serde_json::Value>) =
+        sqlx::query_as("SELECT status, error FROM inbound_events WHERE source = 'sirene'")
+            .fetch_one(&pool)
+            .await
+            .expect("inbound verdict");
+    assert_eq!(inbound_status, 2, "FAILED (declaration-order ordinal)");
+    let error = error.expect("the failure reason is recorded on the row");
+    assert!(
+        error["detail"].as_str().is_some_and(|d| !d.is_empty()),
+        "the trace says WHY, not just that it failed"
+    );
+
+    // (b) Reconciled onto the mirror as FAILED: nothing claims a sync, and the payload survives.
+    let reconcile = worker.run_once().await.expect("reconcile pass");
+    assert_eq!(reconcile.resolved, 1);
+    let (mirror_status, payload, synced_at): (
+        String,
+        Option<serde_json::Value>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as(
+        "SELECT status, payload, synced_at FROM external_sirene_restaurants \
+          WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("reconciled row");
+    assert_eq!(mirror_status, "FAILED");
+    assert!(payload.is_some(), "a failed delivery is precisely when the raw record is still needed");
+    assert!(synced_at.is_none(), "and nothing may claim it reached the domain");
+
+    // (c) The row is checkpointed: the next pass has nothing to do — the churn is gone.
+    let replay = worker.run_once().await.expect("no-op drain");
+    assert_eq!(replay.processed, 0);
     let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM domain_events")
         .fetch_one(&pool)
         .await
         .expect("count events");
-    assert_eq!(events, 0);
-
-    // Since #15 the rejection leaves a durable trace: a REJECTED (=2) WORKER-channel journal row
-    // carrying the errors.yaml code — support can finally answer "what happened to this row".
-    let (status, error): (i32, serde_json::Value) = sqlx::query_as(
-        "SELECT status, error FROM command_journal WHERE command_type = 'RegisterRestaurant'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("rejected journal row");
-    assert_eq!(status, 2);
-    assert_eq!(error["code"], serde_json::json!("SlugAlreadyTaken"));
-
-    // The row is checkpointed: the next pass has nothing to do — the churn is gone.
-    let replay = worker.run_once().await.expect("no-op drain");
-    assert_eq!(replay.processed, 0);
+    assert_eq!(events, 0, "nothing reached the domain");
 }
 
 /// The worker does NOT know, at hand-over, whether the aggregate accepted the record — since
@@ -522,6 +685,10 @@ async fn worker_marks_a_deterministically_rejected_row_processed_instead_of_retr
 #[tokio::test]
 async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP staged_rows_resolve_to_synced_from_the_aggregates_verdict: DATABASE_URL not set");
         return;
     };
@@ -588,6 +755,10 @@ async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
 #[tokio::test]
 async fn an_ignored_verdict_still_counts_as_synced() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP an_ignored_verdict_still_counts_as_synced: DATABASE_URL not set");
         return;
     };
@@ -624,6 +795,10 @@ async fn an_ignored_verdict_still_counts_as_synced() {
 #[tokio::test]
 async fn a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload: DATABASE_URL not set");
         return;
     };
@@ -660,6 +835,10 @@ async fn a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload() {
 #[tokio::test]
 async fn a_failed_verdict_keeps_the_payload() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP a_failed_verdict_keeps_the_payload: DATABASE_URL not set");
         return;
     };

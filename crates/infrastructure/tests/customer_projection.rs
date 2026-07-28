@@ -143,6 +143,10 @@ fn verify_phone_cmd(customer_id: uuid::Uuid) -> VerifyPhone {
 #[tokio::test]
 async fn registered_customer_is_folded_and_served_by_the_read_repository() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP registered_customer_is_folded_and_served_by_the_read_repository: DATABASE_URL not set");
         return;
     };

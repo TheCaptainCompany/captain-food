@@ -3,6 +3,28 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — the pre-#227 syncs were journaled, so compaction can now CONFIRM them; CI runs the
+> DB suites; the SIRENE worker tests assert the real contract
+> ([#238](https://github.com/TheCaptainCompany/captain-food/issues/238) /
+> [#230](https://github.com/TheCaptainCompany/captain-food/issues/230) /
+> [#236](https://github.com/TheCaptainCompany/captain-food/issues/236)).**
+> Product-owner correction on the #240 consequence: reclaiming the historical 655 MB does NOT have to
+> wait for the sweep to resume, because the retired command path recorded its verdicts — every pre-#227
+> sync is a `command_journal` row with a deterministic message_id (UUIDv5 over command type + SIRET +
+> the staged version's `last_seen_at`) and a SUCCEEDED/REJECTED verdict + `completed_at` written by the
+> dispatch. The compaction gained a **journal arm** that transcribes those verdicts (`SYNCED`,
+> `synced_at = completed_at`, payload dropped, one statement); rejected/missing/stale-version verdicts
+> stay `left_unconfirmed` and fall back to re-sync. **The evidence expires**: `sweep_retention()` deletes
+> terminal journal rows after 90 days, so run `mode: compact` before the verdicts age out.
+> Alongside it, CI got a real Postgres (#230): the DB-gated integration suites now RUN (migrations
+> applied, `--test-threads=1`), and a skip is LOUD when `DB_TESTS_REQUIRED` is set instead of reporting
+> `ok` while executing nothing. The three stale worker tests (#236) were rewritten against the
+> post-#227 contract (inbound fact → real `InboundEventsDrainWorker` delivery → verdict reconciled) —
+> and immediately caught a real bug: the worker staged the BARE `RestaurantRegistered` payload while the
+> drain deserializes the adjacently-tagged `DomainEvent` form, so **every staged registry fact was
+> undeliverable** ("missing field eventType" → FAILED). Fixed at the staging site; exactly the class of
+> drift a silently-skipping suite exists to catch.
+
 > ✅ **2026-07-28 — a payload is now removed ONLY against recorded evidence of a successful sync
 > ([#231](https://github.com/TheCaptainCompany/captain-food/issues/231)/[#238](https://github.com/TheCaptainCompany/captain-food/issues/238); PR #240).**
 > Product-owner correction, and it caught a real flaw. The first implementation removed payloads on an

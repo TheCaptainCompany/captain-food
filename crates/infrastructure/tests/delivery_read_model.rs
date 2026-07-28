@@ -115,6 +115,10 @@ fn address(line1: &str) -> serde_json::Value {
 #[tokio::test]
 async fn delivery_lifecycle_events_serve_the_three_read_queries() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP delivery_lifecycle_events_serve_the_three_read_queries: DATABASE_URL not set");
         return;
     };

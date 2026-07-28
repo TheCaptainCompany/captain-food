@@ -59,6 +59,10 @@ async fn reset_schema(pool: &PgPool) {
           restaurant_stars INTEGER,
           rating_comment TEXT,
           rider_thumb INTEGER,
+          -- Added by migrations/20260722000000; the projector's upsert names it, so a fixture
+          -- without it fails the whole INSERT and the row never materializes (caught when #230
+          -- first ran this suite in CI).
+          delivery_timeliness INTEGER,
           rider_tip_cents BIGINT,
           restaurant_tip_cents BIGINT,
           captain_tip_cents BIGINT,
@@ -112,6 +116,10 @@ fn money(cents: i64) -> serde_json::Value {
 #[tokio::test]
 async fn order_events_fold_into_the_read_model() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP order_events_fold_into_the_read_model: DATABASE_URL not set");
         return;
     };

@@ -100,6 +100,10 @@ fn record_with_siret(siret: &str) -> SireneRecord {
 #[tokio::test]
 async fn staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at: DATABASE_URL not set");
         return;
     };
@@ -178,6 +182,10 @@ async fn staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at() {
 #[tokio::test]
 async fn staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent: DATABASE_URL not set");
         return;
     };
@@ -259,6 +267,10 @@ async fn staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent() {
 #[tokio::test]
 async fn staging_batch_upsert_falls_back_to_row_by_row_on_batch_error() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP staging_batch_upsert_falls_back_to_row_by_row_on_batch_error: DATABASE_URL not set");
         return;
     };
@@ -291,6 +303,10 @@ async fn staging_batch_upsert_falls_back_to_row_by_row_on_batch_error() {
 #[tokio::test]
 async fn an_unchanged_processed_row_does_not_get_its_payload_written_back() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP an_unchanged_processed_row_does_not_get_its_payload_written_back: DATABASE_URL not set");
         return;
     };
@@ -332,6 +348,10 @@ async fn an_unchanged_processed_row_does_not_get_its_payload_written_back() {
 #[tokio::test]
 async fn a_changed_record_gets_its_payload_written_again() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP a_changed_record_gets_its_payload_written_again: DATABASE_URL not set");
         return;
     };
@@ -371,6 +391,10 @@ async fn a_changed_record_gets_its_payload_written_again() {
 #[tokio::test]
 async fn a_changed_record_releases_a_poisoned_row() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP a_changed_record_releases_a_poisoned_row: DATABASE_URL not set");
         return;
     };
