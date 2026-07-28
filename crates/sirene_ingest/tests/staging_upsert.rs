@@ -28,7 +28,10 @@ async fn reset_schema(pool: &PgPool) {
           sync_run_id UUID NOT NULL,
           payload_hash TEXT NOT NULL DEFAULT 'unhashed-pre-20260728',
           processed_at TIMESTAMPTZ NULL,
-          status TEXT NOT NULL DEFAULT 'PENDING'
+          status TEXT NOT NULL DEFAULT 'PENDING',
+          synced_at TIMESTAMPTZ NULL,
+          last_attempt_sync_at TIMESTAMPTZ NULL,
+          attempt_sync_retry_count INTEGER NOT NULL DEFAULT 0
         );
         "#,
     )
@@ -357,4 +360,55 @@ async fn a_changed_record_gets_its_payload_written_again() {
     .expect("re-staged row");
     assert!(payload.is_some(), "a CHANGED record must carry its payload — the worker has to translate it");
     assert!(pending, "and it must pend");
+}
+
+/// Quarantine must be self-healing, or a POISON row is a permanent leak that needs an operator.
+///
+/// A row is quarantined for failing to sync the record it currently holds. When INSEE sends a DIFFERENT
+/// record, that verdict no longer applies — so the ordinary conflict arm, which already re-pends changed
+/// rows, must also clear the quarantine. This is the whole recovery path, and it costs nothing extra:
+/// `status` follows exactly the same predicate as `payload` and `processed_at`.
+#[tokio::test]
+async fn a_changed_record_releases_a_poisoned_row() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP a_changed_record_releases_a_poisoned_row: DATABASE_URL not set");
+        return;
+    };
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+
+    upsert_staging_row(&pool, &sample_record(), "37", uuid::Uuid::new_v4()).await.expect("first upsert");
+    sqlx::query(
+        "UPDATE external_sirene_restaurants \
+            SET status = 'POISON', attempt_sync_retry_count = 10, processed_at = last_seen_at",
+    )
+    .execute(&pool)
+    .await
+    .expect("quarantine the row");
+
+    // Re-seeing the SAME record must NOT release it — nothing has changed, so the failure still applies.
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    upsert_staging_row(&pool, &sample_record(), "37", uuid::Uuid::new_v4()).await.expect("unchanged upsert");
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM external_sirene_restaurants WHERE siret = '85242109900021'")
+            .fetch_one(&pool)
+            .await
+            .expect("row");
+    assert_eq!(status, "POISON", "an identical record is not new information");
+
+    // A CHANGED record is: it re-pends the row, and the quarantine goes with it.
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    upsert_staging_row(&pool, &record_with_siret("85242109900021"), "37", uuid::Uuid::new_v4())
+        .await
+        .expect("changed upsert");
+    let (status, payload, pending): (String, Option<serde_json::Value>, bool) = sqlx::query_as(
+        "SELECT status, payload, (processed_at IS NULL OR processed_at < last_seen_at) AS pending \
+         FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("row");
+    assert_eq!(status, "PENDING", "a changed record releases the quarantine — no operator needed");
+    assert!(payload.is_some(), "and brings back the payload the retry will translate");
+    assert!(pending, "and the row is pending again");
 }

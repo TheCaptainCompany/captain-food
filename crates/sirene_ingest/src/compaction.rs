@@ -167,8 +167,14 @@ pub async fn compact_payloads(
             // Hash and payload move in ONE statement so a row can never be left hashed-but-unpayloaded
             // or payloaded-but-unhashed by a crash between two writes.
             sqlx::query(
+                // `synced_at` is backfilled from `processed_at` rather than stamped now(): these rows
+                // were synced in the PAST and pretending otherwise would make every historical row look
+                // freshly translated. For them `processed_at` IS the `last_seen_at` at which the worker
+                // drained the row, and the hash-match carry-forward cannot have moved it, because their
+                // hash is still the sentinel. COALESCE keeps an existing value if one is somehow there.
                 "UPDATE external_sirene_restaurants s \
-                    SET payload_hash = t.hash, payload = NULL, status = $3 \
+                    SET payload_hash = t.hash, payload = NULL, status = $3, \
+                        synced_at = COALESCE(s.synced_at, s.processed_at) \
                    FROM UNNEST($1::text[], $2::text[]) AS t(siret, hash) \
                   WHERE s.siret = t.siret",
             )

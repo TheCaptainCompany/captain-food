@@ -3,6 +3,28 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — the SIRENE mirror now records whether a row actually SYNCED, and quarantines the ones
+> that cannot (ADR-20260728-143000 follow-up, [#231](https://github.com/TheCaptainCompany/captain-food/issues/231); PR #237).**
+> Follow-up to the transient-payload change below, from three product-owner observations, each of which
+> turned out to be a real hole. (1) **`status` was claiming too much.** Since ADR-20260728-011344 the
+> register path STAGES an inbound fact and the aggregate decides later, so at hand-over the worker does
+> not know whether the record was accepted — marking it `SYNCED` there asserted a success nobody
+> observed. There is now a `STAGED` state, resolved on a later drain by joining `inbound_events` on the
+> key the ACL already writes (`external_id = '{siret}:{payload_hash}'`, both halves being columns on the
+> staging row — no new bookkeeping). `DELIVERED`/`IGNORED`/`DUPLICATE` all resolve to `SYNCED` (a
+> no-change verdict is a real answer, not a failure), `FAILED` surfaces as `FAILED`, `RECEIVED` is left
+> in flight. (2) **`processed_at` is not a sync time** — it is a checkpoint the ingestion also advances
+> on unchanged rows — so `synced_at` (wall clock, survives a re-pend) and `last_attempt_sync_at` (every
+> attempt) now exist alongside it. (3) **A failed sync retried forever.** It deliberately leaves the row
+> pending WITH its payload, so nothing excluded a permanently-broken record — the 605-row
+> `SlugAlreadyTaken` log storm was exactly this shape. `attempt_sync_retry_count` counts CONSECUTIVE
+> failures (resetting on any checkpointed outcome, which is what makes it answer "stuck *now*?") and at
+> **10** the row becomes `POISON` and the drain skips it. Recovery needs no operator: a CHANGED record
+> re-pends the row through the ordinary conflict arm, which writes `PENDING` and releases the quarantine
+> — so quarantine holds exactly as long as the record keeps arriving unchanged and broken. Migration
+> `20260728160000` (separate from `20260728050000`, which is merged and may be applied — forward-only),
+> `REQUIRED_SCHEMA_VERSION` bumped.
+
 > ✅ **2026-07-28 — the SIRENE mirror's payload is now TRANSIENT: ~1.8 kB/row → ~200 B/row
 > (ADR-20260728-143000, [#231](https://github.com/TheCaptainCompany/captain-food/issues/231); PR #234).**
 > `external_sirene_restaurants` kept the verbatim INSEE record forever to read five fields out of it:

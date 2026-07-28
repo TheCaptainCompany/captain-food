@@ -237,7 +237,10 @@ CREATE TABLE external_sirene_restaurants (
   sync_run_id UUID NOT NULL,
   payload_hash TEXT NOT NULL,
   processed_at TIMESTAMPTZ NULL,
-  status TEXT NOT NULL
+  status TEXT NOT NULL,
+  synced_at TIMESTAMPTZ NULL,
+  last_attempt_sync_at TIMESTAMPTZ NULL,
+  attempt_sync_retry_count INTEGER NOT NULL
 );
 CREATE INDEX ON external_sirene_restaurants (etat);
 CREATE INDEX ON external_sirene_restaurants (naf);

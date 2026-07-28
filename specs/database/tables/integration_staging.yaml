@@ -52,12 +52,26 @@ external_sirene_restaurants:
     evidence, and nothing distinguishes the two. Values, written by the worker (except PENDING, written
     by the ingestion):
       * PENDING    — ingested or refreshed, not yet translated. Payload PRESENT, because the worker needs it.
-      * SYNCED     — translated into a domain fact (a staged registry fact, or an explicit closure).
-                     Payload DROPPED: it has been consumed and is never read again.
+      * STAGED     — the ACL translated the record and HANDED IT OVER to `inbound_events`; the aggregate
+                     has not decided yet. This is an intermediate state, not a success — calling it
+                     SYNCED would claim more than the worker knows, and a later delivery failure would
+                     leave the mirror asserting something that never happened. Payload DROPPED (the
+                     inbound row carries its own translated copy).
+      * SYNCED     — the record REACHED THE DOMAIN. Either resolved from the aggregate's verdict (see
+                     below) or, for the explicit-closure path, known synchronously because
+                     `MarkRestaurantClosed` is a real command executed inline.
       * UNMAPPABLE — parsed but rejected by the ACL, or not parsable at all. Payload KEPT as evidence.
                      Checkpointed, so it is NOT retried forever — a refresh from INSEE re-pends it.
-      * FAILED     — a write/staging failure. The row is left PENDING and retried on the next pass;
+      * FAILED     — a write/staging failure. The row keeps its payload and is retried on the next pass;
                      the status records that the last attempt did not get there.
+      * POISON     — QUARANTINED after 10 consecutive failed attempts. The drain SKIPS these rows, which
+                     is the whole point: without it a permanently-failing row is retried on every pass
+                     forever, burning the sweep's budget and drowning the log in an error nobody is
+                     acting on (the 605-row SlugAlreadyTaken storm was exactly this shape). The payload
+                     is KEPT -- it is the evidence needed to diagnose it, and the retry would need it.
+                     Recovery is automatic and needs no operator: a CHANGED record from INSEE re-pends
+                     the row through the ordinary conflict arm, which sets PENDING and so clears POISON.
+                     So quarantine holds a row exactly as long as it keeps arriving unchanged and broken.
     It is deliberately TEXT rather than a scalar enum `$ref`. Enums persist as declaration-order ints
     (ADR-0037/0041), and the CI `sirene_ingest` crate that writes PENDING cannot see the domain types at
     all (ADR-0045 keeps domain crates out of that build) — it would have to hardcode ordinals, so a
@@ -66,6 +80,41 @@ external_sirene_restaurants:
     Note it does NOT replace `processed_at`: that is the CHECKPOINT (`< last_seen_at ⇒ pending`, the
     concurrency-safe high-water mark), while `status` is the OUTCOME. `GROUP BY status` is the operator's
     per-sweep report.
+
+    STAGED -> SYNCED is resolved by JOINING `inbound_events`, and the join key already exists -- nothing
+    extra is stored to make it work. The ACL writes `inbound_events.external_id = '{siret}:{payload_hash}'`
+    (ADR-20260728-011344), and both halves are columns on this row, so
+    `i.external_id = s.siret || ':' || s.payload_hash` links them exactly. On each drain the worker reads
+    `inbound_events.status` for its STAGED rows and writes the verdict back: DELIVERED / IGNORED /
+    DUPLICATE all mean the record reached the domain and the domain is now correct about it (a no-change
+    verdict is a real answer, not a failure -- conflating the two is what once made a sweep unable to
+    tell 200,000 registrations from 200,000 no-ops), so all three resolve to SYNCED; FAILED surfaces as
+    FAILED; RECEIVED means still in flight and is left alone. This necessarily LAGS by at least one
+    drain, because the verdict does not exist at hand-over time.
+
+    `synced_at` is the third of that trio and answers WHEN, in wall-clock terms, this row last became a
+    domain fact. It is NOT derivable from `processed_at`, and the difference is easy to miss: the worker
+    sets `processed_at` to the `last_seen_at` it READ, deliberately not `now()`, so that a concurrent
+    ingestion bump re-pends the row instead of being swallowed -- and the ingestion itself then advances
+    `processed_at` to `now()` on every UNCHANGED row it re-sees (the hash-match carry-forward). So
+    `processed_at` moves for rows nothing happened to, and its value is a sweep timestamp rather than a
+    sync timestamp. `synced_at` moves only when a fact is actually produced. NULL means never synced.
+    It deliberately SURVIVES a re-pend: "last synced 3 weeks ago, PENDING again since yesterday" is the
+    useful reading, so a row carries both its current state and when it last got through.
+    No index: the operational queries filter on `status`, and an extra btree over 339k rows is disk this
+    table is specifically trying to give back. Add one if a "not synced since X" query ever needs it.
+
+    `last_attempt_sync_at` + `attempt_sync_retry_count` are the FAILURE side of the same story, and they
+    are what make a stuck row findable. A failed sync leaves the row PENDING with its payload intact --
+    it must, or the retry would have nothing to translate -- so a permanently-failing row is otherwise
+    indistinguishable from one that simply has not been reached yet, and it would retry silently forever.
+    Now: `last_attempt_sync_at` moves on EVERY attempt (that is what "last attempt" means, success or
+    not), while `attempt_sync_retry_count` counts CONSECUTIVE failures and RESETS to 0 on any
+    checkpointed outcome (SYNCED or UNMAPPABLE). Resetting is what gives the number meaning -- a
+    monotonic lifetime counter says nothing about whether a row is stuck NOW, and
+    `WHERE status = 'POISON'` is the operator's stuck-row list, and the count is what put them there.
+    Note the ingestion does NOT reset the count when a changed record re-pends a row: the count is
+    "consecutive failures since the last success", and a row whose new version syncs clears it naturally.
 
     What this costs: an ACL that learns to read a NEW INSEE field cannot re-translate from the mirror.
     It does not need to. The hash covers the TYPED projection, so adding a field to the wire types
@@ -89,6 +138,9 @@ external_sirene_restaurants:
     payload_hash:  { type: text, index: true }              # see the note below -- the "did this actually change?" key
     processed_at:  { type: timestamptz, nullable: true }    # worker high-water mark: NULL / < last_seen_at ⇒ pending
     status:        { type: text, index: true }              # what the worker DECIDED -- see the status note below
+    synced_at:                { type: timestamptz, nullable: true }  # WHEN the row last became a domain fact (wall clock) -- NULL = never synced
+    last_attempt_sync_at:     { type: timestamptz, nullable: true }  # WHEN the worker last TRIED, success or failure
+    attempt_sync_retry_count: { type: integer }                      # CONSECUTIVE failed attempts since the last checkpointed outcome
 
 external_stripe_events:
   staging: true

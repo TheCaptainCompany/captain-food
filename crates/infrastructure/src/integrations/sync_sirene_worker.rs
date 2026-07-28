@@ -86,6 +86,16 @@ const FRESH_INGESTION_DAYS: i64 = 10;
 /// `UserType::EXTERNAL` ordinal for the event envelope (enums stored as declaration-order ints,
 /// ADR-0037/0041) — the sync writes as the fixed external system principal.
 const EXTERNAL_USER_TYPE: i32 = 6;
+/// Consecutive failed sync attempts after which a row is QUARANTINED as `POISON` and the drain stops
+/// selecting it (#231).
+///
+/// A failed sync deliberately leaves the row pending WITH its payload, because the retry needs
+/// something to translate — which means a permanently-failing row is otherwise retried on every pass
+/// forever, burning budget and emitting an error nobody acts on. That failure mode is not theoretical
+/// here: the 605-row `SlugAlreadyTaken` log storm was exactly this shape. Ten is generous enough that
+/// no transient outage (a deploy, a lock, a brief connection loss) can quarantine a healthy row, and
+/// small enough that a genuinely broken one stops costing anything within a sweep or two.
+const MAX_SYNC_ATTEMPTS: i32 = 10;
 
 /// The `inbound_events.source` this adapter owns. `(source, external_id)` is the delivery-level dedupe,
 /// and unlike `command_journal`'s `last_seen_at`-seeded message_id it is STABLE across sweeps
@@ -153,6 +163,9 @@ pub struct SireneSyncSummary {
     pub flagged_for_review: u64,
     /// Unmappable rows (bad SIRET, no name/address, unparsable payload) — skipped, marked processed.
     pub skipped: u64,
+    /// Previously-STAGED rows whose aggregate verdict arrived and was written back (SYNCED / FAILED).
+    /// Lags the staging by at least one drain, by design — the verdict does not exist at hand-over.
+    pub resolved: u64,
     /// Write/load failures — the row stays pending and is retried on the next run.
     pub failed: u64,
 }
@@ -170,7 +183,17 @@ pub struct SireneSyncSummary {
 /// a shared enum would mean hardcoded ordinals there and silent reinterpretation on any reordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowOutcome {
-    /// Translated into a domain fact (a staged registry fact, or an explicit closure). Payload spent.
+    /// HANDED OVER to the inbox, verdict not yet known. The ACL translated the record and staged an
+    /// inbound fact; the aggregate has not decided anything yet — `InboundEventsDrainWorker` delivers it
+    /// and writes the verdict onto `inbound_events.status`. Calling this SYNCED would claim more than
+    /// this worker knows: a later delivery failure or rejection would leave the mirror asserting a
+    /// success that never happened. `reconcile_staged` resolves it on a later pass.
+    ///
+    /// The payload is still dropped here, because the inbound row carries its own translated copy — the
+    /// staging payload has done its job either way.
+    Staged,
+    /// Actually completed. Only the explicit-closure path reaches this synchronously: `MarkRestaurantClosed`
+    /// is a real command executed inline, so its outcome is known when this is written.
     Synced,
     /// Parsed but rejected by the ACL, or not parsable at all. Payload KEPT as evidence. Still
     /// checkpointed, so it is not retried forever — a refresh from INSEE re-pends it.
@@ -180,6 +203,7 @@ enum RowOutcome {
 impl RowOutcome {
     fn status(self) -> &'static str {
         match self {
+            RowOutcome::Staged => "STAGED",
             RowOutcome::Synced => "SYNCED",
             RowOutcome::Unmappable => "UNMAPPABLE",
         }
@@ -187,6 +211,13 @@ impl RowOutcome {
 
     /// Only a spent payload is dropped. Evidence is never discarded.
     fn clears_payload(self) -> bool {
+        matches!(self, RowOutcome::Staged | RowOutcome::Synced)
+    }
+
+    /// `synced_at` is a claim that the record REACHED THE DOMAIN, so only a known-complete outcome may
+    /// stamp it. A staged fact has not been decided yet; `reconcile_staged` stamps it when the verdict
+    /// arrives.
+    fn stamps_synced_at(self) -> bool {
         matches!(self, RowOutcome::Synced)
     }
 }
@@ -254,8 +285,13 @@ impl SireneSyncWorker {
         let mut after = String::new();
         loop {
             let rows = sqlx::query(
+                // `status <> 'POISON'` is what makes the quarantine real. Without it the row still
+                // matches the pending predicate (a failure never advances `processed_at`) and would be
+                // re-attempted on every pass forever. A changed record from INSEE resets the status to
+                // PENDING through the ingestion's conflict arm, so recovery needs no operator action.
                 "SELECT siret, payload, etat, last_seen_at, payload_hash FROM external_sirene_restaurants \
                  WHERE siret > $1 AND (processed_at IS NULL OR processed_at < last_seen_at) \
+                   AND status <> 'POISON' \
                  ORDER BY siret LIMIT $2",
             )
             .bind(&after)
@@ -280,7 +316,10 @@ impl SireneSyncWorker {
             }
         }
 
-        // 2) Deletion reconciliation by absence (debounced, freshness-guarded, partner-gated).
+        // 2) Resolve rows whose fact has since been decided by the aggregate.
+        self.reconcile_staged(&mut summary).await?;
+
+        // 3) Deletion reconciliation by absence (debounced, freshness-guarded, partner-gated).
         self.reconcile_absent(&store, &restaurants, &journal, correlation_id, &mut summary).await?;
 
         Ok(summary)
@@ -384,13 +423,16 @@ impl SireneSyncWorker {
                 match inbox.stage(&row).await {
                     Ok(StageOutcome::Staged) => {
                         summary.registered += 1;
-                        self.mark_processed(siret, last_seen_at, RowOutcome::Synced).await
+                        self.mark_processed(siret, last_seen_at, RowOutcome::Staged).await
                     }
                     // Already staged: this exact (siret, payload_hash) is in the inbox — either awaiting
                     // the drain or already delivered. Nothing to re-stage, and the staging row is done.
+                    // Already in the inbox — this exact (siret, payload_hash) is either awaiting the
+                    // drain or already decided. Same STAGED state: reconciliation reads the verdict off
+                    // the inbound row that is already there.
                     Ok(StageOutcome::Duplicate) => {
                         summary.skipped += 1;
-                        self.mark_processed(siret, last_seen_at, RowOutcome::Synced).await
+                        self.mark_processed(siret, last_seen_at, RowOutcome::Staged).await
                     }
                     Err(e) => {
                         summary.failed += 1; // left pending → retried next pass
@@ -426,6 +468,12 @@ impl SireneSyncWorker {
     /// the one case that keeps it, deliberately — that payload is the only evidence of why INSEE's
     /// record was unusable, and deleting it is how a systematic mapping bug hides (~5.4k rows
     /// historically).
+    ///
+    /// `synced_at` moves on the SAME condition as the payload drop — a fact was produced — which is what
+    /// makes it mean something `processed_at` cannot. `processed_at` is a checkpoint the ingestion also
+    /// advances on unchanged rows; this is a wall clock that only a real sync moves. An unmappable row
+    /// keeps whatever `synced_at` it had, so "last synced 3 weeks ago, unmappable since yesterday" stays
+    /// readable.
     async fn mark_processed(
         &self,
         siret: &str,
@@ -435,13 +483,17 @@ impl SireneSyncWorker {
         sqlx::query(
             "UPDATE external_sirene_restaurants \
                 SET processed_at = $2, status = $3, \
-                    payload = CASE WHEN $4 THEN NULL ELSE payload END \
+                    payload = CASE WHEN $4 THEN NULL ELSE payload END, \
+                    synced_at = CASE WHEN $5 THEN now() ELSE synced_at END, \
+                    last_attempt_sync_at = now(), \
+                    attempt_sync_retry_count = 0 \
               WHERE siret = $1",
         )
         .bind(siret)
         .bind(last_seen_at)
         .bind(outcome.status())
         .bind(outcome.clears_payload())
+        .bind(outcome.stamps_synced_at())
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -449,19 +501,94 @@ impl SireneSyncWorker {
     }
 
     /// Record that the last attempt on this row FAILED, WITHOUT advancing the checkpoint — the row stays
-    /// pending and is retried on the next pass. Only the status moves, so a row that keeps failing is
-    /// visible (`SELECT status, count(*) ... GROUP BY status`) instead of being indistinguishable from
-    /// one that has simply not been reached yet. Best-effort by design: this runs on a path that is
-    /// ALREADY failing, so letting a status write turn a retryable error into a hard one would be
-    /// strictly worse than losing the annotation.
+    /// pending, keeps its payload (the retry needs something to translate) and is picked up next pass.
+    ///
+    /// Counting matters because of that: a row left pending on failure is indistinguishable from one not
+    /// yet reached, so a permanently-broken record would retry forever, burn the sweep's budget and emit
+    /// an error nobody acts on. After [`MAX_SYNC_ATTEMPTS`] consecutive failures the row becomes
+    /// `POISON` and the drain stops selecting it. The count RESETS on any checkpointed outcome, so it
+    /// means "consecutive failures since the last success" rather than a lifetime tally — which is what
+    /// makes it answer "is this row stuck NOW?".
+    ///
+    /// Best-effort by design: this runs on a path that is ALREADY failing, so letting the annotation
+    /// turn a retryable error into a hard one would be strictly worse than losing it.
     async fn mark_failed(&self, siret: &str) {
-        if let Err(e) = sqlx::query("UPDATE external_sirene_restaurants SET status = 'FAILED' WHERE siret = $1")
-            .bind(siret)
-            .execute(&self.pool)
-            .await
-        {
-            eprintln!("sirene sync worker: could not record FAILED status for siret {siret}: {e}");
+        // Referencing the column on the right-hand side of SET reads its OLD value, so `+ 1` is the new
+        // count and the CASE decides on the same number that lands — one statement, no read-modify-write
+        // race with a concurrent pass.
+        let result = sqlx::query(
+            "UPDATE external_sirene_restaurants \
+                SET attempt_sync_retry_count = attempt_sync_retry_count + 1, \
+                    last_attempt_sync_at = now(), \
+                    status = CASE WHEN attempt_sync_retry_count + 1 >= $2 THEN 'POISON' ELSE 'FAILED' END \
+              WHERE siret = $1 \
+          RETURNING attempt_sync_retry_count, status",
+        )
+        .bind(siret)
+        .bind(MAX_SYNC_ATTEMPTS)
+        .fetch_optional(&self.pool)
+        .await;
+        match result {
+            Ok(Some(row)) => {
+                let count: i32 = row.try_get("attempt_sync_retry_count").unwrap_or_default();
+                let status: String = row.try_get("status").unwrap_or_default();
+                if status == "POISON" {
+                    // Loud on the transition, because this is the moment the row stops being retried
+                    // and starts needing a human (or a corrected record from INSEE).
+                    eprintln!(
+                        "sirene sync worker: siret {siret} QUARANTINED as POISON after {count} \
+                         consecutive failed attempts — it will be skipped until INSEE sends a changed \
+                         record. Its payload is retained as evidence."
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("sirene sync worker: could not record the failed attempt for siret {siret}: {e}");
+            }
         }
+    }
+
+    /// Resolve `STAGED` rows against the aggregate's actual verdict.
+    ///
+    /// This closes the gap between "we handed the fact over" and "the domain accepted it". Since
+    /// ADR-20260728-011344 the register path stages an inbound FACT rather than issuing a command, so at
+    /// hand-over time this worker genuinely does not know what happened — `InboundEventsDrainWorker`
+    /// delivers it and the AGGREGATE decides. Without this step the mirror would permanently claim a
+    /// success it never observed.
+    ///
+    /// The join key is the one the ACL already writes: `inbound_events.external_id = '{siret}:{hash}'`,
+    /// which is exactly `siret || ':' || payload_hash` on the staging row. One statement, no per-row
+    /// round-trip.
+    ///
+    /// Verdict mapping (`InboundEventStatus`, declaration-order ints):
+    /// - DELIVERED (1) — the aggregate decided a fact and it was appended;
+    /// - IGNORED (3) — the aggregate decided nothing had changed;
+    /// - DUPLICATE (4) — this delivery had already been consumed.
+    ///
+    /// All three are SUCCESSFUL terminal outcomes: the record reached the domain and the domain is now
+    /// correct about it. "Nothing changed" is a real answer, not a failure — conflating it with one is
+    /// what made a sweep unable to distinguish 200,000 registrations from 200,000 no-ops. FAILED (2) is
+    /// surfaced as FAILED. RECEIVED (0) is still in flight and left alone.
+    async fn reconcile_staged(&self, summary: &mut SireneSyncSummary) -> Result<(), DomainError> {
+        let resolved = sqlx::query(
+            "UPDATE external_sirene_restaurants s \
+                SET status = CASE WHEN i.status = 2 THEN 'FAILED' ELSE 'SYNCED' END, \
+                    synced_at = CASE WHEN i.status = 2 THEN s.synced_at \
+                                     ELSE COALESCE(i.delivered_at, now()) END \
+               FROM inbound_events i \
+              WHERE s.status = 'STAGED' \
+                AND i.source = $1 \
+                AND i.external_id = s.siret || ':' || s.payload_hash \
+                AND i.status <> 0 \
+          RETURNING s.status",
+        )
+        .bind(SIRENE_SOURCE)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        summary.resolved = resolved.len() as u64;
+        Ok(())
     }
 
     /// Detect-by-absence (ADR-0045): SIRENE never sends deletes — the active-only ingestion means a

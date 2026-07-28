@@ -116,7 +116,14 @@ pub fn wire() -> HealthDto {
 /// `20260728040000` = `external_sirene_restaurants.payload_hash` (ADR-20260728-011344, slice 5): the
 /// ingestion writes it and the worker's pending predicate depends on it, so a build without the column
 /// would re-pend the whole mirror on every sweep.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260728050000;
+/// `20260728050000` = `external_sirene_restaurants.payload` DROP NOT NULL + `status`
+/// (ADR-20260728-143000, #231): the worker NULLs a translated payload and stamps the status in the same
+/// statement as the checkpoint, so both would fail against the old NOT NULL column / missing column.
+/// `20260728160000` = `synced_at` + `last_attempt_sync_at` + `attempt_sync_retry_count` on the same
+/// table (ADR-20260728-143000 follow-up): the worker writes all three on every drain and the quarantine
+/// (`status = 'POISON'` after 10 consecutive failures) depends on the counter, so a build without them
+/// would fail every mark and retry a broken row forever.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260728160000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
