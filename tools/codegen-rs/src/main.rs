@@ -35,6 +35,10 @@ const SOURCE_FILES: &[&str] = &[
     // crates so a stale entry (matching no code) is itself caught.
     "translations.code_refs.yaml",
     "observability.yaml",
+    // Runtime configuration (PROP-20260729-004500, issue #246): every env-fulfilled setting the app
+    // needs, with its type, per-profile required-ness and — printed in the fail-fast report — what it
+    // gates. Emits the typed reader; a drift test pins every env::var call site to a declared key.
+    "configuration.yaml",
     "architecture/c4-l2.yaml",
     "architecture/c4-l3.yaml",
 ];
@@ -653,6 +657,10 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("entities.yaml",  "*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
     ("errors.yaml",    "*.context.**",     &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
 
+    // Configuration keys are TYPED (PROP-20260729-004500): each binds the scalar whose `pattern` the
+    // generated reader enforces at startup, so "present" is checked against "usable".
+    ("configuration.yaml", "keys.*.scalar", &[Kind::Scalar, Kind::EnumScalar]),
+
     // Actors (aggregates): the inbox and the lifecycle state machine.
     ("actors.yaml", "*.receives[*].message",            &[Kind::Command, Kind::Event]),
     ("actors.yaml", "*.receives[*].emits[*]",           &[Kind::Event]),
@@ -988,6 +996,9 @@ fn validate(model: &Model) -> Report {
 
     // --- 1b. Ref-KIND contract: a resolving $ref must also point at the right KIND of thing -------
     validate_ref_kinds(model, &mut issues);
+
+    // --- 1c. Configuration hygiene (PROP-20260729-004500) ----------------------------------------
+    validate_configuration(model, &mut issues);
 
     let actors = parse_actors(model);
     let api = parse_api(model);
@@ -8759,6 +8770,498 @@ fn emit_service_bindings(model: &Model) -> String {
     out
 }
 
+/// One declared configuration key (`specs/configuration.yaml`).
+#[derive(Debug, Clone)]
+struct ConfigKey {
+    name: String,
+    ty: String,
+    values: Vec<String>,
+    required: Vec<String>,
+    default: Option<String>,
+    secret: bool,
+    gates: String,
+    mode_of: Option<String>,
+    /// Which binary reads it. `server` (default) lands in the server's typed Config; other consumers
+    /// (e.g. the CI `sirene_ingest` job) are DECLARED — so the drift gate and the docs cover them —
+    /// without being injected into a process that never reads them.
+    consumer: String,
+    /// The scalars.yaml type this value must satisfy, and its regex — validated at STARTUP, because
+    /// "present" is not "usable" (a live key in the test slot, a 31-byte session key, a pasted newline).
+    scalar: Option<String>,
+    pattern: Option<String>,
+}
+
+/// The profiles a key may be required in — also the `APP_PROFILE` enum.
+const CONFIG_PROFILES: &[&str] = &["development", "staging", "production"];
+
+/// Parse `configuration.yaml` into the declared key list, in DECLARATION ORDER (the emitted report
+/// follows it, so the spec's grouping — persistence, identity, payments, toggles — survives into the
+/// operator-facing output).
+fn parse_config_keys(model: &Model) -> Vec<ConfigKey> {
+    let Some(doc) = model.defs.get("configuration.yaml") else { return Vec::new() };
+    let Some(keys) = doc.get("keys").and_then(|k| k.as_mapping()) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (name, node) in keys {
+        let Some(name) = name.as_str() else { continue };
+        let str_at = |k: &str| node.get(k).and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+        // `default` is typed in YAML (bool/int/string) — render it back to its literal text.
+        let scalar_ref = node
+            .get("scalar")
+            .and_then(|sc| sc.get("$ref"))
+            .and_then(|r| r.as_str())
+            .and_then(ref_name);
+        let default = node.get("default").map(|v| match v {
+            Value::Bool(b) => b.to_string(),
+            Value::Number(n) => n.to_string(),
+            Value::String(s) => s.clone(),
+            other => format!("{other:?}"),
+        });
+        out.push(ConfigKey {
+            name: name.to_string(),
+            ty: str_at("type").unwrap_or_default(),
+            values: node
+                .get("values")
+                .and_then(|v| v.as_sequence())
+                .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
+            required: node
+                .get("required")
+                .and_then(|v| v.as_sequence())
+                .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
+            default,
+            secret: node.get("secret").and_then(|v| v.as_bool()).unwrap_or(false),
+            gates: str_at("gates").unwrap_or_default(),
+            mode_of: str_at("mode_of"),
+            consumer: str_at("consumer").unwrap_or_else(|| "server".to_string()),
+            scalar: scalar_ref.clone(),
+            pattern: scalar_ref.as_deref().and_then(|name| {
+                model
+                    .defs
+                    .get("scalars.yaml")
+                    .and_then(|sc| sc.get(name))
+                    .and_then(|sc| sc.get("pattern"))
+                    .and_then(|p| p.as_str())
+                    .map(str::to_string)
+            }),
+        });
+    }
+    out
+}
+
+/// §12 — configuration hygiene (PROP-20260729-004500). The rules exist because each one maps to a way
+/// the declaration could silently stop being trustworthy, which is the failure this spec file replaces.
+fn validate_configuration(model: &Model, issues: &mut Vec<Issue>) {
+    let keys = parse_config_keys(model);
+    if keys.is_empty() {
+        issues.push(err(
+            "config-empty",
+            "configuration.yaml".to_string(),
+            "no configuration keys declared — the app reads env vars, so this cannot be empty".into(),
+        ));
+        return;
+    }
+    for k in &keys {
+        let at = format!("configuration.yaml/{}", k.name);
+        if k.name != k.name.to_uppercase() || k.name.contains('-') {
+            issues.push(err(
+                "config-key-name",
+                at.clone(),
+                format!("'{}' must be SCREAMING_SNAKE_CASE (it is an env var name)", k.name),
+            ));
+        }
+        // `gates` is not documentation: it is PRINTED next to the key when startup fails, so an empty
+        // one produces a report that names a variable without saying why anyone should care.
+        if k.gates.is_empty() {
+            issues.push(err(
+                "config-gates-missing",
+                at.clone(),
+                "no `gates`: the fail-fast report prints it, so a key without one is unactionable"
+                    .into(),
+            ));
+        }
+        match k.ty.as_str() {
+            "bool" | "string" | "int" => {}
+            "enum" => {
+                if k.values.is_empty() {
+                    issues.push(err(
+                        "config-enum-values",
+                        at.clone(),
+                        "type: enum declares no `values`".into(),
+                    ));
+                }
+                if let Some(d) = &k.default {
+                    if !k.values.contains(d) {
+                        issues.push(err(
+                            "config-default-invalid",
+                            at.clone(),
+                            format!("default '{d}' is not one of {:?}", k.values),
+                        ));
+                    }
+                }
+            }
+            other => issues.push(err(
+                "config-type-unknown",
+                at.clone(),
+                format!("unknown type '{other}' (bool | string | int | enum)"),
+            )),
+        }
+        if k.ty == "int" {
+            if let Some(d) = &k.default {
+                if d.parse::<i64>().is_err() {
+                    issues.push(err(
+                        "config-default-invalid",
+                        at.clone(),
+                        format!("type: int but default '{d}' is not an integer"),
+                    ));
+                }
+            }
+        }
+        // A `scalar` that does not resolve, or resolves to something with no `pattern`, is a validation
+        // that silently does nothing — the exact shape of bug this whole file exists to prevent.
+        if let Some(name) = &k.scalar {
+            match model.defs.get("scalars.yaml").and_then(|sc| sc.get(name.as_str())) {
+                None => issues.push(err(
+                    "config-scalar-unresolved",
+                    at.clone(),
+                    format!("scalar '{name}' is not declared in scalars.yaml"),
+                )),
+                Some(_) if k.pattern.is_none() => issues.push(err(
+                    "config-scalar-no-pattern",
+                    at.clone(),
+                    format!(
+                        "scalar '{name}' declares no `pattern`, so binding it validates nothing"
+                    ),
+                )),
+                Some(_) => {
+                    if let Some(pat) = &k.pattern {
+                        if let Err(e) = regex::Regex::new(pat) {
+                            issues.push(err(
+                                "config-pattern-invalid",
+                                at.clone(),
+                                format!("scalar '{name}' pattern does not compile: {e}"),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        // A declared default must itself satisfy the scalar — otherwise the fallback is the bad value.
+        if let (Some(pat), Some(d)) = (&k.pattern, &k.default) {
+            if let Ok(re) = regex::Regex::new(pat) {
+                if !re.is_match(d) {
+                    issues.push(err(
+                        "config-default-invalid",
+                        at.clone(),
+                        format!("default '{d}' does not match scalar {:?} ({pat})", k.scalar),
+                    ));
+                }
+            }
+        }
+        for p in &k.required {
+            if !CONFIG_PROFILES.contains(&p.as_str()) {
+                issues.push(err(
+                    "config-profile-unknown",
+                    at.clone(),
+                    format!("required in unknown profile '{p}' (expected one of {CONFIG_PROFILES:?})"),
+                ));
+            }
+        }
+        // A required key with a default can never be reported missing — the default satisfies it — so
+        // the requirement is silently inert. That is exactly the class of bug this file exists to end.
+        if !k.required.is_empty() && k.default.is_some() {
+            issues.push(err(
+                "config-required-with-default",
+                at.clone(),
+                "declares both `required` and `default` — the default masks the requirement, so it can never fail".into(),
+            ));
+        }
+        // An optional non-secret with no default resolves to "absent" with nothing to fall back on.
+        if k.required.is_empty() && k.default.is_none() && !k.secret && k.ty != "string" {
+            issues.push(warn(
+                "config-optional-no-default",
+                at.clone(),
+                "optional and non-secret but declares no default".into(),
+            ));
+        }
+    }
+}
+
+/// Emit `crates/server/src/generated/config.rs` — the typed reader for `specs/configuration.yaml`.
+///
+/// The generated `Config::from_env` collects EVERY missing required key before failing, because an
+/// operator who learns about one missing variable per deploy cycle fixes a three-key outage in three
+/// deploys. `Display` renders the report the app prints before exiting.
+fn emit_config(model: &Model) -> String {
+    // Only the server's own keys become its Config; other consumers are declared for the drift gate
+    // and the docs, not injected into a process that never reads them.
+    let keys: Vec<ConfigKey> =
+        parse_config_keys(model).into_iter().filter(|k| k.consumer == "server").collect();
+    let field = |name: &str| name.to_lowercase();
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/configuration.yaml — do not edit by hand.\n\
+         //\n\
+         // The typed runtime configuration (PROP-20260729-004500, issue #246). Every setting the app\n\
+         // needs is DECLARED in the spec and read here, once, at startup — never through a scattered\n\
+         // `env::var` call. A missing REQUIRED key (per the resolved `APP_PROFILE`) is collected with\n\
+         // every other missing key and reported together; the composition root then stops the app.\n\
+         //\n\
+         // Secrets are never rendered: the boot report shows `set` / `unset`, and for a key declaring\n\
+         // `mode_of: stripe` the derived test/live mode — never the value.\n\n\
+         use std::fmt;\n\n",
+    );
+
+    // ---- Profile -----------------------------------------------------------------------------
+    out.push_str(
+        "/// Which keys are required. Declared via `APP_PROFILE`, never inferred from the host or from\n\
+         /// a key's prefix — an inferred profile is wrong exactly when it matters most (a mode switch).\n\
+         #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n\
+         pub enum Profile {\n    Development,\n    Staging,\n    Production,\n}\n\n\
+         impl Profile {\n    pub fn as_str(self) -> &'static str {\n        match self {\n            Profile::Development => \"development\",\n            Profile::Staging => \"staging\",\n            Profile::Production => \"production\",\n        }\n    }\n}\n\n\
+         impl fmt::Display for Profile {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        f.write_str(self.as_str())\n    }\n}\n\n",
+    );
+
+    // ---- Value parsing -----------------------------------------------------------------------
+    out.push_str(
+        "/// Lenient boolean parsing (ADR-20260728-224500): `true/1/yes/on` and `false/0/no/off`,\n\
+         /// case-insensitive, trimmed, wrapping quotes stripped. An unrecognised value falls back to the\n\
+         /// declared default AND says so — a typo must never be silently interpreted as either state.\n\
+         fn parse_bool(name: &str, raw: &str, default: bool) -> bool {\n\
+         \x20   match raw.trim().trim_matches(['\"', '\\'']).trim().to_ascii_lowercase().as_str() {\n\
+         \x20       \"true\" | \"1\" | \"yes\" | \"on\" => true,\n\
+         \x20       \"false\" | \"0\" | \"no\" | \"off\" => false,\n\
+         \x20       \"\" => default,\n\
+         \x20       other => {\n\
+         \x20           println!(\n\
+         \x20               \"{name}: unrecognised value {other:?} -- using the default ({default}). \\\n\
+         Accepted: true/1/yes/on, false/0/no/off.\"\n\
+         \x20           );\n\
+         \x20           default\n\
+         \x20       }\n\
+         \x20   }\n}\n\n\
+         /// Read a key, treating an empty/whitespace-only value as ABSENT — a dashboard field someone\n\
+         /// cleared must count as missing, not as an empty string that satisfies a requirement.\n\
+         fn raw(name: &str) -> Option<String> {\n\
+         \x20   std::env::var(name).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())\n}\n\n\
+         /// Validate a value against its scalar's regex. Compiled once per pattern and cached: startup\n\
+         /// cost is a handful of small regexes, paid to make \"present but unusable\" impossible to miss.\n\
+         fn matches_pattern(pattern: &str, value: &str) -> bool {\n\
+         \x20   use std::collections::HashMap;\n\
+         \x20   use std::sync::{Mutex, OnceLock};\n\
+         \x20   static CACHE: OnceLock<Mutex<HashMap<String, regex::Regex>>> = OnceLock::new();\n\
+         \x20   let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));\n\
+         \x20   let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());\n\
+         \x20   let re = guard.entry(pattern.to_string()).or_insert_with(|| {\n\
+         \x20       regex::Regex::new(pattern).expect(\"configuration pattern compiles (checked by codegen)\")\n\
+         \x20   });\n\
+         \x20   re.is_match(value)\n}\n\n\
+         /// Stripe mode from the key prefix — reportable where the key itself never is.\n\
+         fn stripe_mode(value: &str) -> &'static str {\n\
+         \x20   if value.starts_with(\"sk_live_\") {\n        \"live\"\n    } else if value.starts_with(\"sk_test_\") {\n        \"test\"\n    } else {\n        \"unknown\"\n    }\n}\n\n",
+    );
+
+    // ---- Missing-key report ------------------------------------------------------------------
+    out.push_str(
+        "/// A required key that was not supplied, with the `gates` text from the spec.\n\
+         #[derive(Debug, Clone)]\npub struct MissingKey {\n    pub name: &'static str,\n    pub gates: &'static str,\n}\n\n\
+         /// A key that WAS supplied but does not satisfy its scalar. Carries the expected shape, never\n\
+         /// the offending value: a malformed secret is still a secret.\n\
+         #[derive(Debug, Clone)]\npub struct InvalidKey {\n    pub name: &'static str,\n    pub scalar: &'static str,\n    pub pattern: &'static str,\n    pub gates: &'static str,\n}\n\n\
+         /// Everything wrong with the configuration, in one report — never just the first problem. An\n\
+         /// operator who learns of one bad key per deploy cycle fixes a three-key outage in three deploys.\n\
+         #[derive(Debug, Clone, Default)]\npub struct ConfigProblems {\n    pub missing: Vec<MissingKey>,\n    pub invalid: Vec<InvalidKey>,\n}\n\n\
+         impl ConfigProblems {\n    pub fn is_empty(&self) -> bool {\n        self.missing.is_empty() && self.invalid.is_empty()\n    }\n\n    pub fn len(&self) -> usize {\n        self.missing.len() + self.invalid.len()\n    }\n}\n\n\
+         /// The report the app prints before it stops (production/staging) or continues (development).\n\
+         #[derive(Debug, Clone)]\npub struct MissingConfig {\n    pub profile: Profile,\n    pub problems: ConfigProblems,\n}\n\n\
+         impl fmt::Display for MissingConfig {\n\
+         \x20   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n\
+         \x20       writeln!(\n            f,\n            \"FATAL: {} configuration problem(s) (profile: {})\\n\",\n            self.problems.len(),\n            self.profile\n        )?;\n\
+         \x20       let width = self\n            .problems\n            .missing\n            .iter()\n            .map(|m| m.name.len())\n            .chain(self.problems.invalid.iter().map(|i| i.name.len()))\n            .max()\n            .unwrap_or(0);\n\
+         \x20       if !self.problems.missing.is_empty() {\n            writeln!(f, \"MISSING — required in this profile:\")?;\n            for m in &self.problems.missing {\n                writeln!(f, \"  {:width$}  {}\", m.name, m.gates, width = width)?;\n            }\n            writeln!(f)?;\n        }\n\
+         \x20       if !self.problems.invalid.is_empty() {\n            writeln!(f, \"INVALID — supplied but malformed (the value is never printed):\")?;\n            for i in &self.problems.invalid {\n                writeln!(f, \"  {:width$}  expected {} matching {}\", i.name, i.scalar, i.pattern, width = width)?;\n                writeln!(f, \"  {:width$}  {}\", \"\", i.gates, width = width)?;\n            }\n            writeln!(f)?;\n        }\n\
+         \x20       write!(f, \"Fix them in the service environment and redeploy. Nothing was started.\")\n\
+         \x20   }\n}\n\n",
+    );
+
+    // ---- The struct --------------------------------------------------------------------------
+    out.push_str("/// The resolved configuration. Built once, injected — never re-read from env.\n#[derive(Debug, Clone)]\npub struct Config {\n    pub profile: Profile,\n");
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        let ty = match k.ty.as_str() {
+            "bool" => "bool".to_string(),
+            "int" => "i64".to_string(),
+            // Optional strings stay Option: "absent" is a state the composition root branches on.
+            _ if k.required.is_empty() && k.default.is_none() => "Option<String>".to_string(),
+            _ => "String".to_string(),
+        };
+        out.push_str(&format!("    /// {}\n    pub {}: {},\n", k.gates.replace('\n', " ").trim(), field(&k.name), ty));
+    }
+    out.push_str("}\n\n");
+
+    // ---- from_env ----------------------------------------------------------------------------
+    out.push_str(
+        "impl Config {\n\
+         \x20   /// Resolve from the process environment, returning the config AND every missing required\n\
+         \x20   /// key. Both, always: the warn-only rollout phase (`CONFIG_ENFORCE=false`, D5) has to boot\n\
+         \x20   /// with the config it managed to build while still reporting what was absent. A missing\n\
+         \x20   /// required string resolves to empty — the caller decides whether that is fatal.\n\
+         \x20   pub fn resolve() -> (Self, ConfigProblems) {\n\
+         \x20       Self::resolve_inner()\n\
+         \x20   }\n\n\
+         \x20   /// Strict form: `Err` when anything required is missing. Used by tests and any caller that\n\
+         \x20   /// wants no warn-only escape hatch.\n\
+         \x20   pub fn from_env() -> Result<Self, MissingConfig> {\n\
+         \x20       let (cfg, problems) = Self::resolve_inner();\n\
+         \x20       if problems.is_empty() {\n            Ok(cfg)\n        } else {\n            Err(MissingConfig { profile: cfg.profile, problems })\n        }\n\
+         \x20   }\n\n\
+         \x20   /// Whether a configuration problem must STOP the app. Decided by the PROFILE, not by a\n\
+         \x20   /// separate toggle (product-owner directive 2026-07-29): production and staging stop,\n\
+         \x20   /// development reports and continues. Stopping is safe on Render — an exiting container\n\
+         \x20   /// fails the deploy and the PREVIOUS version keeps serving, so a misconfigured build can\n\
+         \x20   /// never replace a working one.\n\
+         \x20   pub fn must_stop_on_problems(&self) -> bool {\n        !matches!(self.profile, Profile::Development)\n    }\n\n\
+         \x20   fn resolve_inner() -> (Self, ConfigProblems) {\n\
+         \x20       let profile = match raw(\"APP_PROFILE\").as_deref() {\n\
+         \x20           Some(\"production\") => Profile::Production,\n\
+         \x20           Some(\"staging\") => Profile::Staging,\n\
+         \x20           Some(\"development\") | None => Profile::Development,\n\
+         \x20           Some(other) => {\n\
+         \x20               println!(\"APP_PROFILE: unrecognised value {other:?} -- using development.\");\n\
+         \x20               Profile::Development\n\
+         \x20           }\n\
+         \x20       };\n\
+         \x20       let mut problems = ConfigProblems::default();\n",
+    );
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        let f = field(&k.name);
+        let gates_lit = k.gates.replace('\n', " ").trim().replace('"', "\\\"");
+        let required_expr = if k.required.is_empty() {
+            "false".to_string()
+        } else {
+            let arms: Vec<String> = k
+                .required
+                .iter()
+                .map(|p| format!("Profile::{}", {
+                    let mut c = p.chars();
+                    c.next().map(|x| x.to_uppercase().to_string() + c.as_str()).unwrap_or_default()
+                }))
+                .collect();
+            format!("matches!(profile, {})", arms.join(" | "))
+        };
+        match k.ty.as_str() {
+            "bool" => {
+                let d = k.default.clone().unwrap_or_else(|| "false".into());
+                out.push_str(&format!(
+                    "        let {f} = raw(\"{n}\").map(|v| parse_bool(\"{n}\", &v, {d})).unwrap_or({d});\n",
+                    n = k.name
+                ));
+            }
+            "int" => {
+                let d = k.default.clone().unwrap_or_else(|| "0".into());
+                out.push_str(&format!(
+                    "        let {f} = raw(\"{n}\").and_then(|v| v.parse::<i64>().ok()).unwrap_or({d});\n",
+                    n = k.name
+                ));
+            }
+            _ => {
+                out.push_str(&format!("        let {f} = raw(\"{n}\");\n", n = k.name));
+                if !k.required.is_empty() {
+                    out.push_str(&format!(
+                        "        if {f}.is_none() && {required_expr} {{\n            problems.missing.push(MissingKey {{ name: \"{n}\", gates: \"{g}\" }});\n        }}\n",
+                        n = k.name,
+                        g = gates_lit
+                    ));
+                    out.push_str(&format!("        let {f} = {f}.unwrap_or_default();\n"));
+                } else if let Some(d) = &k.default {
+                    out.push_str(&format!(
+                        "        let {f} = {f}.unwrap_or_else(|| \"{d}\".to_string());\n"
+                    ));
+                }
+            }
+        }
+    }
+    // Pattern validation, emitted AFTER every key is read so one pass reports every problem. A bool
+    // is validated by its own parser (an unrecognised spelling is reported there, not guessed).
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        let (Some(pat), Some(scalar)) = (&k.pattern, &k.scalar) else { continue };
+        if k.ty == "bool" {
+            continue;
+        }
+        let f = field(&k.name);
+        let gates_lit = k.gates.replace('\n', " ").trim().replace('"', "\\\"");
+        let pat_lit = pat.replace('\\', "\\\\").replace('"', "\\\"");
+        // Optional keys are Option<String> here; required ones were unwrapped to String above.
+        let value_expr = if k.required.is_empty() && k.default.is_none() {
+            format!("{f}.as_deref()")
+        } else {
+            format!("Some({f}.as_str())")
+        };
+        out.push_str(&format!(
+            "        if let Some(v) = {value_expr} {{\n            if !v.is_empty() && !matches_pattern(r\"{pat_lit}\", v) {{\n                problems.invalid.push(InvalidKey {{ name: \"{n}\", scalar: \"{scalar}\", pattern: r\"{pat_lit}\", gates: \"{g}\" }});\n            }}\n        }}\n",
+            n = k.name,
+            g = gates_lit
+        ));
+    }
+    out.push_str("        (\n            Self {\n                profile,\n");
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        out.push_str(&format!("                {},\n", field(&k.name)));
+    }
+    out.push_str("            },\n            problems,\n        )\n    }\n\n");
+
+    // ---- Boot report -------------------------------------------------------------------------
+    out.push_str(
+        "    /// What actually resolved, for the boot log. Secrets render as `set` / `unset`, never as a\n\
+         \x20   /// value; a key declaring `mode_of: stripe` additionally reports its derived mode, so\n\
+         \x20   /// \"is production actually live?\" is answerable without reading a secret.\n\
+         \x20   pub fn boot_report(&self) -> String {\n\
+         \x20       let mut out = format!(\"config: profile={}, {} keys resolved\\n\", self.profile, KEY_COUNT);\n",
+    );
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        let f = field(&k.name);
+        // Optional non-defaulted strings are `Option<String>` in the struct — "absent" is a state the
+        // composition root branches on — so their report arm must not assume `String`.
+        let is_option =
+            k.required.is_empty() && k.default.is_none() && k.ty != "bool" && k.ty != "int";
+        let line = if k.secret && k.mode_of.as_deref() == Some("stripe") {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", if self.{f}.is_empty() {{ \"unset\".to_string() }} else {{ format!(\"set [{{}} mode]\", stripe_mode(&self.{f})) }}));\n",
+                k.name
+            )
+        } else if k.secret && is_option {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", if self.{f}.is_some() {{ \"set\" }} else {{ \"unset\" }}));\n",
+                k.name
+            )
+        } else if k.secret {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", if self.{f}.is_empty() {{ \"unset\" }} else {{ \"set\" }}));\n",
+                k.name
+            )
+        } else if k.ty == "bool" || k.ty == "int" {
+            format!("        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}));\n", k.name)
+        } else if k.required.is_empty() && k.default.is_none() {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}.as_deref().unwrap_or(\"unset\")));\n",
+                k.name
+            )
+        } else {
+            format!("        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}));\n", k.name)
+        };
+        out.push_str(&line);
+    }
+    out.push_str("        out\n    }\n}\n\n");
+    out.push_str(&format!(
+        "/// How many keys the spec declares (excluding the profile selector).\npub const KEY_COUNT: usize = {};\n\n\
+         /// Every declared key name — the drift test asserts each `env::var` call site is one of these.\n\
+         pub const DECLARED_KEYS: &[&str] = &[\n",
+        keys.iter().filter(|k| k.name != "APP_PROFILE").count()
+    ));
+    for k in &keys {
+        out.push_str(&format!("    \"{}\",\n", k.name));
+    }
+    out.push_str("];\n");
+    out
+}
+
 /// Emit `crates/server/src/generated/services_routes.rs` — the DERIVED `/services/<service>/<op>`
 /// axum routes, emitted ONLY for services declaring `expose: true` (ADR-20260719-214500). With no
 /// exposed service (the V0 default) the router is empty and state-generic; exposing one is a
@@ -12968,7 +13471,8 @@ fn main() {
     }
     for (name, content) in [
         ("services_routes.rs", emit_services_routes(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod services_routes;\n".to_string()),
+        ("config.rs", emit_config(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod config;\npub mod services_routes;\n".to_string()),
     ] {
         let path = srv_svc_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
@@ -14794,6 +15298,104 @@ geocoding:
     /// Detection is deliberately the simple over-approximation "any line starting with a TAB":
     /// this Makefile does not set `.RECIPEPREFIX`, and treating a stray tab-indented non-recipe
     /// line as a recipe only tightens the guard, never loosens it.
+    /// Every environment variable the crates READ must be DECLARED in `specs/configuration.yaml`
+    /// (PROP-20260729-004500, issue #246).
+    ///
+    /// This is the rule that stops the inventory rotting again, and it exists because the rot was
+    /// measured rather than imagined: `render.yaml` documented 9 of ~21 variables, `RUN_SIRENE_WORKER`
+    /// gated a paused pipeline while being written down NOWHERE (6,649 rows sat PENDING for four hours
+    /// because of it), and `API_SECRET` sat configured on the production service, read by nothing.
+    /// Any hand-maintained list drifts; only a gate keeps one honest.
+    ///
+    /// Scope: non-test Rust under `crates/**`. Test files legitimately set throwaway variables
+    /// (`DATABASE_URL` overrides, `DB_TESTS_REQUIRED`), and the GENERATED reader is itself the thing
+    /// being checked, so both are excluded.
+    #[test]
+    fn every_env_var_read_by_the_crates_is_declared() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let spec = std::fs::read_to_string(root.join("specs/configuration.yaml"))
+            .expect("specs/configuration.yaml must exist — it is the configuration source of truth");
+        let model = Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(&spec).expect("configuration.yaml parses"),
+            )]),
+        };
+        let declared: BTreeSet<String> =
+            parse_config_keys(&model).into_iter().map(|k| k.name).collect();
+        assert!(!declared.is_empty(), "no keys parsed from configuration.yaml");
+
+        // Platform-injected or tooling-only names the APP never reads through its own config.
+        let exempt: BTreeSet<&str> = ["DB_TESTS_REQUIRED", "CARGO_MANIFEST_DIR", "OUT_DIR"]
+            .into_iter()
+            .collect();
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name != "target" && name != "tests" {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates"), &mut files);
+        files.sort();
+        assert!(!files.is_empty(), "found no crate sources to scan");
+
+        let mut offenders: Vec<String> = Vec::new();
+        for f in &files {
+            // The generated reader legitimately names every key; it IS the declaration's output.
+            if f.to_string_lossy().ends_with("generated/config.rs") {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(f) else { continue };
+            for (idx, line) in src.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for pat in ["env::var(\"", "env_flag(\""] {
+                    let mut rest = line;
+                    while let Some(at) = rest.find(pat) {
+                        let tail = &rest[at + pat.len()..];
+                        let Some(end) = tail.find('"') else { break };
+                        let name = &tail[..end];
+                        if !name.is_empty()
+                            && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+                            && !declared.contains(name)
+                            && !exempt.contains(name)
+                        {
+                            offenders.push(format!(
+                                "  {}:{}: {name}",
+                                f.strip_prefix(&root).unwrap_or(f).display(),
+                                idx + 1
+                            ));
+                        }
+                        rest = &tail[end..];
+                    }
+                }
+            }
+        }
+        offenders.sort();
+        offenders.dedup();
+        assert!(
+            offenders.is_empty(),
+            "these environment variables are READ by the crates but NOT declared in \
+             specs/configuration.yaml:\n{}\n\n\
+             Fix: declare each one (type, required-per-profile, default, secret, and `gates` — what \
+             breaks without it), then `make generate`. Why: an undeclared variable is invisible to the \
+             startup validation, to the boot report and to every derived manifest, which is exactly how \
+             RUN_SIRENE_WORKER came to gate a production pipeline while being written down nowhere.",
+            offenders.join("\n")
+        );
+    }
+
     #[test]
     fn makefile_recipe_lines_are_ascii() {
         // CARGO_MANIFEST_DIR (= tools/codegen-rs) is the one anchor that holds both locally and

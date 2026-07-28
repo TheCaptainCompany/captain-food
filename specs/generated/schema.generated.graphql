@@ -90,6 +90,15 @@ scalar TranslatedText
 scalar ReclamationId
 scalar ReclamationDescription
 scalar ReclamationReason
+scalar ConfigBoolean
+scalar StripeSecretKey
+scalar StripeSecretKeyTest
+scalar StripeSecretKeyLive
+scalar StripeWebhookSecret
+scalar AuthSessionKey
+scalar PostgresUrl
+scalar HttpsUrl
+scalar DepartmentList
 
 # ==============================================================================
 # Enums

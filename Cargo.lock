@@ -484,6 +484,7 @@ checksum = "5f2d30e4173c4026932d51d31d6b0613b1fd3014bf3f9f8943d4ba139c437ba0"
 name = "captain-food-codegen"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3221,6 +3222,7 @@ dependencies = [
  "hubrise-adapter",
  "infrastructure",
  "jsonwebtoken",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

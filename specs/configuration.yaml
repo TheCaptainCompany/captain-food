@@ -1,0 +1,304 @@
+version: 1
+description: >
+  Captain.Food runtime configuration — the single declaration of every setting the app needs, and the
+  source of truth for reading it, validating it, and documenting it (PROP-20260729-004500, issue #246).
+
+  Configuration used to be the one part of this system with NO source of truth: the DSL governed the
+  domain, the API, the screens and the observability contracts, while the ~21 environment variables the
+  app actually reads existed only as inline `std::env::var` calls scattered through the composition
+  root, plus a partial and stale mirror in a `render.yaml` that is not applied. The cost was real:
+  `RUN_SIRENE_WORKER` gated a paused pipeline and was set in NO file and no dashboard, so 6,649 staging
+  rows sat PENDING for four hours; `API_SECRET` was configured on the service and read by nothing; a
+  missing `STRIPE_WEBHOOK_SECRET` silently produced the worst failure mode this product has — a
+  captured payment that never reaches the domain.
+
+  From this file the codegen emits the typed reader (`Config::from_env`), and a drift test asserts that
+  every `env::var` / `env_flag` call site in `crates/**` corresponds to a key declared here. A variable
+  the code reads but does not declare is a build failure, not a discovery someone makes at 00:40.
+
+  Convention:
+    - key       : the environment variable name, SCREAMING_SNAKE_CASE (also the struct field, snake_cased).
+    - type      : bool | string | int | enum. `bool` accepts true/1/yes/on and false/0/no/off,
+                  case-insensitive, trimmed, quotes stripped (ADR-20260728-224500) — an unrecognised
+                  value falls back to `default` AND logs that it did.
+    - required  : list of PROFILES in which the key MUST be present. Absent/[] = never required.
+                  A missing required key is reported WITH EVERY OTHER missing key and the app STOPS.
+    - default   : value when unset. Required keys must not declare one (it would mask the requirement).
+    - secret    : true = the value is NEVER rendered — logs and status surfaces report `set`/`unset`.
+    - gates     : WHAT BREAKS without it, in one sentence. This is not a comment: it is printed next to
+                  the key in the fail-fast report, so it must read usefully to an operator who has never
+                  seen the Rust. A key without `gates` fails validation.
+    - scalar    : $ref into scalars.yaml. The generated reader VALIDATES the supplied value against the
+                  scalar's `pattern` at startup — "present" is not "usable". A live Stripe key in the
+                  test slot, a webhook secret with a pasted trailing newline, a 31-byte session key:
+                  each boots happily without this and fails later, at the worst moment, looking like a
+                  code bug. A malformed value is reported exactly like a missing one, and a SECRET's
+                  value is never printed — only the key name and the expected shape.
+    - mode_of   : optional. Names a secret whose MODE is derivable from its value prefix and safe to
+                  report (never the value itself) — e.g. Stripe `sk_test_` / `sk_live_`.
+
+  ENFORCEMENT is decided by the profile, not by a separate toggle (product-owner directive,
+  2026-07-29 — "fast fail to avoid misconfiguration on production"):
+
+    - production / staging : any missing OR malformed key is logged in full and the app STOPS (exit 78).
+    - development          : the same report is printed, and the app continues.
+
+  Stopping is SAFE on Render, which is what makes it the right default rather than a brave one: a
+  container that exits fails the deploy and the PREVIOUS version keeps serving. A misconfigured build
+  cannot replace a working one — where booting into silent degradation, which is what happened before,
+  replaces it immediately and quietly.
+
+  Profiles (`APP_PROFILE`, default `development`): development | staging | production. The profile is
+  DECLARED, never inferred from the host or from a key's prefix — an inferred profile is wrong exactly
+  when it matters most (during a mode switch-over).
+
+# =====================================================================
+# Profile selector
+# =====================================================================
+
+keys:
+  APP_PROFILE:
+    type: enum
+    values: [development, staging, production]
+    default: development
+    gates: >
+      Which keys are REQUIRED at startup. Defaults to `development` so a local run needs no production
+      secrets; production must set it explicitly, or it inherits development's leniency.
+
+  # ===================================================================
+  # Persistence — without this nothing is durable
+  # ===================================================================
+
+  DATABASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/PostgresUrl'
+    secret: true
+    required: [staging, production]
+    gates: >
+      Postgres pool: the event store, every read model and every background worker. Unset, /health
+      reports `not_configured` (503) and no worker is constructed at all.
+
+  # ===================================================================
+  # Identity (Supabase, ADR-0015) — without these, auth is anonymous-only
+  # ===================================================================
+
+  SUPABASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    required: [staging, production]
+    gates: >
+      Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is
+      the fail-closed stand-in and every login is refused.
+
+  SUPABASE_PUBLISHABLE_KEY:
+    type: string
+    required: [staging, production]
+    gates: >
+      Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed
+      (auth stays anonymous-only).
+
+  SUPABASE_JWKS_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    required: [staging, production]
+    gates: >
+      JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every
+      authenticated request falls back to anonymous.
+
+  AUTH_SESSION_KEY:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/AuthSessionKey'
+    secret: true
+    required: [staging, production]
+    gates: >
+      AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest.
+      Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login
+      SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login.
+
+  SUPABASE_SMS_HOOK_SECRET:
+    type: string
+    secret: true
+    gates: >
+      Shared secret verifying Supabase's SMS send-hook callbacks. Unset, the hook endpoint fails closed.
+
+  # ===================================================================
+  # Payments (Stripe) — the money path
+  # ===================================================================
+
+  STRIPE_SECRET_KEY:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripeSecretKey'
+    secret: true
+    mode_of: stripe
+    required: [staging, production]
+    gates: >
+      Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no
+      checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported
+      (never the key) so "is production actually live?" is answerable.
+
+  STRIPE_WEBHOOK_SECRET:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripeWebhookSecret'
+    secret: true
+    required: [staging, production]
+    gates: >
+      HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails
+      closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the
+      restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched
+      together with STRIPE_SECRET_KEY.
+
+  # ===================================================================
+  # Integrations — feature-scoped, degrade to "unavailable", not "broken"
+  # ===================================================================
+
+  HUBRISE_CLIENT_ID:
+    type: string
+    gates: >
+      HubRise app client id for the OAuth connect flow. Unset, restaurants cannot connect a HubRise
+      location (existing connections are unaffected).
+
+  HUBRISE_WEBHOOK_SECRET:
+    type: string
+    secret: true
+    gates: >
+      HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
+
+  EXTERNAL_API_TOKENS:
+    type: string
+    secret: true
+    gates: >
+      Comma-separated pre-shared tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047).
+      Unset, only a Supabase JWT with captain_role EXTERNAL reaches /external.
+
+  INTERNAL_TRIGGER_TOKEN:
+    type: string
+    secret: true
+    gates: >
+      Shared secret for `POST /internal/sirene/drain` and `/internal/inbound/drain` (`x-internal-token`).
+      Unset, both fail closed (503) and the CI sweep cannot wake the worker — the drain then waits for
+      its hourly poll instead of starting in seconds.
+
+  # ===================================================================
+  # Worker toggles — each pauses a pipeline (ADR-20260728-224500)
+  # ===================================================================
+
+  RUN_PROJECTOR:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      In-process projection worker (ADR-0040). OFF, no read model advances — queries serve stale data
+      indefinitely. Readiness at GET /projector.
+
+  RUN_PROCESS_MANAGERS:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires.
+      Readiness at GET /saga.
+
+  RUN_INBOUND_DRAIN:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      Inbound-events drain (ADR-20260720-015400) delivering adapter-staged facts through the write path,
+      plus the command_journal stale sweep. OFF, every webhook-staged fact accumulates undelivered.
+
+  RUN_RETENTION_SWEEP:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without
+      bound.
+
+  RUN_SIRENE_WORKER:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and
+      releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF,
+      staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen.
+      Readiness at GET /sirene.
+
+  RUN_DELIVERY_OFFER_TIMEOUT:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on
+      a rider who is not coming.
+
+  # ===================================================================
+  # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
+  #
+  # Declared here so the drift gate and the docs cover them, but `consumer` keeps them OUT of the
+  # server's typed Config: the server never reads them, and a boot report listing settings the process
+  # ignores is noise that trains people to skim it.
+  # ===================================================================
+
+  SIRENE_DEPARTMENTS:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/DepartmentList'
+    consumer: sirene_ingest
+    gates: >
+      Comma-separated departments to sweep, honoured VERBATIM and in order (e.g. `37` for Tours only).
+      Blank = stalest-first across all of France (#218). Set per workflow_dispatch run, not persisted.
+
+  SIRENE_BUDGET_MINUTES:
+    type: string
+    consumer: sirene_ingest
+    gates: >
+      Wall-clock a sweep may spend before stopping cleanly at a department boundary. Blank = the binary
+      default (75 sweep / 60 compact); the run resumes where it stopped on the next invocation.
+
+  INTERNAL_TRIGGER_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: sirene_ingest
+    gates: >
+      The deployed server's drain endpoint, pinged at the end of a sweep so the worker starts in seconds
+      instead of waiting for its hourly poll. Unset, the sweep logs that it skipped the ping — which is
+      how department 37's 6,649 rows stayed PENDING after a successful ingestion.
+
+  # ===================================================================
+  # Runtime / build identity
+  # ===================================================================
+
+  PORT:
+    type: int
+    default: 8080
+    gates: >
+      TCP port the HTTP server binds. Render injects this; a mismatch means the platform health check
+      never reaches the app and the deploy fails.
+
+  WEB_ASSETS_DIR:
+    type: string
+    default: /app/web-assets
+    gates: >
+      Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
+
+  CAPTAIN_BUILD_VERSION:
+    type: string
+    default: dev
+    gates: >
+      Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and
+      the X-VERSION header. Unset, every response claims `dev-<crate version>` and a deployed build
+      cannot be identified.
