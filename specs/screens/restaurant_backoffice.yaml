@@ -43,6 +43,11 @@ resolvers:
   # #157 — the claims queue (this restaurant's customer claims, filterable by status/category) + one
   # claim's detail. `reclamationId` for the detail comes from the route `:reclamationId` (same-name).
   reclamations.queue: { query: { $ref: 'api.yaml#/queries/restaurantReclamations' } }
+  # ADR-20260728-011344: the storefront-address screen needs THIS restaurant, and the only
+  # single-restaurant query (`restaurant`) is keyed by SLUG -- circular when the slug is precisely what
+  # is being configured, and unusable for a restaurant that has none yet. So it reads the account's
+  # locations and binds the selected one. See the screen's `gaps` for the by-id query this really wants.
+  restaurant.locations: { query: { $ref: 'api.yaml#/queries/restaurantLocationsByAccount' } }
   reclamation.byId:   { query: { $ref: 'api.yaml#/queries/reclamation' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -60,6 +65,7 @@ actions:
   change_order_acceptance:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/changeOrderAcceptanceMode' }, note: "The pause/resume toggle in the header." }
   mark_order_delivered: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderDelivered' }, note: "Self-dispatch: the restaurant confirms the handover itself." }
   escalate_delivery:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/escalateDelivery' }, note: "Skip the current channel and advance the ranked dispatch walk (#60)." }
+  configure_storefront_slug: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/configureRestaurantSlug' }, note: "Choose or rename the storefront host. A rename 301s the old address and keeps it reserved (ADR-20260728-011344)." }
   approve_refund: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/approveRefund' } }
   deny_refund:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/denyRefund' } }
   # #129 — order conversation writes. post_message serves BOTH visibilities (PUBLIC reply / INTERNAL note),
@@ -453,4 +459,60 @@ screens:
               variables:
                 reclamationId: "{{ reclamation.reclamationId }}"
                 reason: "{{ reject_reason.value }}"
+      - { component: staff_nav }
+
+  # SCREEN — Storefront address (ADR-20260728-011344): choose the {slug}.captain.food host, or rename it.
+  #
+  # Why this screen exists rather than a field buried in a profile form: the slug is IDENTITY. It goes on
+  # printed menus, QR codes and the Google "Order online" link, and a restaurant cannot be activated
+  # without one. The consequences of changing it therefore have to be legible BEFORE the owner commits —
+  # hence the explicit consequences block stating what a rename does before the owner commits.
+  #
+  # `restaurant.slug` is nullable, so the unset case is a first-class state, not an empty string.
+  - id: storefront_address
+    roles: [RESTAURANT_ACCOUNT]
+    route: "/settings/storefront"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.title' }
+    sdui: true
+    requires_auth: true
+    data_requirements: [restaurant.locations]
+    actions_used: [configure_storefront_slug]
+    gaps:
+      - "Availability is not checked as the owner types: there is no `restaurantSlugAvailable` query, so the only feedback is the SlugAlreadyTaken rejection on submit. Deliberate -- an availability query is a public existence oracle over the tenant namespace and wants its own decision. The write side is authoritative either way."
+      - "No `restaurantById` query exists: the only single-restaurant read (`restaurant`) is keyed by SLUG, which is circular here -- a restaurant with no storefront address cannot be fetched by the thing it lacks. This screen therefore reads `restaurantLocationsByAccount` and binds the selected location. A by-id query is the real fix and is a deliberate API-surface decision, not something to slip in under a screen."
+      - "`Previous addresses` has no resolver: SlugAlias is server-internal (it serves the 301 in hosts.rs) and no api.yaml query exposes it. Listing them needs a read model decision, so the section renders from nothing today and is marked here rather than shipped as a live-looking widget bound to no data."
+    components:
+      - { component: staff_topbar }
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.title' } }
+
+      # Current state. The unset case is the one that matters: it is why activation is refused.
+      - type: section
+        id: current
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.current.label' }
+        content:
+          - { type: text, value: "{{ restaurant.slug }}", empty_value: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.unset' } }
+
+      - type: section
+        id: choose
+        content:
+          - { type: text_input, id: slug_input, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.field.label' }, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.field_ph' }, suffix: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.suffix' }, help: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.help' } }
+
+      # Stated before the button, not after: this is the information that makes the decision reversible
+      # in the owner's mind, and it is the whole reason previousSlug is business data.
+      - type: section
+        id: consequences
+        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.consequences.title' }
+        content:
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.consequences.redirect' } }
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.consequences.reserved' } }
+
+      - type: button
+        id: save_slug
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.save' }
+        variant: primary
+        action:
+          type: configure_storefront_slug
+          variables:
+            restaurantId: "{{ restaurant.id }}"
+            slug: "{{ slug_input.value }}"
       - { component: staff_nav }

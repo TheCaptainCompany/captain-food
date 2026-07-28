@@ -3,6 +3,35 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — the storefront slug is an OWNER-CHOSEN lifecycle, live end to end (ADR-20260728-011344,
+> [#220](https://github.com/TheCaptainCompany/captain-food/issues/220); PRs #222/#223/#224/#225).** The slug
+> was derived at SIRENE seeding time as `slugify(name)-{NIC}` — reserving ~200k hostnames no merchant chose,
+> deriving the tenant *host* from INSEE's mutable `denominationUsuelle`, and colliding systematically (the NIC
+> only disambiguates within a company, so generic names on the common `00019`/`00021` establishment numbers
+> clashed across different SIREN — the 605-row `SlugAlreadyTaken` storm). Now: **`RestaurantRegistered` and
+> `RegisterRestaurant` carry no slug**; it arrives via **`RestaurantSlugConfigured`** / **`RestaurantSlugReconfigured`**
+> (the latter carrying `previousSlug`), driven by **`ConfigureRestaurantSlug`** — a real command because it
+> *can* be refused, so `SlugAlreadyTaken` finally reaches a human who can pick again. **Activation is gated**
+> by the new `SlugNotConfigured`, decided **aggregate-locally** from the fold with no read model consulted.
+> Uniqueness moved to a **write-side `slug_reservations` table** (a new table category): its pk *is* the
+> invariant, so `INSERT … ON CONFLICT DO NOTHING` lets Postgres decide once — where a projection lookup would
+> let two simultaneous claims both pass and diverge only after the projector caught up, having told each
+> owner "yes". **A released label stays reserved** (`released_at` set, row kept) so its 301 cannot be
+> hijacked. **`SlugAlias` + `hosts.rs`** 301 a superseded host to the current address **preserving the request
+> path**, resolved through `restaurant_id` so one hop always lands on the live label. `Restaurant.slug` is
+> **nullable + UNIQUE** — Postgres allows many NULLs in a unique index, so the ~200k unconfigured listings
+> coexist while the DB enforces uniqueness over exactly the configured set. **Neither the SIRENE ACL nor the
+> HubRise connect flow invents a slug** any more. Migrations `20260728020000` (DROP NOT NULL + release the
+> derived open-data slugs, claimed listings keep theirs) and `20260728030000` (both tables + backfill a
+> reservation for every slug a claimed restaurant holds); `REQUIRED_SCHEMA_VERSION` bumped so `/health` holds
+> each build until CI has applied the schema. Back office: a dedicated **storefront-address screen** stating
+> what a rename does *before* the button. **Declared gaps** (not faked): no as-you-type availability check
+> (that query is a public existence oracle and wants its own decision), "previous addresses" not rendered
+> (`SlugAlias` is server-internal), and **no `restaurantById` query** — the only single-restaurant read is
+> keyed by *slug*, which is circular for a restaurant that has none. 658 tests, validator 0 errors.
+> **Still open on #220:** SIRENE → inbound events (slice 5), deleting `idempotent_on_existing` across the five
+> remaining sites, observability.
+
 > ⏳ **2026-07-28 — SIRENE sync is PAUSED, both halves (product-owner directive).** Until
 > [#220](https://github.com/TheCaptainCompany/captain-food/issues/220) is resolved: the weekly CI cron in
 > `.github/workflows/sirene-sync.yml` is commented out (`workflow_dispatch` deliberately kept, so a scoped

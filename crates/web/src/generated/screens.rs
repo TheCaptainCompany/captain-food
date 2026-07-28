@@ -153,7 +153,7 @@ pub mod captain_frontoffice {
     ];
 }
 
-/// `specs/screens/restaurant_backoffice.yaml` — 7 screen(s).
+/// `specs/screens/restaurant_backoffice.yaml` — 8 screen(s).
 pub mod restaurant_backoffice {
     use super::*;
 
@@ -335,6 +335,34 @@ pub mod restaurant_backoffice {
                 Node { kind: ComponentKind::TextInput, props: &[("id", PropValue::Text("reject_reason")), ("placeholder", PropValue::I18n("back.claims.reject.reason_ph"))], children: &[] },
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("reject_btn")), ("label", PropValue::I18n("back.claims.reject.label")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("reject_reclamation")), ("action.variables.reclamationId", PropValue::Binding("reclamation.reclamationId")), ("action.variables.reason", PropValue::Binding("reject_reason.value"))], children: &[] }
             ] },
+            Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("staff_nav")), ("items.0.id", PropValue::Text("orders")), ("items.0.label", PropValue::I18n("back.nav.orders")), ("items.0.icon", PropValue::Text("receipt")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("deliveries")), ("items.1.label", PropValue::I18n("back.nav.deliveries")), ("items.1.icon", PropValue::Text("truck")), ("items.1.route", PropValue::Text("/deliveries")), ("items.2.id", PropValue::Text("refunds")), ("items.2.label", PropValue::I18n("back.nav.refunds")), ("items.2.icon", PropValue::Text("coin")), ("items.2.route", PropValue::Text("/refunds")), ("items.3.id", PropValue::Text("claims")), ("items.3.label", PropValue::I18n("back.nav.claims")), ("items.3.icon", PropValue::Text("life_buoy")), ("items.3.route", PropValue::Text("/claims")), ("items.4.id", PropValue::Text("satisfaction")), ("items.4.label", PropValue::I18n("back.nav.satisfaction")), ("items.4.icon", PropValue::Text("star")), ("items.4.route", PropValue::Text("/satisfaction"))], children: &[] }
+        ],
+        },
+        Screen {
+            id: "storefront_address",
+            route: "/settings/storefront",
+            roles: &["RESTAURANT_ACCOUNT"],
+            requires_auth: true,
+            sdui: true,
+            data_requirements: &[ResolverKey::RestaurantLocations],
+            tree: &[
+            Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
+                Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.title"))], children: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("acceptance_toggle")), ("label", PropValue::I18n("back.pause_orders")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("change_order_acceptance"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("back.storefront.title"))], children: &[] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("current")), ("title", PropValue::I18n("back.storefront.current.label"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("restaurant.slug")), ("empty_value", PropValue::I18n("back.storefront.unset"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("choose"))], children: &[
+                Node { kind: ComponentKind::TextInput, props: &[("id", PropValue::Text("slug_input")), ("label", PropValue::I18n("back.storefront.field.label")), ("placeholder", PropValue::I18n("back.storefront.field_ph")), ("suffix", PropValue::I18n("back.storefront.suffix")), ("help", PropValue::I18n("back.storefront.help"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("consequences")), ("title", PropValue::I18n("back.storefront.consequences.title"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.storefront.consequences.redirect"))], children: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.storefront.consequences.reserved"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("save_slug")), ("label", PropValue::I18n("back.storefront.save")), ("variant", PropValue::Text("primary")), ("action.type", PropValue::Text("configure_storefront_slug")), ("action.variables.restaurantId", PropValue::Binding("restaurant.id")), ("action.variables.slug", PropValue::Binding("slug_input.value"))], children: &[] },
             Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("staff_nav")), ("items.0.id", PropValue::Text("orders")), ("items.0.label", PropValue::I18n("back.nav.orders")), ("items.0.icon", PropValue::Text("receipt")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("deliveries")), ("items.1.label", PropValue::I18n("back.nav.deliveries")), ("items.1.icon", PropValue::Text("truck")), ("items.1.route", PropValue::Text("/deliveries")), ("items.2.id", PropValue::Text("refunds")), ("items.2.label", PropValue::I18n("back.nav.refunds")), ("items.2.icon", PropValue::Text("coin")), ("items.2.route", PropValue::Text("/refunds")), ("items.3.id", PropValue::Text("claims")), ("items.3.label", PropValue::I18n("back.nav.claims")), ("items.3.icon", PropValue::Text("life_buoy")), ("items.3.route", PropValue::Text("/claims")), ("items.4.id", PropValue::Text("satisfaction")), ("items.4.label", PropValue::I18n("back.nav.satisfaction")), ("items.4.icon", PropValue::Text("star")), ("items.4.route", PropValue::Text("/satisfaction"))], children: &[] }
         ],
         },

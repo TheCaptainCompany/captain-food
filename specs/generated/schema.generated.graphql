@@ -944,6 +944,11 @@ input RegisterRestaurantInput {
   ref: ExternalReference
 }
 
+input ConfigureRestaurantSlugInput {
+  restaurantId: RestaurantId!
+  slug: Slug!
+}
+
 input ActivateRestaurantInput {
   restaurantId: RestaurantId!
   reason: String
@@ -1719,6 +1724,7 @@ type Mutation {
   updateRestaurantAccount(input: UpdateRestaurantAccountInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateRestaurantAccount")
   deleteRestaurantAccount(input: DeleteRestaurantAccountInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "DeleteRestaurantAccount")
   registerRestaurant(input: RegisterRestaurantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]) @command(name: "RegisterRestaurant")
+  configureRestaurantSlug(input: ConfigureRestaurantSlugInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "ConfigureRestaurantSlug")
   activateRestaurant(input: ActivateRestaurantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "ActivateRestaurant")
   updateRestaurant(input: UpdateRestaurantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateRestaurant")
   deactivateRestaurant(input: DeactivateRestaurantInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "DeactivateRestaurant")

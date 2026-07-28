@@ -427,6 +427,50 @@
     "en": "Delivery satisfaction",
     "fr": "Satisfaction livraison"
   },
+  "back.storefront.consequences.redirect": {
+    "en": "Your old address redirects here, so printed menus and QR codes keep working.",
+    "fr": "Votre ancienne adresse redirige ici : menus imprimés et QR codes continuent de fonctionner."
+  },
+  "back.storefront.consequences.reserved": {
+    "en": "The old address stays reserved to you — nobody else can take it.",
+    "fr": "L'ancienne adresse vous reste réservée — personne d'autre ne peut la prendre."
+  },
+  "back.storefront.consequences.title": {
+    "en": "What happens when you change it",
+    "fr": "Ce qui se passe si vous la changez"
+  },
+  "back.storefront.current.label": {
+    "en": "Current address",
+    "fr": "Adresse actuelle"
+  },
+  "back.storefront.field.label": {
+    "en": "Address",
+    "fr": "Adresse"
+  },
+  "back.storefront.field_ph": {
+    "en": "your-restaurant",
+    "fr": "votre-restaurant"
+  },
+  "back.storefront.help": {
+    "en": "Lowercase letters, numbers and dashes. This goes on your menus and your Google listing, so choose carefully.",
+    "fr": "Minuscules, chiffres et tirets. Elle figurera sur vos menus et votre fiche Google, choisissez-la avec soin."
+  },
+  "back.storefront.save": {
+    "en": "Save address",
+    "fr": "Enregistrer l'adresse"
+  },
+  "back.storefront.suffix": {
+    "en": ".captain.food",
+    "fr": ".captain.food"
+  },
+  "back.storefront.title": {
+    "en": "Storefront address",
+    "fr": "Adresse de la boutique"
+  },
+  "back.storefront.unset": {
+    "en": "Not chosen yet — customers cannot reach your restaurant without one.",
+    "fr": "Pas encore choisie — vos clients ne peuvent pas accéder à votre restaurant sans elle."
+  },
   "back.title": {
     "en": "Back office",
     "fr": "Espace restaurant"

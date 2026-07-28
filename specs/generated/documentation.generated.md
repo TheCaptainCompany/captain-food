@@ -101,6 +101,7 @@ Owns a restaurant ACCOUNT (HubRise restaurant). Manages the account, its locatio
 |  | UpdateAccount | [✏️ `updateRestaurantAccount`](#mutation-updaterestaurantaccount) |
 |  | DeleteAccount | [✏️ `deleteRestaurantAccount`](#mutation-deleterestaurantaccount) |
 | 🧭 **ManageLocations** | AddLocation | [✏️ `registerRestaurant`](#mutation-registerrestaurant) |
+|  | ChooseStorefrontAddress | [✏️ `configureRestaurantSlug`](#mutation-configurerestaurantslug) |
 |  | ActivateLocation | [✏️ `activateRestaurant`](#mutation-activaterestaurant) |
 |  | DeactivateLocation | [✏️ `deactivateRestaurant`](#mutation-deactivaterestaurant) |
 |  | UpdateLocationProfile | [✏️ `updateRestaurant`](#mutation-updaterestaurant) |
@@ -181,6 +182,7 @@ A platform operator who onboards accounts and oversees the platform.
 | --- | --- | --- |
 | 🧭 **OnboardRestaurants** | RegisterAccount | [✏️ `registerRestaurantAccount`](#mutation-registerrestaurantaccount) |
 |  | AddLocation | [✏️ `registerRestaurant`](#mutation-registerrestaurant) |
+|  | ChooseStorefrontAddress | [✏️ `configureRestaurantSlug`](#mutation-configurerestaurantslug) |
 |  | ActivateRestaurant | [✏️ `activateRestaurant`](#mutation-activaterestaurant) |
 |  | ImportCatalog | [✏️ `importCatalog`](#mutation-importcatalog) |
 | 🧭 **ManageListings** | BrowseListings | [🔎 `restaurants`](#query-restaurants) |
@@ -230,7 +232,7 @@ A delivery partner (already integrated: a known catalog channel) acting as an EX
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(27)_
+### 🧰 API operations _(28)_
 
 <a id="query-restaurants"></a>
 #### 🔎 Query: `restaurants`
@@ -334,6 +336,13 @@ B2B prospection pipeline (admin): scored prospects, optionally filtered by minim
 
 - **Command**: [📩 `RegisterRestaurant`](#command-registerrestaurant) → handled by [🎭 `Restaurant`](#actor-restaurant)
 - **Roles**: ADMIN, RESTAURANT_ACCOUNT, EXTERNAL · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-configurerestaurantslug"></a>
+#### ✏️ Mutation: `configureRestaurantSlug`
+
+- **Command**: [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug) → handled by [🎭 `Restaurant`](#actor-restaurant)
+- **Roles**: ADMIN, RESTAURANT_ACCOUNT · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="mutation-activaterestaurant"></a>
@@ -736,7 +745,7 @@ The single, generic way to register a restaurant LOCATION. Used by an owner/admi
 
 The owner chooses (or changes) the restaurant's STOREFRONT ADDRESS -- the {slug}.captain.food host (ADR-20260728-011344). A real command precisely because it CAN be refused: the label may already belong to another restaurant, and the person asking is a human who can pick again -- contrast the SIRENE registry feed, which states facts nobody can be told "no" about. Issued during onboarding after ownership is verified and before activation (a restaurant cannot be activated without a configured slug), and again later from the back office to rename. The aggregate decides which fact it is: first configuration emits RestaurantSlugConfigured, a change emits RestaurantSlugReconfigured carrying the previous label, and re-submitting the CURRENT label is an idempotent no-op (no event, no error).
 
-- **Dispatched by**: — · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Dispatched by**: [✏️ `configureRestaurantSlug`](#mutation-configurerestaurantslug) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
 - **Emits**: [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured), [⚡ `RestaurantSlugReconfigured`](#event-restaurantslugreconfigured)
 - **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken)
 
@@ -10161,6 +10170,33 @@ _Surface_ **`restaurant_backoffice.yaml`**
 **Gaps**
 - ⚠️ refundAmount currency is hard-coded EUR (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel). PARTIAL_REFUND is fully wired via the amount picker's own action; a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0).
 
+<a id="screen-storefront_address"></a>
+### 📱 `storefront_address` · `/settings/storefront` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Storefront address                       │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Storefront address         │
+│ section — Current address                │
+│ section                                  │
+│ section — What happens when you change … │
+│ button — Save address                    │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `restaurant.locations` | [🔎 `restaurantLocationsByAccount`](#query-restaurantlocationsbyaccount) |
+| write | `configure_storefront_slug` | [✏️ `configureRestaurantSlug`](#mutation-configurerestaurantslug) |
+
+**Gaps**
+- ⚠️ Availability is not checked as the owner types: there is no `restaurantSlugAvailable` query, so the only feedback is the SlugAlreadyTaken rejection on submit. Deliberate -- an availability query is a public existence oracle over the tenant namespace and wants its own decision. The write side is authoritative either way.
+- ⚠️ No `restaurantById` query exists: the only single-restaurant read (`restaurant`) is keyed by SLUG, which is circular here -- a restaurant with no storefront address cannot be fetched by the thing it lacks. This screen therefore reads `restaurantLocationsByAccount` and binds the selected location. A by-id query is the real fix and is a deliberate API-surface decision, not something to slip in under a screen.
+- ⚠️ `Previous addresses` has no resolver: SlugAlias is server-internal (it serves the 301 in hosts.rs) and no api.yaml query exposes it. Listing them needs a read model decision, so the section renders from nothing today and is marked here rather than shipped as a live-looking widget bound to no data.
+
 _Surface_ **`restaurant_frontoffice.yaml`**
 
 <a id="screen-restaurant"></a>
@@ -10577,6 +10613,17 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-claims-overdue-all"></a>`back.claims.overdue.all` | — | All | Toutes |
 | <a id="translation-back-claims-overdue-only"></a>`back.claims.overdue.only` | — | Overdue only | En retard uniquement |
 | <a id="translation-back-claims-overdue-badge"></a>`back.claims.overdue.badge` | — | Overdue | En retard |
+| <a id="translation-back-storefront-title"></a>`back.storefront.title` | — | Storefront address | Adresse de la boutique |
+| <a id="translation-back-storefront-current-label"></a>`back.storefront.current.label` | — | Current address | Adresse actuelle |
+| <a id="translation-back-storefront-unset"></a>`back.storefront.unset` | — | Not chosen yet — customers cannot reach your restaurant without one. | Pas encore choisie — vos clients ne peuvent pas accéder à votre restaurant sans elle. |
+| <a id="translation-back-storefront-field-label"></a>`back.storefront.field.label` | — | Address | Adresse |
+| <a id="translation-back-storefront-field_ph"></a>`back.storefront.field_ph` | — | your-restaurant | votre-restaurant |
+| <a id="translation-back-storefront-suffix"></a>`back.storefront.suffix` | — | .captain.food | .captain.food |
+| <a id="translation-back-storefront-help"></a>`back.storefront.help` | — | Lowercase letters, numbers and dashes. This goes on your menus and your Google listing, so choose carefully. | Minuscules, chiffres et tirets. Elle figurera sur vos menus et votre fiche Google, choisissez-la avec soin. |
+| <a id="translation-back-storefront-consequences-title"></a>`back.storefront.consequences.title` | — | What happens when you change it | Ce qui se passe si vous la changez |
+| <a id="translation-back-storefront-consequences-redirect"></a>`back.storefront.consequences.redirect` | — | Your old address redirects here, so printed menus and QR codes keep working. | Votre ancienne adresse redirige ici : menus imprimés et QR codes continuent de fonctionner. |
+| <a id="translation-back-storefront-consequences-reserved"></a>`back.storefront.consequences.reserved` | — | The old address stays reserved to you — nobody else can take it. | L'ancienne adresse vous reste réservée — personne d'autre ne peut la prendre. |
+| <a id="translation-back-storefront-save"></a>`back.storefront.save` | — | Save address | Enregistrer l'adresse |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |

@@ -761,6 +761,16 @@ mutations:
     command: { $ref: 'commands.yaml#/RegisterRestaurant' }
     roles: [ADMIN, RESTAURANT_ACCOUNT, EXTERNAL]   # EXTERNAL = the Sirene/Google sync ACL seeding a listing
     slice: V0
+  configureRestaurantSlug:
+    description: >
+      Choose (or change) the restaurant's storefront address — the {slug}.captain.food host
+      (ADR-20260728-011344). Issued during onboarding after ownership is verified and before activation,
+      and again later from the back office to rename. The aggregate decides which fact it is; a rename
+      keeps the previous address resolving via a 301, and re-submitting the current address is an
+      idempotent no-op.
+    command: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
+    roles: [ADMIN, RESTAURANT_ACCOUNT]
+    slice: V0
   activateRestaurant:
     command: { $ref: 'commands.yaml#/ActivateRestaurant' }
     roles: [ADMIN, RESTAURANT_ACCOUNT]

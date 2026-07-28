@@ -128,6 +128,10 @@ restaurant_owner:
       description: As an owner, I add and maintain the locations under my account.
       steps:
         AddLocation: { $ref: 'api.yaml#/mutations/registerRestaurant' }
+        # Between adding and going live (ADR-20260728-011344 D2): a location cannot be activated
+        # without a storefront address, and the address is the owner's to choose -- not something the
+        # registration invents on their behalf. Renaming later reuses the same step.
+        ChooseStorefrontAddress: { $ref: 'api.yaml#/mutations/configureRestaurantSlug' }
         ActivateLocation: { $ref: 'api.yaml#/mutations/activateRestaurant' }
         DeactivateLocation: { $ref: 'api.yaml#/mutations/deactivateRestaurant' }
         UpdateLocationProfile: { $ref: 'api.yaml#/mutations/updateRestaurant' }
@@ -244,6 +248,7 @@ admin:
       steps:
         RegisterAccount: { $ref: 'api.yaml#/mutations/registerRestaurantAccount' }
         AddLocation: { $ref: 'api.yaml#/mutations/registerRestaurant' }
+        ChooseStorefrontAddress: { $ref: 'api.yaml#/mutations/configureRestaurantSlug' }
         ActivateRestaurant: { $ref: 'api.yaml#/mutations/activateRestaurant' }
         ImportCatalog: { $ref: 'api.yaml#/mutations/importCatalog' }
     ManageListings:
