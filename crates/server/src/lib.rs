@@ -113,7 +113,10 @@ pub fn wire() -> HealthDto {
 /// `20260728030000` = `slug_reservations` + `SlugAlias` (ADR-20260728-011344, slice 3): the projection
 /// worker now upserts alias rows for every rename, and the slug handler reserves through the former, so
 /// the app must not serve without either table.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260728030000;
+/// `20260728040000` = `external_sirene_restaurants.payload_hash` (ADR-20260728-011344, slice 5): the
+/// ingestion writes it and the worker's pending predicate depends on it, so a build without the column
+/// would re-pend the whole mirror on every sweep.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260728040000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
