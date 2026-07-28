@@ -10,6 +10,9 @@
 //!   Every response carries `version` (the build's git SHA, ADR-20260721-175411) for failure diagnostics.
 //! - `/projector` — projection-worker readiness (running / checkpoint / head / lag / lastTickAt).
 //! - `/saga` — process-manager (saga) runner readiness, same shape as `/projector`.
+//! - `/sirene` — SIRENE sync-worker readiness (issue #244), same shape plus `lastSummary`. `503` with
+//!   `reason: poll_loop_not_started` when `RUN_SIRENE_WORKER` left the loop paused — the state that
+//!   was undiagnosable from outside during the department-37 pilot (#238).
 //! - `/{role}/graphql` (+ `/{role}/voyager`) — the GraphQL BFF (ADR-0006), see `graphql`.
 //! - `POST /internal/sirene/drain` — wakes the SIRENE sync worker after a CI ingestion run (ADR-0045);
 //!   secured by the `INTERNAL_TRIGGER_TOKEN` shared secret (`x-internal-token` header).
@@ -139,6 +142,43 @@ pub fn build_version() -> &'static str {
     })
 }
 
+/// Read a `RUN_*` worker toggle, leniently and uniformly (issue #244).
+///
+/// The gates used to be written inline, and inconsistently: `RUN_SIRENE_WORKER` was an exact
+/// `v == "true"` (so `TRUE`, `True`, a space-padded or dashboard-quoted value all silently meant
+/// PAUSED, with one boot-log line as the only trace), while the others were `v != "false"` (so
+/// `RUN_INBOUND_DRAIN=0` meant ON). For a flag whose job is to resume a paused production pipeline,
+/// silent-off on a case variant is the wrong failure mode — it cost hours on the department-37 pilot.
+///
+/// Accepts `true/1/yes/on` and `false/0/no/off`, case-insensitive, surrounding whitespace and wrapping
+/// quotes trimmed. Anything unrecognised (including an empty value) falls back to `default` **and says
+/// so on stdout**: a typo must never be silently interpreted as either state.
+///
+/// Behaviour change worth naming: `RUN_INBOUND_DRAIN=0` now means OFF, where the old `!= "false"`
+/// shortcut read it as ON. The new reading is the intended one.
+pub fn env_flag(name: &str, default: bool) -> bool {
+    parse_flag(std::env::var(name).ok().as_deref(), name, default)
+}
+
+/// The parsing half of [`env_flag`], split out so it is testable without mutating process env
+/// (`set_var` races across the threads of one test binary).
+fn parse_flag(raw: Option<&str>, name: &str, default: bool) -> bool {
+    let Some(raw) = raw else { return default };
+    let normalized = raw.trim().trim_matches(['"', '\'']).trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "true" | "1" | "yes" | "on" => true,
+        "false" | "0" | "no" | "off" => false,
+        "" => default,
+        other => {
+            println!(
+                "{name}: unrecognised value {other:?} -- using the default ({default}). \
+                 Accepted: true/1/yes/on, false/0/no/off."
+            );
+            default
+        }
+    }
+}
+
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
     pub const NOT_CONFIGURED: u8 = 0; // DATABASE_URL unset
@@ -169,9 +209,15 @@ pub struct AppState {
     /// Live saga-runner (process managers, actors.yaml) status when it runs in-process; `None` when
     /// not started.
     saga_status: Option<Arc<Mutex<ProcessManagerStatus>>>,
+    /// Live SIRENE sync-worker status. Unlike the two above this is `Some` whenever a DATABASE_URL
+    /// pool exists — the worker is always constructed (the ping endpoint needs it), so the snapshot
+    /// can distinguish "loop not started" (`running: false`) from "no database" (`None`). That
+    /// distinction is the point of the endpoint (#244).
+    sirene_status: Option<Arc<Mutex<infrastructure::SireneSyncStatus>>>,
 }
 
-/// Build the Axum router: `/ping`, `/health`, `/projector`, and the role-as-path GraphQL routes. Reads
+/// Build the Axum router: `/ping`, `/health`, `/projector`, `/saga`, `/sirene`, and the role-as-path
+/// GraphQL routes. Reads
 /// `DATABASE_URL`; when present it opens a lazy pool used by the heartbeat, the read-model repo (injected
 /// into GraphQL), and the in-process projection worker.
 /// Resolve the `identity` service impl (#117): the real Supabase adapter when configured
@@ -212,6 +258,7 @@ pub fn router() -> Router {
     let mut write_deps: Option<WriteDeps> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
+    let mut sirene_status: Option<Arc<Mutex<infrastructure::SireneSyncStatus>>> = None;
     let mut sirene_worker: Option<Arc<SireneSyncWorker>> = None;
     let mut stripe_ingestor: Option<Arc<StripeWebhookIngestor>> = None;
     let mut avelo37_ingestor: Option<Arc<Avelo37WebhookIngestor>> = None;
@@ -372,7 +419,7 @@ pub fn router() -> Router {
                 });
 
                 // In-process projection worker (ADR-0040). RUN_PROJECTOR=false hands it to a dedicated worker.
-                if std::env::var("RUN_PROJECTOR").map(|v| v != "false").unwrap_or(true) {
+                if env_flag("RUN_PROJECTOR", true) {
                     let worker = ProjectionWorker::new(pool.clone());
                     projector_status = Some(worker.status());
                     tokio::spawn(worker.run_loop());
@@ -391,7 +438,7 @@ pub fn router() -> Router {
                 // logged no-op stand-in (jobs stay open to independent riders; the bounded re-offer
                 // run row still terminates ACCEPTED/FAILED). The partner's answers always arrive
                 // asynchronously through the webhook inbox below, never this outbound call.
-                if std::env::var("RUN_PROCESS_MANAGERS").map(|v| v != "false").unwrap_or(true) {
+                if env_flag("RUN_PROCESS_MANAGERS", true) {
                     // Composite delivery gateway (#60): the saga offers a job on a strategy-resolved
                     // CHANNEL, so the single Avelo-vs-Noop choice becomes a registry of channel →
                     // adapter. `independent` is the rider POOL (a deliberate no-op — jobs stay open to
@@ -477,7 +524,7 @@ pub fn router() -> Router {
                     Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
                 ));
                 inbound_drain = Some(drain.clone());
-                if std::env::var("RUN_INBOUND_DRAIN").map(|v| v != "false").unwrap_or(true) {
+                if env_flag("RUN_INBOUND_DRAIN", true) {
                     tokio::spawn(drain.clone().run_loop());
                     println!("inbound drain worker: running in-process (set RUN_INBOUND_DRAIN=false to disable)");
                 } else {
@@ -590,7 +637,7 @@ pub fn router() -> Router {
                 // sweep_retention() SQL function — journal/mirror retention windows live in the
                 // function, never here. Env-gated like the other workers; a pg_cron job calling
                 // the same function is the alternative where DB-side scheduling is preferred.
-                if std::env::var("RUN_RETENTION_SWEEP").map(|v| v != "false").unwrap_or(true) {
+                if env_flag("RUN_RETENTION_SWEEP", true) {
                     let sweeper =
                         Arc::new(infrastructure::RetentionSweepWorker::new(pool.clone()));
                     tokio::spawn(sweeper.run_loop());
@@ -600,6 +647,10 @@ pub fn router() -> Router {
                 }
 
                 let worker = Arc::new(SireneSyncWorker::new(pool.clone()));
+                // Taken unconditionally, BEFORE the gate below: the worker exists either way (the ping
+                // endpoint drives it), so `/sirene` can report `running: false` for a paused loop
+                // instead of the ambiguous "not available" (#244).
+                sirene_status = Some(worker.status());
                 sirene_worker = Some(worker.clone());
                 // PAUSED 2026-07-28 (product-owner directive): the default is OFF until the write-path
                 // defects in issue #220 are resolved — a drain pass issues one `RegisterRestaurant` per
@@ -609,7 +660,7 @@ pub fn router() -> Router {
                 // It also cannot apply what it reads: no `UpdateRestaurant` exists here, so INSEE changes
                 // are swallowed by that same conflict. The CI half is paused in sirene-sync.yml.
                 // Re-enable BOTH halves together: `RUN_SIRENE_WORKER=true` + the workflow's cron.
-                if std::env::var("RUN_SIRENE_WORKER").map(|v| v == "true").unwrap_or(false) {
+                if env_flag("RUN_SIRENE_WORKER", false) {
                     tokio::spawn(worker.run_loop());
                     println!(
                         "sirene sync worker: running in-process (set RUN_SIRENE_WORKER=false to keep only the ping trigger)"
@@ -628,7 +679,8 @@ pub fn router() -> Router {
         .route("/health", get(health))
         .route("/projector", get(projector))
         .route("/saga", get(saga))
-        .with_state(AppState { snap, projector_status, saga_status });
+        .route("/sirene", get(sirene))
+        .with_state(AppState { snap, projector_status, saga_status, sirene_status });
 
     // Built once, shared twice: the HTTP GraphQL routes AND the SSR page renderer (#92 — the
     // in-process transport executes screens' data_requirements against this same schema).
@@ -771,6 +823,48 @@ async fn saga(State(app): State<AppState>) -> impl IntoResponse {
     }
 }
 
+/// SIRENE sync-worker readiness (issue #244) — the `/projector` counterpart for the staging drain.
+/// `200` when the poll loop is running, `503` otherwise, and the body says WHICH `503` it is:
+///
+/// - `sirene_worker_not_available` — no `DATABASE_URL`, so no worker at all;
+/// - `poll_loop_not_started` — the worker exists (the ping endpoint can drive it) but
+///   `RUN_SIRENE_WORKER` did not start the loop. This is the department-37 case (#238): rows sitting
+///   `PENDING` for hours with no way, from outside, to tell a paused loop from a crashing one.
+///
+/// `lastError` separates the two failure modes once the loop IS running, and `lastSummary` reports
+/// what the last pass did. A ping-triggered pass updates the snapshot too, so the endpoint describes
+/// the worker rather than only the loop.
+async fn sirene(State(app): State<AppState>) -> impl IntoResponse {
+    let status = app
+        .sirene_status
+        .as_ref()
+        .map(|handle| handle.lock().expect("sirene status mutex").clone());
+    let (code, body) = sirene_readiness(status);
+    (code, Json(body))
+}
+
+/// The `/sirene` response, split from the handler so the three states are unit-testable without a
+/// router or a database. `None` = no worker (no `DATABASE_URL`); `Some(status)` = a worker exists and
+/// `running` says whether its poll loop was started.
+fn sirene_readiness(
+    status: Option<infrastructure::SireneSyncStatus>,
+) -> (StatusCode, serde_json::Value) {
+    let Some(status) = status else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({ "running": false, "reason": "sirene_worker_not_available" }),
+        );
+    };
+    let code = if status.running { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    let mut body = serde_json::to_value(&status).unwrap_or_else(|_| json!({ "running": false }));
+    if !status.running {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("reason".to_string(), json!("poll_loop_not_started"));
+        }
+    }
+    (code, body)
+}
+
 /// Every 30s, recompute readiness and cache it. The first run happens immediately.
 fn spawn_heartbeat(pool: PgPool, snap: Arc<Mutex<Snapshot>>) {
     tokio::spawn(async move {
@@ -824,5 +918,92 @@ async fn health(State(app): State<AppState>) -> impl IntoResponse {
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "status": "degraded", "db": "down", "version": build_version() })),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The failure this fixes: `RUN_SIRENE_WORKER=TRUE` on Render silently meant PAUSED, because the
+    /// gate was an exact `== "true"`. Every spelling a human or a dashboard plausibly produces must
+    /// resolve to the state the operator intended (#244).
+    #[test]
+    fn flag_accepts_the_spellings_an_operator_actually_types() {
+        for on in ["true", "TRUE", "True", " true ", "\"true\"", "'true'", "1", "yes", "ON"] {
+            assert!(parse_flag(Some(on), "RUN_SIRENE_WORKER", false), "{on:?} should enable");
+        }
+        for off in ["false", "FALSE", " False ", "\"false\"", "0", "no", "OFF"] {
+            assert!(!parse_flag(Some(off), "RUN_INBOUND_DRAIN", true), "{off:?} should disable");
+        }
+    }
+
+    /// Unset, empty and unparsable all fall back to the DEFAULT — never to a fixed state. A typo must
+    /// not silently pause a worker that defaults on, nor start one that defaults off.
+    #[test]
+    fn flag_falls_back_to_the_default_when_it_cannot_tell() {
+        for undecidable in [None, Some(""), Some("   "), Some("maybe"), Some("2")] {
+            assert!(parse_flag(undecidable, "RUN_PROJECTOR", true), "{undecidable:?}: default true");
+            assert!(
+                !parse_flag(undecidable, "RUN_SIRENE_WORKER", false),
+                "{undecidable:?}: default false"
+            );
+        }
+    }
+
+    /// No `DATABASE_URL` → no worker at all. Distinct from a worker whose loop is merely paused.
+    #[test]
+    fn sirene_readiness_reports_no_worker_without_a_database() {
+        let (code, body) = sirene_readiness(None);
+        assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["reason"], "sirene_worker_not_available");
+        assert_eq!(body["running"], false);
+    }
+
+    /// THE case the department-37 pilot could not diagnose (#238): the worker exists, the loop never
+    /// started, 6,649 rows sat `PENDING` for hours, and nothing outside the process said so. `503` +
+    /// `poll_loop_not_started` is that answer in one request.
+    #[test]
+    fn sirene_readiness_names_a_paused_poll_loop() {
+        let (code, body) = sirene_readiness(Some(infrastructure::SireneSyncStatus::default()));
+        assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["reason"], "poll_loop_not_started");
+        assert_eq!(body["lastTickAt"], serde_json::Value::Null);
+    }
+
+    /// A running loop is `200`, carries no `reason`, and reports the last pass in camelCase (the
+    /// wire shape `/projector` and `/saga` already use).
+    #[test]
+    fn sirene_readiness_reports_a_running_loop_and_its_last_pass() {
+        let status = infrastructure::SireneSyncStatus {
+            running: true,
+            last_tick_at: Some(chrono::Utc::now()),
+            last_error: None,
+            last_summary: Some(infrastructure::SireneSyncSummary {
+                processed: 6649,
+                registered: 6649,
+                ..Default::default()
+            }),
+        };
+        let (code, body) = sirene_readiness(Some(status));
+        assert_eq!(code, StatusCode::OK);
+        assert!(body.get("reason").is_none(), "a running loop needs no reason");
+        assert_eq!(body["lastSummary"]["processed"], 6649);
+        assert!(body["lastTickAt"].is_string());
+    }
+
+    /// A loop that runs and fails every pass must not look like a healthy one: `running` stays true
+    /// (the loop IS turning) and `lastError` carries the reason — the second half of the diagnosis.
+    #[test]
+    fn sirene_readiness_surfaces_a_failing_pass() {
+        let status = infrastructure::SireneSyncStatus {
+            running: true,
+            last_tick_at: Some(chrono::Utc::now()),
+            last_error: Some("connection refused".to_string()),
+            last_summary: None,
+        };
+        let (code, body) = sirene_readiness(Some(status));
+        assert_eq!(code, StatusCode::OK, "the loop is running; the PASS failed");
+        assert_eq!(body["lastError"], "connection refused");
     }
 }

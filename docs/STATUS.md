@@ -3,6 +3,33 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — the SIRENE mirror's disk is RECLAIMED (655 MB → 14 MB), department 37 is re-swept,
+> and every background loop now publishes readiness
+> ([#238](https://github.com/TheCaptainCompany/captain-food/issues/238) /
+> [#244](https://github.com/TheCaptainCompany/captain-food/issues/244), ADR-20260728-224500).**
+> Product-owner decision: **`TRUNCATE external_sirene_restaurants`** rather than compact-and-re-sync in
+> place. The mirror is a cache of INSEE (the system of record), nothing domain-side reads it, and the
+> only designed dependency on row existence — detect-by-absence — is bounded to prospects and recovered
+> by [#243](https://github.com/TheCaptainCompany/captain-food/issues/243) once France is re-swept. The
+> truncate returned ~655 MB (table + indexes + TOAST) to the OS **instantly**: no `VACUUM FULL`, no
+> dead-tuple churn, and it collapsed most of the #238 runbook. Measured after re-sweeping Tours:
+> **6,649 rows / 14 MB** (of which 9,727 kB is payload still awaiting release — steady state ~4 MB).
+> The `payload_hash → bytea` migration (PROP-20260728-120931 D2) is now trivial and should land BEFORE
+> France repopulates.
+>
+> The pilot then exposed two operational holes, both now fixed in code (#244): the SIRENE worker was the
+> **one in-process loop with no status endpoint** — 6,649 rows sat `PENDING` for four hours and nothing
+> outside the process could tell a paused loop from a crashing one — and its `RUN_SIRENE_WORKER` gate was
+> an exact `== "true"`, so `TRUE`/`True`/a quoted value silently meant PAUSED. Now `GET /sirene` joins
+> `/projector` and `/saga` (`running`/`lastTickAt`/`lastError`/`lastSummary`, with `503` +
+> `poll_loop_not_started` vs `sirene_worker_not_available` naming WHICH stopped state it is), and all
+> five `RUN_*` toggles share one lenient parser (`true/1/yes/on`, `false/0/no/off`, case-insensitive,
+> trimmed, unrecognised → documented default **and a log line**). Note `RUN_INBOUND_DRAIN=0` now means
+> OFF (the old `!= "false"` read it as ON). Still config, not code: `INTERNAL_TRIGGER_URL` /
+> `INTERNAL_TRIGGER_TOKEN` are unset in BOTH the CI secrets and the Render env, so
+> `POST /internal/sirene/drain` answers `503 internal trigger not configured` — until they are set,
+> `RUN_SIRENE_WORKER=true` is required and sync latency is the 1-hour poll.
+
 > ✅ **2026-07-28 — the pre-#227 syncs were journaled, so compaction can now CONFIRM them; CI runs the
 > DB suites; the SIRENE worker tests assert the real contract
 > ([#238](https://github.com/TheCaptainCompany/captain-food/issues/238) /

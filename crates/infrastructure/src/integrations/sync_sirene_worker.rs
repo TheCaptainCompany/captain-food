@@ -45,7 +45,7 @@
 //! making `external_sirene_restaurants → command_journal → domain_events` fully traceable.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use application::commands::mark_restaurant_closed;
@@ -231,16 +231,54 @@ impl RowOutcome {
     }
 }
 
+/// Readiness snapshot published by the worker and served by `GET /sirene` — the counterpart of
+/// [`crate::projection::ProjectionStatus`] behind `/projector` (issue #244).
+///
+/// It exists because a paused sync loop and a crashing one look IDENTICAL from outside the process:
+/// during the department-37 pilot (#238) 6,649 rows sat `PENDING` for four hours and answering "is the
+/// worker even running?" needed the Render boot log. `running` answers it; `last_error` separates a
+/// loop that never started from one failing every pass; `last_summary` shows what the last pass did.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SireneSyncStatus {
+    /// Whether the polling loop is running. FALSE also covers "constructed for the ping endpoint but
+    /// `RUN_SIRENE_WORKER` never started the loop" — the case the pilot could not diagnose.
+    pub running: bool,
+    /// When the worker last completed a pass, successful or not.
+    pub last_tick_at: Option<DateTime<Utc>>,
+    /// The last pass's error, cleared by the next successful pass. A pass rejected because another was
+    /// already draining is NOT an error and does not touch this.
+    pub last_error: Option<String>,
+    /// What the last successful pass did — the same counters the loop logs.
+    pub last_summary: Option<SireneSyncSummary>,
+}
+
 /// The worker: owns the pool, guards against overlapping drains (the ping endpoint and the poll loop
 /// share one instance behind an `Arc`).
 pub struct SireneSyncWorker {
     pool: PgPool,
     draining: AtomicBool,
+    status: Arc<Mutex<SireneSyncStatus>>,
 }
 
 impl SireneSyncWorker {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool, draining: AtomicBool::new(false) }
+        Self {
+            pool,
+            draining: AtomicBool::new(false),
+            status: Arc::new(Mutex::new(SireneSyncStatus::default())),
+        }
+    }
+
+    /// Shared status handle — the server reads this for its `/sirene` endpoint. Take a clone BEFORE
+    /// spawning the loop (which consumes an `Arc<Self>`), exactly as `ProjectionWorker::status` is used.
+    pub fn status(&self) -> Arc<Mutex<SireneSyncStatus>> {
+        Arc::clone(&self.status)
+    }
+
+    fn status_mut(&self) -> MutexGuard<'_, SireneSyncStatus> {
+        // A poisoned lock only means a reader panicked mid-inspection; the snapshot stays usable.
+        self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// One full drain pass: translate every pending staging row, then reconcile disappearances.
@@ -255,6 +293,21 @@ impl SireneSyncWorker {
         }
         let result = self.drain().await;
         self.draining.store(false, Ordering::SeqCst);
+        // Publish the outcome for `/sirene` (#244). Deliberately AFTER releasing the drain guard and
+        // recorded for ping-triggered passes too — the endpoint's job is to describe the worker, not
+        // just the loop. The rejected-because-already-draining path returns above without touching the
+        // snapshot: a skipped duplicate pass is not an error and must not clear a real one.
+        {
+            let mut st = self.status_mut();
+            st.last_tick_at = Some(Utc::now());
+            match &result {
+                Ok(summary) => {
+                    st.last_summary = Some(summary.clone());
+                    st.last_error = None;
+                }
+                Err(e) => st.last_error = Some(e.to_string()),
+            }
+        }
         result
     }
 
@@ -262,6 +315,7 @@ impl SireneSyncWorker {
     /// Takes `Arc<Self>` (unlike the projection worker's consuming loop) so the same instance stays
     /// shared with the `/internal/sirene/drain` endpoint.
     pub async fn run_loop(self: Arc<Self>) {
+        self.status_mut().running = true;
         loop {
             match self.run_once().await {
                 Ok(summary) if summary.processed > 0 || summary.closed > 0 => {
