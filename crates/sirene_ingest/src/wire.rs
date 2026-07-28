@@ -3,7 +3,7 @@
 //! exist — they never leak into `domain` (the ACL in `infrastructure::integrations::sirene` maps them
 //! onto ordinary domain commands).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Trimmed, non-empty, non-"[ND]" (INSEE's redaction marker for non-diffusible data) view of an
 /// optional INSEE string field.
@@ -14,7 +14,7 @@ pub fn clean(value: &Option<String>) -> Option<&str> {
 /// One Sirene établissement (deserialization subset). Additive-tolerant on purpose: every field is
 /// optional/defaulted (no `deny_unknown_fields`), so an INSEE shape change never breaks parsing rows
 /// already landed in the staging table.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Etablissement {
     pub siret: String,
@@ -53,7 +53,7 @@ impl Etablissement {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UniteLegale {
     #[serde(default)]
@@ -70,7 +70,7 @@ pub struct UniteLegale {
     pub activite_principale_unite_legale: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdresseEtablissement {
     #[serde(default)]
@@ -91,7 +91,7 @@ pub struct AdresseEtablissement {
     pub code_commune_etablissement: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeriodeEtablissement {
     #[serde(default)]

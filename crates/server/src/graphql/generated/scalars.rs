@@ -1740,7 +1740,18 @@ impl From<CommandChannel> for ds::CommandChannel {
     }
 }
 
-/// Lifecycle of an adapted inbound business event (inbound_events row): RECEIVED (staged by the adapter ACL), DELIVERED (appended through the normal write path — includes the aggregate's already-recorded no-op), FAILED (delivery error, left for retry/inspection).
+/// Lifecycle of an adapted inbound business event (inbound_events row). The three terminal success states are NOT interchangeable — they are the answer to "what did this delivery actually do?", and collapsing them is what made a SIRENE sweep unable to distinguish "registered 200,000 restaurants" from "did nothing 200,000 times" (ADR-20260728-011344 D6):
+/// * RECEIVED  — staged by the adapter ACL, not yet delivered.
+/// * DELIVERED — the aggregate decided a fact and it was appended (a creation OR an update; which
+/// one landed is answerable from domain_events via `cause_id = inbound_event_id`,
+/// a better source than a status column).
+/// * IGNORED   — the aggregate decided NOTHING changed, so no fact exists to append. A legitimate
+/// event-sourcing outcome, not a failure: the external system reported a record we
+/// already hold, identically.
+/// * DUPLICATE — the exact fact was ALREADY in the aggregate's stream (a redelivery tail). Distinct
+/// from IGNORED: here we have seen this very fact before, there the fact is new but
+/// semantically inert. Different causes, different fixes.
+/// * FAILED    — delivery error, left for retry/inspection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum InboundEventStatus {
     #[graphql(name = "RECEIVED")]
@@ -1749,6 +1760,10 @@ pub enum InboundEventStatus {
     DELIVERED,
     #[graphql(name = "FAILED")]
     FAILED,
+    #[graphql(name = "IGNORED")]
+    IGNORED,
+    #[graphql(name = "DUPLICATE")]
+    DUPLICATE,
 }
 impl From<ds::InboundEventStatus> for InboundEventStatus {
     fn from(v: ds::InboundEventStatus) -> Self {
@@ -1756,6 +1771,8 @@ impl From<ds::InboundEventStatus> for InboundEventStatus {
             ds::InboundEventStatus::RECEIVED => Self::RECEIVED,
             ds::InboundEventStatus::DELIVERED => Self::DELIVERED,
             ds::InboundEventStatus::FAILED => Self::FAILED,
+            ds::InboundEventStatus::IGNORED => Self::IGNORED,
+            ds::InboundEventStatus::DUPLICATE => Self::DUPLICATE,
         }
     }
 }
@@ -1765,6 +1782,8 @@ impl From<InboundEventStatus> for ds::InboundEventStatus {
             InboundEventStatus::RECEIVED => Self::RECEIVED,
             InboundEventStatus::DELIVERED => Self::DELIVERED,
             InboundEventStatus::FAILED => Self::FAILED,
+            InboundEventStatus::IGNORED => Self::IGNORED,
+            InboundEventStatus::DUPLICATE => Self::DUPLICATE,
         }
     }
 }

@@ -90,7 +90,7 @@ INSERT INTO ref_command_channel (value, sort_order) VALUES ('GRAPHQL',0),('WORKE
 
 -- InboundEventStatus
 CREATE TABLE ref_inbound_event_status(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
-INSERT INTO ref_inbound_event_status (value, sort_order) VALUES ('RECEIVED',0),('DELIVERED',1),('FAILED',2);
+INSERT INTO ref_inbound_event_status (value, sort_order) VALUES ('RECEIVED',0),('DELIVERED',1),('FAILED',2),('IGNORED',3),('DUPLICATE',4);
 
 -- PaymentProcessStatus
 CREATE TABLE ref_payment_process_status(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
@@ -235,12 +235,14 @@ CREATE TABLE external_sirene_restaurants (
   first_seen_at TIMESTAMPTZ NOT NULL,
   last_seen_at TIMESTAMPTZ NOT NULL,
   sync_run_id UUID NOT NULL,
+  payload_hash TEXT NOT NULL,
   processed_at TIMESTAMPTZ NULL
 );
 CREATE INDEX ON external_sirene_restaurants (etat);
 CREATE INDEX ON external_sirene_restaurants (naf);
 CREATE INDEX ON external_sirene_restaurants (department);
 CREATE INDEX ON external_sirene_restaurants (last_seen_at);
+CREATE INDEX ON external_sirene_restaurants (payload_hash);
 
 CREATE TABLE external_stripe_events (
   stripe_event_id TEXT PRIMARY KEY,

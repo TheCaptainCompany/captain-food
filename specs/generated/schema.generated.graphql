@@ -247,6 +247,8 @@ enum InboundEventStatus {
   RECEIVED
   DELIVERED
   FAILED
+  IGNORED
+  DUPLICATE
 }
 
 enum PaymentProcessStatus {

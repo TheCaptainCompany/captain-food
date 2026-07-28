@@ -129,7 +129,10 @@ enum_ord!(ReclamationResolution {
 });
 enum_ord!(CommandJournalStatus { RECEIVED => 0, SUCCEEDED => 1, REJECTED => 2, FAILED => 3 });
 enum_ord!(CommandChannel { GRAPHQL => 0, WORKER => 1, INTERNAL => 2 });
-enum_ord!(InboundEventStatus { RECEIVED => 0, DELIVERED => 1, FAILED => 2 });
+// Additive-only (ADR-20260728-011344 D6): IGNORED/DUPLICATE take 3/4 so FAILED keeps ordinal 2 and every
+// stored row keeps its meaning. Inserting them mid-enum would have silently reinterpreted FAILED as
+// IGNORED -- the ordinals ARE the storage format.
+enum_ord!(InboundEventStatus { RECEIVED => 0, DELIVERED => 1, FAILED => 2, IGNORED => 3, DUPLICATE => 4 });
 
 /// `to_ord` through an `Option` (nullable enum column).
 pub fn opt_to_ord<E: EnumOrd>(v: &Option<E>) -> Option<i32> {

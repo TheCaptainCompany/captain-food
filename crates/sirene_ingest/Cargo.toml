@@ -20,6 +20,11 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 # v4 for the per-run `sync_run_id` correlating all rows one ingestion touched.
 uuid = { workspace = true }
+# `payload_hash` (ADR-20260728-011344): the "did this record actually change?" key that stops a sweep
+# re-pending ~200k unchanged rows. sqlx already pulls sha2/hex transitively for SCRAM auth, so this
+# adds no build weight to the deliberately-thin CI dependency graph.
+sha2 = "0.10"
+hex = "0.4"
 tokio = { workspace = true }
 # `uuid`/`chrono`/`json` bind the staging columns (UUID/TIMESTAMPTZ/JSONB) on top of the
 # workspace-pinned runtime/tls/postgres features.

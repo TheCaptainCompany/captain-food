@@ -474,13 +474,26 @@ pub enum CommandChannel {
     INTERNAL,
 }
 
-/// Lifecycle of an adapted inbound business event (inbound_events row): RECEIVED (staged by the adapter ACL), DELIVERED (appended through the normal write path — includes the aggregate's already-recorded no-op), FAILED (delivery error, left for retry/inspection).
+/// Lifecycle of an adapted inbound business event (inbound_events row). The three terminal success states are NOT interchangeable — they are the answer to "what did this delivery actually do?", and collapsing them is what made a SIRENE sweep unable to distinguish "registered 200,000 restaurants" from "did nothing 200,000 times" (ADR-20260728-011344 D6):
+/// * RECEIVED  — staged by the adapter ACL, not yet delivered.
+/// * DELIVERED — the aggregate decided a fact and it was appended (a creation OR an update; which
+/// one landed is answerable from domain_events via `cause_id = inbound_event_id`,
+/// a better source than a status column).
+/// * IGNORED   — the aggregate decided NOTHING changed, so no fact exists to append. A legitimate
+/// event-sourcing outcome, not a failure: the external system reported a record we
+/// already hold, identically.
+/// * DUPLICATE — the exact fact was ALREADY in the aggregate's stream (a redelivery tail). Distinct
+/// from IGNORED: here we have seen this very fact before, there the fact is new but
+/// semantically inert. Different causes, different fixes.
+/// * FAILED    — delivery error, left for retry/inspection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum InboundEventStatus {
     RECEIVED,
     DELIVERED,
     FAILED,
+    IGNORED,
+    DUPLICATE,
 }
 
 /// State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart).

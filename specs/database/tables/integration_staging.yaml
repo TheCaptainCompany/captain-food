@@ -19,6 +19,17 @@ external_sirene_restaurants:
     SIRET with the verbatim INSEE payload; the on-app `sync_sirene_worker` drains rows past its checkpoint,
     runs the SIRENE Anti-Corruption Layer and registers/closes restaurants via the normal write path.
     Detect-by-absence deletion uses `last_seen_at` + the explicit `etat` (etatAdministratifEtablissement).
+
+    `payload_hash` (ADR-20260728-011344) is what stops a sweep re-driving the whole country. The
+    ingestion bumps `last_seen_at` on EVERY row it sees -- it must, because absence detection depends on
+    that freshness -- but bumping it also re-pended the row, so ~200k identical établissements were
+    re-translated, re-journaled and re-appended every Monday for no change at all. The hash covers only
+    the fields the ACL actually reads, so an INSEE-internal timestamp cannot defeat it; when it matches,
+    the conflict arm advances `processed_at` alongside `last_seen_at` and the row stays NON-pending.
+    Note the division of labour: "has this external record changed since we mirrored it?" is a fact
+    about INSEE and belongs here, in the adapter. "Is this a meaningful change to the Restaurant?" is a
+    domain question and belongs only in the aggregate's fold. Both exist, and neither substitutes for
+    the other.
     Scope: all active food-service NAF (56.10A/B/C + 56.30Z) across France; the ingestion partitions its
     INSEE queries by `department` when the deep-pagination cap bites.
     NO RETENTION (ADR-20260721-025159): this is a full mirror — detect-by-absence needs the complete
@@ -32,6 +43,7 @@ external_sirene_restaurants:
     first_seen_at: { type: timestamptz }                    # when this SIRET first appeared in a sync
     last_seen_at:  { type: timestamptz, index: true }       # latest sync that saw it — drives detect-by-absence
     sync_run_id:   { type: uuid }                           # correlates all rows touched by one ingestion run
+    payload_hash:  { type: text, index: true }              # see the note below -- the "did this actually change?" key
     processed_at:  { type: timestamptz, nullable: true }    # worker high-water mark: NULL / < last_seen_at ⇒ pending
 
 external_stripe_events:
