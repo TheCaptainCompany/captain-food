@@ -1,7 +1,39 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-27. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 📋 **2026-07-28 — a Supabase disk-IO alert exposed three write-path defects, now proposed as one
+> coupled change (PROP-20260728-004616, [#220](https://github.com/TheCaptainCompany/captain-food/issues/220)).**
+> A "depleting Disk IO Budget" email led to a trace of the SIRENE write path. The IO was the symptom.
+> **(1) A failed INSERT is the idempotency mechanism**: `register_restaurant` never rehydrates the
+> aggregate — it hard-codes `expected_version = 0` (`commands.rs:365`) and lets a `UNIQUE (stream_name,
+> version)` violation decide whether the restaurant exists, which `idempotent_on_existing` (`:160-166`)
+> laundres into `Ok(())`. Postgres writes the heap tuple *before* the constraint fires, so a weekly
+> sweep leaves ~200k dead tuples in `domain_events` and its indexes. Six handlers do this
+> (`:269`, `:365`, `:2172`, `:2382`, `:2594`, `:3074`) — the last is user-facing, `verify_phone`
+> returning `created: true` after a swallowed conflict. The correct pattern is ten lines away
+> (`activate_restaurant` `:376-378` folds and returns with no event). **(2) INSEE updates are silently
+> dropped**: there is no `UpdateRestaurant` in the SIRENE worker at all, so a renamed établissement
+> conflicts, is swallowed as success, and the change is discarded — mirror updates, domain does not.
+> **(3) The write path asks the read side, unindexed**: `by_external_identifier`
+> (`persistence/restaurant.rs:39-43`) runs `external_identifiers @> $1` against the eventually-consistent
+> `Restaurant` projection, and there is **no GIN index anywhere** in the generated schema — a full
+> sequential scan per staged SIRET, the likely dominant IO consumer. **All three trace to deriving the
+> slug at seeding time** (`sirene.rs:215-216` → `chez-marco-00021`): ~200k reserved hostnames no merchant
+> would choose, systematic collisions (the NIC only disambiguates within a company — the 605-row
+> `SlugAlreadyTaken` storm), and the tenant *host* derived from a mutable third-party field. Proposed:
+> **slug becomes a lifecycle** (`RestaurantSlugConfigured` / `RestaurantSlugReconfigured` carrying
+> `previousSlug` for 301s, projection column nullable-unique so the DB enforces uniqueness over exactly
+> the claimed set) and **SIRENE becomes an inbound event** (`inbound_events` keyed on the stable
+> `(source, external_id)` rather than `command_journal`'s `last_seen_at`-seeded `message_id`, with
+> `IGNORED`/`DUPLICATE` persisting the decision the drain worker already makes at
+> `inbound_drain_worker.rs:177-179`). **Sequencing is load-bearing**: the slug change must land first, or
+> fixing the update path turns an INSEE rename into a live-storefront rename. Reverses part of ADR-0045;
+> six decisions are open in [DECISIONS.md §7](proposals/DECISIONS.md), D2 (when the owner chooses the
+> address) gating. Related but distinct: the projector's own IO pathology (groups re-scanning the log
+> every 1.5s because checkpoints only advance on matched events) belongs with
+> [#190](https://github.com/TheCaptainCompany/captain-food/issues/190).
 
 > ✅ **2026-07-27 — [#151](https://github.com/TheCaptainCompany/captain-food/issues/151) reclamation
 > epic COMPLETE — the #158 credit/refund integrations landed (#207 closed).** With PR #213 (refund
