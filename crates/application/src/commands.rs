@@ -3637,3 +3637,50 @@ mod credit_checkout_tests {
         assert_eq!(debit.order_id, order(0x7007));
     }
 }
+
+/// Record an inbound REGISTRY registration (ADR-20260728-011344 D4) — the SIRENE write path.
+///
+/// The ACL stages `RestaurantRegistered` **unconditionally**: it never decides whether this is a
+/// creation or a change, because that is a domain question and an adapter is the wrong place to answer
+/// it. This function is where the aggregate answers, by folding its own stream:
+///
+/// * no stream → record the registration as reported (`Recorded`);
+/// * stream exists and the report moves something → emit `RestaurantUpdated` with exactly those fields
+///   (`Updated`) — this is the path that was MISSING, which is why INSEE renames were silently dropped;
+/// * stream exists and nothing moved → append nothing (`NoChange` → the delivery is IGNORED).
+///
+/// What it deliberately does NOT do: attempt an append and read a unique-constraint violation as
+/// "already exists". That was the old mechanism, and it made every no-op write a heap tuple plus index
+/// entries before aborting — ~200k dead tuples in `domain_events` per weekly sweep, for an outcome that
+/// is by definition no change. Here the decision precedes any write.
+pub async fn record_inbound_restaurant_registration(
+    store: &dyn EventStore,
+    event: DomainEvent,
+    actor: &Actor,
+) -> Result<crate::payments::RecordOutcome, DomainError> {
+    use crate::payments::RecordOutcome;
+
+    let DomainEvent::RestaurantRegistered(reported) = &event else {
+        return Err(DomainError::Repository(format!(
+            "record_inbound_restaurant_registration routed a non-registration event: {event:?}"
+        )));
+    };
+    let stream_name = restaurant_stream(&reported.restaurant_id);
+    let (events, version) = store.load(&stream_name).await?;
+
+    let Some(state) = domain::restaurant::fold(&events) else {
+        // Never registered: the registry is telling us about a restaurant we do not hold. Record it.
+        Repository::new(store).save(&stream_name, version, &[event], actor).await?;
+        return Ok(RecordOutcome::Recorded);
+    };
+
+    match domain::restaurant::changes_from_registry(&state, reported) {
+        None => Ok(RecordOutcome::NoChange),
+        Some(update) => {
+            Repository::new(store)
+                .save(&stream_name, version, &[DomainEvent::RestaurantUpdated(update)], actor)
+                .await?;
+            Ok(RecordOutcome::Updated)
+        }
+    }
+}

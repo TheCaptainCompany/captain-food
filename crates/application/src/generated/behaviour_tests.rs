@@ -92,6 +92,11 @@ fn fx_restaurant_registered() -> DomainEvent {
     DomainEvent::RestaurantRegistered(evs::RestaurantRegistered { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: sc::RestaurantListingStatus::ACTIVE_PARTNER, r#ref: None, external_identifiers: Vec::new(), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: Some(sc::MarginPercent(62.0)), cuisine_category: Some(sc::CuisineCategory::PIZZA), uber_prices_opt_in: Some(true), address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new() })
 }
 
+/// tests.yaml#/fixtures/restaurantRenamedByRegistry — events.yaml#/RestaurantUpdated
+fn fx_restaurant_renamed_by_registry() -> DomainEvent {
+    DomainEvent::RestaurantUpdated(evs::RestaurantUpdated { restaurant_id: sc::RestaurantId(support::uid("resto-1")), display_name: Some(sc::RestaurantDisplayName("Chez Marco et Fils".into())), contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: None, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() })
+}
+
 /// tests.yaml#/fixtures/restaurantSlugConfigured — events.yaml#/RestaurantSlugConfigured
 fn fx_restaurant_slug_configured() -> DomainEvent {
     DomainEvent::RestaurantSlugConfigured(evs::RestaurantSlugConfigured { restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("chez-marco".into()) })
@@ -825,6 +830,36 @@ async fn test_storefront_slug_taken_is_rejected() {
     let err = result.expect_err("TestStorefrontSlugTakenIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestStorefrontSlugTakenIsRejected", &err, &["SlugAlreadyTaken", "RestaurantNotFound"]);
     bed.assert_appended("TestStorefrontSlugTakenIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRegistryReportUnchangedEmitsNothing — "A registry report of a restaurant we already hold, unchanged, emits nothing"
+/// rules: RegistryReportAppliesOnlyRealChanges
+#[tokio::test]
+async fn test_registry_report_unchanged_emits_nothing() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
+    let before = bed.snapshot();
+    let ev = evs::RestaurantRegistered { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: sc::RestaurantListingStatus::ACTIVE_PARTNER, r#ref: None, external_identifiers: Vec::new(), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: Some(sc::MarginPercent(62.0)), cuisine_category: Some(sc::CuisineCategory::PIZZA), uber_prices_opt_in: Some(true), address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new() };
+    let result = crate::commands::record_inbound_restaurant_registration(&bed.store, DomainEvent::RestaurantRegistered(ev), &support::actor()).await;
+    let _ = result.expect("TestRegistryReportUnchangedEmitsNothing: the spec expects acceptance");
+    bed.assert_appended("TestRegistryReportUnchangedEmitsNothing", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRegistryReportChangedEmitsAnUpdate — "A registry report that renames an établissement reaches the domain as an update"
+/// rules: RegistryReportAppliesOnlyRealChanges
+#[tokio::test]
+async fn test_registry_report_changed_emits_an_update() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
+    let before = bed.snapshot();
+    let ev = evs::RestaurantRegistered { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: sc::RestaurantListingStatus::ACTIVE_PARTNER, r#ref: None, external_identifiers: Vec::new(), display_name: sc::RestaurantDisplayName("Chez Marco et Fils".into()), contact: None, website: None, tags: Vec::new(), margin_rate: Some(sc::MarginPercent(62.0)), cuisine_category: Some(sc::CuisineCategory::PIZZA), uber_prices_opt_in: Some(true), address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new() };
+    let result = crate::commands::record_inbound_restaurant_registration(&bed.store, DomainEvent::RestaurantRegistered(ev), &support::actor()).await;
+    let _ = result.expect("TestRegistryReportChangedEmitsAnUpdate: the spec expects acceptance");
+    bed.assert_appended("TestRegistryReportChangedEmitsAnUpdate", &before, &[
+        (format!("Restaurant-{}", support::uid("resto-1")), fx_restaurant_renamed_by_registry()),
+    ]);
 }
 
 /// tests.yaml#/tests/TestActivationWithoutSlugIsRejected — "Rejects going live before a storefront address is chosen"

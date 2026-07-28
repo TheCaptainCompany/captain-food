@@ -486,6 +486,12 @@ mod tests {
         async fn mark_delivered(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
             Ok(())
         }
+        async fn mark_ignored(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn mark_duplicate(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
+            Ok(())
+        }
         async fn mark_failed(
             &self,
             _id: uuid::Uuid,

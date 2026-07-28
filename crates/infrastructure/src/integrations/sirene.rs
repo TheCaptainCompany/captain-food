@@ -33,7 +33,7 @@ use domain::generated::commands::RegisterRestaurant;
 use domain::generated::entities::{Address, ExternalIdentifier};
 use domain::generated::scalars::{
     AddressLine, CityName, CountryCode, CuisineCategory, ExternalIdentifierKey, ExternalReference,
-    PostalCode, RestaurantDisplayName, RestaurantId, RestaurantListingStatus, Slug, TimeZone,
+    PostalCode, RestaurantDisplayName, RestaurantId, RestaurantListingStatus, TimeZone,
 };
 use domain::shared::errors::DomainError;
 

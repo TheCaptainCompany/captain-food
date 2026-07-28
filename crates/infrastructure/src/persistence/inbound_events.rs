@@ -92,6 +92,34 @@ impl InboundEvents for PgInboundEvents {
         Ok(())
     }
 
+    /// RECEIVED → IGNORED: the aggregate decided nothing changed (ADR-20260728-011344 D6). Terminal
+    /// and successful, stamped `delivered_at` like a real delivery so the retention sweep ages it the
+    /// same way — there is nothing pending about a decided no-op.
+    async fn mark_ignored(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError> {
+        sqlx::query(
+            "UPDATE inbound_events SET status = $2, delivered_at = now() WHERE inbound_event_id = $1",
+        )
+        .bind(inbound_event_id)
+        .bind(InboundEventStatus::IGNORED.to_ord())
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// RECEIVED → DUPLICATE: the fact was already in the aggregate's stream (a redelivery tail).
+    async fn mark_duplicate(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError> {
+        sqlx::query(
+            "UPDATE inbound_events SET status = $2, delivered_at = now() WHERE inbound_event_id = $1",
+        )
+        .bind(inbound_event_id)
+        .bind(InboundEventStatus::DUPLICATE.to_ord())
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
     async fn mark_failed(
         &self,
         inbound_event_id: uuid::Uuid,

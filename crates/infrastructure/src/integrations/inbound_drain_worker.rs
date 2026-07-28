@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use application::commands::record_inbound_restaurant_registration;
 use application::journal::{CommandJournal, InboundEventRow, InboundEvents};
 use application::deliveries::record_inbound_delivery_event;
 use application::payments::{record_inbound_payment_event, RecordOutcome};
@@ -49,9 +50,14 @@ fn inbound_namespace() -> uuid::Uuid {
 /// One drain pass's outcome counters (logged; surfaced by the internal trigger).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct InboundDrainSummary {
-    /// Rows delivered through the write path (including the aggregate's already-recorded no-ops).
+    /// Rows where the aggregate decided a fact and it was appended — a creation or an update
+    /// (ADR-20260728-011344 D6). No longer includes no-ops: conflating them is what made a sweep
+    /// unable to distinguish work from no-work.
     pub delivered: u64,
-    /// Of `delivered`, how many the aggregate had already recorded (webhook redelivery tail).
+    /// Rows the aggregate judged inert — it already held this record, identically. Written nowhere,
+    /// recorded IGNORED. On a steady-state SIRENE sweep this is expected to be nearly the whole mirror.
+    pub ignored: u64,
+    /// Rows carrying a fact already in the aggregate's stream (a redelivery tail), recorded DUPLICATE.
     pub already_recorded: u64,
     /// Rows marked FAILED (kept for retry/inspection — only infra failures abort the pass).
     pub failed: u64,
@@ -136,13 +142,33 @@ impl InboundEventsDrainWorker {
     async fn process_row(&self, row: InboundEventRow, summary: &mut InboundDrainSummary) {
         let id = row.inbound_event_id;
         match self.deliver(&row).await {
-            Ok(already) => {
-                summary.delivered += 1;
-                if already {
-                    summary.already_recorded += 1;
-                }
-                if let Err(e) = self.inbox.mark_delivered(id).await {
-                    eprintln!("inbound drain: mark_delivered({id}) failed: {e}");
+            // The aggregate's verdict is PERSISTED, not flattened (ADR-20260728-011344 D6). Previously
+            // every success became DELIVERED, so `SELECT status, count(*)` could not tell "applied
+            // 200,000 records" from "did nothing 200,000 times" -- which is why the first notification
+            // of the SIRENE write-path defects was an email from the database vendor.
+            Ok(outcome) => {
+                let (status, marked) = match outcome {
+                    // A fact was appended -- a creation or an update. WHICH one landed is answerable
+                    // from domain_events via `cause_id = inbound_event_id`, a better source than a
+                    // status column, so both share DELIVERED.
+                    RecordOutcome::Recorded | RecordOutcome::Updated => {
+                        summary.delivered += 1;
+                        ("DELIVERED", self.inbox.mark_delivered(id).await)
+                    }
+                    // New fact, semantically inert: the external system re-reported a record we already
+                    // hold, identically. Nothing was written.
+                    RecordOutcome::NoChange => {
+                        summary.ignored += 1;
+                        ("IGNORED", self.inbox.mark_ignored(id).await)
+                    }
+                    // We have seen this very fact before -- a redelivery tail.
+                    RecordOutcome::AlreadyRecorded => {
+                        summary.already_recorded += 1;
+                        ("DUPLICATE", self.inbox.mark_duplicate(id).await)
+                    }
+                };
+                if let Err(e) = marked {
+                    eprintln!("inbound drain: marking {id} {status} failed: {e}");
                 }
             }
             Err(reason) => {
@@ -156,9 +182,12 @@ impl InboundEventsDrainWorker {
         }
     }
 
-    /// Route the adapted event to its aggregate's recording path. Returns whether the aggregate had
-    /// already recorded the fact (`Ok(true)` = benign redelivery tail).
-    async fn deliver(&self, row: &InboundEventRow) -> Result<bool, String> {
+    /// Route the adapted event to its aggregate's recording path, returning the aggregate's own verdict.
+    ///
+    /// It returns [`RecordOutcome`] rather than a bool because the distinction matters downstream: a
+    /// no-change decision and a redelivered fact are different facts about the world, and the caller
+    /// persists them as IGNORED and DUPLICATE respectively.
+    async fn deliver(&self, row: &InboundEventRow) -> Result<RecordOutcome, String> {
         let event: DomainEvent = serde_json::from_value(row.payload.clone())
             .map_err(|e| format!("unparsable staged DomainEvent: {e}"))?;
         let actor = Actor {
@@ -176,9 +205,12 @@ impl InboundEventsDrainWorker {
             | DomainEvent::PaymentFailed(_)
             | DomainEvent::PaymentRefunded(_) => {
                 match record_inbound_payment_event(self.store.as_ref(), event, &actor).await {
-                    Ok(RecordOutcome::Recorded) => Ok(false),
-                    Ok(RecordOutcome::AlreadyRecorded) => Ok(true),
-                    Err(e) if application::ports::is_version_conflict(&e) => Ok(true),
+                    Ok(outcome) => Ok(outcome),
+                    // A version conflict here means someone else appended between our load and our
+                    // save. The fact is in the log either way, so this is a redelivery tail.
+                    Err(e) if application::ports::is_version_conflict(&e) => {
+                        Ok(RecordOutcome::AlreadyRecorded)
+                    }
                     Err(e) => Err(e.to_string()),
                 }
             }
@@ -188,9 +220,24 @@ impl InboundEventsDrainWorker {
             | DomainEvent::DeliveryRejectedByPartner(_)
             | DomainEvent::DeliveryStatusUpdated(_) => {
                 match record_inbound_delivery_event(self.store.as_ref(), event, &actor).await {
-                    Ok(RecordOutcome::Recorded) => Ok(false),
-                    Ok(RecordOutcome::AlreadyRecorded) => Ok(true),
-                    Err(e) if application::ports::is_version_conflict(&e) => Ok(true),
+                    Ok(outcome) => Ok(outcome),
+                    Err(e) if application::ports::is_version_conflict(&e) => {
+                        Ok(RecordOutcome::AlreadyRecorded)
+                    }
+                    Err(e) => Err(e.to_string()),
+                }
+            }
+            // Registry facts (ADR-20260728-011344 D4): the SIRENE ACL stages `RestaurantRegistered`
+            // UNCONDITIONALLY -- it never decides whether this is a creation or a change, because that is
+            // a domain question. The aggregate folds its own stream and answers: record it, emit
+            // `RestaurantUpdated` for whatever moved, or decide nothing changed and write nothing at all.
+            DomainEvent::RestaurantRegistered(_) => {
+                match record_inbound_restaurant_registration(self.store.as_ref(), event, &actor).await
+                {
+                    Ok(outcome) => Ok(outcome),
+                    Err(e) if application::ports::is_version_conflict(&e) => {
+                        Ok(RecordOutcome::AlreadyRecorded)
+                    }
                     Err(e) => Err(e.to_string()),
                 }
             }
@@ -410,8 +457,12 @@ mod tests {
         assert!(inbox.pending(10).await.unwrap().is_empty());
     }
 
+    /// A redelivery is now recorded as DUPLICATE rather than folded into DELIVERED
+    /// (ADR-20260728-011344 D6). The old assertion here (`delivered == 2`) encoded exactly the
+    /// conflation that made a sweep unable to tell work from no-work: two deliveries, one fact, and a
+    /// counter claiming both did something.
     #[tokio::test]
-    async fn a_redelivered_fact_is_a_no_op_and_still_delivers() {
+    async fn a_redelivered_fact_is_recorded_duplicate_not_delivered() {
         let (inbox, journal, store) =
             (Arc::new(MemInboundEvents::default()), Arc::new(MemCommandJournal::default()), Arc::new(MemStore::default()));
         // Two DIFFERENT provider deliveries carrying the SAME fact (Stripe redelivery after a lost
@@ -421,9 +472,98 @@ mod tests {
 
         let w = worker(inbox.clone(), journal, store.clone());
         let s = w.run_once().await.unwrap();
-        assert_eq!(s.delivered, 2);
-        assert_eq!(s.already_recorded, 1);
+        assert_eq!(s.delivered, 1, "exactly one delivery appended a fact");
+        assert_eq!(s.already_recorded, 1, "the other was a redelivery of it");
+        assert_eq!(s.ignored, 0, "no aggregate judged a report inert here");
         assert_eq!(store.stream("Payment-pi_1").len(), 1, "the fact recorded exactly once");
+        // Both rows reached a terminal state -- a DUPLICATE is finished work, not pending.
+        assert!(inbox.pending(10).await.unwrap().is_empty());
+    }
+
+    /// A SIRENE registry row, staged the way the ACL stages every one: `RestaurantRegistered`,
+    /// unconditionally, with no decision about whether this is a creation or a change.
+    fn registry_row(ext: &str, name: &str) -> InboundEventRow {
+        use domain::generated::entities::Address;
+        use domain::generated::events::RestaurantRegistered;
+        use domain::generated::scalars::{
+            AddressLine, CityName, CountryCode, PostalCode, RestaurantDisplayName,
+            RestaurantListingStatus,
+        };
+        let event = DomainEvent::RestaurantRegistered(RestaurantRegistered {
+            mode: None,
+            restaurant_id: RestaurantId(uuid::Uuid::from_u128(0x5152E)),
+            account_id: None,
+            listing_status: RestaurantListingStatus::NON_PARTNER,
+            r#ref: None,
+            external_identifiers: vec![],
+            display_name: RestaurantDisplayName(name.into()),
+            contact: None,
+            website: None,
+            tags: vec![],
+            margin_rate: None,
+            cuisine_category: None,
+            uber_prices_opt_in: None,
+            address: Address {
+                line1: AddressLine("12 rue Nationale".into()),
+                line2: None,
+                postal_code: PostalCode("37000".into()),
+                city: CityName("Tours".into()),
+                country: CountryCode("FR".into()),
+            },
+            location: None,
+            timezone: None,
+            preparation_time_minutes: None,
+            opening_hours: vec![],
+        });
+        InboundEventRow {
+            inbound_event_id: uuid::Uuid::new_v4(),
+            source: "sirene".into(),
+            external_id: ext.into(),
+            correlation_id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, ext.as_bytes()),
+            event_type: "RestaurantRegistered".into(),
+            payload: serde_json::to_value(&event).unwrap(),
+            status: InboundEventStatus::RECEIVED,
+            error: None,
+            received_at: Utc::now(),
+            delivered_at: None,
+        }
+    }
+
+    /// The whole point of the conversion (ADR-20260728-011344 D4): the ACL stages the same
+    /// `RestaurantRegistered` three times and the AGGREGATE decides what each one means — record it,
+    /// ignore it, or turn it into an update. No adapter branching, and critically no deliberate
+    /// UNIQUE-violation to stand in for "already exists".
+    #[tokio::test]
+    async fn the_aggregate_decides_record_then_ignore_then_update() {
+        let (inbox, journal, store) =
+            (Arc::new(MemInboundEvents::default()), Arc::new(MemCommandJournal::default()), Arc::new(MemStore::default()));
+        let stream = format!("Restaurant-{}", uuid::Uuid::from_u128(0x5152E));
+
+        // 1) First sighting -> recorded.
+        inbox.stage(&registry_row("siret:hash-a", "CHEZ MARCO")).await.unwrap();
+        let s = worker(inbox.clone(), journal.clone(), store.clone()).run_once().await.unwrap();
+        assert_eq!((s.delivered, s.ignored), (1, 0));
+        assert_eq!(store.stream(&stream).len(), 1);
+
+        // 2) The SAME record again (a fresh staged version, e.g. after the mirror was re-hashed) ->
+        //    nothing changed, so nothing is written. This is the ~200k-rows-a-week case.
+        inbox.stage(&registry_row("siret:hash-a2", "CHEZ MARCO")).await.unwrap();
+        let s = worker(inbox.clone(), journal.clone(), store.clone()).run_once().await.unwrap();
+        assert_eq!((s.delivered, s.ignored), (0, 1), "an unchanged report writes nothing");
+        assert_eq!(store.stream(&stream).len(), 1, "no event appended for a no-change report");
+
+        // 3) INSEE renames it -> an UPDATE reaches the domain. This path did not exist before: the
+        //    rename used to conflict, be swallowed as success, and be silently discarded.
+        inbox.stage(&registry_row("siret:hash-b", "CHEZ MARCO ET FILS")).await.unwrap();
+        let s = worker(inbox.clone(), journal, store.clone()).run_once().await.unwrap();
+        assert_eq!((s.delivered, s.ignored), (1, 0));
+        let events = store.stream(&stream);
+        assert_eq!(events.len(), 2);
+        assert!(
+            matches!(events[1], DomainEvent::RestaurantUpdated(_)),
+            "a registry change becomes RestaurantUpdated, decided by the aggregate"
+        );
+        assert!(inbox.pending(10).await.unwrap().is_empty());
     }
 
     #[tokio::test]

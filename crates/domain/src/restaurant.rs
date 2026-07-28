@@ -97,6 +97,88 @@ fn replaced_vec<T: Clone>(current: &[T], incoming: &[T]) -> Vec<T> {
     }
 }
 
+/// Decide what an inbound REGISTRY registration changes about a restaurant we already hold
+/// (ADR-20260728-011344 D4).
+///
+/// This is the decision the SIRENE path used to delegate to a Postgres unique-constraint violation.
+/// The registry ACL stages `RestaurantRegistered` unconditionally — it never branches — and the
+/// aggregate answers one of three ways: `None` here means *nothing changed*, so the drain records the
+/// delivery as IGNORED and writes no event at all; `Some(update)` means emit `RestaurantUpdated` with
+/// exactly the fields that moved.
+///
+/// **Only fields the report actually carries are considered.** A registry is a PARTIAL source: SIRENE
+/// knows an établissement's name, address and NAF, and knows nothing about its website, tags, margin or
+/// opening hours. Treating the report's `None` as "clear this field" would let every weekly sweep wipe
+/// data the restaurant's own staff had entered — so an absent field means *no opinion*, never *empty*.
+/// The arrays follow the same rule for the same reason (empty = no opinion), matching
+/// [`replaced_vec`]'s reading on the fold side.
+///
+/// `address` is required on the event, so it is always compared.
+pub fn changes_from_registry(
+    state: &RestaurantState,
+    reported: &crate::generated::events::RestaurantRegistered,
+) -> Option<crate::generated::events::RestaurantUpdated> {
+    fn moved<T: PartialEq + Clone>(current: &Option<T>, report: &Option<T>) -> Option<T> {
+        match report {
+            Some(v) if Some(v) != current.as_ref() => Some(v.clone()),
+            _ => None,
+        }
+    }
+
+    let display_name =
+        (reported.display_name != state.display_name).then(|| reported.display_name.clone());
+    let address = (reported.address != state.address).then(|| reported.address.clone());
+    let contact = moved(&state.contact, &reported.contact);
+    let website = moved(&state.website, &reported.website);
+    let margin_rate = moved(&state.margin_rate, &reported.margin_rate);
+    let cuisine_category = moved(&state.cuisine_category, &reported.cuisine_category);
+    let uber_prices_opt_in = moved(&state.uber_prices_opt_in, &reported.uber_prices_opt_in);
+    let location = moved(&state.location, &reported.location);
+    let timezone = moved(&state.timezone, &reported.timezone);
+    let preparation_time_minutes =
+        moved(&state.preparation_time_minutes, &reported.preparation_time_minutes);
+    // Arrays: a non-empty report that differs replaces; empty means the source has no opinion.
+    let tags = (!reported.tags.is_empty() && reported.tags != state.tags)
+        .then(|| reported.tags.clone())
+        .unwrap_or_default();
+    let opening_hours = (!reported.opening_hours.is_empty()
+        && reported.opening_hours != state.opening_hours)
+        .then(|| reported.opening_hours.clone())
+        .unwrap_or_default();
+
+    let nothing_moved = display_name.is_none()
+        && address.is_none()
+        && contact.is_none()
+        && website.is_none()
+        && margin_rate.is_none()
+        && cuisine_category.is_none()
+        && uber_prices_opt_in.is_none()
+        && location.is_none()
+        && timezone.is_none()
+        && preparation_time_minutes.is_none()
+        && tags.is_empty()
+        && opening_hours.is_empty();
+    if nothing_moved {
+        return None;
+    }
+
+    Some(crate::generated::events::RestaurantUpdated {
+        restaurant_id: reported.restaurant_id,
+        display_name,
+        contact,
+        website,
+        tags,
+        margin_rate,
+        cuisine_category,
+        uber_prices_opt_in,
+        address,
+        location,
+        timezone,
+        preparation_time_minutes,
+        opening_hours,
+    })
+}
+
 /// Fold a Restaurant stream (events in version order) into its current state. `None` ⇔ the stream has
 /// no `RestaurantRegistered` yet, i.e. the aggregate does not exist.
 pub fn fold(events: &[DomainEvent]) -> Option<RestaurantState> {
@@ -270,6 +352,48 @@ mod tests {
         assert_eq!(s.timezone.as_ref().unwrap().0, "Europe/Paris");
         assert_eq!(s.preparation_time_minutes, Some(20));
         assert_eq!(s.tags, vec![Tag("bistrot".into())]);
+    }
+
+    /// The property the whole inbound-event design rests on: a re-delivered UNCHANGED registration
+    /// produces no update, so the drain can record it IGNORED and write nothing.
+    #[test]
+    fn an_unchanged_registry_report_changes_nothing() {
+        let state = fold(&[registered()]).unwrap();
+        let DomainEvent::RestaurantRegistered(reported) = registered() else { unreachable!() };
+        assert_eq!(changes_from_registry(&state, &reported), None);
+    }
+
+    /// A real INSEE rename must reach the domain — the failure this whole change exists to fix was that
+    /// it silently did not.
+    #[test]
+    fn a_renamed_establishment_produces_an_update() {
+        let state = fold(&[registered()]).unwrap();
+        let DomainEvent::RestaurantRegistered(mut reported) = registered() else { unreachable!() };
+        reported.display_name = RestaurantDisplayName("Chez Marco et Fils".into());
+        let update = changes_from_registry(&state, &reported).expect("a rename is a change");
+        assert_eq!(update.display_name.unwrap().0, "Chez Marco et Fils");
+        // Only what moved is carried: everything else stays `None` so the fold leaves it alone.
+        assert_eq!(update.address, None);
+        assert_eq!(update.timezone, None);
+    }
+
+    /// The data-loss guard. A registry is a PARTIAL source: SIRENE has no idea about a website or tags,
+    /// so its `None` must never be read as "clear it". Without this, every weekly sweep would wipe
+    /// whatever the restaurant's own staff had entered.
+    #[test]
+    fn a_partial_report_never_clears_fields_the_source_knows_nothing_about() {
+        // Staff have since added a website and richer tags.
+        let mut state = fold(&[registered()]).unwrap();
+        state.website = Some(WebUrl("https://chez-marco.fr".into()));
+        state.tags = vec![Tag("bistrot".into()), Tag("terrasse".into())];
+
+        // SIRENE re-reports the same établissement, knowing nothing of either.
+        let DomainEvent::RestaurantRegistered(mut reported) = registered() else { unreachable!() };
+        reported.website = None;
+        reported.tags = vec![];
+
+        // Nothing moved -- the sweep is a no-op, and the staff's data survives.
+        assert_eq!(changes_from_registry(&state, &reported), None);
     }
 
     /// The comparison the SIRENE inbound path relies on: folded state equals the record it came from,

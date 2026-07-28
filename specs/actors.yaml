@@ -105,6 +105,19 @@ Restaurant:
       throws:
         - { $ref: 'errors.yaml#/RestaurantAccountNotFound' }
         - { $ref: 'errors.yaml#/RefAlreadyUsed' }
+    # INBOUND registry fact (ADR-20260728-011344 D4). Not a command: INSEE cannot be told "no" — there
+    # is nobody to reject to, which is why the old path's "rejections" were dropped to a log line. The
+    # ACL stages this UNCONDITIONALLY and never branches; the aggregate folds its own stream and decides
+    # which fact follows. Note the shape: an inbound event that may emit a DIFFERENT event than the one
+    # delivered — absent → RestaurantRegistered, changed → RestaurantUpdated, unchanged → no fact at all
+    # (the delivery is recorded IGNORED). Registry-inferred CLOSURE stays a command
+    # (MarkRestaurantClosed): absence is OUR inference, and it can be refused — partners are flagged for
+    # review, not closed.
+    - message: { $ref: 'events.yaml#/RestaurantRegistered' }
+      emits:
+        - { $ref: 'events.yaml#/RestaurantRegistered' }
+        - { $ref: 'events.yaml#/RestaurantUpdated' }
+      effect: "A registry (SIRENE) reported an établissement. The aggregate records it if unknown, emits RestaurantUpdated for whatever the report moves, or decides nothing changed and appends nothing."
     - message: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
       # ONE command, TWO possible facts — the aggregate folds its own stream and decides which:
       # never configured → Configured; a different label → Reconfigured (carrying the previous one);

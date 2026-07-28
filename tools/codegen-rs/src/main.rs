@@ -12691,6 +12691,14 @@ fn emit_behaviour_tests(model: &Model) -> String {
                         "    let result = crate::payments::record_inbound_payment_event(&bed.store, DomainEvent::{}(ev), &support::actor()).await;\n",
                         msg
                     ));
+                } else if msg == "RestaurantRegistered" {
+                    // The registry (SIRENE) inbound path (ADR-20260728-011344 D4). Unlike every other
+                    // inbound fact, this one is NOT recorded verbatim: the aggregate folds its own stream
+                    // and may emit a DIFFERENT event (RestaurantUpdated) or none at all. `record_fact`
+                    // would append the report as-is and silently assert the wrong thing.
+                    out.push_str(
+                        "    let result = crate::commands::record_inbound_restaurant_registration(&bed.store, DomainEvent::RestaurantRegistered(ev), &support::actor()).await;\n",
+                    );
                 } else {
                     let (agg, id) = bt_event_stream(&owners, &pool, &mut ctx, &msg, Some(&wdata), &format!("{}/when", key));
                     let (_, _, uuid_keyed) = bt_agg(agg).expect("aggregate meta");
