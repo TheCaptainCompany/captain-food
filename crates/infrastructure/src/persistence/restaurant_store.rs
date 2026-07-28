@@ -53,7 +53,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<RestaurantRow, DomainError> {
             .try_get::<Option<String>, _>("google_place_id")
             .map_err(db_err)?
             .map(GooglePlaceId),
-        slug: Slug(row.try_get("slug").map_err(db_err)?),
+        slug: row.try_get::<Option<String>, _>("slug").map_err(db_err)?.map(Slug),
         display_name: RestaurantDisplayName(row.try_get("display_name").map_err(db_err)?),
         description: row.try_get("description").map_err(db_err)?,
         tags: opt_json(row.try_get("tags").map_err(db_err)?),
@@ -134,7 +134,7 @@ pub async fn upsert(pool: &PgPool, row: &RestaurantRow) -> Result<(), DomainErro
         .bind(row.listing_status.to_ord())
         .bind(opt_json(row.external_identifiers.clone()))
         .bind(row.google_place_id.as_ref().map(|v| v.0.clone()))
-        .bind(row.slug.0.clone())
+        .bind(row.slug.as_ref().map(|s| s.0.clone()))
         .bind(row.display_name.0.clone())
         .bind(row.description.clone())
         .bind(opt_json(row.tags.clone()))

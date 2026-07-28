@@ -408,7 +408,7 @@ pub struct Restaurant {
     #[serde(default)]
     pub external_identifiers: Vec<ExternalIdentifier>,
     #[graphql(name = "slug")]
-    pub slug: Slug,
+    pub slug: Option<Slug>,
     #[graphql(name = "displayName")]
     pub display_name: RestaurantDisplayName,
     #[graphql(name = "description")]
@@ -1040,7 +1040,7 @@ impl From<RestaurantRow> for Restaurant {
                 .external_identifiers
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default(),
-            slug: row.slug.into(),
+            slug: row.slug.map(Into::into),
             display_name: row.display_name.into(),
             description: row.description,
             tags: row.tags.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),

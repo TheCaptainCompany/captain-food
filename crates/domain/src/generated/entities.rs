@@ -159,7 +159,7 @@ pub struct Restaurant {
     #[serde(default)]
     pub external_identifiers: Vec<ExternalIdentifier>,
     pub google_place_id: Option<GooglePlaceId>,
-    pub slug: Slug,
+    pub slug: Option<Slug>,
     pub display_name: RestaurantDisplayName,
     pub contact: Option<RestaurantContact>,
     pub website: Option<WebUrl>,

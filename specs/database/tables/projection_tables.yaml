@@ -33,6 +33,8 @@ Restaurant:
     - { $ref: 'events.yaml#/RestaurantListingStatusChanged' }
     - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkConfigured' }
     - { $ref: 'events.yaml#/RestaurantGoogleBusinessProfileOrderLinkVerified' }
+    - { $ref: 'events.yaml#/RestaurantSlugConfigured' }       # the storefront host, once the owner picks it
+    - { $ref: 'events.yaml#/RestaurantSlugReconfigured' }     # a rename moves it (the old label lives on in SlugAlias)
     - { $ref: 'events.yaml#/RestaurantAccountRegistered' }   # folds the account's default_currency onto its locations
   columns:
     restaurant_id:
@@ -63,8 +65,15 @@ Restaurant:
       type: { $ref: 'scalars.yaml#/GooglePlaceId' }
       nullable: true
     slug:
-      from: [{ $ref: 'events.yaml#/RestaurantRegistered/properties/slug' }]
+      # NULL until the owner configures one, then the storefront host (ADR-20260728-011344).
+      # `unique` + `nullable` is exactly right here: Postgres permits many NULLs in a unique index,
+      # so ~200k unconfigured open-data listings coexist while the DATABASE enforces uniqueness over
+      # precisely the configured set. Registration no longer feeds this column.
+      from:
+        - { $ref: 'events.yaml#/RestaurantSlugConfigured/properties/slug' }
+        - { $ref: 'events.yaml#/RestaurantSlugReconfigured/properties/slug' }
       unique: true
+      nullable: true
     display_name:
       from:
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/displayName' }

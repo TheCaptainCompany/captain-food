@@ -89,17 +89,27 @@ fn fx_restaurant_account_deleted() -> DomainEvent {
 
 /// tests.yaml#/fixtures/restaurantRegistered — events.yaml#/RestaurantRegistered
 fn fx_restaurant_registered() -> DomainEvent {
-    DomainEvent::RestaurantRegistered(evs::RestaurantRegistered { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: sc::RestaurantListingStatus::ACTIVE_PARTNER, r#ref: None, external_identifiers: Vec::new(), slug: sc::Slug("chez-marco".into()), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: Some(sc::MarginPercent(62.0)), cuisine_category: Some(sc::CuisineCategory::PIZZA), uber_prices_opt_in: Some(true), address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new() })
+    DomainEvent::RestaurantRegistered(evs::RestaurantRegistered { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: sc::RestaurantListingStatus::ACTIVE_PARTNER, r#ref: None, external_identifiers: Vec::new(), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: Some(sc::MarginPercent(62.0)), cuisine_category: Some(sc::CuisineCategory::PIZZA), uber_prices_opt_in: Some(true), address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new() })
+}
+
+/// tests.yaml#/fixtures/restaurantSlugConfigured — events.yaml#/RestaurantSlugConfigured
+fn fx_restaurant_slug_configured() -> DomainEvent {
+    DomainEvent::RestaurantSlugConfigured(evs::RestaurantSlugConfigured { restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("chez-marco".into()) })
+}
+
+/// tests.yaml#/fixtures/restaurantSlugReconfigured — events.yaml#/RestaurantSlugReconfigured
+fn fx_restaurant_slug_reconfigured() -> DomainEvent {
+    DomainEvent::RestaurantSlugReconfigured(evs::RestaurantSlugReconfigured { restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("chez-marco-tours".into()), previous_slug: sc::Slug("chez-marco".into()) })
 }
 
 /// tests.yaml#/fixtures/restaurantRegisteredTest — events.yaml#/RestaurantRegistered
 fn fx_restaurant_registered_test() -> DomainEvent {
-    DomainEvent::RestaurantRegistered(evs::RestaurantRegistered { mode: Some(sc::Mode::TEST), restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: sc::RestaurantListingStatus::ACTIVE_PARTNER, r#ref: None, external_identifiers: Vec::new(), slug: sc::Slug("chez-marco".into()), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new() })
+    DomainEvent::RestaurantRegistered(evs::RestaurantRegistered { mode: Some(sc::Mode::TEST), restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: sc::RestaurantListingStatus::ACTIVE_PARTNER, r#ref: None, external_identifiers: Vec::new(), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new() })
 }
 
 /// tests.yaml#/fixtures/restaurantSeeded — events.yaml#/RestaurantRegistered
 fn fx_restaurant_seeded() -> DomainEvent {
-    DomainEvent::RestaurantRegistered(evs::RestaurantRegistered { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-2")), account_id: None, listing_status: sc::RestaurantListingStatus::NON_PARTNER, r#ref: None, external_identifiers: vec![ent::ExternalIdentifier { key: sc::ExternalIdentifierKey("siret".into()), value: "12345678900012".to_string() }, ent::ExternalIdentifier { key: sc::ExternalIdentifierKey("google_place_id".into()), value: "ChIJxyz".to_string() }], slug: sc::Slug("le-saint-honore".into()), display_name: sc::RestaurantDisplayName("Le Saint-Honoré".into()), contact: None, website: Some(sc::WebUrl("https://le-saint-honore.fr".into())), tags: vec![sc::Tag("bistronomie".into()), sc::Tag("français".into())], margin_rate: None, cuisine_category: Some(sc::CuisineCategory::BISTRONOMIC), uber_prices_opt_in: None, address: ent::Address { line1: sc::AddressLine("5 Rue Colbert".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: Some(ent::GeoPoint { latitude: sc::Latitude(47.3941), longitude: sc::Longitude(0.6848) }), timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() })
+    DomainEvent::RestaurantRegistered(evs::RestaurantRegistered { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-2")), account_id: None, listing_status: sc::RestaurantListingStatus::NON_PARTNER, r#ref: None, external_identifiers: vec![ent::ExternalIdentifier { key: sc::ExternalIdentifierKey("siret".into()), value: "12345678900012".to_string() }, ent::ExternalIdentifier { key: sc::ExternalIdentifierKey("google_place_id".into()), value: "ChIJxyz".to_string() }], display_name: sc::RestaurantDisplayName("Le Saint-Honoré".into()), contact: None, website: Some(sc::WebUrl("https://le-saint-honore.fr".into())), tags: vec![sc::Tag("bistronomie".into()), sc::Tag("français".into())], margin_rate: None, cuisine_category: Some(sc::CuisineCategory::BISTRONOMIC), uber_prices_opt_in: None, address: ent::Address { line1: sc::AddressLine("5 Rue Colbert".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: Some(ent::GeoPoint { latitude: sc::Latitude(47.3941), longitude: sc::Longitude(0.6848) }), timezone: None, preparation_time_minutes: None, opening_hours: Vec::new() })
 }
 
 /// tests.yaml#/fixtures/restaurantUpdated — events.yaml#/RestaurantUpdated
@@ -727,14 +737,14 @@ async fn test_restaurant_account_deleted() {
 }
 
 /// tests.yaml#/tests/TestRestaurantLocationRegistered — "Registers a location under an existing account"
-/// rules: LocationRegistrationUnderAccountUniqueSlug
+/// rules: LocationRegistrationUnderAccount
 #[tokio::test]
 async fn test_restaurant_location_registered() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     bed.seed(&format!("RestaurantAccount-{}", support::uid("acct-1")), vec![fx_restaurant_account_registered()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::RegisterRestaurant { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: Some(sc::RestaurantListingStatus::ACTIVE_PARTNER), slug: sc::Slug("chez-marco".into()), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: Some(sc::MarginPercent(62.0)), cuisine_category: Some(sc::CuisineCategory::PIZZA), uber_prices_opt_in: Some(true), address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new(), external_identifiers: Vec::new(), r#ref: None };
+    let cmd = cmds::RegisterRestaurant { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-1"))), listing_status: Some(sc::RestaurantListingStatus::ACTIVE_PARTNER), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: Some(sc::MarginPercent(62.0)), cuisine_category: Some(sc::CuisineCategory::PIZZA), uber_prices_opt_in: Some(true), address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: Some(sc::TimeZone("Europe/Paris".into())), preparation_time_minutes: None, opening_hours: Vec::new(), external_identifiers: Vec::new(), r#ref: None };
     let result = crate::commands::register_restaurant(&bed.store, &bed.restaurants, cmd, &support::actor()).await;
     let _ = result.expect("TestRestaurantLocationRegistered: the spec expects acceptance");
     bed.assert_appended("TestRestaurantLocationRegistered", &before, &[
@@ -742,27 +752,103 @@ async fn test_restaurant_location_registered() {
     ]);
 }
 
-/// tests.yaml#/tests/TestRestaurantRegisterIsRejected — "Rejects registering a location when the account is missing, the slug is taken, or the external ref is already used"
-/// rules: LocationRegistrationUnderAccountUniqueSlug
+/// tests.yaml#/tests/TestRestaurantRegisterIsRejected — "Rejects registering a location when the account is missing or the external ref is already used"
+/// rules: LocationRegistrationUnderAccount
 #[tokio::test]
 async fn test_restaurant_register_is_rejected() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::RegisterRestaurant { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-missing"))), listing_status: None, slug: sc::Slug("chez-marco".into()), display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new(), external_identifiers: Vec::new(), r#ref: None };
+    let cmd = cmds::RegisterRestaurant { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-1")), account_id: Some(sc::RestaurantAccountId(support::uid("acct-missing"))), listing_status: None, display_name: sc::RestaurantDisplayName("Chez Marco".into()), contact: None, website: None, tags: Vec::new(), margin_rate: None, cuisine_category: None, uber_prices_opt_in: None, address: ent::Address { line1: sc::AddressLine("1 Rue Nationale".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: None, timezone: None, preparation_time_minutes: None, opening_hours: Vec::new(), external_identifiers: Vec::new(), r#ref: None };
     let result = crate::commands::register_restaurant(&bed.store, &bed.restaurants, cmd, &support::actor()).await;
     let err = result.expect_err("TestRestaurantRegisterIsRejected: the spec expects a typed rejection");
-    support::assert_thrown("TestRestaurantRegisterIsRejected", &err, &["RestaurantAccountNotFound", "SlugAlreadyTaken", "RefAlreadyUsed"]);
+    support::assert_thrown("TestRestaurantRegisterIsRejected", &err, &["RestaurantAccountNotFound", "RefAlreadyUsed"]);
     bed.assert_appended("TestRestaurantRegisterIsRejected", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestRestaurantActivated — "Activates a registered restaurant"
+/// tests.yaml#/tests/TestStorefrontSlugConfigured — "The owner chooses the storefront address for the first time"
+/// rules: StorefrontSlugChosenByOwner
+#[tokio::test]
+async fn test_storefront_slug_configured() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfigureRestaurantSlug { restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("chez-marco".into()) };
+    let result = crate::commands::configure_restaurant_slug(&bed.store, &bed.slugs, cmd, &support::actor()).await;
+    let _ = result.expect("TestStorefrontSlugConfigured: the spec expects acceptance");
+    bed.assert_appended("TestStorefrontSlugConfigured", &before, &[
+        (format!("Restaurant-{}", support::uid("resto-1")), fx_restaurant_slug_configured()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestStorefrontSlugReconfigured — "Renaming the storefront carries the previous address so it can keep resolving"
+/// rules: StorefrontSlugRenameKeepsThePreviousAddress
+#[tokio::test]
+async fn test_storefront_slug_reconfigured() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_slug_configured()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfigureRestaurantSlug { restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("chez-marco-tours".into()) };
+    let result = crate::commands::configure_restaurant_slug(&bed.store, &bed.slugs, cmd, &support::actor()).await;
+    let _ = result.expect("TestStorefrontSlugReconfigured: the spec expects acceptance");
+    bed.assert_appended("TestStorefrontSlugReconfigured", &before, &[
+        (format!("Restaurant-{}", support::uid("resto-1")), fx_restaurant_slug_reconfigured()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestStorefrontSlugUnchangedIsANoOp — "Re-submitting the current storefront address emits nothing"
+/// rules: StorefrontSlugChosenByOwner
+#[tokio::test]
+async fn test_storefront_slug_unchanged_is_a_no_op() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_slug_configured()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfigureRestaurantSlug { restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("chez-marco".into()) };
+    let result = crate::commands::configure_restaurant_slug(&bed.store, &bed.slugs, cmd, &support::actor()).await;
+    let _ = result.expect("TestStorefrontSlugUnchangedIsANoOp: the spec expects acceptance");
+    bed.assert_appended("TestStorefrontSlugUnchangedIsANoOp", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestStorefrontSlugTakenIsRejected — "Rejects a storefront address held by another restaurant, or released by one"
+/// rules: StorefrontSlugUniqueAndNeverReused
+#[tokio::test]
+async fn test_storefront_slug_taken_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfigureRestaurantSlug { restaurant_id: sc::RestaurantId(support::uid("resto-1")), slug: sc::Slug("already-held".into()) };
+    let result = crate::commands::configure_restaurant_slug(&bed.store, &bed.slugs, cmd, &support::actor()).await;
+    let err = result.expect_err("TestStorefrontSlugTakenIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestStorefrontSlugTakenIsRejected", &err, &["SlugAlreadyTaken", "RestaurantNotFound"]);
+    bed.assert_appended("TestStorefrontSlugTakenIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestActivationWithoutSlugIsRejected — "Rejects going live before a storefront address is chosen"
+/// rules: ActivationRequiresStorefrontSlug
+#[tokio::test]
+async fn test_activation_without_slug_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ActivateRestaurant { restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: None };
+    let result = crate::commands::activate_restaurant(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestActivationWithoutSlugIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestActivationWithoutSlugIsRejected", &err, &["SlugNotConfigured"]);
+    bed.assert_appended("TestActivationWithoutSlugIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRestaurantActivated — "Activates a registered restaurant that has a storefront address"
 /// rules: RestaurantActivationVisibility
 #[tokio::test]
 async fn test_restaurant_activated() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
-    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered()]).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_slug_configured()]).await;
     let before = bed.snapshot();
     let cmd = cmds::ActivateRestaurant { restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: None };
     let result = crate::commands::activate_restaurant(&bed.store, cmd, &support::actor()).await;
@@ -778,7 +864,7 @@ async fn test_restaurant_activated() {
 async fn test_restaurant_activate_again_is_no_op() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
-    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_activated()]).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_slug_configured(), fx_restaurant_activated()]).await;
     let before = bed.snapshot();
     let cmd = cmds::ActivateRestaurant { restaurant_id: sc::RestaurantId(support::uid("resto-1")), reason: None };
     let result = crate::commands::activate_restaurant(&bed.store, cmd, &support::actor()).await;
@@ -900,7 +986,7 @@ async fn test_restaurant_seeded_from_sync() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::RegisterRestaurant { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-2")), account_id: None, listing_status: Some(sc::RestaurantListingStatus::NON_PARTNER), slug: sc::Slug("le-saint-honore".into()), display_name: sc::RestaurantDisplayName("Le Saint-Honoré".into()), contact: None, website: Some(sc::WebUrl("https://le-saint-honore.fr".into())), tags: vec![sc::Tag("bistronomie".into()), sc::Tag("français".into())], margin_rate: None, cuisine_category: Some(sc::CuisineCategory::BISTRONOMIC), uber_prices_opt_in: None, address: ent::Address { line1: sc::AddressLine("5 Rue Colbert".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: Some(ent::GeoPoint { latitude: sc::Latitude(47.3941), longitude: sc::Longitude(0.6848) }), timezone: None, preparation_time_minutes: None, opening_hours: Vec::new(), external_identifiers: vec![ent::ExternalIdentifier { key: sc::ExternalIdentifierKey("siret".into()), value: "12345678900012".to_string() }, ent::ExternalIdentifier { key: sc::ExternalIdentifierKey("google_place_id".into()), value: "ChIJxyz".to_string() }], r#ref: None };
+    let cmd = cmds::RegisterRestaurant { mode: None, restaurant_id: sc::RestaurantId(support::uid("resto-2")), account_id: None, listing_status: Some(sc::RestaurantListingStatus::NON_PARTNER), display_name: sc::RestaurantDisplayName("Le Saint-Honoré".into()), contact: None, website: Some(sc::WebUrl("https://le-saint-honore.fr".into())), tags: vec![sc::Tag("bistronomie".into()), sc::Tag("français".into())], margin_rate: None, cuisine_category: Some(sc::CuisineCategory::BISTRONOMIC), uber_prices_opt_in: None, address: ent::Address { line1: sc::AddressLine("5 Rue Colbert".into()), line2: None, postal_code: sc::PostalCode("37000".into()), city: sc::CityName("Tours".into()), country: sc::CountryCode("FR".into()) }, location: Some(ent::GeoPoint { latitude: sc::Latitude(47.3941), longitude: sc::Longitude(0.6848) }), timezone: None, preparation_time_minutes: None, opening_hours: Vec::new(), external_identifiers: vec![ent::ExternalIdentifier { key: sc::ExternalIdentifierKey("siret".into()), value: "12345678900012".to_string() }, ent::ExternalIdentifier { key: sc::ExternalIdentifierKey("google_place_id".into()), value: "ChIJxyz".to_string() }], r#ref: None };
     let result = crate::commands::register_restaurant(&bed.store, &bed.restaurants, cmd, &support::actor()).await;
     let _ = result.expect("TestRestaurantSeededFromSync: the spec expects acceptance");
     bed.assert_appended("TestRestaurantSeededFromSync", &before, &[

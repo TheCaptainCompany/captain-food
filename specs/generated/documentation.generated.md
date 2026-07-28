@@ -457,7 +457,7 @@ A restaurant (public discovery + single-restaurant header). Navigates to its cat
 | <a id="type-restaurant--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ |
 | <a id="type-restaurant--orderable"></a>`orderable` | `boolean` | ✅ |
 | <a id="type-restaurant--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ✅ |
-| <a id="type-restaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |
+| <a id="type-restaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ⬜ |
 | <a id="type-restaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |
 | <a id="type-restaurant--description"></a>`description` | `string` | ⬜ |
 | <a id="type-restaurant--tags"></a>`tags` | [[🔤 `Tag`](#scalar-tag)] | ✅ |
@@ -514,8 +514,9 @@ _🧩 aggregate_ — A single restaurant location: profile, operational status (
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `RegisterRestaurant`](#command-registerrestaurant) | [⚡ `RestaurantRegistered`](#event-restaurantregistered) | [⛔ `RestaurantAccountNotFound`](#error-restaurantaccountnotfound), [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken), [⛔ `RefAlreadyUsed`](#error-refalreadyused) |
-| [📩 `ActivateRestaurant`](#command-activaterestaurant) | [⚡ `RestaurantActivated`](#event-restaurantactivated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotReadyForActivation`](#error-restaurantnotreadyforactivation) |
+| [📩 `RegisterRestaurant`](#command-registerrestaurant) | [⚡ `RestaurantRegistered`](#event-restaurantregistered) | [⛔ `RestaurantAccountNotFound`](#error-restaurantaccountnotfound), [⛔ `RefAlreadyUsed`](#error-refalreadyused) |
+| [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug) | [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured), [⚡ `RestaurantSlugReconfigured`](#event-restaurantslugreconfigured) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken) |
+| [📩 `ActivateRestaurant`](#command-activaterestaurant) | [⚡ `RestaurantActivated`](#event-restaurantactivated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotReadyForActivation`](#error-restaurantnotreadyforactivation), [⛔ `SlugNotConfigured`](#error-slugnotconfigured) |
 | [📩 `UpdateRestaurant`](#command-updaterestaurant) | [⚡ `RestaurantUpdated`](#event-restaurantupdated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `NoEditableFieldProvided`](#error-noeditablefieldprovided) |
 | [📩 `DeactivateRestaurant`](#command-deactivaterestaurant) | [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound) |
 | [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode) | [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotActive`](#error-restaurantnotactive), [⛔ `AcceptanceModeUnchanged`](#error-acceptancemodeunchanged) |
@@ -580,7 +581,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 #### 🗄️ View: `Restaurant`
 
 - **Source**: [🎭 `Restaurant`](#actor-restaurant) · 🛶 V0
-- **Fed by**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged), [⚡ `RestaurantRemoved`](#event-restaurantremoved), [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged), [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured), [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified), [⚡ `RestaurantAccountRegistered`](#event-restaurantaccountregistered)
+- **Fed by**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `RestaurantDeactivated`](#event-restaurantdeactivated), [⚡ `RestaurantAcceptanceModeChanged`](#event-restaurantacceptancemodechanged), [⚡ `RestaurantRemoved`](#event-restaurantremoved), [⚡ `RestaurantGoogleBusinessProfileUpdated`](#event-restaurantgooglebusinessprofileupdated), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantListingOptedOut`](#event-restaurantlistingoptedout), [⚡ `RestaurantMarkedClosed`](#event-restaurantmarkedclosed), [⚡ `RestaurantListingStatusChanged`](#event-restaurantlistingstatuschanged), [⚡ `RestaurantGoogleBusinessProfileOrderLinkConfigured`](#event-restaurantgooglebusinessprofileorderlinkconfigured), [⚡ `RestaurantGoogleBusinessProfileOrderLinkVerified`](#event-restaurantgooglebusinessprofileorderlinkverified), [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured), [⚡ `RestaurantSlugReconfigured`](#event-restaurantslugreconfigured), [⚡ `RestaurantAccountRegistered`](#event-restaurantaccountregistered)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -589,7 +590,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `listing_status` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | [⚡ `RestaurantRegistered`.`listingStatus`](#event-restaurantregistered--listingstatus), [⚡ `RestaurantListingStatusChanged`.`listingStatus`](#event-restaurantlistingstatuschanged--listingstatus) | index |  |
 | `external_identifiers` | `jsonb` | [⚡ `RestaurantRegistered`.`externalIdentifiers`](#event-restaurantregistered--externalidentifiers) | nullable | Source-agnostic [{key,value}] (siret/naf/google_place_id…); not unique. |
 | `google_place_id` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | [⚡ `RestaurantGoogleBusinessProfileUpdated`.`googlePlaceId`](#event-restaurantgooglebusinessprofileupdated--googleplaceid) | nullable |  |
-| `slug` | [🔤 `Slug`](#scalar-slug) _(derived)_ | [⚡ `RestaurantRegistered`.`slug`](#event-restaurantregistered--slug) | unique |  |
+| `slug` | [🔤 `Slug`](#scalar-slug) _(derived)_ | [⚡ `RestaurantSlugConfigured`.`slug`](#event-restaurantslugconfigured--slug), [⚡ `RestaurantSlugReconfigured`.`slug`](#event-restaurantslugreconfigured--slug) | unique, nullable |  |
 | `display_name` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) _(derived)_ | [⚡ `RestaurantRegistered`.`displayName`](#event-restaurantregistered--displayname), [⚡ `RestaurantUpdated`.`displayName`](#event-restaurantupdated--displayname) | — |  |
 | `description` | `text` | ⚠️ _(none)_ | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
 | `tags` | `jsonb` | [⚡ `RestaurantRegistered`.`tags`](#event-restaurantregistered--tags), [⚡ `RestaurantUpdated`.`tags`](#event-restaurantupdated--tags) | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |
@@ -632,7 +633,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(19)_
+### 📩 Commands _(20)_
 
 <a id="command-registerrestaurantaccount"></a>
 #### 📩 Command: `RegisterRestaurantAccount`
@@ -691,7 +692,7 @@ The single, generic way to register a restaurant LOCATION. Used by an owner/admi
 
 - **Dispatched by**: [✏️ `registerRestaurant`](#mutation-registerrestaurant) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
 - **Emits**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
-- **Throws**: [⛔ `RestaurantAccountNotFound`](#error-restaurantaccountnotfound), [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken), [⛔ `RefAlreadyUsed`](#error-refalreadyused)
+- **Throws**: [⛔ `RestaurantAccountNotFound`](#error-restaurantaccountnotfound), [⛔ `RefAlreadyUsed`](#error-refalreadyused)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -699,7 +700,6 @@ The single, generic way to register a restaurant LOCATION. Used by an owner/admi
 | <a id="command-registerrestaurant--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ | Client/ACL-generated id for the new location. |
 | <a id="command-registerrestaurant--accountid"></a>`accountId` | [🔤 `RestaurantAccountId`](#scalar-restaurantaccountid) | ⬜ | The owning account (must already exist) — omitted for a non-partner public listing. |
 | <a id="command-registerrestaurant--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ⬜ | Partnership funnel; defaults to NON_PARTNER when omitted (e.g. sync-seeded listing). |
-| <a id="command-registerrestaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 | <a id="command-registerrestaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="command-registerrestaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ | Location-specific contact; falls back to the account contact when absent. |
 | <a id="command-registerrestaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
@@ -715,6 +715,20 @@ The single, generic way to register a restaurant LOCATION. Used by an owner/admi
 | <a id="command-registerrestaurant--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ⬜ | Source-agnostic identifiers preserving original keys (siret/naf/google_place_id…). Not unique. |
 | <a id="command-registerrestaurant--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ | Set only when seeded from an external source (e.g. HubRise location). |
 
+<a id="command-configurerestaurantslug"></a>
+#### 📩 Command: `ConfigureRestaurantSlug`
+
+The owner chooses (or changes) the restaurant's STOREFRONT ADDRESS -- the {slug}.captain.food host (ADR-20260728-011344). A real command precisely because it CAN be refused: the label may already belong to another restaurant, and the person asking is a human who can pick again -- contrast the SIRENE registry feed, which states facts nobody can be told "no" about. Issued during onboarding after ownership is verified and before activation (a restaurant cannot be activated without a configured slug), and again later from the back office to rename. The aggregate decides which fact it is: first configuration emits RestaurantSlugConfigured, a change emits RestaurantSlugReconfigured carrying the previous label, and re-submitting the CURRENT label is an idempotent no-op (no event, no error).
+
+- **Dispatched by**: — · **handled by** [🎭 `Restaurant`](#actor-restaurant)
+- **Emits**: [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured), [⚡ `RestaurantSlugReconfigured`](#event-restaurantslugreconfigured)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-configurerestaurantslug--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-configurerestaurantslug--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | The requested storefront host label. Rejected with SlugAlreadyTaken if reserved by another restaurant -- including a label another restaurant has RELEASED by renaming, which stays reserved so its redirect cannot be hijacked. |
+
 <a id="command-activaterestaurant"></a>
 #### 📩 Command: `ActivateRestaurant`
 
@@ -722,7 +736,7 @@ Admin makes a restaurant visible and orderable by customers.
 
 - **Dispatched by**: [✏️ `activateRestaurant`](#mutation-activaterestaurant) · **handled by** [🎭 `Restaurant`](#actor-restaurant)
 - **Emits**: [⚡ `RestaurantActivated`](#event-restaurantactivated)
-- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotReadyForActivation`](#error-restaurantnotreadyforactivation)
+- **Throws**: [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotReadyForActivation`](#error-restaurantnotreadyforactivation), [⛔ `SlugNotConfigured`](#error-slugnotconfigured)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -942,7 +956,7 @@ Record that a prospect replied (CRM/admin or inbound), stopping the sequence.
 | <a id="command-recordprospectreply--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-recordprospectreply--note"></a>`note` | `string` | ⬜ |  |
 
-### ⚡ Events _(19)_
+### ⚡ Events _(21)_
 
 <a id="event-restaurantaccountregistered"></a>
 #### ⚡ Event: `RestaurantAccountRegistered`
@@ -1011,7 +1025,6 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 | <a id="event-restaurantregistered--listingstatus"></a>`listingStatus` | [🔤 `RestaurantListingStatus`](#scalar-restaurantlistingstatus) | ✅ |  |
 | <a id="event-restaurantregistered--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="event-restaurantregistered--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ⬜ |  |
-| <a id="event-restaurantregistered--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
 | <a id="event-restaurantregistered--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="event-restaurantregistered--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ |  |
 | <a id="event-restaurantregistered--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ |  |
@@ -1024,6 +1037,35 @@ A restaurant location has been registered. Covers every path: an owner/admin onb
 | <a id="event-restaurantregistered--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |  |
 | <a id="event-restaurantregistered--preparationtimeminutes"></a>`preparationTimeMinutes` | `integer` | ⬜ |  |
 | <a id="event-restaurantregistered--openinghours"></a>`openingHours` | [[📦 `OpeningHoursSlot`](#entity-openinghoursslot)] | ⬜ |  |
+
+<a id="event-restaurantslugconfigured"></a>
+#### ⚡ Event: `RestaurantSlugConfigured`
+
+The restaurant's STOREFRONT ADDRESS has been chosen for the first time — {slug}.captain.food now resolves to it (ADR-20260728-011344). Emitted from ConfigureRestaurantSlug during onboarding, after ownership is verified and before activation: a restaurant cannot be activated without one. The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at, ADR-0041), never payload.
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantslugconfigured--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantslugconfigured--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | The chosen storefront host label. Unique across all CONFIGURED restaurants. |
+
+<a id="event-restaurantslugreconfigured"></a>
+#### ⚡ Event: `RestaurantSlugReconfigured`
+
+The restaurant's storefront address has been CHANGED (ADR-20260728-011344). Distinct from RestaurantSlugConfigured because a rename carries an obligation the first configuration does not: the previous host is already on printed menus, QR codes, Google listings and inbound links, so it must keep resolving. `previousSlug` is business data — it feeds the slug-alias read model that serves the 301, and it keeps the old label RESERVED so a competitor cannot claim it and inherit the redirect.
+
+- **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantslugreconfigured--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantslugreconfigured--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | The new storefront host label. |
+| <a id="event-restaurantslugreconfigured--previousslug"></a>`previousSlug` | [🔤 `Slug`](#scalar-slug) | ✅ | The label being superseded — kept reserved, and 301-redirected to `slug`. |
 
 <a id="event-restaurantupdated"></a>
 #### ⚡ Event: `RestaurantUpdated`
@@ -1337,7 +1379,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ | HubRise location reference, when imported. |
 | <a id="entity-restaurant--externalidentifiers"></a>`externalIdentifiers` | [[📦 `ExternalIdentifier`](#entity-externalidentifier)] | ⬜ | Source-agnostic identifiers preserving original keys (siret/naf/google_place_id/hubrise_ref…). Not unique. |
 | <a id="entity-restaurant--googleplaceid"></a>`googlePlaceId` | [🔤 `GooglePlaceId`](#scalar-googleplaceid) | ⬜ | Google Place id, when known (enrichment / GBP). |
-| <a id="entity-restaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ |  |
+| <a id="entity-restaurant--slug"></a>`slug` | [🔤 `Slug`](#scalar-slug) | ✅ | The storefront host label ({slug}.captain.food) — NULL until the owner configures one (ADR-20260728-011344). An open-data listing has no storefront and therefore no slug; only a claimed restaurant that has been through onboarding does. Unique across the non-NULL set.  |
 | <a id="entity-restaurant--displayname"></a>`displayName` | [🔤 `RestaurantDisplayName`](#scalar-restaurantdisplayname) | ✅ |  |
 | <a id="entity-restaurant--contact"></a>`contact` | [📦 `RestaurantContact`](#entity-restaurantcontact) | ⬜ | Location-specific contact; falls back to the account contact when absent. |
 | <a id="entity-restaurant--website"></a>`website` | [🔤 `WebUrl`](#scalar-weburl) | ⬜ | Restaurant website (general restaurant info; any source may provide it). |
@@ -1385,12 +1427,13 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-cuisinecategory"></a>🔤 `CuisineCategory` | enum (FAST_FOOD \| PIZZA \| TRADITIONAL \| BISTRONOMIC \| FOOD_TRUCK) | A restaurant's SINGLE primary/representative cuisine bucket, used only to select ONE Uber Eats mark-up coefficient in View_UberEstimationPolicy (ADR-0024): FAST_FOOD 1.30, PIZZA 1.35, TRADITIONAL 1.40, BISTRONOMIC 1.45, FOOD_TRUCK 1.35. NOT for discovery — a restaurant may belong to several cuisines for browsing/filtering; that is the multi-valued `Restaurant.tags`. This is deliberately one value because the estimate needs a single coefficient.  |
 | <a id="scalar-restaurantlistkey"></a>🔤 `RestaurantListKey` | enum (ORDER_AGAIN \| RECOMMENDED \| TOP_DEALS \| GREEN_PACKAGING) | Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model resolves the actual member restaurants (editorial rules / customer history); the client just asks for a list by key.  |
 
-### ⛔ Errors _(13)_
+### ⛔ Errors _(14)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
 | <a id="error-restaurantaccountnotfound"></a>⛔ `RestaurantAccountNotFound` | No restaurant account with this id (e.g. registering a location under a missing account). | 🇬🇧 Restaurant account not found. | 🇫🇷 Compte restaurant introuvable. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `DeleteRestaurantAccount`](#command-deleterestaurantaccount), [📩 `RegisterRestaurant`](#command-registerrestaurant) |
-| <a id="error-slugalreadytaken"></a>⛔ `SlugAlreadyTaken` | Another restaurant already uses this slug. | 🇬🇧 The address '{slug}' is already taken. | 🇫🇷 L'adresse '{slug}' est déjà utilisée. | [📩 `RegisterRestaurant`](#command-registerrestaurant) |
+| <a id="error-slugalreadytaken"></a>⛔ `SlugAlreadyTaken` | Another restaurant already holds this slug. Includes a label a restaurant RELEASED by renaming: released labels stay reserved so their 301 redirect cannot be hijacked (ADR-20260728-011344).  | 🇬🇧 The address '{slug}' is already taken. | 🇫🇷 L'adresse '{slug}' est déjà utilisée. | [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug) |
+| <a id="error-slugnotconfigured"></a>⛔ `SlugNotConfigured` | The restaurant has no storefront address yet, so it cannot be activated — customers would have no host to reach it on (ADR-20260728-011344). Aggregate-local: the fold sees whether RestaurantSlugConfigured ever landed, so no read model is consulted.  | 🇬🇧 Choose your storefront address before going live. | 🇫🇷 Choisissez l'adresse de votre boutique avant la mise en ligne. | [📩 `ActivateRestaurant`](#command-activaterestaurant) |
 | <a id="error-refalreadyused"></a>⛔ `RefAlreadyUsed` | The external reference (idempotent import key) is already owned by another aggregate. | 🇬🇧 The reference '{ref}' is already in use. | 🇫🇷 La référence '{ref}' est déjà utilisée. | [📩 `RegisterRestaurantAccount`](#command-registerrestaurantaccount), [📩 `RegisterRestaurant`](#command-registerrestaurant) |
 | <a id="error-invalidcurrency"></a>⛔ `InvalidCurrency` | Currency is not a valid ISO 4217 code. | 🇬🇧 '{currency}' is not a valid currency. | 🇫🇷 '{currency}' n'est pas une devise valide. | [📩 `RegisterRestaurantAccount`](#command-registerrestaurantaccount) |
 | <a id="error-restaurantnotactive"></a>⛔ `RestaurantNotActive` | Operation requires an ACTIVE restaurant. | 🇬🇧 The restaurant '{restaurantName}' is not active. | 🇫🇷 Le restaurant '{restaurantName}' n'est pas actif. | [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode) |
@@ -1403,7 +1446,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="error-prospectcontactedtoorecently"></a>⛔ `ProspectContactedTooRecently` | A new contact is too soon after the previous one (anti-spam: ≥ 7 days apart). | 🇬🇧 This prospect was contacted too recently; wait before contacting again. | 🇫🇷 Ce prospect a été contacté trop récemment ; patientez avant de le recontacter. | [📩 `RecordProspectContact`](#command-recordprospectcontact) |
 | <a id="error-prospectnotfound"></a>⛔ `ProspectNotFound` | No prospect (contact history) exists for this restaurant. | 🇬🇧 Prospect not found. | 🇫🇷 Prospect introuvable. | [📩 `MarkProspectCold`](#command-markprospectcold), [📩 `RecordProspectReply`](#command-recordprospectreply) |
 
-### 📐 Business rules _(19)_
+### 📐 Business rules _(23)_
 
 <a id="rule-accountregistrationvalidcurrencyuniqueref"></a>
 #### 📐 Rule: `AccountRegistrationValidCurrencyUniqueRef`
@@ -1426,12 +1469,40 @@ _A restaurant account can be deleted._
 
 - **Verified by**: [🧪 `TestRestaurantAccountDeleted`](#test-testrestaurantaccountdeleted)
 
-<a id="rule-locationregistrationunderaccountuniqueslug"></a>
-#### 📐 Rule: `LocationRegistrationUnderAccountUniqueSlug`
+<a id="rule-locationregistrationunderaccount"></a>
+#### 📐 Rule: `LocationRegistrationUnderAccount`
 
-_A location is registered under an existing account with a unique slug and a not-already-used external ref._
+_A location is registered under an existing account with a not-already-used external ref._
 
 - **Verified by**: [🧪 `TestRestaurantLocationRegistered`](#test-testrestaurantlocationregistered), [🧪 `TestRestaurantRegisterIsRejected`](#test-testrestaurantregisterisrejected)
+
+<a id="rule-storefrontslugchosenbyowner"></a>
+#### 📐 Rule: `StorefrontSlugChosenByOwner`
+
+_The storefront address is chosen by the owner, never derived at registration; re-submitting the current one is a no-op._
+
+- **Verified by**: [🧪 `TestStorefrontSlugConfigured`](#test-teststorefrontslugconfigured), [🧪 `TestStorefrontSlugUnchangedIsANoOp`](#test-teststorefrontslugunchangedisanoop)
+
+<a id="rule-storefrontslugrenamekeepsthepreviousaddress"></a>
+#### 📐 Rule: `StorefrontSlugRenameKeepsThePreviousAddress`
+
+_Renaming a storefront records the previous address, so old links, menus and QR codes keep resolving to it._
+
+- **Verified by**: [🧪 `TestStorefrontSlugReconfigured`](#test-teststorefrontslugreconfigured)
+
+<a id="rule-storefrontsluguniqueandneverreused"></a>
+#### 📐 Rule: `StorefrontSlugUniqueAndNeverReused`
+
+_A storefront address belongs to at most one restaurant, and an address released by a rename is never handed to another._
+
+- **Verified by**: [🧪 `TestStorefrontSlugTakenIsRejected`](#test-teststorefrontslugtakenisrejected)
+
+<a id="rule-activationrequiresstorefrontslug"></a>
+#### 📐 Rule: `ActivationRequiresStorefrontSlug`
+
+_A restaurant cannot go live without a storefront address — there would be no host for customers to reach it on._
+
+- **Verified by**: [🧪 `TestActivationWithoutSlugIsRejected`](#test-testactivationwithoutslugisrejected)
 
 <a id="rule-restaurantactivationvisibility"></a>
 #### 📐 Rule: `RestaurantActivationVisibility`
@@ -1602,24 +1673,74 @@ _Registers a location under an existing account_
 - **Given**: [⚡ `RestaurantAccountRegistered`](#event-restaurantaccountregistered)
 - **When**: [📩 `RegisterRestaurant`](#command-registerrestaurant)
 - **Then**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
-- **Verifies**: [📐 `LocationRegistrationUnderAccountUniqueSlug`](#rule-locationregistrationunderaccountuniqueslug)
+- **Verifies**: [📐 `LocationRegistrationUnderAccount`](#rule-locationregistrationunderaccount)
 
 <a id="test-testrestaurantregisterisrejected"></a>
 #### 🧪 Test: `TestRestaurantRegisterIsRejected`
 
-_Rejects registering a location when the account is missing, the slug is taken, or the external ref is already used_
+_Rejects registering a location when the account is missing or the external ref is already used_
 
 - **Given**: _(none)_
 - **When**: [📩 `RegisterRestaurant`](#command-registerrestaurant)
-- **Thrown**: [⛔ `RestaurantAccountNotFound`](#error-restaurantaccountnotfound), [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken), [⛔ `RefAlreadyUsed`](#error-refalreadyused)
-- **Verifies**: [📐 `LocationRegistrationUnderAccountUniqueSlug`](#rule-locationregistrationunderaccountuniqueslug)
+- **Thrown**: [⛔ `RestaurantAccountNotFound`](#error-restaurantaccountnotfound), [⛔ `RefAlreadyUsed`](#error-refalreadyused)
+- **Verifies**: [📐 `LocationRegistrationUnderAccount`](#rule-locationregistrationunderaccount)
+
+<a id="test-teststorefrontslugconfigured"></a>
+#### 🧪 Test: `TestStorefrontSlugConfigured`
+
+_The owner chooses the storefront address for the first time_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug)
+- **Then**: [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured)
+- **Verifies**: [📐 `StorefrontSlugChosenByOwner`](#rule-storefrontslugchosenbyowner)
+
+<a id="test-teststorefrontslugreconfigured"></a>
+#### 🧪 Test: `TestStorefrontSlugReconfigured`
+
+_Renaming the storefront carries the previous address so it can keep resolving_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured)
+- **When**: [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug)
+- **Then**: [⚡ `RestaurantSlugReconfigured`](#event-restaurantslugreconfigured)
+- **Verifies**: [📐 `StorefrontSlugRenameKeepsThePreviousAddress`](#rule-storefrontslugrenamekeepsthepreviousaddress)
+
+<a id="test-teststorefrontslugunchangedisanoop"></a>
+#### 🧪 Test: `TestStorefrontSlugUnchangedIsANoOp`
+
+_Re-submitting the current storefront address emits nothing_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured)
+- **When**: [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `StorefrontSlugChosenByOwner`](#rule-storefrontslugchosenbyowner)
+
+<a id="test-teststorefrontslugtakenisrejected"></a>
+#### 🧪 Test: `TestStorefrontSlugTakenIsRejected`
+
+_Rejects a storefront address held by another restaurant, or released by one_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug)
+- **Thrown**: [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken), [⛔ `RestaurantNotFound`](#error-restaurantnotfound)
+- **Verifies**: [📐 `StorefrontSlugUniqueAndNeverReused`](#rule-storefrontsluguniqueandneverreused)
+
+<a id="test-testactivationwithoutslugisrejected"></a>
+#### 🧪 Test: `TestActivationWithoutSlugIsRejected`
+
+_Rejects going live before a storefront address is chosen_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `ActivateRestaurant`](#command-activaterestaurant)
+- **Thrown**: [⛔ `SlugNotConfigured`](#error-slugnotconfigured)
+- **Verifies**: [📐 `ActivationRequiresStorefrontSlug`](#rule-activationrequiresstorefrontslug)
 
 <a id="test-testrestaurantactivated"></a>
 #### 🧪 Test: `TestRestaurantActivated`
 
-_Activates a registered restaurant_
+_Activates a registered restaurant that has a storefront address_
 
-- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured)
 - **When**: [📩 `ActivateRestaurant`](#command-activaterestaurant)
 - **Then**: [⚡ `RestaurantActivated`](#event-restaurantactivated)
 - **Verifies**: [📐 `RestaurantActivationVisibility`](#rule-restaurantactivationvisibility)
@@ -1629,7 +1750,7 @@ _Activates a registered restaurant_
 
 _Re-activating an already-active restaurant is a no-op (idempotent)_
 
-- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated)
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured), [⚡ `RestaurantActivated`](#event-restaurantactivated)
 - **When**: [📩 `ActivateRestaurant`](#command-activaterestaurant)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `RestaurantActivationIdempotent`](#rule-restaurantactivationidempotent)
@@ -9606,7 +9727,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-conflict"></a>⛔ `Conflict` | Concurrent modification (optimistic-concurrency version clash); retry. | 🇬🇧 This item was modified meanwhile. Please retry. | 🇫🇷 Cet élément a été modifié entre-temps. Veuillez réessayer. | — |
 | <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path. | 🇬🇧 Too many requests. Please slow down. | 🇫🇷 Trop de requêtes. Veuillez patienter. | — |
 | <a id="error-internal"></a>⛔ `Internal` | Unexpected server error. | 🇬🇧 Something went wrong on our side. | 🇫🇷 Une erreur est survenue de notre côté. | — |
-| <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite) |
+| <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |

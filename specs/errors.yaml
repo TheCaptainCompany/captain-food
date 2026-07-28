@@ -87,12 +87,25 @@ RestaurantNotFound:
     fr: "Restaurant introuvable."
 
 SlugAlreadyTaken:
-  description: "Another restaurant already uses this slug."
+  description: >
+    Another restaurant already holds this slug. Includes a label a restaurant RELEASED by renaming:
+    released labels stay reserved so their 301 redirect cannot be hijacked (ADR-20260728-011344).
   context:
     slug: { $ref: 'scalars.yaml#/Slug' }
   messages:
     en: "The address '{slug}' is already taken."
     fr: "L'adresse '{slug}' est déjà utilisée."
+
+SlugNotConfigured:
+  description: >
+    The restaurant has no storefront address yet, so it cannot be activated — customers would have no
+    host to reach it on (ADR-20260728-011344). Aggregate-local: the fold sees whether
+    RestaurantSlugConfigured ever landed, so no read model is consulted.
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "Choose your storefront address before going live."
+    fr: "Choisissez l'adresse de votre boutique avant la mise en ligne."
 
 RefAlreadyUsed:
   description: "The external reference (idempotent import key) is already owned by another aggregate."

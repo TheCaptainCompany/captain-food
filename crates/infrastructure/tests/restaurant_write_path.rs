@@ -104,7 +104,6 @@ fn register_restaurant_cmd(restaurant_id: uuid::Uuid) -> RegisterRestaurant {
         restaurant_id: RestaurantId(restaurant_id),
         account_id: None,
         listing_status: None, // → defaults to NON_PARTNER (sync-seeded listing path)
-        slug: Slug("chez-marco".into()),
         display_name: RestaurantDisplayName("Chez Marco".into()),
         contact: None,
         website: None,

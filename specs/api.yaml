@@ -65,7 +65,10 @@ types:
       listingStatus: { $ref: 'scalars.yaml#/RestaurantListingStatus' }
       orderable: { type: boolean }   # derived: ACTIVE_PARTNER + status ACTIVE + acceptance ≠ PAUSED
       externalIdentifiers: { $ref: 'entities.yaml#/ExternalIdentifier', array: true }
-      slug: { $ref: 'scalars.yaml#/Slug' }
+      # NULL for a listing with no storefront yet (ADR-20260728-011344): an open-data prospect has no
+      # {slug}.captain.food host, and a claimed restaurant only gets one once the owner chooses it
+      # during onboarding. Clients must therefore not assume a storefront link exists.
+      slug: { $ref: 'scalars.yaml#/Slug', nullable: true }
       displayName: { $ref: 'scalars.yaml#/RestaurantDisplayName' }
       description: { type: string, nullable: true }   # free text — no domain scalar (matches the view column)
       tags: { $ref: 'scalars.yaml#/Tag', array: true }

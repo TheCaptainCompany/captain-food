@@ -240,7 +240,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `Restaurant` · 🛶 V0 · source aggregate `Restaurant`
 
-- **Fed by**: `RestaurantRegistered`, `RestaurantUpdated`, `RestaurantActivated`, `RestaurantDeactivated`, `RestaurantAcceptanceModeChanged`, `RestaurantRemoved`, `RestaurantGoogleBusinessProfileUpdated`, `RestaurantListingClaimed`, `RestaurantListingOptedOut`, `RestaurantMarkedClosed`, `RestaurantListingStatusChanged`, `RestaurantGoogleBusinessProfileOrderLinkConfigured`, `RestaurantGoogleBusinessProfileOrderLinkVerified`, `RestaurantAccountRegistered`
+- **Fed by**: `RestaurantRegistered`, `RestaurantUpdated`, `RestaurantActivated`, `RestaurantDeactivated`, `RestaurantAcceptanceModeChanged`, `RestaurantRemoved`, `RestaurantGoogleBusinessProfileUpdated`, `RestaurantListingClaimed`, `RestaurantListingOptedOut`, `RestaurantMarkedClosed`, `RestaurantListingStatusChanged`, `RestaurantGoogleBusinessProfileOrderLinkConfigured`, `RestaurantGoogleBusinessProfileOrderLinkVerified`, `RestaurantSlugConfigured`, `RestaurantSlugReconfigured`, `RestaurantAccountRegistered`
 
 | Column | Type | SQL | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -249,7 +249,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `listing_status` | `RestaurantListingStatus` | `INTEGER` | index |  |
 | `external_identifiers` | `jsonb` | `JSONB` | nullable | Source-agnostic [{key,value}] (siret/naf/google_place_id…); not unique. |
 | `google_place_id` | `GooglePlaceId` | `TEXT` | nullable |  |
-| `slug` | `Slug` | `TEXT` | unique |  |
+| `slug` | `Slug` | `TEXT` | unique, nullable |  |
 | `display_name` | `RestaurantDisplayName` | `TEXT` | — |  |
 | `description` | `text` | `TEXT` | nullable | ⚠️ HOLE: no event carries a restaurant description — nothing populates this column yet. |
 | `tags` | `jsonb` | `JSONB` | nullable | Cuisine/attribute tags — general restaurant info (source-agnostic), not from the GBP event. |

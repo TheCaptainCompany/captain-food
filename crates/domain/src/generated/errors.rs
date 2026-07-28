@@ -73,12 +73,20 @@ pub const RESTAURANT_NOT_FOUND: ErrorDef = ErrorDef {
     message_fr: "Restaurant introuvable.",
 };
 
-/// Another restaurant already uses this slug.
+/// Another restaurant already holds this slug. Includes a label a restaurant RELEASED by renaming: released labels stay reserved so their 301 redirect cannot be hijacked (ADR-20260728-011344).
 /// Context: `slug`.
 pub const SLUG_ALREADY_TAKEN: ErrorDef = ErrorDef {
     code: "SlugAlreadyTaken",
     message_en: "The address '{slug}' is already taken.",
     message_fr: "L'adresse '{slug}' est déjà utilisée.",
+};
+
+/// The restaurant has no storefront address yet, so it cannot be activated — customers would have no host to reach it on (ADR-20260728-011344). Aggregate-local: the fold sees whether RestaurantSlugConfigured ever landed, so no read model is consulted.
+/// Context: `restaurantId`.
+pub const SLUG_NOT_CONFIGURED: ErrorDef = ErrorDef {
+    code: "SlugNotConfigured",
+    message_en: "Choose your storefront address before going live.",
+    message_fr: "Choisissez l'adresse de votre boutique avant la mise en ligne.",
 };
 
 /// The external reference (idempotent import key) is already owned by another aggregate.
@@ -757,6 +765,7 @@ pub const ERRORS: &[ErrorDef] = &[
     RESTAURANT_ACCOUNT_NOT_FOUND,
     RESTAURANT_NOT_FOUND,
     SLUG_ALREADY_TAKEN,
+    SLUG_NOT_CONFIGURED,
     REF_ALREADY_USED,
     INVALID_CURRENCY,
     RESTAURANT_NOT_ACTIVE,

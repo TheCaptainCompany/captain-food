@@ -97,6 +97,7 @@ pub struct TestBed {
     pub cart_pm: MemCartBindingState,
     pub dispatch_pm: MemDeliveryDispatchState,
     pub restaurants: SpecRestaurants,
+    pub slugs: SpecSlugReservations,
     pub catalogs: SpecCatalogs,
     pub carts: SpecCarts,
     pub customers: SpecCustomers,
@@ -421,7 +422,7 @@ fn restaurant_row_from_registered(
         listing_status: e.listing_status,
         external_identifiers: None,
         google_place_id: None,
-        slug: e.slug.clone(),
+        slug: None,   // no storefront address until the owner configures one
         display_name: e.display_name.clone(),
         description: None,
         tags: None,
@@ -513,6 +514,46 @@ fn offer_view(product_name: &str, offer: &domain::generated::entities::Offer) ->
 // Read-model doubles (Mutex<Vec/HashMap> rows, answering like the Pg adapters would)
 // ------------------------------------------------------------------------------------------------
 
+/// In-memory `SlugReservationRepository` (ADR-20260728-011344 D3).
+///
+/// Seeded with `already-held`, owned by a foreign restaurant: that is tests.yaml's "held by someone
+/// else" fixture, and it is what makes `TestStorefrontSlugTakenIsRejected` a real assertion rather
+/// than a tautology. Reservations are otherwise driven by the handler under test.
+pub struct SpecSlugReservations {
+    /// slug -> the restaurant holding it. A released label KEEPS its entry (never reusable).
+    held: std::sync::Mutex<std::collections::HashMap<String, RestaurantId>>,
+}
+
+impl Default for SpecSlugReservations {
+    fn default() -> Self {
+        let mut held = std::collections::HashMap::new();
+        held.insert("already-held".to_string(), RestaurantId(uuid::Uuid::from_u128(0xA11EAD)));
+        Self { held: std::sync::Mutex::new(held) }
+    }
+}
+
+#[async_trait]
+impl crate::queries::SlugReservationRepository for SpecSlugReservations {
+    async fn reserve(&self, slug: Slug, restaurant_id: RestaurantId) -> Result<bool, DomainError> {
+        let mut held = self.held.lock().unwrap();
+        match held.get(&slug.0) {
+            // Already ours: an idempotent replay, not a conflict.
+            Some(owner) if *owner == restaurant_id => Ok(true),
+            Some(_) => Ok(false),
+            None => {
+                held.insert(slug.0, restaurant_id);
+                Ok(true)
+            }
+        }
+    }
+    async fn release(&self, _slug: Slug, _restaurant_id: RestaurantId) -> Result<(), DomainError> {
+        // Deliberately a no-op on the entry: a released label stays reserved so its redirect cannot
+        // be hijacked. Only the "is this my current address" question moves, and that lives in the
+        // event log, not here.
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct SpecRestaurants {
     rows: Mutex<Vec<crate::queries::RestaurantRow>>,
@@ -541,7 +582,7 @@ impl RestaurantReadRepository for SpecRestaurants {
         Ok(self.rows.lock().unwrap().clone())
     }
     async fn by_slug(&self, slug: Slug) -> Result<Option<crate::queries::RestaurantRow>, DomainError> {
-        Ok(self.rows.lock().unwrap().iter().find(|r| r.slug == slug).cloned())
+        Ok(self.rows.lock().unwrap().iter().find(|r| r.slug.as_ref() == Some(&slug)).cloned())
     }
     async fn by_id(&self, id: RestaurantId) -> Result<Option<crate::queries::RestaurantRow>, DomainError> {
         Ok(self.rows.lock().unwrap().iter().find(|r| r.restaurant_id == id).cloned())

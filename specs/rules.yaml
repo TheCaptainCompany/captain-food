@@ -15,8 +15,17 @@ AccountDeletion:
   description: "A restaurant account can be deleted."
 
 # --- Restaurant ---
-LocationRegistrationUnderAccountUniqueSlug:
-  description: "A location is registered under an existing account with a unique slug and a not-already-used external ref."
+LocationRegistrationUnderAccount:
+  description: "A location is registered under an existing account with a not-already-used external ref."
+# --- Storefront address (ADR-20260728-011344) ---
+StorefrontSlugChosenByOwner:
+  description: "The storefront address is chosen by the owner, never derived at registration; re-submitting the current one is a no-op."
+StorefrontSlugRenameKeepsThePreviousAddress:
+  description: "Renaming a storefront records the previous address, so old links, menus and QR codes keep resolving to it."
+StorefrontSlugUniqueAndNeverReused:
+  description: "A storefront address belongs to at most one restaurant, and an address released by a rename is never handed to another."
+ActivationRequiresStorefrontSlug:
+  description: "A restaurant cannot go live without a storefront address — there would be no host for customers to reach it on."
 RestaurantActivationVisibility:
   description: "Activating a restaurant makes it visible/orderable; activation is rejected from an invalid state."
 RestaurantActivationIdempotent:

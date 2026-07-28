@@ -25,7 +25,8 @@ use domain::generated::commands::{
     ActivateRestaurant, AddCatalogCategory, AddOptionList, AddProduct, ChangeLanguage,
     ChangeOrderAcceptanceMode, ChangeRestaurantListingStatus, ClaimRestaurantListing,
     ConfigureGoogleBusinessProfileOrderLink, ConfirmEmailVerification, ConfirmPhoneChange,
-    CreateCatalog, DeactivateRestaurant, DeleteRestaurantAccount, ImportCatalog, MarkProspectCold,
+    ConfigureRestaurantSlug, CreateCatalog, DeactivateRestaurant, DeleteRestaurantAccount,
+    ImportCatalog, MarkProspectCold,
     MarkRestaurantAsFavorite, MarkRestaurantClosed, OptOutRestaurantListing, RecordProspectContact,
     RecordProspectReply, RegisterRestaurant, RegisterRestaurantAccount, RemoveCatalogCategory,
     RemoveCustomerAddress, RemoveOptionList, RemoveProduct, RemoveRestaurant,
@@ -48,8 +49,8 @@ use domain::generated::events::{
     RestaurantGoogleBusinessProfileOrderLinkConfigured,
     RestaurantGoogleBusinessProfileOrderLinkVerified, RestaurantGoogleBusinessProfileUpdated,
     RestaurantListingClaimed, RestaurantListingOptedOut, RestaurantListingStatusChanged,
-    RestaurantMarkedClosed, RestaurantRegistered, RestaurantRemoved, RestaurantUnfavorited,
-    RestaurantUpdated,
+    RestaurantMarkedClosed, RestaurantRegistered, RestaurantRemoved,
+    RestaurantSlugConfigured, RestaurantSlugReconfigured, RestaurantUnfavorited, RestaurantUpdated,
 };
 use domain::generated::scalars::{
     CatalogId, CurrencyCode, CustomerId, DialingCode, ExternalReference, NationalPhoneNumber,
@@ -66,6 +67,7 @@ use crate::ports::{
 };
 use crate::queries::{
     CustomerReadRepository, ProspectFilter, ProspectionReadRepository, RestaurantReadRepository,
+    SlugReservationRepository,
 };
 
 // --- Cart / Order / DeliveryJob / PlaceOrderProcess (checkout→order→delivery flow, ADR-0046 round 2) ---
@@ -316,12 +318,17 @@ pub async fn delete_restaurant_account(
 /// `Restaurant-<id>` stream (actors.yaml, Restaurant aggregate). `listingStatus` defaults to
 /// NON_PARTNER when omitted (e.g. a Sirene/Google sync-seeded listing), per the command spec.
 ///
-/// `restaurants` backs the `SlugAlreadyTaken` uniqueness check (the Restaurant projection is the only
-/// slug index we have). A row already owning the slug under the SAME restaurant id is the idempotent
-/// replay of this very registration and is not a conflict.
+/// No slug, and no slug check (ADR-20260728-011344): a registration does not carry a storefront
+/// address, so it cannot collide. Uniqueness moved to `configure_restaurant_slug`, arbitrated by a
+/// write-side reservation with a real `UNIQUE` constraint rather than by a read-model lookup — the old
+/// check queried the `Restaurant` projection with an unindexed `external_identifiers @> $1` scan, per
+/// call, and was eventually consistent besides.
+///
+/// `_restaurants` is retained for the still-open `RefAlreadyUsed` invariant below, which needs an
+/// external-reference lookup port.
 pub async fn register_restaurant(
     store: &dyn EventStore,
-    restaurants: &dyn RestaurantReadRepository,
+    _restaurants: &dyn RestaurantReadRepository,
     cmd: RegisterRestaurant,
     actor: &Actor,
 ) -> Result<(), DomainError> {
@@ -335,11 +342,6 @@ pub async fn register_restaurant(
     }
     // TODO(invariant): RefAlreadyUsed — reject when cmd.ref is already owned by another aggregate
     //                  (needs an external-reference read-model lookup port).
-    if let Some(existing) = restaurants.by_slug(cmd.slug.clone()).await? {
-        if existing.restaurant_id != cmd.restaurant_id {
-            return Err(reject("SlugAlreadyTaken", json!({ "slug": cmd.slug })));
-        }
-    }
     let stream_name = restaurant_stream(&cmd.restaurant_id);
     let event = DomainEvent::RestaurantRegistered(RestaurantRegistered {
         mode: cmd.mode,
@@ -348,7 +350,6 @@ pub async fn register_restaurant(
         listing_status: cmd.listing_status.unwrap_or(RestaurantListingStatus::NON_PARTNER),
         r#ref: cmd.r#ref,
         external_identifiers: cmd.external_identifiers,
-        slug: cmd.slug,
         display_name: cmd.display_name,
         contact: cmd.contact,
         website: cmd.website,
@@ -365,6 +366,59 @@ pub async fn register_restaurant(
     idempotent_on_existing(Repository::new(store).save(&stream_name, 0, &[event], actor).await)
 }
 
+/// Handle `commands.yaml#/ConfigureRestaurantSlug` → emit `events.yaml#/RestaurantSlugConfigured` on a
+/// first configuration, `events.yaml#/RestaurantSlugReconfigured` on a rename, or NOTHING when the
+/// requested label is already the current one (ADR-20260728-011344).
+///
+/// The aggregate decides which of the three it is, by folding its own stream. Note the shape: one
+/// command, two possible facts, and a legitimate no-fact outcome — that no-op is a real event-sourcing
+/// decision (`activate_restaurant` has the same shape), not an error to be swallowed.
+///
+/// Uniqueness is arbitrated by `slugs`, a write-side reservation with a real `UNIQUE` constraint —
+/// never by the `Restaurant` projection, which is eventually consistent and would let two concurrent
+/// claims both succeed. A label another restaurant RELEASED by renaming stays reserved, so its 301
+/// cannot be hijacked.
+///
+/// Ordering: reserve BEFORE appending. A reservation with no event is a harmless orphan the owner can
+/// re-drive by re-submitting; an event with no reservation would mean two restaurants believing they
+/// own one host, which is unrecoverable without operator surgery.
+pub async fn configure_restaurant_slug(
+    store: &dyn EventStore,
+    slugs: &dyn SlugReservationRepository,
+    cmd: ConfigureRestaurantSlug,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_restaurant(store, &cmd.restaurant_id).await?;
+
+    // Already our current address → nothing happened. No event, no error, no reservation churn.
+    if state.slug.as_ref() == Some(&cmd.slug) {
+        return Ok(());
+    }
+
+    if !slugs.reserve(cmd.slug.clone(), cmd.restaurant_id).await? {
+        return Err(reject("SlugAlreadyTaken", json!({ "slug": cmd.slug })));
+    }
+
+    let stream_name = restaurant_stream(&cmd.restaurant_id);
+    let event = match state.slug {
+        // A rename: carry the previous label so the alias read model can 301 from it, and release it
+        // (release keeps the row — released never means reusable).
+        Some(previous) => {
+            slugs.release(previous.clone(), cmd.restaurant_id).await?;
+            DomainEvent::RestaurantSlugReconfigured(RestaurantSlugReconfigured {
+                restaurant_id: cmd.restaurant_id,
+                slug: cmd.slug,
+                previous_slug: previous,
+            })
+        }
+        None => DomainEvent::RestaurantSlugConfigured(RestaurantSlugConfigured {
+            restaurant_id: cmd.restaurant_id,
+            slug: cmd.slug,
+        }),
+    };
+    Repository::new(store).save(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
 /// Handle `commands.yaml#/ActivateRestaurant` → emit `events.yaml#/RestaurantActivated`. Idempotent
 /// per actors.yaml: activating an already-ACTIVE restaurant is a no-op (no event, no error) — the
 /// command ensures the ACTIVE state, it is not a toggle.
@@ -374,6 +428,13 @@ pub async fn activate_restaurant(
     actor: &Actor,
 ) -> Result<(), DomainError> {
     let (state, version) = require_restaurant(store, &cmd.restaurant_id).await?;
+    // No storefront address = no host a customer could reach (ADR-20260728-011344). Checked BEFORE the
+    // already-ACTIVE short-circuit is irrelevant either way (an ACTIVE restaurant necessarily has one),
+    // but checked before the append so a DRAFT can never go live address-less. Aggregate-local: the
+    // answer is in the fold, so no read model is consulted and no race exists.
+    if state.slug.is_none() {
+        return Err(reject("SlugNotConfigured", json!({ "restaurantId": cmd.restaurant_id })));
+    }
     // TODO(invariant): RestaurantNotReadyForActivation — "at least one catalog with one orderable
     //                  offer" is a cross-aggregate (Catalog) check; needs a catalog read-model port.
     if state.status == RestaurantStatus::ACTIVE {
@@ -3470,7 +3531,6 @@ mod credit_checkout_tests {
                     listing_status: RestaurantListingStatus::ACTIVE_PARTNER,
                     r#ref: None,
                     external_identifiers: Vec::new(),
-                    slug: Slug("resto".into()),
                     display_name: RestaurantDisplayName("Resto".into()),
                     contact: None,
                     website: None,

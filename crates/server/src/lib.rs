@@ -106,7 +106,11 @@ pub fn wire() -> HealthDto {
 /// upserts the woven claim-lifecycle timeline into it, so the app must not serve without the column.
 /// `20260727000000` = the `customercreditbalance` projection table (#158, Part B of #207): the projection
 /// worker upserts the folded store-credit balance into it, so the app must not serve without the table.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260727000000;
+/// `20260728020000` = `Restaurant.slug` DROP NOT NULL (ADR-20260728-011344): `RestaurantRegistered` no
+/// longer carries a slug, so the projector writes NULL for every listing without a configured storefront
+/// — against the old NOT NULL column that fails on the first projected registration. This gate is what
+/// holds the new projector back until CI has applied the migration.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260728020000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see

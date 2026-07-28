@@ -112,8 +112,6 @@ pub struct RegisterRestaurantInput {
     /// Partnership funnel; defaults to NON_PARTNER when omitted (e.g. sync-seeded listing).
     #[graphql(name = "listingStatus")]
     pub listing_status: Option<RestaurantListingStatus>,
-    #[graphql(name = "slug")]
-    pub slug: Slug,
     #[graphql(name = "displayName")]
     pub display_name: RestaurantDisplayName,
     /// Location-specific contact; falls back to the account contact when absent.
