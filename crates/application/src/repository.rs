@@ -13,7 +13,7 @@ use domain::aggregate::Aggregate;
 use domain::generated::events::DomainEvent;
 use domain::shared::errors::DomainError;
 
-use crate::ports::{is_version_conflict, Actor, EventStore};
+use crate::ports::{Actor, EventStore};
 
 /// A write-side repository over the [`EventStore`] journal. Cheap to build per unit of work
 /// (`Repository::new(store)`) — it borrows the journal, adds no state.
@@ -68,18 +68,4 @@ impl<'a> Repository<'a> {
         self.journal.append(stream, expected_version, events, actor).await
     }
 
-    /// Birth a new aggregate stream (`expected_version = 0`), absorbing the optimistic-concurrency clash of
-    /// a REPLAYED creation command as success — the aggregate already exists under this client-generated id.
-    pub async fn create(
-        &self,
-        stream: &str,
-        events: &[DomainEvent],
-        actor: &Actor,
-    ) -> Result<(), DomainError> {
-        match self.journal.append(stream, 0, events, actor).await {
-            Ok(_) => Ok(()),
-            Err(e) if is_version_conflict(&e) => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
 }
