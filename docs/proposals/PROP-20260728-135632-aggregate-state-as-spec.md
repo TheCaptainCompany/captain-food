@@ -343,6 +343,11 @@ Order:
 > append and the journal completion commit in **ONE SQL transaction** — no window where events
 > landed but the journal reports otherwise. Today's code diverges on (2) resolver-side spawn and
 > (3) completion outside the append's transaction — that gap is #242's scope, not this proposal's.
+>
+> **Queue mechanism directed (2026-07-28, recorded on #242):** `command_journal` and
+> `inbound_events` share ONE auto-increment `position` (a common sequence), and a UNION view
+> (`pending_work`) over the two pending sets — ordered by that shared position — is what the worker
+> consumes, one row at a time into the application dispatch.
 
 ```mermaid
 sequenceDiagram
@@ -351,9 +356,9 @@ sequenceDiagram
     box GraphQL edge (infrastructure)
         participant GQL as Axum GraphQL edge<br/>(role gate + principal resolution)
     end
-    participant J as command_journal (queue + operationStatus source)
+    participant J as command_journal + inbound_events<br/>(shared position sequence, pending_work UNION view, operationStatus source)
     box workers (infrastructure)
-        participant W as Journal consumer worker<br/>(drains command_journal + inbound_events by position)
+        participant W as Journal consumer worker<br/>(consumes the pending_work view in position order)
     end
     box application core
         participant App as Application dispatch
@@ -366,10 +371,10 @@ sequenceDiagram
 
     C->>GQL: postMessage(orderId, authorRole: CUSTOMER, …)
     GQL->>GQL: verify JWT, resolve principal to domain identity (CustomerId)
-    GQL->>J: insert command RECEIVED (idempotent by messageId)
+    GQL->>J: insert command RECEIVED (idempotent by messageId, position from the shared sequence)
     GQL-->>C: ACCEPTED {messageId} — nothing more
     Note over C,J: client follows via operationStatus query or operationStatusChanged subscription
-    W->>J: claim next work by position (commands and inbound events interleaved)
+    W->>J: next pending_work row (UNION of both journals, ordered by shared position), claim on the source table
     W->>App: dispatch(cmd, actor{id: CustomerId, role: CUSTOMER})
     App->>Repo: rehydrate Conversation for orderId
     Repo->>ES: read stream(orderId)
@@ -391,7 +396,7 @@ sequenceDiagram
     J-->>C: operationStatusChanged: SUCCEEDED or REJECTED {errorCode}
 ```
 
-[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:eNqNVttu4zYQ_ZWBX6pgvUm7KPogFCkMRVjEaLLZOGkeukVBixOZXYnUklQuTf3vnRGpW-ICzYscmXM5Z84Z-mVRGImLFBYOv7WoCzxTorSi_qKB_kTrjW7rLdrwfyOsV4VqhPaQgXCQtc6bGi0UlULtw6mteYKPVjS7z78CyhIhUfreCudtW_jW4lE49jrhRzpOKVdPbT0L_3lrT04TayqEUniEd9BYpTmoAovOVK1XRsekqOXbVtectzB1LbT88y_TWk2hCeFtOZtp0ApOsfHCtw4cHSj6JhnLo7Ff0br_CeOOi61jkcJo1zI_IUeAIq1Q-m1D70DprWnpDT4Qlw62z9AYpw6h47ZE01Sq6DqnXBYPt7Nqmo7VyWGpXCN8sTsccI2N4Qh-UnFjnyF5tIqId0r-F-hVWXZyMPqBmAplRFla5IkF1CVq5hll1_jzyb2pJGG2pDtFY4Rih8VXeiGxoDrwpf3w_Q8_QjMSPQM_HwUIKRpPlQ93l2-4uasyZ143BIkk6Q1IU9MgItvTIuFj9v70lDSZ8hD8BTonSkyMlWjP5ZKtsTP2mlSZQna7ufl0kV8vu64__BRzUXCfglhR98-wvrtZBs0-4ETFQy9AyLVXnijvnXUuZ9nWKUF3aH0vH7jOs_z8t_yM5CmxboynDCydOnQ8i6cEWQqrLMuvbijiZTiz7_nWxu-ULqEeBHVJGcEQAMiWVD0YHWh6lXl08KDEGwORsUg0xr7-ItsJXdL8Xbt1hVUNfxNq3AVkRSVUDRqffOeXqQEgiXgdMOjoFIhOUZqGX6F4wB4tZyTNp4PYk6LmqRU0_RclUxj5pYnMpriPKSickrANUprZ7lmyeucSv2eQQREhhk9TUL7hEEFQPT3qXjUxcb55PyQOAGbB5KWU-ZVJVGY_G7_DAOA7B6_clDhiGJch3VF8Mn_dh4inLMe6Uxg8HXwpJoQEGe8nbfV0DkQwNuYjKVpruRinGzdVIK-DQlOXFSZXo4uWENvt0ByN7cWIEdywHRqLtEtl0ELkg6JJqr_3c_sjDfmOFeniWysqF8ocj8jglze1Os05etbyePR0nyAk7O6eGCoqzybphjHdMScsBlY3Hx7XUCS9446ctLqahPwDXOpCuXq-jQN37AdTNxUSydf5Os86x6K1xmZ0Z--nquhFPkS47nW8WZbU8ExoWDmMC0z9jfJwt3EPJ90GTiGOjqc4i5iYxJH_Bs2uLs_G_vsrbnNLqyc_IyCx-U-XOWzonvdWaMfz7DfCKzORyGkzQ7JF2k4ykG-sH6xxe3n--TZPgt2Wr7Q4XBzruAAP76V00h75-hDniyUsSEi0qiX9ZnpZUB919-tJ4r1oK7_Y7_8Ftp0hZg) —
+[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:eNqNVttu4zYQ_ZWBX6pgtUm7KPogFCkMRVjEaLLZOGkeusWCFscyu5KoklQuTf3vnRGpm-MC9YtsmTNz5sw5I70uci1xkcDC4l8t1jleKFEYUX2pgT6idbpuqw0a_7sRxqlcNaJ2kIKwkLbW6QoN5KXC2vlTG_0MH41odp9_BZQFQqTqrRHWmTZ3rcETf-ww4Uc6TimXz201C_95Y87OI6NLhEI4hHfQGFVzUAkGrS5bp3QdkmIt30Jdcd5cV5Wo5dc_dWtqCn0Hqt7olu7gI0G3vozdCYMSGm0VZ4WelhgaSq3q4uuTNt_g_vry0zU8KnyKQTdoBB9eO-FaC5YK5H2TzAVHoLH_k4YHBrsKIHNd25b59Tk8xnDTgtvhHBYDorZG-NpINIfUMCbRNKXKO9hUxOBxLMum6UYyOSyVbYTLd8cDbrHRHMFXgqDNC0RPRtHUrJL_1fGyKDot6fqRaPJlRFEY5HH7lgusmWSaDAN_OdvqUtIEDU1HkQYg32H-jW5IzKkOfGk_fP_Dj9CMLM-an88BhBSNo8rH0WVrBndTZKySNbVEenYapK6EqoN2pkX81_T9-TkJOuFRuCu0VhQYddO4lDH7aqfNLUk6gfR-fffpKruNO9Qffgq5KLhPQayo7QusHu5iL_hHnFhgwALUee2UI8p7W17KWbZVQq1bNK43A9xmaXb5W3ZB2pRYNdpRBti8QOURM9ZBS1ujq05ywSO9NSYlqEaawDJNs5s7Svo6pNn3I6m125FcoRo0d01FQVOPkMYE0C8SoAGX-smSosUbg1FZ0pU2h3-kO1EXDKzd2Nyohv_xNR588zU-u7lhjH6CyJtZb0kbbgdhP9jYm4fyER8Ha-EkJpxCVUC0dIx0lgcnNiWOFck2yeCXKK948DkJ6FXJBMYR0VBnQtgHQimckrCTEhr77kWyAeYu2TIJXlQ-hk9TULbmEEFUOLpUvfBC4mz9fkjs9TsLJjsmzL-Mgrj72XGnXQPfWTgwZGRpArQku4iTcGXiui-hn6IY607b4Onhaz4hxDthP4HV0zkQwb0xH1HeGsPFON34HPDkda2QKmSJ0c1oxBgC3K6bkxFeiBibGxZMY5DWrvROCHxQNAnp935ufyQ-36mSQGEkIV_mdOwMfnlTq9ORpWslT8e10CfwCbtnXwgVpWMT-d0_WVNnLAZWPx8eN1kgveOOnLa8mYT8A1zqStlqvtA9d-xFXTUlEsm32SpLO0ejMdqk9M6wn6qiF_kQ4Z9NwUoxAZ4JDUuLYQeqv1EeRxtWedQt8QTC6HiKs4iJSax4xEGzy-uLEX__zF_f02rKLqiRAP7TdQZres9wRtSW59lvjAMzkchpbUC0Qdpe0pOvjRusQSvk830WebvFB1ocnj2rsCCP761kAo98fYzzRQwLEhJte0nvbK8LwlF1b28St6It3WK__xeEjE-z) —
 regenerate this link (snippet in docs/claude/mermaid.md) whenever the fenced block above changes.
 
 ## 7. Mockups — the user-visible surface is a refusal
