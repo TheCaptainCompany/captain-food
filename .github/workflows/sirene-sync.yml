@@ -35,6 +35,13 @@ name: sirene-sync
 # `workflow_dispatch` is deliberately KEPT so a scoped debug run stays possible (e.g. one department via
 # SIRENE_DEPARTMENTS below) — pausing the schedule is not the same as removing the capability.
 #
+# It also carries the `mode: compact` run (issue #238, ADR-20260728-143000). Compaction reads payloads
+# already in the staging table and makes NO INSEE calls, so it is unaffected by the pause above — the
+# pause is about the sweep's write-path cost, and compaction is what makes national coverage affordable
+# in the first place. It needs only DATABASE_URL, never pings the worker, and is safe to re-run: it is
+# resumable by construction (`payload IS NOT NULL` is its own progress marker), so run it until it
+# reports nothing left to do.
+#
 # The on-app drain half is paused separately: `RUN_SIRENE_WORKER` now defaults to OFF
 # (crates/server/src/lib.rs). Both halves must be re-enabled together.
 #
@@ -44,7 +51,24 @@ name: sirene-sync
 on:
   # schedule:
   #   - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC — the ADR-0020 Sirene-sync cadence (PAUSED, see above)
-  workflow_dispatch: {} # manual runs for the first import / debugging
+  workflow_dispatch: # manual runs for the first import / debugging / compaction
+    inputs:
+      mode:
+        description: "sweep = fetch from INSEE into staging. compact = drop translated payloads already in staging (#238), no INSEE calls."
+        type: choice
+        required: true
+        default: sweep
+        options: [sweep, compact]
+      budget_minutes:
+        description: "Wall-clock the run may spend before stopping cleanly. Blank = the binary default (75 sweep / 60 compact). Both modes stop at a safe boundary and resume next run."
+        type: string
+        required: false
+        default: ""
+      departments:
+        description: "sweep only — comma-separated departments (e.g. 37 or 37,41). Honoured verbatim and IN ORDER, never reordered by staleness. Blank = stalest-first across all of France."
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -73,17 +97,40 @@ jobs:
         run: cargo build --release -p sirene_ingest
 
       - name: Run the SIRENE ingestion (--once)
+        if: inputs.mode != 'compact'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           INSEE_API_TOKEN: ${{ secrets.INSEE_API_TOKEN }}
           INTERNAL_TRIGGER_URL: ${{ secrets.INTERNAL_TRIGGER_URL }}
           INTERNAL_TRIGGER_TOKEN: ${{ secrets.INTERNAL_TRIGGER_TOKEN }}
-          # Uncomment to narrow a debug run to specific departments (comma-separated). An explicit
-          # list is honoured verbatim and in order — it is NOT reordered by staleness, so debugging and
-          # a deliberate single-market scope stay predictable.
-          # SIRENE_DEPARTMENTS: "37"
-          # Wall-clock the run may spend fetching before stopping cleanly and leaving the rest to the
-          # next run. Default 75. INSEE's ~30 req/min quota means a full France sweep is ~4h, so
-          # coverage is completed ACROSS runs, stalest department first — never in one job.
-          # SIRENE_BUDGET_MINUTES: "75"
+          # Both come from the workflow_dispatch inputs above, and BLANK is the normal case: the binary
+          # parses an unparsable/empty value as "not set" and falls back to its own default, so an
+          # untouched dispatch form behaves exactly like the schedule does.
+          #
+          # An explicit department list is honoured verbatim and IN ORDER — it is NOT reordered by
+          # staleness, so debugging and a deliberate single-market scope stay predictable. Left blank,
+          # the sweep goes stalest-first so successive runs converge on full coverage (#218); INSEE's
+          # ~30 req/min quota makes a full France sweep ~4h, so it is completed ACROSS runs, never in one.
+          SIRENE_DEPARTMENTS: ${{ inputs.departments }}
+          SIRENE_BUDGET_MINUTES: ${{ inputs.budget_minutes }}
         run: ./target/release/sirene_ingest --once
+
+      # Compaction (#231/#238): recompute each real payload_hash, then DROP the payload of every row the
+      # worker has already translated. No INSEE calls, so no token and no rate limit — the only input is
+      # what is already in the staging table.
+      #
+      # The hash is recomputed BEFORE the payload is dropped, and that order is the whole correctness
+      # argument: every pre-#231 row carries the `unhashed-pre-20260728` sentinel, so dropping payloads
+      # under it would make the next sweep mismatch on all 339k rows, re-pend every one and re-write all
+      # 655 MB — the exact opposite of the intent.
+      #
+      # Expect to run this SEVERAL times. It is budgeted and resumable; re-run until `compacted` is 0.
+      # Note the table will NOT shrink on disk from this alone: a plain VACUUM makes the space reusable
+      # (so full France now fits in what departments 1-37 already cost) but only a VACUUM FULL returns it
+      # to the OS — and that becomes affordable only AFTER this pass. See #238 for the full runbook.
+      - name: Compact the SIRENE mirror (--compact)
+        if: inputs.mode == 'compact'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SIRENE_BUDGET_MINUTES: ${{ inputs.budget_minutes }}
+        run: ./target/release/sirene_ingest --compact
