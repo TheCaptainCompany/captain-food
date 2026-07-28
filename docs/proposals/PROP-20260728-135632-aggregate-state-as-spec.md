@@ -312,15 +312,15 @@ sequenceDiagram
     participant ES as PgEventStore
 
     C->>GQL: postMessage(orderId, authorRole: CUSTOMER, …)
-    GQL->>GQL: verify JWT, resolve principal -> domain identity (CustomerId)
+    GQL->>GQL: verify JWT, resolve principal to domain identity (CustomerId)
     GQL->>J: journal command (acceptance-first, idempotency key)
     GQL->>App: dispatch(cmd, actor{id: CustomerId, role: CUSTOMER})
-    App->>Repo: require::<Conversation>(orderId)
+    App->>Repo: require Conversation state for orderId
     Repo->>ES: read stream(orderId)
     ES-->>Repo: events
-    Repo-->>App: fold via generated states.rs -> ConversationState{customerId, …}
-    App->>App: requires.acting[CUSTOMER]: actor.id == state.customerId ?
-    App->>App: requires.claims: cmd.authorRole == actor.role ?
+    Repo-->>App: fold via generated states.rs into ConversationState{customerId, …}
+    App->>App: requires.acting[CUSTOMER]: actor.id equals state.customerId ?
+    App->>App: requires.claims: cmd.authorRole equals actor.role ?
     alt not the participant / forged role
         App-->>GQL: NotAParticipant | RoleMismatch
         GQL-->>C: error (journal records the rejection)
