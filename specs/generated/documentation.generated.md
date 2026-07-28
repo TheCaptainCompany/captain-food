@@ -9786,7 +9786,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(5)_
+### 📡 Observability _(6)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -9945,6 +9945,35 @@ _criticality: **high**_
 - **Metrics**: `uber_direct_webhook_ingest_duration_ms` _(histogram)_, `inbound_drain_lag_ms` _(histogram)_ · **Business metrics**: `inbound_events_staged_total` _(counter)_, `inbound_events_delivered_total` _(counter)_, `webhook_duplicates_total` _(counter)_
 - **Status rules**: success ⇐ spans [`webhook.verify`, `external.persist`, `acl.translate`, `inbound.persist`, `inbound.drain.deliver`, `event.store.append`]
 - **SLOs**: p95 ≤ 1000ms · p99 ≤ 3000ms · error rate ≤ 1%
+
+<a id="obs-sirene-sync"></a>
+#### 📡 Contract: `sirene-sync`
+
+_criticality: **medium**_
+
+- **Workflow**: 
+- **Emits**: — · **Inbound**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `inbound.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `inbound_event_id` | `inbound.inbound_event_id` | ✅ | — |
+| `external_id` | `sirene.siret_and_hash` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `registry.stage` | `INTERNAL` | ✅ | — | `business.source`*, `business.staged`* |
+| `inbound.drain` | `INTERNAL` | ✅ | — | `business.event_type`*, `business.decision`* |
+| `event.store.append` | `INTERNAL` | ⬜ | — | `business.event_type`* |
+
+- **Metrics**: `sirene_sweep_duration_ms` _(histogram)_ · **Business metrics**: `sirene_records_created_total` _(counter)_, `sirene_records_updated_total` _(counter)_, `sirene_records_ignored_total` _(counter)_, `sirene_records_failed_total` _(counter)_, `event_store_version_conflicts_total` _(counter)_
+- **Status rules**: success ⇐ spans [`registry.stage`, `inbound.drain`]
+- **SLOs**: p95 ≤ 500ms · p99 ≤ 2000ms · error rate ≤ 1%
 
 <a id="sec-screens"></a>
 ## 📱 Front-office screens (SDUI)

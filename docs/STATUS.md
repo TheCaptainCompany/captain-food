@@ -3,6 +3,29 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — `idempotent_on_existing` is GONE, and `sirene-sync` has an observability contract
+> (ADR-20260728-011344, [#220](https://github.com/TheCaptainCompany/captain-food/issues/220); PR #229).**
+> The last of the six slices. All five remaining creation handlers
+> (`register_restaurant_account`, `register_restaurant`, `place_replacement_order`, the checkout
+> payment-intent, `create_catalog`, `verify_phone`) used to answer *"does this aggregate already
+> exist?"* by ATTEMPTING the append and reading the resulting `UNIQUE (stream_name, version)` violation
+> as success. Postgres writes the heap tuple and index entries **before** the constraint fires, so every
+> no-op left dead tuples in the largest table — and the caller could not tell a real creation from a
+> no-op, which is exactly how **`verify_phone` came to report `created: true` for customers who already
+> existed**, on a live identity flow. Replaced by `create_if_absent`, which asks before writing and
+> answers aggregate-agnostically (an empty stream is version 0 — "does this stream exist" is not a
+> domain question, so no fold is needed). A version conflict is no longer swallowed: reaching one now
+> means a genuine race, reported as `Created::No` and left visible. `Repository::create` deleted rather
+> than left as a trap. Two tests pin the two properties that were lost: the caller can tell creation
+> from no-op, and a no-op **appends nothing**. Plus the `sirene-sync` observability contract
+> (`specs/observability.yaml`) — the project's own rule is that every critical workflow has one, and
+> this one writes to the event store on a loop with nobody watching. Its four business counters
+> (created / updated / ignored / failed, plus `event_store_version_conflicts_total`) make *"did this
+> sweep do anything, and was it what we meant?"* answerable without reading logs. **#220 is complete in
+> code.** ⚠️ Note the standing caveat before resuming SIRENE: the staging SQL is still not exercised
+> locally or in CI (`DATABASE_URL`-gated tests skip in both), so the first sweep wants watching. Giving
+> CI a Postgres service would turn several existing DB tests from decorative into real.
+
 > ✅ **2026-07-28 — SIRENE is an INBOUND EVENT: the disk-IO write path is fixed end to end
 > (ADR-20260728-011344, [#220](https://github.com/TheCaptainCompany/captain-food/issues/220); PRs
 > #226/#227/#228).** The Supabase alert was a symptom of three defects, all now closed.

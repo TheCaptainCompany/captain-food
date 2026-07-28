@@ -823,3 +823,76 @@ reclamation-sla:
 
   latency_budget: { max_p95_ms: 600, max_p99_ms: 1500 }
   error_budget: { max_error_rate_pct: 2.0 }
+
+# =====================================================================
+# sirene-sync — the open-data registry ingestion (ADR-0045, converted to inbound events by
+# ADR-20260728-011344). CI ingest -> external_sirene_restaurants (payload_hash gates re-pending)
+#   -> ACL stages RestaurantRegistered -> inbound_events (RECEIVED)
+#   -> drain -> Restaurant aggregate DECIDES -> record | update | nothing
+#   -> DELIVERED | IGNORED | DUPLICATE
+#
+# Why this workflow needs a contract at all, despite being a background job with no customer waiting:
+# it writes to the event store on a loop with nobody watching, and its previous failure mode was
+# SILENT. A swallowed constraint violation looked identical to a successful registration, so a sweep
+# that did nothing 200,000 times reported the same number as one that registered 200,000 restaurants —
+# and the first notification of the resulting damage was an email from the database vendor. The
+# business metrics below exist to make "did this sweep do anything, and was it what we meant?"
+# answerable without reading logs.
+# =====================================================================
+sirene-sync:
+  feature: sirene-sync
+  criticality: medium   # no customer is waiting; but silent divergence of the prospection base is costly
+  workflow:
+    aggregate: { $ref: 'actors.yaml#/Restaurant' }
+    inbound:
+      - { $ref: 'events.yaml#/RestaurantRegistered' }
+
+  run_identity:
+    - { name: correlation_id, source: "inbound.correlation_id", required: true }   # UUIDv5(siret:payload_hash)
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: inbound_event_id, source: "inbound.inbound_event_id", required: true }   # -> domain_events.cause_id
+    - { name: external_id, source: "sirene.siret_and_hash", required: true }   # {siret}:{payload_hash} — stable across sweeps
+
+  spans:
+    - name: "registry.stage"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.source", type: string, required: true }        # 'sirene'
+        - { key: "business.staged", type: bool, required: true }          # false = already in the inbox
+    - name: "inbound.drain"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }    # RestaurantRegistered
+        # The whole point of the conversion: the AGGREGATE's verdict, not the adapter's guess.
+        - { key: "business.decision", type: string, required: true }      # recorded | updated | no_change | duplicate
+    - name: "event.store.append"
+      kind: INTERNAL
+      required: false   # deliberately optional: a no_change decision appends NOTHING, and that is success
+      attributes:
+        - { key: "business.event_type", type: string, required: true }    # RestaurantRegistered | RestaurantUpdated
+
+  metrics:
+    - { name: "sirene_sweep_duration_ms", type: histogram, attributes: ["phase"] }   # phase = ingest | drain
+  business_metrics:
+    # The four numbers that answer "what did this sweep DO?" — the split that did not exist before.
+    - { name: "sirene_records_created_total", type: counter, attributes: ["department"] }
+    - { name: "sirene_records_updated_total", type: counter, attributes: ["department"] }
+    - { name: "sirene_records_ignored_total", type: counter, attributes: ["department"] }   # steady state: nearly the whole mirror
+    - { name: "sirene_records_failed_total", type: counter, attributes: ["reason"] }
+    # A version conflict is never "nothing" — it is either a bulk-replay pathology or genuine
+    # contention on a hot aggregate. Counted, never swallowed (ADR-20260728-011344).
+    - { name: "event_store_version_conflicts_total", type: counter, attributes: ["stream_category"] }
+
+  status_rules:
+    success:
+      required_spans: ["registry.stage", "inbound.drain"]
+      conditions: ["inbound.drain.business.decision != 'failed'"]
+    technical_error:
+      any_span_errors: true
+
+  # A sweep is a background loop, not a request: the budget bounds one record's translation, not the
+  # whole France pass (which is INSEE-API-paced, see issue #218).
+  latency_budget: { max_p95_ms: 500, max_p99_ms: 2000 }
+  error_budget: { max_error_rate_pct: 1.0 }

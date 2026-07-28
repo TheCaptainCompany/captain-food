@@ -157,12 +157,45 @@ pub use crate::generated::handlers::{
     update_delivery_partner_status, update_delivery_status,
 };
 
-/// Absorb the optimistic-concurrency clash of a CREATION command (expected_version = 0) as success:
-/// the aggregate already exists under this client-generated id, so re-running the command is a no-op.
-fn idempotent_on_existing(result: Result<i64, DomainError>) -> Result<(), DomainError> {
-    match result {
-        Ok(_) => Ok(()),
-        Err(e) if is_version_conflict(&e) => Ok(()),
+/// Did a creation command actually create the aggregate, or was it already there?
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Created {
+    /// The stream was empty and the birth events were appended.
+    Yes,
+    /// The aggregate already existed under this id — nothing was written.
+    No,
+}
+
+/// Create an aggregate if its stream does not exist yet (ADR-20260728-011344).
+///
+/// This replaces `idempotent_on_existing`, which answered "does this already exist?" by ATTEMPTING the
+/// append and reading the resulting `UNIQUE (stream_name, version)` violation as success. That was
+/// wrong twice over. It was expensive — Postgres writes the heap tuple and index entries *before* the
+/// constraint fires, so every no-op left dead tuples in the largest table (a SIRENE sweep left ~200k
+/// per week, which is what put the database's disk-IO budget on the floor). And it was **silent**: the
+/// caller could not tell a real creation from a no-op, which is how `verify_phone` came to report
+/// `created: true` for customers who already existed.
+///
+/// Here the question is asked before anything is written, and answered aggregate-agnostically: an
+/// empty stream is version 0. No fold is needed — "does this stream exist" is not a domain question.
+///
+/// A version conflict is no longer swallowed. Reaching one now means a genuine race (someone created
+/// the same aggregate between our load and our append), so it is reported as [`Created::No`] — correct,
+/// because they created it and we did not — and left visible to the caller rather than disguised.
+async fn create_if_absent(
+    store: &dyn EventStore,
+    stream_name: &str,
+    events: &[DomainEvent],
+    actor: &Actor,
+) -> Result<Created, DomainError> {
+    let (_existing, version) = store.load(stream_name).await?;
+    if version > 0 {
+        return Ok(Created::No);
+    }
+    match Repository::new(store).save(stream_name, 0, events, actor).await {
+        Ok(_) => Ok(Created::Yes),
+        // Lost the race. The aggregate exists — just not because of us.
+        Err(e) if is_version_conflict(&e) => Ok(Created::No),
         Err(e) => Err(e),
     }
 }
@@ -268,7 +301,7 @@ pub async fn register_restaurant_account(
         default_tax_rate: cmd.default_tax_rate,
         timezone: cmd.timezone,
     });
-    idempotent_on_existing(Repository::new(store).save(&stream_name, 0, &[event], actor).await)
+    create_if_absent(store, &stream_name, &[event], actor).await.map(|_| ())
 }
 
 /// Handle `commands.yaml#/UpdateRestaurantAccount` → emit `events.yaml#/RestaurantAccountUpdated`
@@ -363,7 +396,7 @@ pub async fn register_restaurant(
         preparation_time_minutes: cmd.preparation_time_minutes,
         opening_hours: cmd.opening_hours,
     });
-    idempotent_on_existing(Repository::new(store).save(&stream_name, 0, &[event], actor).await)
+    create_if_absent(store, &stream_name, &[event], actor).await.map(|_| ())
 }
 
 /// Handle `commands.yaml#/ConfigureRestaurantSlug` → emit `events.yaml#/RestaurantSlugConfigured` on a
@@ -2230,7 +2263,7 @@ pub async fn place_replacement_order(
     });
     // Version-0 birth: a re-delivered claim (same deterministic orderId) clashes and is absorbed — one
     // replacement per resolved claim, never two.
-    idempotent_on_existing(Repository::new(store).save(&order_stream(&cmd.order_id), 0, &[event], actor).await)
+    create_if_absent(store, &order_stream(&cmd.order_id), &[event], actor).await.map(|_| ())
 }
 
 // ================================================================================================
@@ -2439,8 +2472,10 @@ pub async fn place_order(
         amount: buyer_total,
         checkout,
     });
-    Repository::new(store)
-        .create(&domain::payment::stream(&intent.payment_intent_id), &[event], actor)
+    // Create-if-absent rather than the birth-and-swallow `Repository::create`: a retried checkout for
+    // the same intent must not write a dead tuple into `domain_events` to discover it already exists
+    // (ADR-20260728-011344).
+    create_if_absent(store, &domain::payment::stream(&intent.payment_intent_id), &[event], actor)
         .await?;
     // Open the PM run: one `payment_process_manager` row keyed by cart, AWAITING_PAYMENT_RESULT until
     // the inbound Stripe outcome resolves it. `last_update_utc` is stamped server-side by the store
@@ -2652,7 +2687,7 @@ pub async fn create_catalog(
         restaurant_id: cmd.restaurant_id,
         name: cmd.name,
     });
-    idempotent_on_existing(Repository::new(store).save(&stream_name, 0, &[event], actor).await)
+    create_if_absent(store, &stream_name, &[event], actor).await.map(|_| ())
 }
 
 /// Handle `commands.yaml#/AddProduct` → emit `events.yaml#/ProductAdded`. Enforces `CatalogNotFound`,
@@ -3132,8 +3167,12 @@ pub async fn verify_phone(
         locale: cmd.locale,
         timezone: cmd.timezone,
     });
-    idempotent_on_existing(Repository::new(store).save(&stream_name, 0, &[event], actor).await)?;
-    Ok(VerifyPhoneOutcome { customer_id, created: true })
+    // `created` now reports what actually happened (ADR-20260728-011344). It used to be a hard-coded
+    // `true` sitting immediately after a swallowed version conflict, so a customer who already existed
+    // under this id was told they had just been created — a lie the caller had no way to detect, on a
+    // live identity flow rather than a batch job.
+    let created = create_if_absent(store, &stream_name, &[event], actor).await?;
+    Ok(VerifyPhoneOutcome { customer_id, created: created == Created::Yes })
 }
 
 /// Handle `commands.yaml#/RequestEmailVerification` — a pure EFFECT (emits nothing): reject an email
@@ -3682,5 +3721,65 @@ pub async fn record_inbound_restaurant_registration(
                 .await?;
             Ok(RecordOutcome::Updated)
         }
+    }
+}
+
+#[cfg(test)]
+mod create_if_absent_tests {
+    use super::*;
+    use crate::process_managers::test_support::MemStore;
+    use domain::generated::events::CustomerRegistered;
+    use domain::generated::scalars::{CustomerId, PhoneNumber};
+
+    fn actor() -> Actor {
+        Actor {
+            user_id: uuid::Uuid::nil(),
+            user_type: 0,
+            correlation_id: uuid::Uuid::nil(),
+            cause_id: None,
+        }
+    }
+
+    fn birth() -> DomainEvent {
+        DomainEvent::CustomerRegistered(CustomerRegistered {
+            mode: None,
+            customer_id: CustomerId(uuid::Uuid::nil()),
+            auth_ref: None,
+            phone: PhoneNumber("+33600000000".into()),
+            display_name: None,
+            email: None,
+            locale: None,
+            timezone: None,
+        })
+    }
+
+    /// The distinction the old `idempotent_on_existing` destroyed: a caller can now tell a real
+    /// creation from a no-op. `verify_phone` reported `created: true` for existing customers precisely
+    /// because this answer did not exist.
+    #[tokio::test]
+    async fn reports_whether_it_actually_created() {
+        let store = MemStore::default();
+        assert_eq!(
+            create_if_absent(&store, "Customer-1", &[birth()], &actor()).await.unwrap(),
+            Created::Yes
+        );
+        assert_eq!(
+            create_if_absent(&store, "Customer-1", &[birth()], &actor()).await.unwrap(),
+            Created::No,
+            "a second call must not claim to have created anything"
+        );
+    }
+
+    /// And it must not WRITE to find that out. The old path attempted the append and read the
+    /// constraint violation — Postgres wrote the heap tuple before rejecting it, which is what left
+    /// ~200k dead tuples in `domain_events` per SIRENE sweep.
+    #[tokio::test]
+    async fn a_no_op_appends_nothing() {
+        let store = MemStore::default();
+        create_if_absent(&store, "Customer-1", &[birth()], &actor()).await.unwrap();
+        create_if_absent(&store, "Customer-1", &[birth()], &actor()).await.unwrap();
+        let (events, version) = store.load("Customer-1").await.unwrap();
+        assert_eq!(events.len(), 1, "the birth event, exactly once");
+        assert_eq!(version, 1);
     }
 }
