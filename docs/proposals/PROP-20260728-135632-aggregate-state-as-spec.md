@@ -333,22 +333,45 @@ Order:
 
 ## 6. Sequence diagram — PostMessage under the generated check
 
+> **Amended 2026-07-28 (product-owner corrections, third round — the execution-model gap is tracked
+> as [#242 "Write path: command_journal becomes the consumed queue — a worker executes commands in position order, and journal completion commits in the SAME transaction as the event append"](https://github.com/TheCaptainCompany/captain-food/issues/242)):**
+> (1) completing the `command_journal` row after processing (SUCCEEDED/REJECTED/FAILED) is shown —
+> it is the **application dispatch's responsibility**; (2) GraphQL journals the command and returns
+> **ACCEPTED, nothing more** — it never calls the dispatch; a **worker** consumes `command_journal`
+> and `inbound_events` **prioritized by position** and calls the dispatch; the client follows via
+> the `operationStatus` query or the `operationStatusChanged` subscription; (3) the `domain_events`
+> append and the journal completion commit in **ONE SQL transaction** — no window where events
+> landed but the journal reports otherwise. Today's code diverges on (2) resolver-side spawn and
+> (3) completion outside the append's transaction — that gap is #242's scope, not this proposal's.
+
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Customer client
-    participant GQL as Axum GraphQL edge<br/>(role gate + principal resolution)
-    participant J as command_journal
-    participant App as Application dispatch
-    participant Repo as Repository (write side)
-    participant Agg as Conversation aggregate<br/>(generated apply/fold + requires check + decide — pure)
-    participant ES as PgEventStore
+    box GraphQL edge (infrastructure)
+        participant GQL as Axum GraphQL edge<br/>(role gate + principal resolution)
+    end
+    participant J as command_journal (queue + operationStatus source)
+    box workers (infrastructure)
+        participant W as Journal consumer worker<br/>(drains command_journal + inbound_events by position)
+    end
+    box application core
+        participant App as Application dispatch
+        participant Repo as Repository (write side)
+        participant Agg as Conversation aggregate<br/>(generated apply/fold + requires check + decide — pure)
+    end
+    box infrastructure adapters
+        participant ES as PgEventStore (to domain_events)
+    end
 
     C->>GQL: postMessage(orderId, authorRole: CUSTOMER, …)
     GQL->>GQL: verify JWT, resolve principal to domain identity (CustomerId)
-    GQL->>J: journal command (acceptance-first, idempotency key)
-    GQL->>App: dispatch(cmd, actor{id: CustomerId, role: CUSTOMER})
-    App->>Repo: require Conversation state for orderId
+    GQL->>J: insert command RECEIVED (idempotent by messageId)
+    GQL-->>C: ACCEPTED {messageId} — nothing more
+    Note over C,J: client follows via operationStatus query or operationStatusChanged subscription
+    W->>J: claim next work by position (commands and inbound events interleaved)
+    W->>App: dispatch(cmd, actor{id: CustomerId, role: CUSTOMER})
+    App->>Repo: rehydrate Conversation for orderId
     Repo->>ES: read stream(orderId)
     ES-->>Repo: events
     Repo->>Agg: fold(events) — the actor's generated apply(state, event), event by event
@@ -359,17 +382,16 @@ sequenceDiagram
     Agg->>Agg: claims: cmd.authorRole equals actor.role ?
     alt not the participant / forged role
         Agg-->>App: NotAParticipant | RoleMismatch
-        App-->>GQL: rejection
-        GQL-->>C: error (journal records the rejection)
+        App->>J: complete REJECTED {errorCode} — the dispatch completes the journal, no events
     else authorized
-        Agg-->>App: decide (pure): MessagePosted | domain error
-        App->>Repo: save(events, expected version)
-        Repo->>ES: append
-        GQL-->>C: MessagePosted payload
+        Agg-->>App: decide (pure): MessagePosted
+        App->>Repo: save(events) AND complete journal SUCCEEDED — ONE SQL transaction
+        Repo->>ES: append (behind the port) — UNIQUE(stream, version)
     end
+    J-->>C: operationStatusChanged: SUCCEEDED or REJECTED {errorCode}
 ```
 
-[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:eNptVd9v0zAQ_ldOfSEV3QYT4iFCQ1Wppk0MxjrEA0PIs6-pt8Q2tlMWuv7vnGOnadf2JU1z3919P5yuBlwLHOQwcPinRsXxk2SFZdWdAvqw2mtVV_do471h1ksuDVMeJsAcTGrndYUWeClR-f2q82-fQ934qa7g3DKzoHsUBX64tydnmdUlQsE8wmswVqoAKsGi02XtpVbD_YaXoR3XVcWU-P2ga6tYuV81NqYda0wpOQutQEhnmOeL_eIbNDpUh6uTXtsGsr9W0lZOCjyww7goWvJaLdG62J4VhcVAJTIrUKGlOwGMdmhO5roURNKSypL4AV8gf6QfBHKaAXf16Zu378DU9tC86SyMuy6mS9J4RgvinYpVk6OzM5I4B9rcX6FzrMBMW4H2QoyCfQttb0jkHCbfZ7dfr6Y3o3bW6fs0hsBdC-Ii5w1c_rgdRQuWuGWK1yB0xaQC2ld56Umkzv0LsdPtModkTGcUZIxzNJ5RwI7m0jo_Cm0qoz1lroFHbHY6kG_5xrCMV4ELJ94rKXLop9KeO9zWqQnBqUmwM-8U3zXL-ZC5ubaQtIq4gCDgdBZgTFAZXapOz9R8OjvaNMdgiNsBUzZyCG5n8eGw89YvMJJ45eBFOrJ2n1FsN0xXuG_il8SpKPq522RmAbviW6JEg9dba3WSWlw0Ig6OEmS8tjYMC-36AxcFbKksyL4Ss-s-XyNI67Zshv16CdGT26TdWORaCdmKn_QgtFTFz867X3nsdywFEIyVLo457pnBx71ZvGSycnStxHGf9q5BbNi-ZBKUlR6U9q0Z2yfsJIShCCtTcSzdEr3V7ov24-styDOEUVfSVf1bpdOuO1IWH5AH0v3jEHB6PKHwWEsBzLqjEiSywrWrbXBJXSwdptMs_6E4vGB6lWTtSySH5FYwjng9d6e3nbq7bZcqx5aYUksZfDK0AiF3k_HimFB8UYlD7HbHG9aUmqVCQgxGMCBPaSNBfz6rAZGu2r8hgXNWl36wXv8HI1A1WA) —
+[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:eNqNVttu4zYQ_ZWBX6pgvUm7KPogFCkMRVjEaLLZOGkeukVBixOZXYnUklQuTf3vnRGpW-ICzYscmXM5Z84Z-mVRGImLFBYOv7WoCzxTorSi_qKB_kTrjW7rLdrwfyOsV4VqhPaQgXCQtc6bGi0UlULtw6mteYKPVjS7z78CyhIhUfreCudtW_jW4lE49jrhRzpOKVdPbT0L_3lrT04TayqEUniEd9BYpTmoAovOVK1XRsekqOXbVtectzB1LbT88y_TWk2hCeFtOZtp0ApOsfHCtw4cHSj6JhnLo7Ff0br_CeOOi61jkcJo1zI_IUeAIq1Q-m1D70DprWnpDT4Qlw62z9AYpw6h47ZE01Sq6DqnXBYPt7Nqmo7VyWGpXCN8sTsccI2N4Qh-UnFjnyF5tIqId0r-F-hVWXZyMPqBmAplRFla5IkF1CVq5hll1_jzyb2pJGG2pDtFY4Rih8VXeiGxoDrwpf3w_Q8_QjMSPQM_HwUIKRpPlQ93l2-4uasyZ143BIkk6Q1IU9MgItvTIuFj9v70lDSZ8hD8BTonSkyMlWjP5ZKtsTP2mlSZQna7ufl0kV8vu64__BRzUXCfglhR98-wvrtZBs0-4ETFQy9AyLVXnijvnXUuZ9nWKUF3aH0vH7jOs_z8t_yM5CmxboynDCydOnQ8i6cEWQqrLMuvbijiZTiz7_nWxu-ULqEeBHVJGcEQAMiWVD0YHWh6lXl08KDEGwORsUg0xr7-ItsJXdL8Xbt1hVUNfxNq3AVkRSVUDRqffOeXqQEgiXgdMOjoFIhOUZqGX6F4wB4tZyTNp4PYk6LmqRU0_RclUxj5pYnMpriPKSickrANUprZ7lmyeucSv2eQQREhhk9TUL7hEEFQPT3qXjUxcb55PyQOAGbB5KWU-ZVJVGY_G7_DAOA7B6_clDhiGJch3VF8Mn_dh4inLMe6Uxg8HXwpJoQEGe8nbfV0DkQwNuYjKVpruRinGzdVIK-DQlOXFSZXo4uWENvt0ByN7cWIEdywHRqLtEtl0ELkg6JJqr_3c_sjDfmOFeniWysqF8ocj8jglze1Os05etbyePR0nyAk7O6eGCoqzybphjHdMScsBlY3Hx7XUCS9446ctLqahPwDXOpCuXq-jQN37AdTNxUSydf5Os86x6K1xmZ0Z--nquhFPkS47nW8WZbU8ExoWDmMC0z9jfJwt3EPJ90GTiGOjqc4i5iYxJH_Bs2uLs_G_vsrbnNLqyc_IyCx-U-XOWzonvdWaMfz7DfCKzORyGkzQ7JF2k4ykG-sH6xxe3n--TZPgt2Wr7Q4XBzruAAP76V00h75-hDniyUsSEi0qiX9ZnpZUB919-tJ4r1oK7_Y7_8Ftp0hZg) —
 regenerate this link (snippet in docs/claude/mermaid.md) whenever the fenced block above changes.
 
 ## 7. Mockups — the user-visible surface is a refusal
@@ -411,6 +433,10 @@ nothing changes visually for legitimate users — which is the point.
    the aggregate's handler entry (the actor runs the check — D4 as amended, so the negatives are
    ordinary actor unit tests); extend `Actor` with the resolved domain identity (shared with #144's
    edge resolution).
+6. Write-path execution model (independent of this proposal's DSL scope): resolvers journal +
+   return ACCEPTED only; a worker consumes `command_journal` + `inbound_events` by position and
+   calls the dispatch; event append + journal completion in one SQL transaction — tracked as
+   [#242 "Write path: command_journal becomes the consumed queue — a worker executes commands in position order, and journal completion commits in the SAME transaction as the event append"](https://github.com/TheCaptainCompany/captain-food/issues/242).
 
 ## 9. Verification plan
 
