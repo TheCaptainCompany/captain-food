@@ -201,16 +201,26 @@ l3() {
   say "      L3: fixture state '$state' — creating via GraphQL (ADMIN role)"
   admin=$(mint_token "$SMOKE_ADMIN_EMAIL" "ADMIN")
 
-  # 1. Register (idempotent server-side: replaying an existing registration is a no-op; the slug is
-  #    dedicated to this fixture). TEST mode => rules.yaml OrderTestModeIsolation applies.
+  # 1. Register (idempotent server-side: replaying an existing registration is a no-op). The slug is
+  #    no longer part of registration (ADR-20260728-011344): it is chosen by a separate
+  #    ConfigureRestaurantSlug command, issued right below. TEST mode => rules.yaml
+  #    OrderTestModeIsolation applies.
   gql_ok "L3" "$API_BASE/admin/graphql" "$admin" \
     'mutation($i: RegisterRestaurantInput!){ registerRestaurant(input:$i){ correlationId } }' \
-    "$(jq -cn --arg id "$FIX_RESTAURANT_ID" --arg slug "$SMOKE_TENANT_SLUG" '{i:{
-        mode:"TEST", restaurantId:$id, slug:$slug, displayName:"Smoke Test Restaurant",
+    "$(jq -cn --arg id "$FIX_RESTAURANT_ID" '{i:{
+        mode:"TEST", restaurantId:$id, displayName:"Smoke Test Restaurant",
         address:{line1:"1 rue du Test", postalCode:"37000", city:"Tours", country:"FR"},
         timezone:"Europe/Paris"}}')" >/dev/null
 
-  # The registration must be projected before createCatalog (RestaurantNotFound guard reads the view).
+  # 1b. Configure the storefront slug (idempotent: re-submitting the current slug is a no-op). Same
+  #     aggregate as the registration above, so the write-side ordering holds without a wait; the
+  #     projection wait below then observes the slug becoming resolvable.
+  gql_ok "L3" "$API_BASE/admin/graphql" "$admin" \
+    'mutation($i: ConfigureRestaurantSlugInput!){ configureRestaurantSlug(input:$i){ correlationId } }' \
+    "$(jq -cn --arg id "$FIX_RESTAURANT_ID" --arg slug "$SMOKE_TENANT_SLUG" '{i:{restaurantId:$id, slug:$slug}}')" >/dev/null
+
+  # The registration + slug must be projected before createCatalog (RestaurantNotFound guard reads
+  # the view) and before the slug resolves the tenant host.
   check_restaurant_projected() {
     local r; r=$(gql "$API_BASE/public/graphql" "" "$RESTAURANT_QUERY" "$(jq -cn --arg s "$SMOKE_TENANT_SLUG" '{slug:$s}')")
     [ "$(printf '%s' "$r" | jq -r '.data.restaurant.id // empty')" = "$FIX_RESTAURANT_ID" ] && echo ok || printf '%s' "$r" | jq -c '.data' 2>/dev/null

@@ -3,6 +3,18 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — `prod-smoke` back to green: the fixture now sets its slug via `configureRestaurantSlug`
+> (watchdog fix).** The daily `prod-smoke` run went red at L3 with `unknown field "slug" of type
+> "RegisterRestaurantInput"`: the slug split out of registration into a separate `ConfigureRestaurantSlug`
+> command (ADR-20260728-011344, [#225](https://github.com/TheCaptainCompany/captain-food/issues/225))
+> left `tools/smoke/prod-smoke.sh` registering with a field the schema no longer has, and — because the
+> existing fixture's slug stopped resolving after the projection change — no way to reach its tenant host.
+> Fixed by registering without `slug` and issuing `configureRestaurantSlug(restaurantId, slug)` right
+> after (same aggregate, so write-side ordering holds; the existing projection-by-slug wait now observes
+> the slug becoming resolvable). Verified against live prod: L1-L3 PASS (fixture repaired, `smoke-test`
+> resolves ACTIVE with its offer). L4 (money path) needs `sk_test` and runs in CI; the repaired fixture
+> means the next scheduled run short-circuits L3 and exercises L4.
+
 > ✅ **2026-07-28 — `idempotent_on_existing` is GONE, and `sirene-sync` has an observability contract
 > (ADR-20260728-011344, [#220](https://github.com/TheCaptainCompany/captain-food/issues/220); PR #229).**
 > The last of the six slices. All five remaining creation handlers
