@@ -37,7 +37,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "AddCartLine".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -55,7 +55,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -82,7 +82,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RemoveCartLine".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -100,7 +100,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -128,7 +128,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ChangeCartLineQuantity".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -146,7 +146,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -173,7 +173,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RegisterRestaurantAccount".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -191,7 +191,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -218,7 +218,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UpdateRestaurantAccount".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -236,7 +236,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -263,7 +263,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "DeleteRestaurantAccount".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -281,7 +281,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -309,7 +309,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RegisterRestaurant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -327,7 +327,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -356,7 +356,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ConfigureRestaurantSlug".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -374,7 +374,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -401,7 +401,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ActivateRestaurant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -419,7 +419,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -446,7 +446,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UpdateRestaurant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -464,7 +464,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -491,7 +491,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "DeactivateRestaurant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -509,7 +509,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -536,7 +536,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RemoveRestaurant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -554,7 +554,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -581,7 +581,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ChangeOrderAcceptanceMode".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -599,7 +599,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -626,7 +626,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UpdateRestaurantGoogleBusinessProfile".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -644,7 +644,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -671,7 +671,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "MarkRestaurantClosed".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -689,7 +689,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -717,7 +717,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ClaimRestaurantListing".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -735,7 +735,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -763,7 +763,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "OptOutRestaurantListing".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -781,7 +781,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -808,7 +808,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ChangeRestaurantListingStatus".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -826,7 +826,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -853,7 +853,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ConfigureGoogleBusinessProfileOrderLink".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -871,7 +871,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -899,7 +899,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "VerifyGoogleBusinessProfileOrderLink".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -917,7 +917,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -945,7 +945,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RecordProspectContact".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -963,7 +963,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -990,7 +990,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "MarkProspectCold".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1008,7 +1008,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1035,7 +1035,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RecordProspectReply".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1053,7 +1053,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1081,7 +1081,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "CreateCatalog".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1099,7 +1099,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1127,7 +1127,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "AddProduct".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1145,7 +1145,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1173,7 +1173,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UpdateProduct".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1191,7 +1191,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1218,7 +1218,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RemoveProduct".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1236,7 +1236,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1263,7 +1263,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "AddCatalogCategory".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1281,7 +1281,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1308,7 +1308,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UpdateCatalogCategory".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1326,7 +1326,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1353,7 +1353,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RemoveCatalogCategory".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1371,7 +1371,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1398,7 +1398,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "AddOptionList".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1416,7 +1416,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1443,7 +1443,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UpdateOptionList".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1461,7 +1461,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1488,7 +1488,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RemoveOptionList".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1506,7 +1506,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1533,7 +1533,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UpdateOfferStock".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1551,7 +1551,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1578,7 +1578,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ImportCatalog".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1596,7 +1596,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1624,7 +1624,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RequestPhoneVerification".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1642,7 +1642,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1672,7 +1672,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "VerifyPhone".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1690,7 +1690,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1719,7 +1719,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RequestEmailVerification".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1737,7 +1737,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1765,7 +1765,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ConfirmEmailVerification".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1783,7 +1783,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1812,7 +1812,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RequestPhoneChange".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1830,7 +1830,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1859,7 +1859,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ConfirmPhoneChange".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1877,7 +1877,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1904,7 +1904,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ChangeLanguage".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1922,7 +1922,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1950,7 +1950,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "MarkRestaurantAsFavorite".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -1968,7 +1968,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1995,7 +1995,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UnmarkRestaurantAsFavorite".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2013,7 +2013,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2040,7 +2040,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UpdateCustomerInfo".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2058,7 +2058,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2085,7 +2085,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "SetCustomerPreferences".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2103,7 +2103,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2130,7 +2130,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "SetCustomerAddress".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2148,7 +2148,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2175,7 +2175,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RemoveCustomerAddress".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2193,7 +2193,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2220,7 +2220,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "SetCustomerPaymentMethod".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2238,7 +2238,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2268,7 +2268,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "PlaceOrder".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2286,7 +2286,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2313,7 +2313,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "AcceptOrder".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2331,7 +2331,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2358,7 +2358,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RejectOrder".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2376,7 +2376,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2403,7 +2403,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "StartPreparation".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2421,7 +2421,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2448,7 +2448,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "MarkOrderReady".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2466,7 +2466,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2493,7 +2493,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "MarkOrderDelivered".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2511,7 +2511,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2538,7 +2538,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "CancelOrderByCustomer".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2556,7 +2556,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2583,7 +2583,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "CancelOrderByRestaurant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2601,7 +2601,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2628,7 +2628,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RateOrder".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2646,7 +2646,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2673,7 +2673,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RateRestaurant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2691,7 +2691,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2722,7 +2722,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "TipOrder".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2740,7 +2740,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2767,7 +2767,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RequestRefund".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2785,7 +2785,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2814,7 +2814,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ApproveRefund".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2832,7 +2832,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2860,7 +2860,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "DenyRefund".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2878,7 +2878,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2905,7 +2905,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ChangeRiderStatus".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2923,7 +2923,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2950,7 +2950,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "AcceptDelivery".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -2968,7 +2968,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2995,7 +2995,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ConfirmPickup".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3013,7 +3013,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3040,7 +3040,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "CompleteDelivery".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3058,7 +3058,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3085,7 +3085,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "CancelDelivery".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3103,7 +3103,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3134,7 +3134,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RegisterDeliveryPartnerAvailability".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3152,7 +3152,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3179,7 +3179,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ApproveDeliveryPartnerAvailability".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3197,7 +3197,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3224,7 +3224,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RevokeDeliveryPartnerAvailability".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3242,7 +3242,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3269,7 +3269,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "OpenConversation".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3287,7 +3287,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3314,7 +3314,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "PostMessage".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3332,7 +3332,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3359,7 +3359,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RecordMessageTranslation".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3377,7 +3377,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3404,7 +3404,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "EscalateToAdmin".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3422,7 +3422,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3449,7 +3449,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "MuteParticipant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3467,7 +3467,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3494,7 +3494,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "UnmuteParticipant".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3512,7 +3512,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3539,7 +3539,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "OpenReclamation".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3557,7 +3557,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3584,7 +3584,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ResolveReclamation".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3602,7 +3602,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3629,7 +3629,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "RejectReclamation".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3647,7 +3647,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3674,7 +3674,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "ReopenReclamation".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3692,7 +3692,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3719,7 +3719,7 @@ impl MutationRoot {
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
             user_id: env.user_id,
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             channel: domain::generated::scalars::CommandChannel::GRAPHQL,
             command_type: "AttachReclamationEvidence".into(),
             payload_hash: application::journal::payload_hash(&payload_json),
@@ -3737,7 +3737,7 @@ impl MutationRoot {
         // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: env.user_type,
+            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3777,17 +3777,17 @@ fn strip_nulls(value: &mut serde_json::Value) {
     }
 }
 
-/// `RequestRole` → the scalars.yaml UserType declaration-order ordinal (ADR-0037).
-fn role_ordinal(role: &crate::graphql::acl::RequestRole) -> i32 {
+/// `RequestRole` → the scalars.yaml UserType TEXT value (ADR-20260728: enums are stored verbatim).
+fn role_text(role: &crate::graphql::acl::RequestRole) -> &'static str {
     use crate::graphql::acl::RequestRole as R;
     match role {
-        R::Public => 0,
-        R::Customer => 1,
-        R::RestaurantAccount => 2,
-        R::Restaurant => 3,
-        R::Rider => 4,
-        R::Admin => 5,
-        R::External => 6,
+        R::Public => "PUBLIC",
+        R::Customer => "CUSTOMER",
+        R::RestaurantAccount => "RESTAURANT_ACCOUNT",
+        R::Restaurant => "RESTAURANT",
+        R::Rider => "RIDER",
+        R::Admin => "ADMIN",
+        R::External => "EXTERNAL",
     }
 }
 
@@ -3801,7 +3801,7 @@ pub(crate) struct RequestEnvelope {
     pub session_id: Option<uuid::Uuid>,
     pub trace_id: Option<String>,
     pub user_id: Option<uuid::Uuid>,
-    pub user_type: i32,
+    pub user_type: String,
 }
 
 fn request_envelope(ctx: &async_graphql::Context<'_>, metadata: &Option<MetadataInput>) -> RequestEnvelope {
@@ -3809,7 +3809,7 @@ fn request_envelope(ctx: &async_graphql::Context<'_>, metadata: &Option<Metadata
     let user_id = principal
         .and_then(|p| p.user_id.as_deref())
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
-    let user_type = principal.map(|p| role_ordinal(&p.role)).unwrap_or(0);
+    let user_type = principal.map(|p| role_text(&p.role)).unwrap_or("PUBLIC").to_string();
     let session_id = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
     let trace_id = ctx.data_opt::<crate::graphql::session::TraceContext>().and_then(|t| t.0.clone());
     // Client-suppliable ids validate structurally at scalar parse time; anything missing is

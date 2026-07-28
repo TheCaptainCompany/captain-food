@@ -9,7 +9,7 @@ use sqlx::PgPool;
 
 use super::cart_store;
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 
 /// Postgres adapter for the Cart read model.
 pub struct PgCartRepository {
@@ -43,7 +43,7 @@ impl CartReadRepository for PgCartRepository {
     }
 
     /// The session's OPEN carts (CartBindingProcess's `read` step): a real SQL predicate over the
-    /// projected `status` ordinal, overriding the provided empty default.
+    /// projected `status` value, overriding the provided empty default.
     async fn open_by_session(&self, session_id: SessionId) -> Result<Vec<CartRow>, DomainError> {
         let sql = format!(
             "SELECT {} FROM cart WHERE session_id = $1 AND status = $2 ORDER BY updated_at DESC",
@@ -51,7 +51,7 @@ impl CartReadRepository for PgCartRepository {
         );
         let rows = sqlx::query(&sql)
             .bind(session_id.0)
-            .bind(CartStatus::OPEN.to_ord())
+            .bind(CartStatus::OPEN.to_text())
             .fetch_all(&self.pool)
             .await
             .map_err(db_err)?;

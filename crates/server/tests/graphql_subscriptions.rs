@@ -453,7 +453,7 @@ fn journal_entry(message_id: uuid::Uuid, session: uuid::Uuid) -> application::jo
         session_id: Some(session),
         trace_id: None,
         user_id: None,
-        user_type: 0,
+        user_type: "PUBLIC".to_string(),
         channel: ds::CommandChannel::GRAPHQL,
         command_type: "AddCartLine".into(),
         payload: serde_json::json!({}),

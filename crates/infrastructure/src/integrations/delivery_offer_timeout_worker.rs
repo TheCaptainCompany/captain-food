@@ -28,8 +28,8 @@ use sqlx::{PgPool, Row};
 
 use crate::persistence::{db_err, PgDispatchStrategy, PgEventStore};
 
-/// `process_status` ordinal for OFFERED (ADR-0037; matches `enum_sql::DeliveryDispatchProcessStatus`).
-const OFFERED_ORDINAL: i32 = 0;
+/// `process_status` TEXT value for OFFERED (ADR-20260728; matches `enum_sql::DeliveryDispatchProcessStatus`).
+const OFFERED_STATUS: &str = "OFFERED";
 
 /// Env var for the global maximum offer TTL (the hard ceiling over every channel), in seconds.
 pub const MAX_TTL_ENV: &str = "DELIVERY_OFFER_MAX_TTL_SECONDS";
@@ -72,7 +72,7 @@ impl DeliveryOfferTimeoutWorker {
     fn actor() -> Actor {
         Actor {
             user_id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"captain.food/delivery-offer-timeout-worker"),
-            user_type: 6, // UserType::EXTERNAL ordinal (ADR-0037)
+            user_type: "EXTERNAL".to_string(), // UserType::EXTERNAL, stored as TEXT (ADR-20260728)
             correlation_id: uuid::Uuid::new_v4(),
             cause_id: None,
         }
@@ -106,7 +106,7 @@ impl DeliveryOfferTimeoutWorker {
              FROM delivery_dispatch_process_manager \
              WHERE process_status = $1 AND current_channel IS NOT NULL AND current_rank IS NOT NULL",
         )
-        .bind(OFFERED_ORDINAL)
+        .bind(OFFERED_STATUS)
         .fetch_all(&self.pool)
         .await
         .map_err(db_err)?;

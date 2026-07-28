@@ -70,15 +70,15 @@ pub fn uid(s: &str) -> uuid::Uuid {
 
 /// The fixed command-side actor (ADMIN-level envelope identity; the envelope is not asserted).
 pub fn actor() -> Actor {
-    actor_as(5)
+    actor_as("ADMIN")
 }
 
-/// A command-side actor with an explicit UserType ORDINAL — for the handlers whose semantics
+/// A command-side actor with an explicit UserType TEXT value — for the handlers whose semantics
 /// derive from the acting persona (e.g. `TipOrder`'s `tippedBy`, ADR-0041).
-pub fn actor_as(user_type: i32) -> Actor {
+pub fn actor_as(user_type: &str) -> Actor {
     Actor {
         user_id: uuid::Uuid::from_u128(0xA0),
-        user_type,
+        user_type: user_type.to_string(),
         correlation_id: uuid::Uuid::from_u128(0xC0),
         cause_id: None,
     }

@@ -345,7 +345,7 @@ mod tests {
     fn admin_actor() -> Actor {
         Actor {
             user_id: uid(0xAD),
-            user_type: 5, // ADMIN ordinal
+            user_type: "ADMIN".to_string(),
             correlation_id: uid(0xC0),
             cause_id: None,
         }

@@ -62,9 +62,9 @@ pub const STRIPE_WEBHOOK_SECRET_ENV: &str = "STRIPE_WEBHOOK_SECRET";
 /// default tolerance).
 pub const SIGNATURE_TOLERANCE_SECS: i64 = 300;
 
-/// `UserType::EXTERNAL` ordinal for the event envelope (enums stored as declaration-order ints,
-/// ADR-0037/0041) — Stripe facts are recorded as the fixed external system principal.
-const EXTERNAL_USER_TYPE: i32 = 6;
+/// `UserType::EXTERNAL` TEXT value for the event envelope (enums stored verbatim, ADR-20260728)
+/// — Stripe facts are recorded as the fixed external system principal.
+const EXTERNAL_USER_TYPE: &str = "EXTERNAL";
 
 // ---------------------------------------------------------------------------------------------
 // Envelope identity (ADR-0041) — deterministic, like the SIRENE ACL's

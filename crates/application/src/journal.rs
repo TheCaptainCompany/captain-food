@@ -29,8 +29,8 @@ pub struct CommandJournalEntry {
     pub trace_id: Option<String>,
     /// Acting user's auth subject (`None` for anonymous) — the authenticated ownership scope.
     pub user_id: Option<uuid::Uuid>,
-    /// `UserType` ordinal (declaration-order integer, ADR-0037).
-    pub user_type: i32,
+    /// `UserType` TEXT value, stored verbatim (ADR-20260728).
+    pub user_type: String,
     pub channel: CommandChannel,
     /// commands.yaml key, e.g. `PlaceOrder`.
     pub command_type: String,
@@ -332,7 +332,7 @@ mod tests {
             session_id: None,
             trace_id: None,
             user_id: None,
-            user_type: 0,
+            user_type: "PUBLIC".to_string(),
             channel: CommandChannel::GRAPHQL,
             command_type: "RegisterRestaurant".into(),
             payload_hash: payload_hash(&payload),

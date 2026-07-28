@@ -83,11 +83,11 @@ external_sirene_restaurants:
                      Recovery is automatic and needs no operator: a CHANGED record from INSEE re-pends
                      the row through the ordinary conflict arm, which sets PENDING and so clears POISON.
                      So quarantine holds a row exactly as long as it keeps arriving unchanged and broken.
-    It is deliberately TEXT rather than a scalar enum `$ref`. Enums persist as declaration-order ints
-    (ADR-0037/0041), and the CI `sirene_ingest` crate that writes PENDING cannot see the domain types at
-    all (ADR-0045 keeps domain crates out of that build) — it would have to hardcode ordinals, so a
-    future reordering of the enum would silently reinterpret every row. Text has no such failure mode,
-    and matches its sibling columns (`etat`, `naf`) on this adapter-owned table.
+    It is deliberately TEXT rather than a scalar enum `$ref`: the CI `sirene_ingest` crate that writes
+    PENDING cannot see the domain types at all (ADR-0045 keeps domain crates out of that build), and this
+    is an adapter-owned staging column, not a domain read model. Since ADR-20260728 every enum column
+    stores its TEXT value verbatim anyway, so the two conventions now agree; the column simply stays
+    outside scalars.yaml, matching its sibling columns (`etat`, `naf`).
     Note it does NOT replace `processed_at`: that is the CHECKPOINT (`< last_seen_at ⇒ pending`, the
     concurrency-safe high-water mark), while `status` is the OUTCOME. `GROUP BY status` is the operator's
     per-sweep report.

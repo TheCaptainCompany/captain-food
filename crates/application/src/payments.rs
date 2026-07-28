@@ -89,7 +89,7 @@ mod tests {
         Money { amount_cents: MoneyCents(cents), currency: CurrencyCode("EUR".into()) }
     }
     fn actor() -> Actor {
-        Actor { user_id: uid(0xAC), user_type: 6, correlation_id: uid(0xC0), cause_id: None }
+        Actor { user_id: uid(0xAC), user_type: "EXTERNAL".to_string(), correlation_id: uid(0xC0), cause_id: None }
     }
     fn intent() -> PaymentIntentId {
         PaymentIntentId("pi_123".into())

@@ -2512,9 +2512,9 @@ fn sql_type(ty: &str, model: &Model) -> String {
     }
     if let Some(scalar) = model.defs.get("scalars.yaml").and_then(|s| s.get(ty)) {
         if scalar.get("enum").map(|e| e.is_sequence()).unwrap_or(false) {
-            // Enums are stored as their compact INTEGER ordinal (the sort_order in the generated
-            // ref_<enum> lookup) — by principle, since a ref table always exists for the enum (ADR-0037).
-            return "INTEGER".into();
+            // Enums are stored as their TEXT value verbatim (ADR-20260728: supersedes the ADR-0037
+            // INTEGER-ordinal + ref_<enum> lookup scheme) — self-describing rows, no join to read.
+            return "TEXT".into();
         }
         if scalar.get("format").and_then(|x| x.as_str()) == Some("uuid") {
             return "UUID".into();
@@ -2746,7 +2746,7 @@ fn money_subfield(model: &Model, evt: &str, prop: &str, col_ty: &str) -> Option<
     }
 }
 
-/// The values of a scalars.yaml enum, in declared (ordinal) order — `Some` only for an enum scalar.
+/// The values of a scalars.yaml enum, in declared order — `Some` only for an enum scalar.
 fn enum_values(model: &Model, ty: &str) -> Option<Vec<String>> {
     model
         .defs
@@ -2755,14 +2755,6 @@ fn enum_values(model: &Model, ty: &str) -> Option<Vec<String>> {
         .get("enum")?
         .as_sequence()
         .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect())
-}
-
-/// SQL mapping a text-enum expression to its INTEGER ordinal (`ref_<enum>.sort_order`) via a CASE over the
-/// enum's values — the event payload stores the enum's TEXT value, but read models store the ordinal.
-fn enum_ordinal_case(expr: &str, values: &[String]) -> String {
-    let arms: Vec<String> =
-        values.iter().enumerate().map(|(i, v)| format!("WHEN '{}' THEN {}", v, i)).collect();
-    format!("(CASE {} {} END)", expr, arms.join(" "))
 }
 
 /// Generate a `SELECT … FROM domain_events` state-fold body for a foldable view (ADR-0035 #2), sourcing
@@ -2781,8 +2773,8 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
     let mut selects: Vec<String> = Vec::new();
     for c in &v.columns {
         let pgty = sql_type(&c.ty, model);
-        // Enum columns are stored as their INTEGER ordinal (by principle) — the payload holds the TEXT
-        // value, so enum expressions are wrapped in a value→ordinal CASE.
+        // Enum columns store the enum's TEXT value verbatim — exactly what the payload holds, so no
+        // mapping is needed; the values are still validated against scalars.yaml for literals.
         let enum_vals = enum_values(model, &c.ty);
         let expr = if c.name == "created_at" {
             // implicit technical column: the creation event's occurrence time.
@@ -2818,18 +2810,18 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
                 .iter()
                 .map(|(evt, val)| {
                     let then = match val {
-                        DeriveVal::Lit(s) => match &enum_vals {
-                            Some(vals) => vals
-                                .iter()
-                                .position(|v| v == s)
-                                .unwrap_or_else(|| panic!("derive value '{}' not in enum {}", s, c.ty))
-                                .to_string(),
-                            None => format!("'{}'", s),
-                        },
-                        DeriveVal::Payload(p) => match &enum_vals {
-                            Some(vals) => enum_ordinal_case(&format!("e.payload->>'{}'", p), vals),
-                            None => format!("e.payload->>'{}'", p),
-                        },
+                        DeriveVal::Lit(s) => {
+                            if let Some(vals) = &enum_vals {
+                                assert!(
+                                    vals.iter().any(|v| v == s),
+                                    "derive value '{}' not in enum {}",
+                                    s,
+                                    c.ty
+                                );
+                            }
+                            format!("'{}'", s)
+                        }
+                        DeriveVal::Payload(p) => format!("e.payload->>'{}'", p),
                     };
                     format!("WHEN '{}' THEN {}", evt, then)
                 })
@@ -2861,7 +2853,7 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
                 }
             } else if let Some((first_evt, prop)) = carrying.first() {
                 // scalar "latest carrying event": the newest event whose payload holds this property.
-                // An enum column stores the ordinal (value→ordinal CASE); a Money property splits into
+                // An enum column stores the payload's TEXT value verbatim; a Money property splits into
                 // its `amountCents`/`currency` subfield by declared column type; others extract+cast.
                 let money_sub = money_subfield(model, first_evt, prop, &c.ty);
                 let val_expr = |alias: &str| {
@@ -2873,10 +2865,7 @@ fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, String> {
                             format!("({}.payload->'{}'->>'{}'){}", alias, prop, sub, cast)
                         }
                     } else {
-                        match &enum_vals {
-                            Some(vals) => enum_ordinal_case(&format!("{}.payload->>'{}'", alias, prop), vals),
-                            None => payload_extract(alias, prop, &pgty),
-                        }
+                        payload_extract(alias, prop, &pgty)
                     }
                 };
                 let only_creation = carrying.iter().all(|(e, _)| e == &creation);
@@ -3008,42 +2997,15 @@ fn table_sql_type(ty: &str) -> &'static str {
     }
 }
 
-/// Emit `schema.generated.sql` (ADR-0037): the full store DDL — enum reference tables from
-/// scalars.yaml, the real tables from database/tables.yaml, the raw SQL functions from
-/// database/functions/*.sql (sorted by filename), then the triggers declared on the tables
-/// (after the functions they execute).
+/// Emit `schema.generated.sql` (ADR-0037, enum storage revised by ADR-20260728): the full store DDL —
+/// the real tables from database/tables.yaml, the raw SQL functions from database/functions/*.sql
+/// (sorted by filename), then the triggers declared on the tables (after the functions they execute).
+/// Enum columns are TEXT holding the scalars.yaml value verbatim — no ref_<enum> lookup tables.
 fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
     let mut sections: Vec<String> = Vec::new();
 
-    // 1. Enum reference tables — one ref_<snake> lookup table per scalars.yaml enum, in file order.
-    if let Some(Value::Mapping(m)) = model.defs.get("scalars.yaml") {
-        for (k, node) in m {
-            let name = match k.as_str() {
-                Some(s) => s,
-                None => continue,
-            };
-            let vals = match node.get("enum").and_then(|e| e.as_sequence()) {
-                Some(v) => v,
-                None => continue,
-            };
-            let table = format!("ref_{}", snake_type(name));
-            let values: Vec<String> = vals
-                .iter()
-                .enumerate()
-                .filter_map(|(i, v)| v.as_str().map(|s| format!("('{}',{})", s, i)))
-                .collect();
-            sections.push(format!(
-                "-- {}\nCREATE TABLE {}(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);\nINSERT INTO {} (value, sort_order) VALUES {};",
-                name,
-                table,
-                table,
-                values.join(",")
-            ));
-        }
-    }
-
-    // 2. Tables from database/tables/*.yaml, in file order. Triggers are collected and emitted after
-    // the functions they execute (step 4). projection_tables.yaml is handled separately (step 2b) — its
+    // 1. Tables from database/tables/*.yaml, in file order. Triggers are collected and emitted after
+    // the functions they execute (step 3). projection_tables.yaml is handled separately (step 1b) — its
     // columns derive their type from event lineage, not an explicit `type`.
     let mut triggers: Vec<String> = Vec::new();
     for (_fkey, fval) in model
@@ -3081,7 +3043,7 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
                     let scalar = ref_name(rf).unwrap_or_else(|| {
                         panic!("database/tables.yaml#/{}/columns/{}: malformed $ref '{}'", name, cname, rf)
                     });
-                    sql_type(&scalar, model) // an enum scalar → INTEGER ordinal (ref_<enum>), by principle
+                    sql_type(&scalar, model) // an enum scalar → TEXT value, verbatim
                 } else {
                     panic!("database/tables.yaml#/{}/columns/{}: type must be a SQL primitive or a $ref", name, cname)
                 };
@@ -3147,7 +3109,7 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
         }
     }
 
-    // 2b. Materialized read-model tables (database/tables/projection_tables.yaml) — column types resolved
+    // 1b. Materialized read-model tables (database/tables/projection_tables.yaml) — column types resolved
     // from event lineage. Filled by an application-layer (Rust) projector, not SQL (ADR-0040). Emitted
     // here so the read-model tables sit alongside the store tables.
     let ptables = emit_projection_tables_sql(model);
@@ -3155,7 +3117,7 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
         sections.push(ptables);
     }
 
-    // 3. Functions — raw SQL bodies from database/functions/*.sql, sorted by filename. They reference
+    // 2. Functions — raw SQL bodies from database/functions/*.sql, sorted by filename. They reference
     // domain_events/domain_stream, which now exist above.
     let fn_dir = specs.join("database/functions");
     let mut fn_files: Vec<PathBuf> = fs::read_dir(&fn_dir)
@@ -3169,7 +3131,7 @@ fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String {
         sections.push(body.replace("\r\n", "\n").trim().to_string());
     }
 
-    // 4. Triggers — after the functions they execute.
+    // 3. Triggers — after the functions they execute.
     sections.extend(triggers);
 
     format!(
@@ -7965,7 +7927,7 @@ enum PmTy {
     StringScalar(String),
     /// scalars.yaml newtype over `i64` (Copy — e.g. `MoneyCents`, stored BIGINT).
     IntScalar(String),
-    /// scalars.yaml enum — stored as its INTEGER declaration-order ordinal (ADR-0037).
+    /// scalars.yaml enum — stored as its TEXT value verbatim (ADR-20260728).
     EnumScalar(String),
     /// SQL `text`.
     Text,
@@ -8227,13 +8189,13 @@ fn emit_pm_state_application(model: &Model) -> String {
 /// Emit `crates/infrastructure/src/generated/pm_state.rs` — the Postgres adapters for the PM state
 /// stores (issue #27, replacing the hand-written `infrastructure/persistence/pm_state.rs`): one
 /// `Pg<Base>State` per `application::pm_state` port. Conventions match the projection stores: enum
-/// columns are INTEGER declaration-order ordinals (`persistence::enum_sql`), scalar newtypes bind via
+/// columns are TEXT values held verbatim (`persistence::enum_sql`), scalar newtypes bind via
 /// `.0`, upserts are `INSERT … ON CONFLICT (pk) DO UPDATE` over all columns, and `last_update_utc` is
 /// stamped `now()` server-side on every upsert (the row's carried value is IGNORED).
 fn emit_pm_state_infrastructure(model: &Model) -> String {
     let tables = parse_pm_tables(model);
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/database/tables/process_managers.yaml — do not edit by hand.\n// Postgres adapters for the process-manager STATE stores (ADR-20260719-172821): one `Pg…State` per\n// `application::pm_state` port, over the saga state tables (migration\n// `20260719200000_process_manager_state_tables.sql`). Conventions match the projection stores: enum\n// columns are INTEGER declaration-order ordinals (`crate::persistence::enum_sql`); scalar newtypes\n// bind via `.0`; upserts are `INSERT … ON CONFLICT (pk) DO UPDATE` over all columns. `last_update_utc`\n// is the runtime envelope's stamp: every upsert writes `now()` server-side (the row's carried value is\n// IGNORED), reads return the stored value.\n\nuse application::pm_state::*;\nuse async_trait::async_trait;\nuse domain::generated::scalars::*;\nuse domain::shared::errors::DomainError;\nuse sqlx::postgres::PgRow;\nuse sqlx::{PgPool, Row};\n\nuse crate::persistence::db_err;\nuse crate::persistence::enum_sql::EnumOrd;\n",
+        "// GENERATED by the Captain.Food codegen from specs/database/tables/process_managers.yaml — do not edit by hand.\n// Postgres adapters for the process-manager STATE stores (ADR-20260719-172821): one `Pg…State` per\n// `application::pm_state` port, over the saga state tables (migration\n// `20260719200000_process_manager_state_tables.sql`). Conventions match the projection stores: enum\n// columns are TEXT holding the scalars.yaml value verbatim (`crate::persistence::enum_sql`); scalar newtypes\n// bind via `.0`; upserts are `INSERT … ON CONFLICT (pk) DO UPDATE` over all columns. `last_update_utc`\n// is the runtime envelope's stamp: every upsert writes `now()` server-side (the row's carried value is\n// IGNORED), reads return the stored value.\n\nuse application::pm_state::*;\nuse async_trait::async_trait;\nuse domain::generated::scalars::*;\nuse domain::shared::errors::DomainError;\nuse sqlx::postgres::PgRow;\nuse sqlx::{PgPool, Row};\n\nuse crate::persistence::db_err;\nuse crate::persistence::enum_sql::EnumText;\n",
     );
     for t in &tables {
         let upper = snake_type(&t.base).to_uppercase();
@@ -8263,8 +8225,8 @@ fn emit_pm_state_infrastructure(model: &Model) -> String {
                 (PmTy::StringScalar(n), true) => format!("row.try_get::<Option<String>, _>(\"{}\").map_err(db_err)?.map({})", c.name, n),
                 (PmTy::IntScalar(n), false) => format!("{}(row.try_get(\"{}\").map_err(db_err)?)", n, c.name),
                 (PmTy::IntScalar(n), true) => format!("row.try_get::<Option<i64>, _>(\"{}\").map_err(db_err)?.map({})", c.name, n),
-                (PmTy::EnumScalar(_), false) => format!("EnumOrd::from_ord(row.try_get::<i32, _>(\"{}\").map_err(db_err)?)?", c.name),
-                (PmTy::EnumScalar(_), true) => format!("crate::persistence::enum_sql::opt_from_ord(row.try_get::<Option<i32>, _>(\"{}\").map_err(db_err)?)?", c.name),
+                (PmTy::EnumScalar(_), false) => format!("EnumText::from_text(&row.try_get::<String, _>(\"{}\").map_err(db_err)?)?", c.name),
+                (PmTy::EnumScalar(_), true) => format!("crate::persistence::enum_sql::opt_from_text(row.try_get::<Option<String>, _>(\"{}\").map_err(db_err)?)?", c.name),
                 (PmTy::Text, true) => format!("row.try_get::<Option<String>, _>(\"{}\").map_err(db_err)?", c.name),
                 _ => format!("row.try_get(\"{}\").map_err(db_err)?", c.name),
             };
@@ -8286,7 +8248,7 @@ fn emit_pm_state_infrastructure(model: &Model) -> String {
             let bind = match &ty {
                 PmTy::StringScalar(_) => format!("{}.0.clone()", ident),
                 PmTy::Text => format!("{}.clone()", ident),
-                PmTy::EnumScalar(_) => format!("{}.to_ord()", ident),
+                PmTy::EnumScalar(_) => format!("{}.to_text()", ident),
                 PmTy::Integer => ident.clone(),
                 _ => format!("{}.0", ident),
             };
@@ -8315,8 +8277,8 @@ fn emit_pm_state_infrastructure(model: &Model) -> String {
                 (PmTy::StringScalar(_), true) => format!("row.{}.as_ref().map(|v| v.0.clone())", ident),
                 (PmTy::IntScalar(_), false) => format!("row.{}.0", ident),
                 (PmTy::IntScalar(_), true) => format!("row.{}.map(|v| v.0)", ident),
-                (PmTy::EnumScalar(_), false) => format!("row.{}.to_ord()", ident),
-                (PmTy::EnumScalar(_), true) => format!("crate::persistence::enum_sql::opt_to_ord(&row.{})", ident),
+                (PmTy::EnumScalar(_), false) => format!("row.{}.to_text()", ident),
+                (PmTy::EnumScalar(_), true) => format!("crate::persistence::enum_sql::opt_to_text(&row.{})", ident),
                 (PmTy::Text, _) => format!("row.{}.clone()", ident),
                 (PmTy::Integer, _) => format!("row.{}", ident),
                 (PmTy::Timestamptz, _) => format!("row.{}", ident),
@@ -9964,7 +9926,7 @@ fn emit_server_mutation(model: &Model) -> String {
         match wired_mutation_dispatch(&m.name) {
             // Wired: journal → spawn the command handler over Arc-cloned ports → acceptance.
             Some((resolve_ports, handler_call)) => out.push_str(&format!(
-                "    #[graphql(name = \"{name}\"{acl})]\n    async fn {fnname}(&self, ctx: &async_graphql::Context<'_>, input: {command}Input, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {{\n        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();\n        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();\n{resolve_ports}        let payload_json = command_payload(&input)?;\n        let cmd: domain::generated::commands::{command} = serde_json::from_value(payload_json.clone())\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        let env = request_envelope(ctx, &metadata);\n        let entry = application::journal::CommandJournalEntry {{\n            message_id: env.message_id,\n            correlation_id: env.correlation_id,\n            cause_id: env.cause_id,\n            session_id: env.session_id,\n            trace_id: env.trace_id.clone(),\n            user_id: env.user_id,\n            user_type: env.user_type,\n            channel: domain::generated::scalars::CommandChannel::GRAPHQL,\n            command_type: \"{command}\".into(),\n            payload_hash: application::journal::payload_hash(&payload_json),\n            payload: payload_json,\n        }};\n        match journal.insert(&entry).await.map_err(domain_error)? {{\n            application::journal::JournalInsertOutcome::Duplicate {{ status, payload_hash }} => {{\n                if payload_hash != entry.payload_hash {{\n                    return Err(conflict_error(env.message_id));\n                }}\n                return Ok(acceptance(&env, journal_status_api(status), true));\n            }}\n            application::journal::JournalInsertOutcome::Inserted => {{}}\n        }}\n        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.\n        let actor = application::ports::Actor {{\n            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),\n            user_type: env.user_type,\n            correlation_id: env.correlation_id,\n            cause_id: Some(env.message_id),\n        }};\n        let (message_id, correlation_id) = (env.message_id, env.correlation_id);\n        tokio::spawn(async move {{\n            let outcome = {handler_call};\n            complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;\n        }});\n        Ok(acceptance(&env, OperationStatus::PENDING, false))\n    }}\n",
+                "    #[graphql(name = \"{name}\"{acl})]\n    async fn {fnname}(&self, ctx: &async_graphql::Context<'_>, input: {command}Input, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {{\n        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();\n        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();\n{resolve_ports}        let payload_json = command_payload(&input)?;\n        let cmd: domain::generated::commands::{command} = serde_json::from_value(payload_json.clone())\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        let env = request_envelope(ctx, &metadata);\n        let entry = application::journal::CommandJournalEntry {{\n            message_id: env.message_id,\n            correlation_id: env.correlation_id,\n            cause_id: env.cause_id,\n            session_id: env.session_id,\n            trace_id: env.trace_id.clone(),\n            user_id: env.user_id,\n            user_type: env.user_type.clone(),\n            channel: domain::generated::scalars::CommandChannel::GRAPHQL,\n            command_type: \"{command}\".into(),\n            payload_hash: application::journal::payload_hash(&payload_json),\n            payload: payload_json,\n        }};\n        match journal.insert(&entry).await.map_err(domain_error)? {{\n            application::journal::JournalInsertOutcome::Duplicate {{ status, payload_hash }} => {{\n                if payload_hash != entry.payload_hash {{\n                    return Err(conflict_error(env.message_id));\n                }}\n                return Ok(acceptance(&env, journal_status_api(status), true));\n            }}\n            application::journal::JournalInsertOutcome::Inserted => {{}}\n        }}\n        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.\n        let actor = application::ports::Actor {{\n            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),\n            user_type: env.user_type.clone(),\n            correlation_id: env.correlation_id,\n            cause_id: Some(env.message_id),\n        }};\n        let (message_id, correlation_id) = (env.message_id, env.correlation_id);\n        tokio::spawn(async move {{\n            let outcome = {handler_call};\n            complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;\n        }});\n        Ok(acceptance(&env, OperationStatus::PENDING, false))\n    }}\n",
                 name = m.name, acl = acl, fnname = fnname, command = m.command,
                 resolve_ports = resolve_ports, handler_call = handler_call
             )),
@@ -9977,7 +9939,7 @@ fn emit_server_mutation(model: &Model) -> String {
     out.push_str("}\n");
     // Shared write-side plumbing for the wired resolvers.
     out.push_str(
-        "\n/// The stripped serde wire shape of the GraphQL input — both the journal `payload` column and the\n/// domain command deserialize from it (generated from the same commands.yaml, camelCase). `null`s\n/// are stripped first — an unset GraphQL optional serializes as an explicit null, while the domain\n/// payloads model absence as a MISSING key (`Option` fields / `#[serde(default)]` arrays).\nfn command_payload(input: &impl serde::Serialize) -> async_graphql::Result<serde_json::Value> {\n    let mut value = serde_json::to_value(input).map_err(|e| async_graphql::Error::new(e.to_string()))?;\n    strip_nulls(&mut value);\n    Ok(value)\n}\n\nfn strip_nulls(value: &mut serde_json::Value) {\n    match value {\n        serde_json::Value::Object(map) => {\n            map.retain(|_, v| !v.is_null());\n            for v in map.values_mut() {\n                strip_nulls(v);\n            }\n        }\n        serde_json::Value::Array(items) => {\n            for v in items.iter_mut() {\n                strip_nulls(v);\n            }\n        }\n        _ => {}\n    }\n}\n\n/// `RequestRole` → the scalars.yaml UserType declaration-order ordinal (ADR-0037).\nfn role_ordinal(role: &crate::graphql::acl::RequestRole) -> i32 {\n    use crate::graphql::acl::RequestRole as R;\n    match role {\n        R::Public => 0,\n        R::Customer => 1,\n        R::RestaurantAccount => 2,\n        R::Restaurant => 3,\n        R::Rider => 4,\n        R::Admin => 5,\n        R::External => 6,\n    }\n}\n\n/// The EFFECTIVE technical envelope of one mutation request (ADR-20260720-015500): what the client\n/// supplied via MetadataInput/headers, completed server-side (UUIDv7) and echoed back verbatim in\n/// the MutationAcceptance.\npub(crate) struct RequestEnvelope {\n    pub message_id: uuid::Uuid,\n    pub correlation_id: uuid::Uuid,\n    pub cause_id: Option<uuid::Uuid>,\n    pub session_id: Option<uuid::Uuid>,\n    pub trace_id: Option<String>,\n    pub user_id: Option<uuid::Uuid>,\n    pub user_type: i32,\n}\n\nfn request_envelope(ctx: &async_graphql::Context<'_>, metadata: &Option<MetadataInput>) -> RequestEnvelope {\n    let principal = ctx.data_opt::<crate::auth::Principal>();\n    let user_id = principal\n        .and_then(|p| p.user_id.as_deref())\n        .and_then(|s| uuid::Uuid::parse_str(s).ok());\n    let user_type = principal.map(|p| role_ordinal(&p.role)).unwrap_or(0);\n    let session_id = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n    let trace_id = ctx.data_opt::<crate::graphql::session::TraceContext>().and_then(|t| t.0.clone());\n    // Client-suppliable ids validate structurally at scalar parse time; anything missing is\n    // server-generated (time-ordered UUIDv7) and the correlation defaults to the messageId.\n    let message_id = metadata\n        .as_ref()\n        .and_then(|m| m.message_id.as_ref())\n        .map(|v| v.0)\n        .unwrap_or_else(uuid::Uuid::now_v7);\n    let correlation_id = metadata\n        .as_ref()\n        .and_then(|m| m.correlation_id.as_ref())\n        .map(|v| v.0)\n        .unwrap_or(message_id);\n    let cause_id = metadata.as_ref().and_then(|m| m.cause_id.as_ref()).map(|v| v.0);\n    RequestEnvelope { message_id, correlation_id, cause_id, session_id, trace_id, user_id, user_type }\n}\n\n/// The uniform acceptance payload from the effective envelope.\nfn acceptance(env: &RequestEnvelope, status: OperationStatus, duplicate: bool) -> MutationAcceptance {\n    MutationAcceptance {\n        message_id: MessageId(env.message_id),\n        correlation_id: CorrelationId(env.correlation_id),\n        cause_id: env.cause_id.map(CauseId),\n        session_id: env.session_id.map(SessionId),\n        trace_id: env.trace_id.clone().map(TraceId),\n        operation_status: status,\n        duplicate,\n    }\n}\n\n/// `command_journal` lifecycle → the caller-facing OperationStatus (RECEIVED reads as PENDING).\npub(crate) fn journal_status_api(s: domain::generated::scalars::CommandJournalStatus) -> OperationStatus {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    match s {\n        J::RECEIVED => OperationStatus::PENDING,\n        J::SUCCEEDED => OperationStatus::SUCCEEDED,\n        J::REJECTED => OperationStatus::REJECTED,\n        J::FAILED => OperationStatus::FAILED,\n    }\n}\n\n/// A `command_journal` row → the API Operation shape (`operationStatus` / `operationStatusChanged`).\npub(crate) fn operation_from_journal(row: &application::journal::CommandJournalRow) -> Operation {\n    let error_code = row\n        .error\n        .as_ref()\n        .and_then(|e| e.get(\"code\"))\n        .and_then(|c| c.as_str())\n        .map(str::to_owned);\n    let message = match (&error_code, row.error.as_ref().and_then(|e| e.get(\"context\"))) {\n        (Some(code), Some(context)) => domain::generated::errors::message_en(code, context),\n        _ => None,\n    };\n    Operation {\n        message_id: MessageId(row.entry.message_id),\n        correlation_id: CorrelationId(row.entry.correlation_id),\n        status: journal_status_api(row.status),\n        error_code,\n        message,\n        occurred_at: row.completed_at.unwrap_or(row.received_at),\n    }\n}\n\n/// The operation ownership scope (ADR-20260720-015500): ADMIN, the journaling actor (JWT subject),\n/// or the journaling session (X-SESSION-ID). Callers resolve null / an empty stream on false — the\n/// PUBLIC surface must not become an existence oracle.\npub(crate) fn operation_owned(\n    ctx: &async_graphql::Context<'_>,\n    row: &application::journal::CommandJournalRow,\n) -> bool {\n    let admin = matches!(\n        ctx.data_opt::<crate::graphql::acl::RequestRole>(),\n        Some(crate::graphql::acl::RequestRole::Admin)\n    );\n    let principal_uuid = ctx\n        .data_opt::<crate::auth::Principal>()\n        .and_then(|p| p.user_id.as_deref())\n        .and_then(|s| uuid::Uuid::parse_str(s).ok());\n    let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n    admin\n        || (principal_uuid.is_some() && principal_uuid == row.entry.user_id)\n        || (session.is_some() && session == row.entry.session_id)\n}\n\n/// The spawned handler's terminal transition: complete the journal row and publish the update.\n/// REJECTED = an anticipated errors.yaml rejection (surfaced as Operation.errorCode); FAILED = the\n/// catalogued generic Internal (adapter detail never leaks).\nasync fn complete_operation(\n    journal: std::sync::Arc<dyn application::journal::CommandJournal>,\n    bus: infrastructure::OperationStatusBus,\n    message_id: uuid::Uuid,\n    correlation_id: uuid::Uuid,\n    outcome: Result<(), domain::shared::errors::DomainError>,\n) {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    use domain::shared::errors::DomainError;\n    let (status, error, error_code, message) = match outcome {\n        Ok(()) => (J::SUCCEEDED, None, None, None),\n        Err(DomainError::Rejected { code, context }) => {\n            let msg = domain::generated::errors::message_en(&code, &context).unwrap_or_else(|| code.clone());\n            let error = serde_json::json!({ \"code\": code, \"context\": context });\n            (J::REJECTED, Some(error), Some(code), Some(msg))\n        }\n        // Legacy \"<Code>: <detail>\" string invariants (interim adapters): a catalogued prefix is a\n        // rejection; anything else — and every Repository failure — is a technical failure.\n        Err(DomainError::Invariant(msg)) => {\n            let code = msg.split(':').next().map(str::trim).unwrap_or(\"\").to_string();\n            if domain::generated::errors::find(&code).is_some() {\n                let error = serde_json::json!({ \"code\": code, \"context\": { \"detail\": msg } });\n                (J::REJECTED, Some(error), Some(code), Some(msg))\n            } else {\n                internal_completion()\n            }\n        }\n        Err(DomainError::Repository(_)) => internal_completion(),\n    };\n    if let Err(e) = journal.complete(message_id, status, error).await {\n        eprintln!(\"command journal: complete({message_id}) failed: {e}\");\n    }\n    bus.publish(infrastructure::OperationUpdate { message_id, correlation_id, status, error_code, message });\n}\n\nfn internal_completion() -> (\n    domain::generated::scalars::CommandJournalStatus,\n    Option<serde_json::Value>,\n    Option<String>,\n    Option<String>,\n) {\n    let def = domain::generated::errors::INTERNAL;\n    (\n        domain::generated::scalars::CommandJournalStatus::FAILED,\n        Some(serde_json::json!({ \"code\": def.code, \"context\": {} })),\n        Some(def.code.to_string()),\n        Some(def.message_en.to_string()),\n    )\n}\n\n/// The synchronous Conflict for a replayed messageId whose payload differs — a client bug, not a\n/// retry (ADR-20260720-015300); errors.yaml cross-cutting `Conflict`, P-10 extensions shape.\nfn conflict_error(message_id: uuid::Uuid) -> async_graphql::Error {\n    use async_graphql::ErrorExtensions;\n    let def = domain::generated::errors::CONFLICT;\n    async_graphql::Error::new(format!(\n        \"messageId {message_id} was already used with a different payload\"\n    ))\n    .extend_with(|_, ext| ext.set(\"code\", def.code))\n}\n\n/// Map a SYNCHRONOUS failure (journal insert, input deserialization) onto the GraphQL error\n/// contract (P-10): an anticipated errors.yaml rejection surfaces `extensions.code` = the stable\n/// PascalCase code, the interpolated English message as the error message, and its typed context\n/// fields under the extensions; anything unexpected (repository/adapter failures) surfaces as the\n/// generic catalogued `Internal` — never leaking adapter details to the client.\nfn domain_error(e: domain::shared::errors::DomainError) -> async_graphql::Error {\n",
+        "\n/// The stripped serde wire shape of the GraphQL input — both the journal `payload` column and the\n/// domain command deserialize from it (generated from the same commands.yaml, camelCase). `null`s\n/// are stripped first — an unset GraphQL optional serializes as an explicit null, while the domain\n/// payloads model absence as a MISSING key (`Option` fields / `#[serde(default)]` arrays).\nfn command_payload(input: &impl serde::Serialize) -> async_graphql::Result<serde_json::Value> {\n    let mut value = serde_json::to_value(input).map_err(|e| async_graphql::Error::new(e.to_string()))?;\n    strip_nulls(&mut value);\n    Ok(value)\n}\n\nfn strip_nulls(value: &mut serde_json::Value) {\n    match value {\n        serde_json::Value::Object(map) => {\n            map.retain(|_, v| !v.is_null());\n            for v in map.values_mut() {\n                strip_nulls(v);\n            }\n        }\n        serde_json::Value::Array(items) => {\n            for v in items.iter_mut() {\n                strip_nulls(v);\n            }\n        }\n        _ => {}\n    }\n}\n\n/// `RequestRole` → the scalars.yaml UserType TEXT value (ADR-20260728: enums are stored verbatim).\nfn role_text(role: &crate::graphql::acl::RequestRole) -> &'static str {\n    use crate::graphql::acl::RequestRole as R;\n    match role {\n        R::Public => \"PUBLIC\",\n        R::Customer => \"CUSTOMER\",\n        R::RestaurantAccount => \"RESTAURANT_ACCOUNT\",\n        R::Restaurant => \"RESTAURANT\",\n        R::Rider => \"RIDER\",\n        R::Admin => \"ADMIN\",\n        R::External => \"EXTERNAL\",\n    }\n}\n\n/// The EFFECTIVE technical envelope of one mutation request (ADR-20260720-015500): what the client\n/// supplied via MetadataInput/headers, completed server-side (UUIDv7) and echoed back verbatim in\n/// the MutationAcceptance.\npub(crate) struct RequestEnvelope {\n    pub message_id: uuid::Uuid,\n    pub correlation_id: uuid::Uuid,\n    pub cause_id: Option<uuid::Uuid>,\n    pub session_id: Option<uuid::Uuid>,\n    pub trace_id: Option<String>,\n    pub user_id: Option<uuid::Uuid>,\n    pub user_type: String,\n}\n\nfn request_envelope(ctx: &async_graphql::Context<'_>, metadata: &Option<MetadataInput>) -> RequestEnvelope {\n    let principal = ctx.data_opt::<crate::auth::Principal>();\n    let user_id = principal\n        .and_then(|p| p.user_id.as_deref())\n        .and_then(|s| uuid::Uuid::parse_str(s).ok());\n    let user_type = principal.map(|p| role_text(&p.role)).unwrap_or(\"PUBLIC\").to_string();\n    let session_id = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n    let trace_id = ctx.data_opt::<crate::graphql::session::TraceContext>().and_then(|t| t.0.clone());\n    // Client-suppliable ids validate structurally at scalar parse time; anything missing is\n    // server-generated (time-ordered UUIDv7) and the correlation defaults to the messageId.\n    let message_id = metadata\n        .as_ref()\n        .and_then(|m| m.message_id.as_ref())\n        .map(|v| v.0)\n        .unwrap_or_else(uuid::Uuid::now_v7);\n    let correlation_id = metadata\n        .as_ref()\n        .and_then(|m| m.correlation_id.as_ref())\n        .map(|v| v.0)\n        .unwrap_or(message_id);\n    let cause_id = metadata.as_ref().and_then(|m| m.cause_id.as_ref()).map(|v| v.0);\n    RequestEnvelope { message_id, correlation_id, cause_id, session_id, trace_id, user_id, user_type }\n}\n\n/// The uniform acceptance payload from the effective envelope.\nfn acceptance(env: &RequestEnvelope, status: OperationStatus, duplicate: bool) -> MutationAcceptance {\n    MutationAcceptance {\n        message_id: MessageId(env.message_id),\n        correlation_id: CorrelationId(env.correlation_id),\n        cause_id: env.cause_id.map(CauseId),\n        session_id: env.session_id.map(SessionId),\n        trace_id: env.trace_id.clone().map(TraceId),\n        operation_status: status,\n        duplicate,\n    }\n}\n\n/// `command_journal` lifecycle → the caller-facing OperationStatus (RECEIVED reads as PENDING).\npub(crate) fn journal_status_api(s: domain::generated::scalars::CommandJournalStatus) -> OperationStatus {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    match s {\n        J::RECEIVED => OperationStatus::PENDING,\n        J::SUCCEEDED => OperationStatus::SUCCEEDED,\n        J::REJECTED => OperationStatus::REJECTED,\n        J::FAILED => OperationStatus::FAILED,\n    }\n}\n\n/// A `command_journal` row → the API Operation shape (`operationStatus` / `operationStatusChanged`).\npub(crate) fn operation_from_journal(row: &application::journal::CommandJournalRow) -> Operation {\n    let error_code = row\n        .error\n        .as_ref()\n        .and_then(|e| e.get(\"code\"))\n        .and_then(|c| c.as_str())\n        .map(str::to_owned);\n    let message = match (&error_code, row.error.as_ref().and_then(|e| e.get(\"context\"))) {\n        (Some(code), Some(context)) => domain::generated::errors::message_en(code, context),\n        _ => None,\n    };\n    Operation {\n        message_id: MessageId(row.entry.message_id),\n        correlation_id: CorrelationId(row.entry.correlation_id),\n        status: journal_status_api(row.status),\n        error_code,\n        message,\n        occurred_at: row.completed_at.unwrap_or(row.received_at),\n    }\n}\n\n/// The operation ownership scope (ADR-20260720-015500): ADMIN, the journaling actor (JWT subject),\n/// or the journaling session (X-SESSION-ID). Callers resolve null / an empty stream on false — the\n/// PUBLIC surface must not become an existence oracle.\npub(crate) fn operation_owned(\n    ctx: &async_graphql::Context<'_>,\n    row: &application::journal::CommandJournalRow,\n) -> bool {\n    let admin = matches!(\n        ctx.data_opt::<crate::graphql::acl::RequestRole>(),\n        Some(crate::graphql::acl::RequestRole::Admin)\n    );\n    let principal_uuid = ctx\n        .data_opt::<crate::auth::Principal>()\n        .and_then(|p| p.user_id.as_deref())\n        .and_then(|s| uuid::Uuid::parse_str(s).ok());\n    let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n    admin\n        || (principal_uuid.is_some() && principal_uuid == row.entry.user_id)\n        || (session.is_some() && session == row.entry.session_id)\n}\n\n/// The spawned handler's terminal transition: complete the journal row and publish the update.\n/// REJECTED = an anticipated errors.yaml rejection (surfaced as Operation.errorCode); FAILED = the\n/// catalogued generic Internal (adapter detail never leaks).\nasync fn complete_operation(\n    journal: std::sync::Arc<dyn application::journal::CommandJournal>,\n    bus: infrastructure::OperationStatusBus,\n    message_id: uuid::Uuid,\n    correlation_id: uuid::Uuid,\n    outcome: Result<(), domain::shared::errors::DomainError>,\n) {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    use domain::shared::errors::DomainError;\n    let (status, error, error_code, message) = match outcome {\n        Ok(()) => (J::SUCCEEDED, None, None, None),\n        Err(DomainError::Rejected { code, context }) => {\n            let msg = domain::generated::errors::message_en(&code, &context).unwrap_or_else(|| code.clone());\n            let error = serde_json::json!({ \"code\": code, \"context\": context });\n            (J::REJECTED, Some(error), Some(code), Some(msg))\n        }\n        // Legacy \"<Code>: <detail>\" string invariants (interim adapters): a catalogued prefix is a\n        // rejection; anything else — and every Repository failure — is a technical failure.\n        Err(DomainError::Invariant(msg)) => {\n            let code = msg.split(':').next().map(str::trim).unwrap_or(\"\").to_string();\n            if domain::generated::errors::find(&code).is_some() {\n                let error = serde_json::json!({ \"code\": code, \"context\": { \"detail\": msg } });\n                (J::REJECTED, Some(error), Some(code), Some(msg))\n            } else {\n                internal_completion()\n            }\n        }\n        Err(DomainError::Repository(_)) => internal_completion(),\n    };\n    if let Err(e) = journal.complete(message_id, status, error).await {\n        eprintln!(\"command journal: complete({message_id}) failed: {e}\");\n    }\n    bus.publish(infrastructure::OperationUpdate { message_id, correlation_id, status, error_code, message });\n}\n\nfn internal_completion() -> (\n    domain::generated::scalars::CommandJournalStatus,\n    Option<serde_json::Value>,\n    Option<String>,\n    Option<String>,\n) {\n    let def = domain::generated::errors::INTERNAL;\n    (\n        domain::generated::scalars::CommandJournalStatus::FAILED,\n        Some(serde_json::json!({ \"code\": def.code, \"context\": {} })),\n        Some(def.code.to_string()),\n        Some(def.message_en.to_string()),\n    )\n}\n\n/// The synchronous Conflict for a replayed messageId whose payload differs — a client bug, not a\n/// retry (ADR-20260720-015300); errors.yaml cross-cutting `Conflict`, P-10 extensions shape.\nfn conflict_error(message_id: uuid::Uuid) -> async_graphql::Error {\n    use async_graphql::ErrorExtensions;\n    let def = domain::generated::errors::CONFLICT;\n    async_graphql::Error::new(format!(\n        \"messageId {message_id} was already used with a different payload\"\n    ))\n    .extend_with(|_, ext| ext.set(\"code\", def.code))\n}\n\n/// Map a SYNCHRONOUS failure (journal insert, input deserialization) onto the GraphQL error\n/// contract (P-10): an anticipated errors.yaml rejection surfaces `extensions.code` = the stable\n/// PascalCase code, the interpolated English message as the error message, and its typed context\n/// fields under the extensions; anything unexpected (repository/adapter failures) surfaces as the\n/// generic catalogued `Internal` — never leaking adapter details to the client.\nfn domain_error(e: domain::shared::errors::DomainError) -> async_graphql::Error {\n",
     );
     out.push_str(
         "    use async_graphql::ErrorExtensions;\n    use domain::shared::errors::DomainError;\n    match e {\n        DomainError::Rejected { code, context } => {\n            let message = domain::generated::errors::message_en(&code, &context)\n                .unwrap_or_else(|| code.clone());\n            async_graphql::Error::new(message).extend_with(|_, ext| {\n                ext.set(\"code\", code.as_str());\n                if let Some(fields) = context.as_object() {\n                    for (key, value) in fields {\n                        if key == \"code\" {\n                            continue; // never let a context field shadow the wire code\n                        }\n                        ext.set(\n                            key.as_str(),\n                            async_graphql::Value::from_json(value.clone())\n                                .unwrap_or(async_graphql::Value::Null),\n                        );\n                    }\n                }\n            })\n        }\n        // Legacy \"<Code>: <detail>\" string invariants (interim adapters, e.g. the fail-closed\n        // payment stand-in): surface the prefix when it is a catalogued code, else it is unexpected.\n        DomainError::Invariant(msg) => {\n            let code = msg.split(':').next().map(str::trim).unwrap_or(\"\").to_string();\n            if domain::generated::errors::find(&code).is_some() {\n                async_graphql::Error::new(msg).extend_with(|_, ext| ext.set(\"code\", code.as_str()))\n            } else {\n                internal_error()\n            }\n        }\n        DomainError::Repository(_) => internal_error(),\n    }\n}\n\n/// The generic catalogued `Internal` fallback (errors.yaml): unexpected/infrastructure failures\n/// never leak their detail to the client.\nfn internal_error() -> async_graphql::Error {\n    use async_graphql::ErrorExtensions;\n    let def = domain::generated::errors::INTERNAL;\n    async_graphql::Error::new(def.message_en).extend_with(|_, ext| ext.set(\"code\", def.code))\n}\n",
@@ -12657,7 +12619,7 @@ fn emit_behaviour_tests(model: &Model) -> String {
             out.push_str(&format!("    let cmd = {};\n", literal));
             let mut call = bt_command_call(&msg);
             // TipOrder derives `tippedBy` from the acting persona (ADR-0041): dispatch as the
-            // RESTAURANT ordinal when the asserted fact says the restaurant tipped.
+            // RESTAURANT user type when the asserted fact says the restaurant tipped.
             if msg == "TipOrder" {
                 let restaurant_tips = t
                     .get("then")
@@ -12673,7 +12635,7 @@ fn emit_behaviour_tests(model: &Model) -> String {
                     })
                     .unwrap_or(false);
                 if restaurant_tips {
-                    call = call.replace("support::actor()", "support::actor_as(3)");
+                    call = call.replace("support::actor()", "support::actor_as(\"RESTAURANT\")");
                 }
             }
             out.push_str(&format!("    let result = {};\n", call));

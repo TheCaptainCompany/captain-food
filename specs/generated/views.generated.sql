@@ -27,10 +27,10 @@ SELECT
   (c.payload->>'deliveryJobId')::uuid AS delivery_job_id,
   (c.payload->>'orderId')::uuid AS order_id,
   (c.payload->>'restaurantId')::uuid AS restaurant_id,
-  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 0 WHEN 'DeliveryAcceptedByRider' THEN 1 WHEN 'DeliveryAcceptedByPartner' THEN 1 WHEN 'DeliveryPickedUp' THEN 2 WHEN 'DeliveryStatusUpdated' THEN (CASE e.payload->>'status' WHEN 'PENDING' THEN 0 WHEN 'ASSIGNED' THEN 1 WHEN 'PICKED_UP' THEN 2 WHEN 'OUT_FOR_DELIVERY' THEN 3 WHEN 'DELIVERED' THEN 4 WHEN 'FAILED' THEN 5 WHEN 'CANCELLED' THEN 6 END) WHEN 'DeliveryCompleted' THEN 4 WHEN 'DeliveryCancelled' THEN 6 WHEN 'DeliveryDispatchFailed' THEN 5 END FROM domain_events e
+  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 'PENDING' WHEN 'DeliveryAcceptedByRider' THEN 'ASSIGNED' WHEN 'DeliveryAcceptedByPartner' THEN 'ASSIGNED' WHEN 'DeliveryPickedUp' THEN 'PICKED_UP' WHEN 'DeliveryStatusUpdated' THEN e.payload->>'status' WHEN 'DeliveryCompleted' THEN 'DELIVERED' WHEN 'DeliveryCancelled' THEN 'CANCELLED' WHEN 'DeliveryDispatchFailed' THEN 'FAILED' END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryPickedUp', 'DeliveryStatusUpdated', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed')
      ORDER BY e.position DESC LIMIT 1) AS status,
-  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 1 WHEN 'DeliveryAcceptedByPartner' THEN 0 END FROM domain_events e
+  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 'INDEPENDENT' WHEN 'DeliveryAcceptedByPartner' THEN 'PARTNER' END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner')
      ORDER BY e.position DESC LIMIT 1) AS provider,
   (SELECT (e.payload->>'riderId')::uuid FROM domain_events e
@@ -68,7 +68,7 @@ CREATE OR REPLACE VIEW View_DeliverySatisfaction AS
 SELECT
   (c.payload->>'orderId')::uuid AS order_id,
   (c.payload->>'restaurantId')::uuid AS restaurant_id,
-  (CASE c.payload->>'timeliness' WHEN 'ON_TIME' THEN 0 WHEN 'ACCEPTABLE_DELAY' THEN 1 WHEN 'TOO_LATE' THEN 2 END) AS timeliness,
+  c.payload->>'timeliness' AS timeliness,
   c.payload->>'reason' AS reason,
   c.occurred_at AS recorded_at,
   c.occurred_at AS created_at,
@@ -84,7 +84,7 @@ SELECT
   (c.payload->>'cityId')::uuid AS city_id,
   c.payload->>'partnerName' AS partner_name,
   c.payload->>'contactEmail' AS contact_email,
-  (SELECT CASE e.event_type WHEN 'DeliveryPartnerAvailabilityRequested' THEN 0 WHEN 'DeliveryPartnerAvailabilityApproved' THEN 1 WHEN 'DeliveryPartnerAvailabilityRevoked' THEN 2 END FROM domain_events e
+  (SELECT CASE e.event_type WHEN 'DeliveryPartnerAvailabilityRequested' THEN 'PENDING' WHEN 'DeliveryPartnerAvailabilityApproved' THEN 'APPROVED' WHEN 'DeliveryPartnerAvailabilityRevoked' THEN 'REVOKED' END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPartnerAvailabilityRequested', 'DeliveryPartnerAvailabilityApproved', 'DeliveryPartnerAvailabilityRevoked')
      ORDER BY e.position DESC LIMIT 1) AS status,
   c.occurred_at AS requested_at,
@@ -102,13 +102,13 @@ SELECT
   (c.payload->>'orderId')::uuid AS order_id,
   (c.payload->>'customerId')::uuid AS customer_id,
   (c.payload->>'restaurantId')::uuid AS restaurant_id,
-  (CASE c.payload->>'category' WHEN 'MISSING_ITEM' THEN 0 WHEN 'WRONG_ITEM' THEN 1 WHEN 'QUALITY' THEN 2 WHEN 'LATE_DELIVERY' THEN 3 WHEN 'DAMAGED' THEN 4 WHEN 'NOT_DELIVERED' THEN 5 WHEN 'OTHER' THEN 6 END) AS category,
+  c.payload->>'category' AS category,
   c.payload->>'description' AS description,
-  (CASE c.payload->>'requestedResolution' WHEN 'FULL_REFUND' THEN 0 WHEN 'PARTIAL_REFUND' THEN 1 WHEN 'REPLACEMENT' THEN 2 WHEN 'GOODWILL_CREDIT' THEN 3 WHEN 'REJECTED' THEN 4 END) AS requested_resolution,
-  (SELECT CASE e.event_type WHEN 'ReclamationOpened' THEN 0 WHEN 'ReclamationResolved' THEN 1 WHEN 'ReclamationRejected' THEN 2 WHEN 'ReclamationReopened' THEN 0 END FROM domain_events e
+  c.payload->>'requestedResolution' AS requested_resolution,
+  (SELECT CASE e.event_type WHEN 'ReclamationOpened' THEN 'OPEN' WHEN 'ReclamationResolved' THEN 'RESOLVED' WHEN 'ReclamationRejected' THEN 'REJECTED' WHEN 'ReclamationReopened' THEN 'OPEN' END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationOpened', 'ReclamationResolved', 'ReclamationRejected', 'ReclamationReopened')
      ORDER BY e.position DESC LIMIT 1) AS status,
-  (SELECT (CASE e.payload->>'resolution' WHEN 'FULL_REFUND' THEN 0 WHEN 'PARTIAL_REFUND' THEN 1 WHEN 'REPLACEMENT' THEN 2 WHEN 'GOODWILL_CREDIT' THEN 3 WHEN 'REJECTED' THEN 4 END) FROM domain_events e
+  (SELECT e.payload->>'resolution' FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved') AND e.payload ? 'resolution'
      ORDER BY e.position DESC LIMIT 1) AS resolution,
   (SELECT (e.payload->'refundAmount'->>'amountCents')::bigint FROM domain_events e
@@ -133,7 +133,7 @@ CREATE OR REPLACE VIEW View_PendingRefunds AS
 SELECT
   (c.payload->>'orderId')::uuid AS order_id,
   (c.payload->>'restaurantId')::uuid AS restaurant_id,
-  (SELECT CASE e.event_type WHEN 'RefundOpened' THEN 0 WHEN 'RefundApproved' THEN 1 WHEN 'RefundDenied' THEN 2 WHEN 'PaymentRefunded' THEN 3 END FROM domain_events e
+  (SELECT CASE e.event_type WHEN 'RefundOpened' THEN 'REQUESTED' WHEN 'RefundApproved' THEN 'APPROVED' WHEN 'RefundDenied' THEN 'DENIED' WHEN 'PaymentRefunded' THEN 'REFUNDED' END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')
      ORDER BY e.position DESC LIMIT 1) AS status,
   (c.payload->'amount'->>'amountCents')::bigint AS amount_cents,

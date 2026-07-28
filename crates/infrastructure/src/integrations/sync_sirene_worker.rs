@@ -86,9 +86,9 @@ const ABSENCE_GRACE_DAYS: i64 = 21;
 /// the sweep is budget-limited and rotates — most departments are legitimately stale at any moment, and
 /// a global freshness check would read that as mass closure.
 const FRESH_INGESTION_DAYS: i64 = 10;
-/// `UserType::EXTERNAL` ordinal for the event envelope (enums stored as declaration-order ints,
-/// ADR-0037/0041) — the sync writes as the fixed external system principal.
-const EXTERNAL_USER_TYPE: i32 = 6;
+/// `UserType::EXTERNAL` TEXT value for the event envelope (enums stored verbatim, ADR-20260728) —
+/// the sync writes as the fixed external system principal.
+const EXTERNAL_USER_TYPE: &str = "EXTERNAL";
 /// Consecutive failed sync attempts after which a row is QUARANTINED as `POISON` and the drain stops
 /// selecting it (#231).
 ///
@@ -124,7 +124,7 @@ fn journal_entry(
         session_id: None,
         trace_id: None,
         user_id: Some(sirene_system_user_id()),
-        user_type: EXTERNAL_USER_TYPE,
+        user_type: EXTERNAL_USER_TYPE.to_string(),
         channel: CommandChannel::WORKER,
         command_type: command_type.to_string(),
         payload_hash: payload_hash(&payload),
@@ -137,7 +137,7 @@ fn journal_entry(
 fn send_actor(entry: &CommandJournalEntry) -> Actor {
     Actor {
         user_id: sirene_system_user_id(),
-        user_type: EXTERNAL_USER_TYPE,
+        user_type: EXTERNAL_USER_TYPE.to_string(),
         correlation_id: entry.correlation_id,
         cause_id: Some(entry.message_id),
     }
@@ -182,8 +182,8 @@ pub struct SireneSyncSummary {
 /// `GROUP BY status` is the operator's per-sweep report.
 ///
 /// Deliberately NOT a domain scalar: the value is also written by the CI `sirene_ingest` crate, which
-/// cannot see domain types (ADR-0045), and enums persist as declaration-order ints (ADR-0037/0041) — so
-/// a shared enum would mean hardcoded ordinals there and silent reinterpretation on any reordering.
+/// cannot see domain types (ADR-0045) — this adapter-owned staging status simply stays outside
+/// scalars.yaml (since ADR-20260728 domain enums persist as TEXT too, so the conventions agree).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowOutcome {
     /// HANDED OVER to the inbox, verdict not yet known. The ACL translated the record and staged an
@@ -574,30 +574,30 @@ impl SireneSyncWorker {
     /// which is exactly `siret || ':' || payload_hash` on the staging row. One statement, no per-row
     /// round-trip.
     ///
-    /// Verdict mapping (`InboundEventStatus`, declaration-order ints):
-    /// - DELIVERED (1) — the aggregate decided a fact and it was appended;
-    /// - IGNORED (3) — the aggregate decided nothing had changed;
-    /// - DUPLICATE (4) — this delivery had already been consumed.
+    /// Verdict mapping (`InboundEventStatus`, stored as TEXT):
+    /// - DELIVERED — the aggregate decided a fact and it was appended;
+    /// - IGNORED — the aggregate decided nothing had changed;
+    /// - DUPLICATE — this delivery had already been consumed.
     ///
     /// All three are SUCCESSFUL terminal outcomes: the record reached the domain and the domain is now
     /// correct about it. "Nothing changed" is a real answer, not a failure — conflating it with one is
-    /// what made a sweep unable to distinguish 200,000 registrations from 200,000 no-ops. FAILED (2) is
-    /// surfaced as FAILED. RECEIVED (0) is still in flight and left alone.
+    /// what made a sweep unable to distinguish 200,000 registrations from 200,000 no-ops. FAILED is
+    /// surfaced as FAILED. RECEIVED is still in flight and left alone.
     async fn reconcile_staged(&self, summary: &mut SireneSyncSummary) -> Result<(), DomainError> {
         let resolved = sqlx::query(
             // The payload is dropped HERE, in the same statement that records the verdict — never
             // before it. A FAILED verdict keeps the payload: that is the row that may need
             // re-translating, and it is the only original we hold.
             "UPDATE external_sirene_restaurants s \
-                SET status = CASE WHEN i.status = 2 THEN 'FAILED' ELSE 'SYNCED' END, \
-                    synced_at = CASE WHEN i.status = 2 THEN s.synced_at \
+                SET status = CASE WHEN i.status = 'FAILED' THEN 'FAILED' ELSE 'SYNCED' END, \
+                    synced_at = CASE WHEN i.status = 'FAILED' THEN s.synced_at \
                                      ELSE COALESCE(i.delivered_at, now()) END, \
-                    payload = CASE WHEN i.status = 2 THEN s.payload ELSE NULL END \
+                    payload = CASE WHEN i.status = 'FAILED' THEN s.payload ELSE NULL END \
                FROM inbound_events i \
               WHERE s.status = 'STAGED' \
                 AND i.source = $1 \
                 AND i.external_id = s.siret || ':' || s.payload_hash \
-                AND i.status <> 0 \
+                AND i.status <> 'RECEIVED' \
           RETURNING s.status",
         )
         .bind(SIRENE_SOURCE)

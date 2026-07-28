@@ -1156,9 +1156,9 @@ pub async fn tip_order(
         return Err(reject("ValidationError", json!({ "field": "tips" })));
     }
     // The business role that changes semantics (scalars.yaml#/Tipper), derived from the acting user's
-    // envelope UserType ordinal (ADR-0037/0041): RESTAURANT_ACCOUNT (2) / RESTAURANT (3) tip as the
-    // restaurant; everyone else is the customer.
-    let tipped_by = if actor.user_type == 2 || actor.user_type == 3 {
+    // envelope UserType (ADR-0041; stored as TEXT per ADR-20260728): RESTAURANT_ACCOUNT / RESTAURANT
+    // tip as the restaurant; everyone else is the customer.
+    let tipped_by = if actor.user_type == "RESTAURANT_ACCOUNT" || actor.user_type == "RESTAURANT" {
         Tipper::RESTAURANT
     } else {
         Tipper::CUSTOMER
@@ -3734,7 +3734,7 @@ mod create_if_absent_tests {
     fn actor() -> Actor {
         Actor {
             user_id: uuid::Uuid::nil(),
-            user_type: 0,
+            user_type: "PUBLIC".to_string(),
             correlation_id: uuid::Uuid::nil(),
             cause_id: None,
         }

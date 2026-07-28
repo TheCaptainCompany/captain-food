@@ -31,7 +31,7 @@ command_journal:
     session_id:     { type: { $ref: 'scalars.yaml#/SessionId' }, nullable: true, index: true, note: "X-SESSION-ID header — the anonymous ownership scope for operationStatus." }
     trace_id:       { type: { $ref: 'scalars.yaml#/TraceId' }, nullable: true, note: "W3C trace-id (traceparent-derived or server-started); technical tracing, not business correlation." }
     user_id:        { type: uuid, nullable: true, index: true, note: "Acting user's auth subject (null for anonymous) — the authenticated ownership scope. Envelope, mirrors domain_events.user_id semantics (ADR-0041)." }
-    user_type:      { type: { $ref: 'scalars.yaml#/UserType' }, note: "Role of the acting user; stored as the compact UserType ordinal (ref_user_type.sort_order)." }
+    user_type:      { type: { $ref: 'scalars.yaml#/UserType' }, note: "Role of the acting user; stored as its TEXT value verbatim (ADR-20260728)." }
     channel:        { type: { $ref: 'scalars.yaml#/CommandChannel' }, note: "Dispatch surface the command arrived through." }
     command_type:   { type: text, index: true, note: "commands.yaml key, e.g. 'PlaceOrder'." }
     payload:        { type: jsonb, note: "The BUSINESS command payload only — the envelope is the columns (ADR-0041)." }

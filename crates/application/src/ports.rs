@@ -13,8 +13,8 @@ use domain::shared::{errors::DomainError, identifiers::RestaurantId};
 #[derive(Debug, Clone)]
 pub struct Actor {
     pub user_id: uuid::Uuid,
-    /// `UserType` ordinal (enums are stored as declaration-order integers, ADR-0037).
-    pub user_type: i32,
+    /// `UserType` TEXT value, stored verbatim (ADR-20260728).
+    pub user_type: String,
     pub correlation_id: uuid::Uuid,
     pub cause_id: Option<uuid::Uuid>,
 }

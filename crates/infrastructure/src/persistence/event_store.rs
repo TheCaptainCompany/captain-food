@@ -70,7 +70,7 @@ impl EventStore for PgEventStore {
             .bind(stream_name)
             .bind(i32::try_from(version).map_err(db_err)?)
             .bind(actor.user_id)
-            .bind(actor.user_type)
+            .bind(actor.user_type.clone())
             .bind(actor.correlation_id)
             .bind(actor.cause_id)
             .bind(&event_type)

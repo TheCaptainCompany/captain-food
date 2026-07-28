@@ -2,7 +2,7 @@
 // Postgres adapters for the process-manager STATE stores (ADR-20260719-172821): one `Pg…State` per
 // `application::pm_state` port, over the saga state tables (migration
 // `20260719200000_process_manager_state_tables.sql`). Conventions match the projection stores: enum
-// columns are INTEGER declaration-order ordinals (`crate::persistence::enum_sql`); scalar newtypes
+// columns are TEXT holding the scalars.yaml value verbatim (`crate::persistence::enum_sql`); scalar newtypes
 // bind via `.0`; upserts are `INSERT … ON CONFLICT (pk) DO UPDATE` over all columns. `last_update_utc`
 // is the runtime envelope's stamp: every upsert writes `now()` server-side (the row's carried value is
 // IGNORED), reads return the stored value.
@@ -15,7 +15,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
 use crate::persistence::db_err;
-use crate::persistence::enum_sql::EnumOrd;
+use crate::persistence::enum_sql::EnumText;
 
 // ---------------------------------------------------------------------------------------------------
 // payment_process_manager
@@ -29,8 +29,8 @@ fn decode_payment_process(row: &PgRow) -> Result<PaymentProcessRow, DomainError>
         cart_id: CartId(row.try_get("cart_id").map_err(db_err)?),
         order_id: OrderId(row.try_get("order_id").map_err(db_err)?),
         payment_intent_id: PaymentIntentId(row.try_get("payment_intent_id").map_err(db_err)?),
-        process_status: EnumOrd::from_ord(row.try_get::<i32, _>("process_status").map_err(db_err)?)?,
-        payment_status: EnumOrd::from_ord(row.try_get::<i32, _>("payment_status").map_err(db_err)?)?,
+        process_status: EnumText::from_text(&row.try_get::<String, _>("process_status").map_err(db_err)?)?,
+        payment_status: EnumText::from_text(&row.try_get::<String, _>("payment_status").map_err(db_err)?)?,
         customer_id: row.try_get::<Option<uuid::Uuid>, _>("customer_id").map_err(db_err)?.map(CustomerId),
         session_id: row.try_get::<Option<uuid::Uuid>, _>("session_id").map_err(db_err)?.map(SessionId),
         client_secret: row.try_get::<Option<String>, _>("client_secret").map_err(db_err)?,
@@ -89,8 +89,8 @@ impl PaymentProcessStateStore for PgPaymentProcessState {
             .bind(row.cart_id.0)
             .bind(row.order_id.0)
             .bind(row.payment_intent_id.0.clone())
-            .bind(row.process_status.to_ord())
-            .bind(row.payment_status.to_ord())
+            .bind(row.process_status.to_text())
+            .bind(row.payment_status.to_text())
             .bind(row.customer_id.as_ref().map(|v| v.0))
             .bind(row.session_id.as_ref().map(|v| v.0))
             .bind(row.client_secret.clone())
@@ -114,7 +114,7 @@ fn decode_refund_process(row: &PgRow) -> Result<RefundProcessRow, DomainError> {
         order_id: OrderId(row.try_get("order_id").map_err(db_err)?),
         payment_intent_id: row.try_get::<Option<String>, _>("payment_intent_id").map_err(db_err)?.map(PaymentIntentId),
         refund_id: row.try_get::<Option<String>, _>("refund_id").map_err(db_err)?.map(RefundId),
-        process_status: EnumOrd::from_ord(row.try_get::<i32, _>("process_status").map_err(db_err)?)?,
+        process_status: EnumText::from_text(&row.try_get::<String, _>("process_status").map_err(db_err)?)?,
         approved_amount_cents: row.try_get::<Option<i64>, _>("approved_amount_cents").map_err(db_err)?.map(MoneyCents),
         reason: row.try_get::<Option<String>, _>("reason").map_err(db_err)?,
         last_update_utc: row.try_get("last_update_utc").map_err(db_err)?,
@@ -156,7 +156,7 @@ impl RefundProcessStateStore for PgRefundProcessState {
             .bind(row.order_id.0)
             .bind(row.payment_intent_id.as_ref().map(|v| v.0.clone()))
             .bind(row.refund_id.as_ref().map(|v| v.0.clone()))
-            .bind(row.process_status.to_ord())
+            .bind(row.process_status.to_text())
             .bind(row.approved_amount_cents.map(|v| v.0))
             .bind(row.reason.clone())
             .execute(&self.pool)
@@ -230,7 +230,7 @@ fn decode_delivery_dispatch(row: &PgRow) -> Result<DeliveryDispatchRow, DomainEr
         order_id: OrderId(row.try_get("order_id").map_err(db_err)?),
         restaurant_id: RestaurantId(row.try_get("restaurant_id").map_err(db_err)?),
         delivery_job_id: DeliveryJobId(row.try_get("delivery_job_id").map_err(db_err)?),
-        process_status: EnumOrd::from_ord(row.try_get::<i32, _>("process_status").map_err(db_err)?)?,
+        process_status: EnumText::from_text(&row.try_get::<String, _>("process_status").map_err(db_err)?)?,
         offer_attempts: row.try_get("offer_attempts").map_err(db_err)?,
         current_rank: row.try_get("current_rank").map_err(db_err)?,
         current_channel: row.try_get::<Option<String>, _>("current_channel").map_err(db_err)?.map(DeliveryChannelKey),
@@ -280,7 +280,7 @@ impl DeliveryDispatchStateStore for PgDeliveryDispatchState {
             .bind(row.order_id.0)
             .bind(row.restaurant_id.0)
             .bind(row.delivery_job_id.0)
-            .bind(row.process_status.to_ord())
+            .bind(row.process_status.to_text())
             .bind(row.offer_attempts)
             .bind(row.current_rank)
             .bind(row.current_channel.as_ref().map(|v| v.0.clone()))

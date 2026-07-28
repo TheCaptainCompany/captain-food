@@ -28,7 +28,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -41,7 +41,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE restaurant (
           restaurant_id UUID PRIMARY KEY,
           restaurant_account_id UUID,
-          listing_status INTEGER NOT NULL,
+          listing_status TEXT NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
           -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
@@ -50,18 +50,18 @@ async fn reset_schema(pool: &PgPool) {
           description TEXT,
           tags JSONB,
           margin_rate TEXT,
-          cuisine_category INTEGER,
+          cuisine_category TEXT,
           uber_prices_opt_in BOOLEAN,
           website TEXT,
           rating TEXT,
           reviews_count INTEGER,
           gbp_order_url TEXT,
-          gbp_link_status INTEGER,
+          gbp_link_status TEXT,
           address JSONB NOT NULL,
           location JSONB,
           opening_hours JSONB NOT NULL,
-          status INTEGER NOT NULL,
-          order_acceptance INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          order_acceptance TEXT NOT NULL,
           default_currency TEXT NOT NULL,
           timezone TEXT,
           preparation_time_minutes INTEGER,
@@ -71,7 +71,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE prospectionpipeline (
           restaurant_id UUID PRIMARY KEY,
           score INTEGER NOT NULL,
-          pipeline_status INTEGER NOT NULL,
+          pipeline_status TEXT NOT NULL,
           contacts_count INTEGER NOT NULL,
           last_contacted_at TIMESTAMPTZ,
           replied_at TIMESTAMPTZ,
@@ -93,7 +93,7 @@ async fn reset_schema(pool: &PgPool) {
 fn admin_actor() -> Actor {
     Actor {
         user_id: uuid::Uuid::new_v4(),
-        user_type: 5, // UserType::ADMIN ordinal
+        user_type: "ADMIN".to_string(),
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     }
@@ -190,7 +190,7 @@ async fn command_appends_event_and_projects_the_restaurant_row() {
     let (version, user_id, user_type, event_type, payload): (
         i32,
         uuid::Uuid,
-        i32,
+        String,
         String,
         serde_json::Value,
     ) = sqlx::query_as(
@@ -203,7 +203,7 @@ async fn command_appends_event_and_projects_the_restaurant_row() {
     .expect("restaurant event row");
     assert_eq!(version, 1);
     assert_eq!(user_id, actor.user_id); // envelope metadata (ADR-0041)…
-    assert_eq!(user_type, 5);
+    assert_eq!(user_type, "ADMIN");
     assert_eq!(event_type, "RestaurantRegistered");
     assert_eq!(payload["restaurantId"], serde_json::json!(restaurant_id));
     // No slug in the fact: registration and the storefront address are separate lifecycles since
@@ -216,7 +216,7 @@ async fn command_appends_event_and_projects_the_restaurant_row() {
     // 3) The existing projection worker folds it into the materialized `restaurant` table.
     let worker = ProjectionWorker::new(pool.clone());
     worker.run_once().await.expect("run_once");
-    let (slug, display_name, status, listing_status): (Option<String>, String, i32, i32) =
+    let (slug, display_name, status, listing_status): (Option<String>, String, String, String) =
         sqlx::query_as(
             "SELECT slug, display_name, status, listing_status FROM restaurant WHERE restaurant_id = $1",
         )
@@ -226,8 +226,8 @@ async fn command_appends_event_and_projects_the_restaurant_row() {
         .expect("projected restaurant row");
     assert_eq!(slug, None, "no storefront address until one is configured (#220)");
     assert_eq!(display_name, "Chez Marco");
-    assert_eq!(status, 0); // RestaurantStatus::DRAFT
-    assert_eq!(listing_status, 0); // RestaurantListingStatus::NON_PARTNER
+    assert_eq!(status, "DRAFT"); // RestaurantStatus::DRAFT
+    assert_eq!(listing_status, "NON_PARTNER"); // RestaurantListingStatus::NON_PARTNER
 
     // 4) Idempotent replay: same client-generated id → version clash absorbed as Ok, no duplicate fact.
     register_restaurant(&store, &restaurants, register_restaurant_cmd(restaurant_id), &actor)
@@ -256,11 +256,11 @@ async fn command_appends_event_and_projects_the_restaurant_row() {
     assert!(matches!(&stale, Err(e) if application::ports::is_version_conflict(e)));
 
     worker.run_once().await.expect("run_once (activated)");
-    let status_after: i32 =
+    let status_after: String =
         sqlx::query_scalar("SELECT status FROM restaurant WHERE restaurant_id = $1")
             .bind(restaurant_id)
             .fetch_one(&pool)
             .await
             .expect("status after activation");
-    assert_eq!(status_after, 1); // RestaurantStatus::ACTIVE
+    assert_eq!(status_after, "ACTIVE"); // RestaurantStatus::ACTIVE
 }

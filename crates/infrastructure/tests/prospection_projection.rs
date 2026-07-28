@@ -26,7 +26,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -39,7 +39,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE restaurant (
           restaurant_id UUID PRIMARY KEY,
           restaurant_account_id UUID,
-          listing_status INTEGER NOT NULL,
+          listing_status TEXT NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
           -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
@@ -48,18 +48,18 @@ async fn reset_schema(pool: &PgPool) {
           description TEXT,
           tags JSONB,
           margin_rate TEXT,
-          cuisine_category INTEGER,
+          cuisine_category TEXT,
           uber_prices_opt_in BOOLEAN,
           website TEXT,
           rating TEXT,
           reviews_count INTEGER,
           gbp_order_url TEXT,
-          gbp_link_status INTEGER,
+          gbp_link_status TEXT,
           address JSONB NOT NULL,
           location JSONB,
           opening_hours JSONB NOT NULL,
-          status INTEGER NOT NULL,
-          order_acceptance INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          order_acceptance TEXT NOT NULL,
           default_currency TEXT NOT NULL,
           timezone TEXT,
           preparation_time_minutes INTEGER,
@@ -69,7 +69,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE prospectionpipeline (
           restaurant_id UUID PRIMARY KEY,
           score INTEGER NOT NULL,
-          pipeline_status INTEGER NOT NULL,
+          pipeline_status TEXT NOT NULL,
           contacts_count INTEGER NOT NULL,
           last_contacted_at TIMESTAMPTZ,
           replied_at TIMESTAMPTZ,
@@ -132,7 +132,7 @@ async fn registered_prospect_is_folded_and_served_by_the_read_repository() {
     let store = PgEventStore::new(pool.clone());
     let actor = Actor {
         user_id: sirene_system_user_id(),
-        user_type: 6, // UserType::EXTERNAL ordinal
+        user_type: "EXTERNAL".to_string(),
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     };
@@ -146,18 +146,18 @@ async fn registered_prospect_is_folded_and_served_by_the_read_repository() {
 
     // 2) One worker pass folds the event into the prospect row: NEW, unscored, never contacted.
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once");
-    let (score, pipeline_status, contacts_count): (i32, i32, i32) = sqlx::query_as(
+    let (score, pipeline_status, contacts_count): (i32, String, i32) = sqlx::query_as(
         "SELECT score, pipeline_status, contacts_count FROM prospectionpipeline WHERE restaurant_id = $1",
     )
     .bind(restaurant_id)
     .fetch_one(&pool)
     .await
     .expect("projected prospect row");
-    assert_eq!(pipeline_status, 0); // ProspectPipelineStatus::NEW ordinal
+    assert_eq!(pipeline_status, "NEW"); // ProspectPipelineStatus::NEW
     assert_eq!(score, 0); // TODO(runtime) weighted score — 0 until the lookup ports land
     assert_eq!(contacts_count, 0);
 
-    // 3) The read repository serves it — and the status filter binds the right ordinal.
+    // 3) The read repository serves it — and the status filter binds the right TEXT value.
     let repo = PgProspectionRepository::new(pool.clone());
     let all = repo.list(ProspectFilter::default()).await.expect("list all");
     assert_eq!(all.len(), 1);

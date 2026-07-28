@@ -22,7 +22,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 
 use super::db_err;
-use super::enum_sql::{opt_from_ord, EnumOrd};
+use super::enum_sql::{opt_from_text, EnumText};
 
 /// The view columns the read side consumes, in `ReclamationRow` field order.
 const COLUMNS: &str = "reclamation_id, order_id, customer_id, restaurant_id, category, description, \
@@ -46,20 +46,20 @@ fn is_overdue(status: ReclamationStatus, opened_at: chrono::DateTime<chrono::Utc
 /// Decode one `View_Reclamation` row into the hand-written read-model DTO.
 fn decode(row: &PgRow) -> Result<ReclamationRow, DomainError> {
     let status: ReclamationStatus =
-        EnumOrd::from_ord(row.try_get::<i32, _>("status").map_err(db_err)?)?;
+        EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?;
     let opened_at: chrono::DateTime<chrono::Utc> = row.try_get("opened_at").map_err(db_err)?;
     Ok(ReclamationRow {
         reclamation_id: ReclamationId(row.try_get("reclamation_id").map_err(db_err)?),
         order_id: OrderId(row.try_get("order_id").map_err(db_err)?),
         customer_id: CustomerId(row.try_get("customer_id").map_err(db_err)?),
         restaurant_id: RestaurantId(row.try_get("restaurant_id").map_err(db_err)?),
-        category: EnumOrd::from_ord(row.try_get::<i32, _>("category").map_err(db_err)?)?,
+        category: EnumText::from_text(&row.try_get::<String, _>("category").map_err(db_err)?)?,
         description: ReclamationDescription(row.try_get("description").map_err(db_err)?),
-        requested_resolution: opt_from_ord(
-            row.try_get::<Option<i32>, _>("requested_resolution").map_err(db_err)?,
+        requested_resolution: opt_from_text(
+            row.try_get::<Option<String>, _>("requested_resolution").map_err(db_err)?,
         )?,
         status,
-        resolution: opt_from_ord(row.try_get::<Option<i32>, _>("resolution").map_err(db_err)?)?,
+        resolution: opt_from_text(row.try_get::<Option<String>, _>("resolution").map_err(db_err)?)?,
         refund_amount_cents: row
             .try_get::<Option<i64>, _>("refund_amount_cents")
             .map_err(db_err)?
@@ -108,16 +108,16 @@ impl ReclamationReadRepository for PgReclamationRepository {
         let mut qb: QueryBuilder<Postgres> =
             QueryBuilder::new(format!("SELECT {COLUMNS} FROM {VIEW} WHERE TRUE"));
         if let Some(status) = filter.status {
-            qb.push(" AND status = ").push_bind(status.to_ord());
+            qb.push(" AND status = ").push_bind(status.to_text());
         }
         if let Some(category) = filter.category {
-            qb.push(" AND category = ").push_bind(category.to_ord());
+            qb.push(" AND category = ").push_bind(category.to_text());
         }
         // First-response SLA filter (#160): overdue = OPEN AND older than the target. The interval is
         // built from the named constant via `make_interval` (bound as int4), so the target lives in
         // ONE place (RECLAMATION_FIRST_RESPONSE_TARGET_HOURS), matching `is_overdue`'s Rust check.
         if filter.overdue == Some(true) {
-            qb.push(" AND status = ").push_bind(ReclamationStatus::OPEN.to_ord());
+            qb.push(" AND status = ").push_bind(ReclamationStatus::OPEN.to_text());
             qb.push(" AND opened_at < now() - make_interval(hours => ")
                 .push_bind(RECLAMATION_FIRST_RESPONSE_TARGET_HOURS as i32)
                 .push(")");

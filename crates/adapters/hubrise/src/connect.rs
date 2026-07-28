@@ -249,7 +249,7 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
             session_id: None,
             trace_id: None,
             user_id: Some(hubrise_system_user_id()),
-            user_type: EXTERNAL_USER_TYPE,
+            user_type: EXTERNAL_USER_TYPE.to_string(),
             channel: CommandChannel::WORKER,
             command_type: command_type.to_string(),
             payload_hash: payload_hash(&payload),
@@ -260,7 +260,7 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
     fn actor(entry: &CommandJournalEntry) -> Actor {
         Actor {
             user_id: hubrise_system_user_id(),
-            user_type: EXTERNAL_USER_TYPE,
+            user_type: EXTERNAL_USER_TYPE.to_string(),
             correlation_id: entry.correlation_id,
             cause_id: Some(entry.message_id),
         }

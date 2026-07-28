@@ -37,9 +37,9 @@ const BATCH_SIZE: i64 = 100;
 /// complete — the spawned handler cannot still be running).
 const STALE_COMMAND_SWEEP: chrono::Duration = chrono::Duration::minutes(10);
 
-/// `UserType::EXTERNAL` ordinal (declaration-order int, ADR-0037) — inbound facts are delivered as
+/// `UserType::EXTERNAL` TEXT value (stored verbatim, ADR-20260728) — inbound facts are delivered as
 /// the external system principal.
-const EXTERNAL_USER_TYPE: i32 = 6;
+const EXTERNAL_USER_TYPE: &str = "EXTERNAL";
 
 /// Fixed UUIDv5 namespace for the per-source system user id (mirrors the adapters' own namespaces —
 /// deterministic, stable across deliveries and deployments).
@@ -195,7 +195,7 @@ impl InboundEventsDrainWorker {
                 &inbound_namespace(),
                 format!("system:{}", row.source).as_bytes(),
             ),
-            user_type: EXTERNAL_USER_TYPE,
+            user_type: EXTERNAL_USER_TYPE.to_string(),
             correlation_id: row.correlation_id,
             // The causality link: the appended fact's cause is the inbound record that carried it.
             cause_id: Some(row.inbound_event_id),
@@ -416,7 +416,7 @@ mod tests {
                     dropoff: address,
                     provider: None,
                 }),
-                Actor { user_id: uuid::Uuid::nil(), user_type: 0, correlation_id: uuid::Uuid::nil(), cause_id: None },
+                Actor { user_id: uuid::Uuid::nil(), user_type: "PUBLIC".to_string(), correlation_id: uuid::Uuid::nil(), cause_id: None },
             ));
         // …and the Avelo37 ACL staged the partner acceptance.
         let event = DomainEvent::DeliveryAcceptedByPartner(DeliveryAcceptedByPartner {
@@ -595,7 +595,7 @@ mod tests {
                 session_id: None,
                 trace_id: None,
                 user_id: None,
-                user_type: 0,
+                user_type: "PUBLIC".to_string(),
                 channel: CommandChannel::GRAPHQL,
                 command_type: "AddCartLine".into(),
                 payload: serde_json::json!({}),

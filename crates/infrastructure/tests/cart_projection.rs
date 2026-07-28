@@ -19,7 +19,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -34,7 +34,7 @@ async fn reset_schema(pool: &PgPool) {
           restaurant_id UUID NOT NULL,
           session_id UUID NOT NULL,
           customer_id UUID,
-          status INTEGER NOT NULL,
+          status TEXT NOT NULL,
           lines JSONB NOT NULL,
           total_amount_cents BIGINT NOT NULL,
           currency TEXT NOT NULL,
@@ -118,14 +118,14 @@ async fn cart_events_fold_into_the_read_model() {
 
     // The row materialized, OPEN, under the group's own 'Cart' checkpoint. The priced columns hold the
     // projector's documented defaults (lines [], total 0 EUR — pricing is TODO(runtime)).
-    let (status, total, currency, projected_session): (i32, i64, String, uuid::Uuid) = sqlx::query_as(
+    let (status, total, currency, projected_session): (String, i64, String, uuid::Uuid) = sqlx::query_as(
         "SELECT status, total_amount_cents, currency, session_id FROM cart WHERE cart_id = $1",
     )
     .bind(cart_id)
     .fetch_one(&pool)
     .await
     .expect("projected cart row");
-    assert_eq!(status, 0); // CartStatus::OPEN ordinal
+    assert_eq!(status, "OPEN"); // CartStatus::OPEN
     assert_eq!(total, 0);
     assert_eq!(currency, "EUR");
     assert_eq!(projected_session, session_id);

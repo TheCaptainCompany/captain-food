@@ -54,10 +54,10 @@ pub enum Outcome {
     Skipped(String),
 }
 
-/// `UserType::EXTERNAL` ordinal (declaration-order ints, ADR-0037): the envelope principal for
+/// `UserType::EXTERNAL` TEXT value (stored verbatim, ADR-20260728): the envelope principal for
 /// non-human system appends — the same convention the SIRENE/Stripe ACLs use (scalars.yaml has no
 /// dedicated SYSTEM member; adding one would be a DSL change).
-pub const EXTERNAL_USER_TYPE: i32 = 6;
+pub const EXTERNAL_USER_TYPE: &str = "EXTERNAL";
 
 /// Fixed system user id stamping saga-emitted events (`domain_events.user_id`, ADR-0041).
 pub fn saga_system_user_id() -> uuid::Uuid {
@@ -71,7 +71,7 @@ pub fn saga_system_user_id() -> uuid::Uuid {
 pub fn saga_actor(env: &TriggerEnvelope) -> Actor {
     Actor {
         user_id: saga_system_user_id(),
-        user_type: EXTERNAL_USER_TYPE,
+        user_type: EXTERNAL_USER_TYPE.to_string(),
         correlation_id: env.correlation_id,
         cause_id: Some(env.event_id),
     }
