@@ -3,6 +3,41 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — SIRENE is an INBOUND EVENT: the disk-IO write path is fixed end to end
+> (ADR-20260728-011344, [#220](https://github.com/TheCaptainCompany/captain-food/issues/220); PRs
+> #226/#227/#228).** The Supabase alert was a symptom of three defects, all now closed.
+> **(1) A failed INSERT was the idempotency mechanism.** `register_restaurant` never rehydrated the
+> aggregate; a deliberate `UNIQUE (stream_name, version)` violation answered "does this exist?", and
+> Postgres writes the heap tuple *before* the constraint fires — ~200k dead tuples in `domain_events`
+> and its indexes per sweep, for an outcome that is by definition no change. Now the ACL stages
+> `RestaurantRegistered` **unconditionally** into `inbound_events` and the **aggregate decides**:
+> record it, emit `RestaurantUpdated` for whatever moved, or append nothing.
+> `domain::restaurant::changes_from_registry` is where that is decided — pure, and considering **only
+> fields the report carries**, because a registry is a partial source and reading its `None` as "clear
+> this" would let every sweep wipe data restaurant staff had entered.
+> **(2) INSEE updates were silently dropped** — no `UpdateRestaurant` existed in the worker at all, so a
+> rename conflicted, was swallowed as success, and vanished. That path now exists and is tested both
+> ways (a rename MUST produce an update; an unchanged report MUST produce nothing).
+> **(3) The write path asked the read side, unindexed** — `external_identifiers @> $1` against the
+> projection, no GIN index, once per staged SIRET. **Deleted.** The aggregate id is UUIDv5(SIRET). The
+> same lookup is **kept on the closure path**, deliberately: legacy listings predate that derivation and
+> the projection row is the only thing naming them, so deriving would silently fail to close them — and
+> that call is bounded (rows absent 21+ days), not per-SIRET.
+> Plus **`payload_hash`** on the mirror, so `last_seen_at` can keep advancing for absence detection
+> without re-pending ~200k unchanged rows; it hashes the **typed projection**, so an INSEE per-fetch
+> timestamp cannot defeat it. **`InboundEventStatus` gained `IGNORED`/`DUPLICATE`** (appended, never
+> inserted — the ordinals ARE the storage format, and inserting mid-enum would have reinterpreted every
+> stored `FAILED` row), so `SELECT status, count(*) FROM inbound_events WHERE source='sirene'` is now the
+> per-sweep report: created+updated / no-change / redelivered / failed. Closure stays a **command**
+> (absence is our inference and CAN be refused — partners are flagged, not closed). Migration
+> `20260728040000`; `REQUIRED_SCHEMA_VERSION` bumped.
+> **⚠️ Before resuming SIRENE:** the staging SQL is **not** exercised locally or in CI — those
+> integration tests are `DATABASE_URL`-gated and neither environment provides Postgres, so they skip.
+> Watch the first sweep rather than assuming it. Resuming means re-enabling **both** halves together (the
+> cron in `sirene-sync.yml` and `RUN_SIRENE_WORKER`). **Still open on #220:** removing
+> `idempotent_on_existing` from its five remaining sites (incl. the `verify_phone` `created: true`
+> fiction) and the `sirene-sync` observability contract.
+
 > ✅ **2026-07-28 — the storefront slug is an OWNER-CHOSEN lifecycle, live end to end (ADR-20260728-011344,
 > [#220](https://github.com/TheCaptainCompany/captain-food/issues/220); PRs #222/#223/#224/#225).** The slug
 > was derived at SIRENE seeding time as `slugify(name)-{NIC}` — reserving ~200k hostnames no merchant chose,
