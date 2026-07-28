@@ -348,6 +348,14 @@ Order:
 > `inbound_events` share ONE auto-increment `position` (a common sequence), and a UNION view
 > (`pending_work`) over the two pending sets — ordered by that shared position — is what the worker
 > consumes, one row at a time into the application dispatch.
+>
+> **Superseded later the same day**: the product owner unified the two tables into ONE
+> `inbound_messages` mailbox addressed by `(actor_type, actor_id)`, with per-actor-type/partition
+> workers — the write path becomes an actor mailbox. The full design (including the actor-runtime
+> decision) moved to its own proposal:
+> [PROP-20260728-152752 "The write path becomes an actor mailbox"](PROP-20260728-152752-actor-mailbox-write-path.md).
+> This section's diagram remains correct on everything inside the application core (fold,
+> `requires`, decide, atomic completion); the delivery legs are refined there.
 
 ```mermaid
 sequenceDiagram
