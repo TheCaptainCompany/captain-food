@@ -248,6 +248,22 @@ async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map(
     assert_eq!(summary.registered, 1, "one staged as an inbound registry fact");
     assert_eq!(summary.skipped, 1, "one could not be mapped");
 
+    // The snapshot `/sirene` serves (#244). A ping-triggered pass records itself too — the endpoint
+    // describes the WORKER, not just the poll loop — while `running` stays false here because no loop
+    // was started. That pair is the distinction the department-37 pilot (#238) had no way to make.
+    {
+        let handle = worker.status();
+        let snapshot = handle.lock().expect("sirene status");
+        assert!(!snapshot.running, "this test never started the poll loop");
+        assert!(snapshot.last_tick_at.is_some(), "the pass stamped itself");
+        assert!(snapshot.last_error.is_none(), "a successful pass leaves no error");
+        assert_eq!(
+            snapshot.last_summary.as_ref().map(|s| s.registered),
+            Some(1),
+            "the snapshot carries the pass's own counters"
+        );
+    }
+
     let (payload, hash, status): (Option<serde_json::Value>, String, String) = sqlx::query_as(
         "SELECT payload, payload_hash, status FROM external_sirene_restaurants WHERE siret = '85242109900021'",
     )

@@ -24,7 +24,7 @@ pub use integrations::inbound_drain_worker::{InboundDrainSummary, InboundEventsD
 pub use integrations::delivery_gateway::CompositeDeliveryGateway;
 pub use integrations::delivery_offer_timeout_worker::DeliveryOfferTimeoutWorker;
 pub use integrations::retention_sweep_worker::{RetentionSweepSummary, RetentionSweepWorker};
-pub use integrations::sync_sirene_worker::{SireneSyncSummary, SireneSyncWorker};
+pub use integrations::sync_sirene_worker::{SireneSyncStatus, SireneSyncSummary, SireneSyncWorker};
 pub use persistence::{
     AppendedEvent, EventBus, OperationStatusBus, OperationUpdate, PgCartRepository,
     PgAuthSessionStore, PgCatalogRepository, PgCommandJournal, PgCustomerCreditRepository,
