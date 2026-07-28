@@ -1,7 +1,7 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-29. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
 > ✅ **2026-07-29 — configuration is DECLARED in the DSL and validated at startup
 > ([#246](https://github.com/TheCaptainCompany/captain-food/issues/246), PROP-20260729-004500,
@@ -23,9 +23,17 @@
 > Reconciles with ADR-0043 rather than contradicting it: **missing configuration cannot self-heal
 > (refuse to start); an unavailable dependency can (start, report 503)**. On Render this is strictly
 > safer — an exiting container fails the deploy, so a misconfigured build cannot replace a working one.
-> **Rollout is two steps**: `CONFIG_ENFORCE` defaults to **false**, so the next deploy prints the full
-> report without stopping and tells us what production is actually missing; flipping that default to
-> `true` is the reviewed second step. Deferred by design: injecting `Config` into `router()` (the drift
+> **Values are TYPED too** (product-owner directive, same day): each key binds a `scalars.yaml` scalar
+> whose `pattern` the reader enforces at startup — *present is not usable*. `ConfigBoolean`
+> (true/yes/1/on, case-insensitive), `StripeSecretKeyTest`/`-Live` (a LIVE key in the test slot is now a
+> startup failure, not a way to move real money), `StripeWebhookSecret`, `AuthSessionKey` (32 bytes hex
+> or base64 — a 31-byte key no longer silently disables login), `PostgresUrl`, `HttpsUrl`,
+> `DepartmentList`. The report groups **MISSING** (absent) and **INVALID** (malformed) separately —
+> different problems, different fixes — and a secret's value is never printed, only its expected shape.
+> **Enforcement follows the PROFILE**: production and staging STOP, development reports and continues.
+> The warn-only rollout was dropped rather than deferred: it hedged against a first enforced deploy
+> failing, but an exiting container fails the DEPLOY and the previous version keeps serving, so the
+> feared outcome is the desired one. Deferred by design: injecting `Config` into `router()` (the drift
 > gate already makes every read *declared*, just not yet *injected*) and the presence-only `/config`
 > endpoint (PROP D4).
 
