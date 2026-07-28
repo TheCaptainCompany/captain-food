@@ -129,6 +129,15 @@ pub trait InboundEvents: Send + Sync {
     /// Delivery succeeded (including the aggregate's already-recorded no-op): RECEIVED → DELIVERED.
     async fn mark_delivered(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError>;
 
+    /// The aggregate decided the fact changes NOTHING: RECEIVED → IGNORED (ADR-20260728-011344 D6).
+    /// Terminal and successful — no event was appended because none was warranted.
+    async fn mark_ignored(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError>;
+
+    /// The fact was ALREADY in the aggregate's stream: RECEIVED → DUPLICATE. Terminal and successful,
+    /// but distinct from IGNORED — this is a redelivery of something we recorded before, not a report
+    /// that happens to be inert.
+    async fn mark_duplicate(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError>;
+
     /// Delivery failed: RECEIVED → FAILED with the error detail (retryable/inspectable).
     async fn mark_failed(
         &self,
@@ -255,6 +264,28 @@ pub mod mem {
             for row in self.rows.lock().unwrap().iter_mut() {
                 if row.inbound_event_id == inbound_event_id {
                     row.status = InboundEventStatus::DELIVERED;
+                    row.delivered_at = Some(Utc::now());
+                }
+            }
+            Ok(())
+        }
+
+        async fn mark_ignored(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError> {
+            for row in self.rows.lock().unwrap().iter_mut() {
+                if row.inbound_event_id == inbound_event_id {
+                    row.status = InboundEventStatus::IGNORED;
+                    // Stamped like a delivery: the row reached a terminal SUCCESS state, and the
+                    // retention sweep ages IGNORED rows the same way (nothing is pending here).
+                    row.delivered_at = Some(Utc::now());
+                }
+            }
+            Ok(())
+        }
+
+        async fn mark_duplicate(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError> {
+            for row in self.rows.lock().unwrap().iter_mut() {
+                if row.inbound_event_id == inbound_event_id {
+                    row.status = InboundEventStatus::DUPLICATE;
                     row.delivered_at = Some(Utc::now());
                 }
             }

@@ -76,6 +76,9 @@ fixtures:
   restaurantRegistered:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
     data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+  restaurantRenamedByRegistry:
+    type: { $ref: 'events.yaml#/RestaurantUpdated' }
+    data: { restaurantId: "resto-1", displayName: "Chez Marco et Fils" }
   restaurantSlugConfigured:
     type: { $ref: 'events.yaml#/RestaurantSlugConfigured' }
     data: { restaurantId: "resto-1", slug: "chez-marco" }
@@ -700,6 +703,36 @@ tests:
     thrown:
       - { $ref: 'errors.yaml#/SlugAlreadyTaken' }
       - { $ref: 'errors.yaml#/RestaurantNotFound' }
+
+  # --- The registry (SIRENE) inbound path (ADR-20260728-011344 D4) ---
+  #
+  # The ACL stages RestaurantRegistered UNCONDITIONALLY and never branches. These two tests pin what the
+  # AGGREGATE then decides, which is the whole substance of the conversion: an unchanged report produces
+  # NO fact, and a changed one produces RestaurantUpdated -- the path that did not exist before, which is
+  # why INSEE renames were silently discarded.
+
+  TestRegistryReportUnchangedEmitsNothing:
+    name: "A registry report of a restaurant we already hold, unchanged, emits nothing"
+    rules: [{ $ref: 'rules.yaml#/RegistryReportAppliesOnlyRealChanges' }]
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+    when:
+      type: { $ref: 'events.yaml#/RestaurantRegistered' }
+      data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+    then: []
+
+  TestRegistryReportChangedEmitsAnUpdate:
+    name: "A registry report that renames an établissement reaches the domain as an update"
+    rules: [{ $ref: 'rules.yaml#/RegistryReportAppliesOnlyRealChanges' }]
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+    when:
+      type: { $ref: 'events.yaml#/RestaurantRegistered' }
+      data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", displayName: "Chez Marco et Fils", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+    then:
+      - { $ref: '#/fixtures/restaurantRenamedByRegistry' }
 
   TestActivationWithoutSlugIsRejected:
     name: "Rejects going live before a storefront address is chosen"

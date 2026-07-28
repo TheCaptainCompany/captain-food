@@ -39,10 +39,9 @@ use domain::generated::entities::{Address, TaxRate};
 use domain::generated::scalars::{
     AddressLine, CatalogName, CityName, CommandChannel, CommandJournalStatus, CountryCode,
     CurrencyCode, ExternalReference, PostalCode, RestaurantDisplayName, RestaurantLegalName,
-    RestaurantListingStatus, Slug, TaxRatePercent, TimeZone,
+    RestaurantListingStatus, TaxRatePercent, TimeZone,
 };
 use domain::shared::errors::DomainError;
-use infrastructure::integrations::sirene::slugify;
 
 use crate::api::TokenResponse;
 use crate::connections::{ConnectedLocation, HubRiseConnection, HubRiseConnections};
@@ -662,6 +661,10 @@ mod tests {
             updated_at: chrono::Utc::now(),
         }
     }
+
+    // Only the test doubles need `Slug` now that the connect flow derives no storefront address
+    // (ADR-20260728-011344) -- importing it at module level would warn in the lib build.
+    use domain::generated::scalars::Slug;
 
     #[async_trait::async_trait]
     impl RestaurantReadRepository for CaughtUpRestaurants {

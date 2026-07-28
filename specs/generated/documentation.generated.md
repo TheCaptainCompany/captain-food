@@ -524,6 +524,7 @@ _🧩 aggregate_ — A single restaurant location: profile, operational status (
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [📩 `RegisterRestaurant`](#command-registerrestaurant) | [⚡ `RestaurantRegistered`](#event-restaurantregistered) | [⛔ `RestaurantAccountNotFound`](#error-restaurantaccountnotfound), [⛔ `RefAlreadyUsed`](#error-refalreadyused) |
+| [⚡ `RestaurantRegistered`](#event-restaurantregistered) | [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantUpdated`](#event-restaurantupdated) | — |
 | [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug) | [⚡ `RestaurantSlugConfigured`](#event-restaurantslugconfigured), [⚡ `RestaurantSlugReconfigured`](#event-restaurantslugreconfigured) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken) |
 | [📩 `ActivateRestaurant`](#command-activaterestaurant) | [⚡ `RestaurantActivated`](#event-restaurantactivated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantNotReadyForActivation`](#error-restaurantnotreadyforactivation), [⛔ `SlugNotConfigured`](#error-slugnotconfigured) |
 | [📩 `UpdateRestaurant`](#command-updaterestaurant) | [⚡ `RestaurantUpdated`](#event-restaurantupdated) | [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `NoEditableFieldProvided`](#error-noeditablefieldprovided) |
@@ -1039,7 +1040,7 @@ A restaurant account was closed/deleted.
 A restaurant location has been registered. Covers every path: an owner/admin onboarding a partner location (with accountId), or the Sirene/Google sync ACL seeding a public NON_PARTNER listing (no accountId). The listingStatus and externalIdentifiers distinguish them.
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
-- **Consumed by**: —
+- **Consumed by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 
 | Field | Type | Required | Description |
@@ -1471,7 +1472,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="error-prospectcontactedtoorecently"></a>⛔ `ProspectContactedTooRecently` | A new contact is too soon after the previous one (anti-spam: ≥ 7 days apart). | 🇬🇧 This prospect was contacted too recently; wait before contacting again. | 🇫🇷 Ce prospect a été contacté trop récemment ; patientez avant de le recontacter. | [📩 `RecordProspectContact`](#command-recordprospectcontact) |
 | <a id="error-prospectnotfound"></a>⛔ `ProspectNotFound` | No prospect (contact history) exists for this restaurant. | 🇬🇧 Prospect not found. | 🇫🇷 Prospect introuvable. | [📩 `MarkProspectCold`](#command-markprospectcold), [📩 `RecordProspectReply`](#command-recordprospectreply) |
 
-### 📐 Business rules _(23)_
+### 📐 Business rules _(24)_
 
 <a id="rule-accountregistrationvalidcurrencyuniqueref"></a>
 #### 📐 Rule: `AccountRegistrationValidCurrencyUniqueRef`
@@ -1521,6 +1522,13 @@ _Renaming a storefront records the previous address, so old links, menus and QR 
 _A storefront address belongs to at most one restaurant, and an address released by a rename is never handed to another._
 
 - **Verified by**: [🧪 `TestStorefrontSlugTakenIsRejected`](#test-teststorefrontslugtakenisrejected)
+
+<a id="rule-registryreportappliesonlyrealchanges"></a>
+#### 📐 Rule: `RegistryReportAppliesOnlyRealChanges`
+
+_An open-data registry report updates a restaurant only where it genuinely differs, never clears fields the registry knows nothing about, and produces no event at all when nothing changed._
+
+- **Verified by**: [🧪 `TestRegistryReportUnchangedEmitsNothing`](#test-testregistryreportunchangedemitsnothing), [🧪 `TestRegistryReportChangedEmitsAnUpdate`](#test-testregistryreportchangedemitsanupdate)
 
 <a id="rule-activationrequiresstorefrontslug"></a>
 #### 📐 Rule: `ActivationRequiresStorefrontSlug`
@@ -1749,6 +1757,26 @@ _Rejects a storefront address held by another restaurant, or released by one_
 - **When**: [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug)
 - **Thrown**: [⛔ `SlugAlreadyTaken`](#error-slugalreadytaken), [⛔ `RestaurantNotFound`](#error-restaurantnotfound)
 - **Verifies**: [📐 `StorefrontSlugUniqueAndNeverReused`](#rule-storefrontsluguniqueandneverreused)
+
+<a id="test-testregistryreportunchangedemitsnothing"></a>
+#### 🧪 Test: `TestRegistryReportUnchangedEmitsNothing`
+
+_A registry report of a restaurant we already hold, unchanged, emits nothing_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `RestaurantRegistered`](#command-restaurantregistered)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `RegistryReportAppliesOnlyRealChanges`](#rule-registryreportappliesonlyrealchanges)
+
+<a id="test-testregistryreportchangedemitsanupdate"></a>
+#### 🧪 Test: `TestRegistryReportChangedEmitsAnUpdate`
+
+_A registry report that renames an établissement reaches the domain as an update_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
+- **When**: [📩 `RestaurantRegistered`](#command-restaurantregistered)
+- **Then**: [⚡ `RestaurantUpdated`](#event-restaurantupdated)
+- **Verifies**: [📐 `RegistryReportAppliesOnlyRealChanges`](#rule-registryreportappliesonlyrealchanges)
 
 <a id="test-testactivationwithoutslugisrejected"></a>
 #### 🧪 Test: `TestActivationWithoutSlugIsRejected`

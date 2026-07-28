@@ -24,6 +24,8 @@ StorefrontSlugRenameKeepsThePreviousAddress:
   description: "Renaming a storefront records the previous address, so old links, menus and QR codes keep resolving to it."
 StorefrontSlugUniqueAndNeverReused:
   description: "A storefront address belongs to at most one restaurant, and an address released by a rename is never handed to another."
+RegistryReportAppliesOnlyRealChanges:
+  description: "An open-data registry report updates a restaurant only where it genuinely differs, never clears fields the registry knows nothing about, and produces no event at all when nothing changed."
 ActivationRequiresStorefrontSlug:
   description: "A restaurant cannot go live without a storefront address — there would be no host for customers to reach it on."
 RestaurantActivationVisibility:

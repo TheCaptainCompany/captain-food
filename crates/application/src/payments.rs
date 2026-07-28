@@ -22,6 +22,15 @@ use crate::repository::Repository;
 pub enum RecordOutcome {
     Recorded,
     AlreadyRecorded,
+    /// The aggregate decided the inbound fact changes NOTHING, so no event was appended
+    /// (ADR-20260728-011344 D6). A legitimate outcome, not a failure: an external system re-reported a
+    /// record we already hold, identically. Distinct from [`Self::AlreadyRecorded`], where we have seen
+    /// this very fact before — here the fact is new but semantically inert. The drain persists the
+    /// difference as IGNORED vs DUPLICATE, because they have different causes and different fixes.
+    NoChange,
+    /// The aggregate decided a DIFFERENT fact from the one reported — an inbound registration for a
+    /// restaurant we already hold becomes `RestaurantUpdated`. Appended, so it delivers.
+    Updated,
 }
 
 /// The PaymentIntent a payment fact belongs to — the Payment aggregate's stream key. `None` for any
