@@ -269,9 +269,18 @@ Order:
 
 ### D4 — Where the generated `requires` check runs
 
+> **Amended 2026-07-28 (product-owner objection):** the first draft recommended the application
+> dispatch. The product owner rejected it: *a check outside the actor cannot be covered by unit
+> tests that test the actor* — the behaviour-test kind #235's DoD relies on (given events → when
+> command → thrown error) would never execute it, and the aggregate's tests would prove nothing
+> about authorization. #235's own framing agrees ("authorization is just one more invariant over
+> that same state"), as does the 2026-07-25 decision ("for the write side the actors are
+> responsible to do these business security checks"). Recommendation flipped accordingly.
+
 | Option | Pros | Cons |
 |---|---|---|
-| **Generated precondition invoked by the application dispatch after rehydration, before the handler** ✅ recommended | The aggregate stays the authority (#235: strong consistency, zero lag); handlers stay pure business invariants; one generated site per (aggregate, command) — an omission is a compile error, not a forgotten line | Dispatch needs the resolved domain identity on `Actor` (consequence B — already in #235's DoD) |
+| **Inside the actor: codegen emits the precondition into the aggregate's generated handler entry — `handle(cmd, state, actor)` runs the `requires` check, then calls the hand-written decide** ✅ recommended (amended) | The actor is the authority **in its tests too**: `NotAParticipant`/`RoleMismatch` negatives are ordinary command tests against the aggregate, exactly as #235's DoD assumes; pure and trivially unit-testable (state + command + actor in, error out); the generated wrapper makes bypass impossible — the hand-written decide is unreachable without passing the check | The domain layer needs the actor identity as an explicit **input value** (an `ActorIdentity` value object — pure data, no infra); the envelope doctrine must stay sharp: the actor is an input to decide, never a payload field folded into events (ADR-0041 unchanged) |
+| In the application dispatch, after rehydration, before the handler | One generated site outside domain code; hand-written handlers untouched | **A check the actor's unit tests never execute** — testing the aggregate proves nothing about authorization, and the DoD's "ordinary command tests" would silently test around the hole; splits "who may" from "what happens" across two layers |
 | Inside each hand-written handler | Closest to the other invariants | Reintroduces the exact failure mode being fixed: 82 opportunities to forget, invisibly |
 | At the GraphQL edge against `ScopeMembership` | Cheapest rejection | Rejected by the product-owner correction on #235 — projection lag rejects legitimate commands (open-then-post); the edge check is [#233](https://github.com/TheCaptainCompany/captain-food/issues/233)'s complementary *pre-filter*, never the authority |
 
@@ -306,9 +315,9 @@ sequenceDiagram
     participant C as Customer client
     participant GQL as Axum GraphQL edge<br/>(role gate + principal resolution)
     participant J as command_journal
-    participant App as Application dispatch<br/>(generated requires check)
+    participant App as Application dispatch
     participant Repo as Repository (write side)
-    participant Agg as Conversation aggregate (pure)
+    participant Agg as Conversation aggregate<br/>(generated requires check + decide — pure)
     participant ES as PgEventStore
 
     C->>GQL: postMessage(orderId, authorRole: CUSTOMER, …)
@@ -319,19 +328,23 @@ sequenceDiagram
     Repo->>ES: read stream(orderId)
     ES-->>Repo: events
     Repo-->>App: fold via generated states.rs into ConversationState{customerId, …}
-    App->>App: requires.acting[CUSTOMER]: actor.id equals state.customerId ?
-    App->>App: requires.claims: cmd.authorRole equals actor.role ?
+    App->>Agg: handle(PostMessage, state, actor)
+    Agg->>Agg: generated requires precondition — acting[CUSTOMER]: actor.id equals state.customerId ?
+    Agg->>Agg: claims: cmd.authorRole equals actor.role ?
     alt not the participant / forged role
-        App-->>GQL: NotAParticipant | RoleMismatch
+        Agg-->>App: NotAParticipant | RoleMismatch
+        App-->>GQL: rejection
         GQL-->>C: error (journal records the rejection)
     else authorized
-        App->>Agg: handle(PostMessage, state)
         Agg-->>App: decide (pure): MessagePosted | domain error
         App->>Repo: save(events, expected version)
         Repo->>ES: append
         GQL-->>C: MessagePosted payload
     end
 ```
+
+[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:eNptVWFv0zAQ_SunfAqi62BCfIjQUFWqaRODsQ7xgSHk2VfXW2J7tlNWuv53zkm8NLT9EkW-9-7de-dmk3EjMCsg8_hYo-b4STHpWHWrgX6sDkbX1R269t0yFxRXlukAU2AeprUPpkIHvFSow37V2bfPsW7yVFdw5phd0jsKiR_u3PFp7kyJIFlAeA3WKR1BJTj0pqyDMvrVPuFFpOOmqpgWv-9N7TQr96sm1jZtrS0VZ5EKhPKWBb7cL75Ga2J1fHoVjFtD_scpUuWVwAMaJlI2wxu9QudbeialwzhKO5lEjY7eBE3zWCsaCfgS-QMNKpATLdzWJ2_evgNbu0MtZvPY4UrOVmTrnDThrW6rpkenp-RqASQ2XKL3TGJunEB3LkYxsaVx1-RrAdPv85uvl7PrUdPr5H3XhsCJguSrxRouftyMWtdXuJNDMCBMxZQG0quDCuRLCvxcDNguCuiySNlAzjhHGxjt1NFCOR9GkaayJtCareEB1wMGiqp4ySjnVZyF09wbJQrou5LOwWzbjoTgRBITLJLjw3x8iGu2MA46r1pcRBBwNo8wJqiMHlXysyOfzY9eyDEG4nfASfvClAJWikEffdPTj50HpcnMXT3zeLThO3O1GW13x6E9K2BJZpaYX_Vpj1rizqBkgJQJcWD3rENutFCNFd3mEVpp-TM5-ato-cZKAMFY6ds2414kfNzrxUumKk_PSoz73UsELWFzyzsoKwNoEyAscbDvxzEaGSVTcVuaOiWDv5gwudqBPENsdal81V_r5F1acIf3yOPQ_XFcNzqeUpTO0TrkaXGjRU74RtoLrnMXS4_d3VJ_URwW2F3svLnSBXRpxeBorud0l5quQ7VptzxbYd4u2AjwyZIEQsad6ZX8t7TMWtTi0HTD9patS8O6QkJkI8goU1Ik6N9_k9HQVfMdELhgdRmy7fYfhPYLWQ) —
+regenerate this link (snippet in docs/claude/mermaid.md) whenever the fenced block above changes.
 
 ## 7. Mockups — the user-visible surface is a refusal
 
@@ -367,8 +380,10 @@ nothing changes visually for legitimate users — which is the point.
    `Conversation` (pilot); other aggregates follow under `st-missing`.
 4. `tools/codegen-rs`: the `st-*`/`req-*` validator rules; `states.rs` emitter; `requires`
    precondition emitter; documentation emitter section (state table per actor).
-5. `crates/`: port `Conversation` to the generated state; wire the generated check into dispatch;
-   extend `Actor` with the resolved domain identity (shared with #144's edge resolution).
+5. `crates/`: port `Conversation` to the generated state; generate the `requires` precondition into
+   the aggregate's handler entry (the actor runs the check — D4 as amended, so the negatives are
+   ordinary actor unit tests); extend `Actor` with the resolved domain identity (shared with #144's
+   edge resolution).
 
 ## 9. Verification plan
 

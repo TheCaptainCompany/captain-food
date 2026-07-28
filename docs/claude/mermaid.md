@@ -29,6 +29,41 @@ renders blank or half-drawn.
 Prose **outside** mermaid fences is unaffected: `` `Order-<id>` `` inside backticks renders literally and is
 fine — this rule is strictly about ```mermaid blocks.
 
+## Every sequence diagram carries a mermaid.live pan/zoom link (product-owner directive, 2026-07-28)
+
+GitHub renders an inline mermaid block too small to read comfortably, and moving the diagram to its
+own page renders it just as small (that approach was tried and rolled back the same day). The fix:
+**the diagram STAYS inline in the doc** (readable in context, single source), and **directly under
+the closing fence** it carries a link that opens the same source in mermaid.live's pan/zoom viewer:
+
+```markdown
+[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:…)
+```
+
+- The `#pako:` fragment **encodes the diagram source itself** (deflate + base64url of the editor
+  state), so the link works with zero build tooling — but it also means the link **goes stale the
+  moment the fenced block is edited**. A stale link silently shows an OUTDATED diagram, which is
+  worse than no link: **regenerating the link is part of any edit to the block**, same discipline
+  as regenerated artifacts.
+- Regenerate with this snippet (stdlib only — prints one `view` URL per ```mermaid block in the file):
+
+  ```bash
+  python3 - <<'EOF' path/to/doc.md
+  import base64, json, re, sys, zlib
+  src = open(sys.argv[1], encoding='utf-8').read()
+  for i, code in enumerate(re.findall(r'```mermaid\n(.*?)```', src, re.S), 1):
+      state = json.dumps({"code": code.strip(), "mermaid": {"theme": "default"}})
+      pako = base64.urlsafe_b64encode(zlib.compress(state.encode(), 9)).decode().rstrip('=')
+      print(f"diagram {i}: https://mermaid.live/view#pako:{pako}")
+  EOF
+  ```
+
+- Use the **`/view`** page (read-only pan/zoom); swap `view` for `edit` in the URL when you want
+  the editor pane too.
+- Applies to every **hand-written** doc (proposals, ADRs, docs/**) — retrofit a doc's diagrams
+  whenever you edit it. Generated artifacts (`specs/generated/**`, `c4.generated.md`) are out of
+  scope until their emitters adopt the same rule.
+
 ## Represent the architecture faithfully (hexagonal / ports & adapters)
 
 A sequence diagram must show the **clean hexagonal architecture**, not the raw plumbing. Domain events are
