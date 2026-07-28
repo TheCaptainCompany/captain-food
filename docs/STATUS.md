@@ -3,6 +3,37 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — the SIRENE mirror's payload is now TRANSIENT: ~1.8 kB/row → ~200 B/row
+> (ADR-20260728-143000, [#231](https://github.com/TheCaptainCompany/captain-food/issues/231); PR #234).**
+> `external_sirene_restaurants` kept the verbatim INSEE record forever to read five fields out of it:
+> measured on production, **655 MB for 339k rows — 77% of the whole database** — at department **37 of
+> 101**, on a **2 GB disk with ~580 MB free**. Full France is ~2 GB for that one table, so this — not
+> pacing — is what gated national coverage ([#218](https://github.com/TheCaptainCompany/captain-food/issues/218)
+> made the sweep capable of it; disk did not follow). The fix is a lifetime distinction: the **payload is
+> an input to translation** (needed from the moment INSEE reports a change until the worker turns it into
+> a domain fact, never again), the **hash is the change-detection key** (needed forever). So the payload
+> lives exactly while a row is pending — the ingestion writes it only when the row will pend, and the
+> worker NULLs it in the SAME statement that advances the checkpoint. A record the ACL could not map
+> KEEPS its payload: it is the only evidence of why INSEE's record was unusable. One-shot compaction of
+> existing rows ships as `sirene_ingest --compact` (batched, `VACUUM` interleaved, resumable —
+> `payload IS NOT NULL` is its own progress marker), recomputing each real hash BEFORE dropping the
+> payload, because every row still carries the `unhashed-pre-20260728` sentinel and dropping payloads
+> under it would re-pend all 339k rows and re-write all 655 MB. **Two things to know before reading the
+> production numbers:** (1) a plain `VACUUM` makes space reusable but does NOT shrink the file — the
+> table stays ~655 MB until a `VACUUM FULL`, which only becomes affordable AFTER compaction (live data
+> ~90 MB vs the ~620 MB that made the earlier attempt fail with `No space left on device`); (2) the
+> `bytea` hash change (D2, approved) is deliberately NOT in this change — `ALTER … TYPE` rewrites the
+> whole table and would fail the same way, so it follows compaction. Compaction runs in the CI job by
+> product-owner choice, which means historical ACL-unmappable payloads are dropped (the crate has no
+> ACL); D3 holds going forward via the worker. **A `status` column lands with it** (product-owner
+> addition): making the payload transient would otherwise leave the table ambiguous — a row that HAS a
+> payload is either awaiting translation or kept as evidence, and nothing told them apart. `PENDING` /
+> `SYNCED` / `UNMAPPABLE` / `FAILED` answers "has this been synced?" directly instead of by inference
+> from `processed_at >= last_seen_at` (which stays the concurrency-safe checkpoint); `GROUP BY status`
+> is the per-sweep report. TEXT, not a scalar enum, because the CI crate that writes it cannot see
+> domain types (ADR-0045) and would have to hardcode ordinals. Migration `20260728050000`,
+> `REQUIRED_SCHEMA_VERSION` bumped. SIRENE stays **paused** — this makes the mirror affordable, it does not resume the sweep.
+
 > ✅ **2026-07-28 — `prod-smoke` back to green: the fixture now sets its slug via `configureRestaurantSlug`
 > (watchdog fix).** The daily `prod-smoke` run went red at L3 with `unknown field "slug" of type
 > "RegisterRestaurantInput"`: the slug split out of registration into a separate `ConfigureRestaurantSlug`

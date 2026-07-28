@@ -1,8 +1,15 @@
 //! Raw UPSERT into the `external_sirene_restaurants` staging table (ADR-0045,
 //! `specs/database/tables/integration_staging.yaml` / `migrations/20260718100000_…`).
 //!
-//! One row per SIRET, verbatim payload. The ingestion never touches `first_seen_at`; it bumps
-//! `last_seen_at`/`sync_run_id` and refreshes `payload`/`etat`/`naf`/`department`/`payload_hash`.
+//! One row per SIRET. The ingestion never touches `first_seen_at`; it bumps `last_seen_at`/`sync_run_id`
+//! and refreshes `etat`/`naf`/`department`/`payload_hash`.
+//!
+//! The `payload` is written only when the worker is going to NEED it (ADR-20260728-143000, #231): an
+//! unchanged, already-processed record keeps whatever the row holds — NULL, once the worker has dropped
+//! it — so the steady-state sweep writes ~200-byte row versions rather than ~1.8 kB ones. That asymmetry
+//! is the whole change: the payload is an input to translation and has a LIFETIME; the hash is the
+//! change-detection key and persists. Before it, the mirror was 655 MB for 339k rows -- 77% of the
+//! database at department 37 of 101, projecting to ~2 GB for full France on a 2 GB disk.
 //!
 //! Whether that re-pends the row for the on-app `sync_sirene_worker`
 //! (`processed_at < last_seen_at ⇒ pending`) now depends on `payload_hash`
@@ -20,6 +27,23 @@ use crate::client::{SireneError, SireneRecord};
 /// was ~99% of wall-clock). 500 keeps each statement's bind arrays and parameter payload bounded.
 pub const STAGING_BATCH_SIZE: usize = 500;
 
+/// `external_sirene_restaurants.status` — "has this row been SYNCED, or not?" (#231).
+///
+/// TEXT rather than a scalar enum `$ref` on purpose: enums persist as declaration-order ints
+/// (ADR-0037/0041) and THIS crate cannot see the domain types at all (ADR-0045 keeps domain crates out
+/// of the CI ingest build), so it would have to hardcode ordinals — and a future reordering of the enum
+/// would then silently reinterpret every row. Text has no such failure mode.
+pub mod status {
+    /// Ingested or refreshed, not yet translated. The payload is PRESENT — the worker needs it.
+    pub const PENDING: &str = "PENDING";
+    /// Translated into a domain fact; the payload has been consumed and dropped.
+    pub const SYNCED: &str = "SYNCED";
+    /// Parsed but rejected by the ACL, or unparsable. The payload is KEPT as evidence.
+    pub const UNMAPPABLE: &str = "UNMAPPABLE";
+    /// The last attempt failed to write; the row stays pending and is retried.
+    pub const FAILED: &str = "FAILED";
+}
+
 /// The "did this record actually change?" key (ADR-20260728-011344).
 ///
 /// Hashes the TYPED projection — a canonical re-serialization of the deserialized [`Etablissement`] —
@@ -32,7 +56,13 @@ pub const STAGING_BATCH_SIZE: usize = 500;
 ///
 /// Struct field order is declaration order, so the serialization — and therefore the digest — is stable
 /// across runs and processes.
-fn payload_hash(etablissement: &crate::wire::Etablissement) -> String {
+///
+/// One consequence is worth naming because it is load-bearing for the retention model
+/// (ADR-20260728-143000 D5): the day the ACL learns to read a NEW INSEE field, adding it to
+/// [`crate::wire::Etablissement`] changes this digest for EVERY record. The next ordinary sweep then
+/// re-pends and re-translates the whole mirror on its own — so "we can no longer backfill from the
+/// stored payloads" costs nothing that has to be built. The backfill IS the normal paced sweep.
+pub fn payload_hash(etablissement: &crate::wire::Etablissement) -> String {
     use sha2::{Digest, Sha256};
     let canonical = serde_json::to_string(etablissement).unwrap_or_default();
     let mut hasher = Sha256::new();
@@ -89,12 +119,22 @@ pub async fn upsert_staging_batch(
 
     let result = sqlx::query(
         "INSERT INTO external_sirene_restaurants \
-           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, payload_hash, processed_at) \
-         SELECT t.siret, t.payload::jsonb, t.etat, t.naf, t.department, now(), now(), $7, t.payload_hash, NULL \
+           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, payload_hash, processed_at, status) \
+         SELECT t.siret, t.payload::jsonb, t.etat, t.naf, t.department, now(), now(), $7, t.payload_hash, NULL, 'PENDING' \
          FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[]) \
               AS t(siret, payload, etat, naf, department, payload_hash) \
          ON CONFLICT (siret) DO UPDATE SET \
-           payload = EXCLUDED.payload, \
+           -- ADR-20260728-143000: the payload is TRANSIENT — an input to translation, written only
+           -- when the worker is going to need it. An UNCHANGED, already-processed record keeps
+           -- whatever the row holds (NULL, once compacted), so the steady-state sweep writes ~200-byte
+           -- row versions instead of ~1.8 kB ones. Same predicate as `processed_at` below, and it must
+           -- stay that way: the payload is present exactly when the row is pending.
+           payload = CASE
+             WHEN external_sirene_restaurants.processed_at IS NOT NULL
+              AND external_sirene_restaurants.payload_hash = EXCLUDED.payload_hash
+             THEN external_sirene_restaurants.payload
+             ELSE EXCLUDED.payload
+           END, \
            etat = EXCLUDED.etat, \
            naf = EXCLUDED.naf, \
            department = EXCLUDED.department, \
@@ -113,6 +153,15 @@ pub async fn upsert_staging_batch(
               AND external_sirene_restaurants.payload_hash = EXCLUDED.payload_hash
              THEN now()
              ELSE external_sirene_restaurants.processed_at
+           END, \
+           -- Same predicate again: an unchanged, already-processed row KEEPS the outcome the worker
+           -- recorded (SYNCED, or UNMAPPABLE for a record INSEE has not fixed). Anything else is going
+           -- to be re-translated, so it goes back to PENDING and the payload above comes with it.
+           status = CASE
+             WHEN external_sirene_restaurants.processed_at IS NOT NULL
+              AND external_sirene_restaurants.payload_hash = EXCLUDED.payload_hash
+             THEN external_sirene_restaurants.status
+             ELSE 'PENDING'
            END",
     )
     .bind(&sirets)
@@ -166,22 +215,36 @@ pub async fn upsert_staging_row(
     let naf = record.etablissement.naf().unwrap_or("");
     sqlx::query(
         "INSERT INTO external_sirene_restaurants \
-           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, payload_hash, processed_at) \
-         VALUES ($1, $2, $3, $4, $5, now(), now(), $6, $7, NULL) \
+           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, payload_hash, processed_at, status) \
+         VALUES ($1, $2, $3, $4, $5, now(), now(), $6, $7, NULL, 'PENDING') \
          ON CONFLICT (siret) DO UPDATE SET \
-           payload = EXCLUDED.payload, \
+           -- Identical semantics to the batch path above -- see its comments.
+           payload = CASE
+             WHEN external_sirene_restaurants.processed_at IS NOT NULL
+              AND external_sirene_restaurants.payload_hash = EXCLUDED.payload_hash
+             THEN external_sirene_restaurants.payload
+             ELSE EXCLUDED.payload
+           END, \
            etat = EXCLUDED.etat, \
            naf = EXCLUDED.naf, \
            department = EXCLUDED.department, \
            last_seen_at = EXCLUDED.last_seen_at, \
            sync_run_id = EXCLUDED.sync_run_id, \
            payload_hash = EXCLUDED.payload_hash, \
-           -- Identical semantics to the batch path above -- see its comment.
            processed_at = CASE
              WHEN external_sirene_restaurants.processed_at IS NOT NULL
               AND external_sirene_restaurants.payload_hash = EXCLUDED.payload_hash
              THEN now()
              ELSE external_sirene_restaurants.processed_at
+           END, \
+           -- Same predicate again: an unchanged, already-processed row KEEPS the outcome the worker
+           -- recorded (SYNCED, or UNMAPPABLE for a record INSEE has not fixed). Anything else is going
+           -- to be re-translated, so it goes back to PENDING and the payload above comes with it.
+           status = CASE
+             WHEN external_sirene_restaurants.processed_at IS NOT NULL
+              AND external_sirene_restaurants.payload_hash = EXCLUDED.payload_hash
+             THEN external_sirene_restaurants.status
+             ELSE 'PENDING'
            END",
     )
     .bind(siret)

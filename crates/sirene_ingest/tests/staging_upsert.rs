@@ -17,14 +17,18 @@ async fn reset_schema(pool: &PgPool) {
         DROP TABLE IF EXISTS external_sirene_restaurants CASCADE;
         CREATE TABLE external_sirene_restaurants (
           siret TEXT PRIMARY KEY,
-          payload JSONB NOT NULL,
+          -- NULLable since #231: the payload is TRANSIENT, present only while the row is pending
+          -- (or when the record could not be mapped and it is kept as evidence).
+          payload JSONB NULL,
           etat TEXT NOT NULL,
           naf TEXT NOT NULL,
           department TEXT NOT NULL,
           first_seen_at TIMESTAMPTZ NOT NULL,
           last_seen_at TIMESTAMPTZ NOT NULL,
           sync_run_id UUID NOT NULL,
-          processed_at TIMESTAMPTZ NULL
+          payload_hash TEXT NOT NULL DEFAULT 'unhashed-pre-20260728',
+          processed_at TIMESTAMPTZ NULL,
+          status TEXT NOT NULL DEFAULT 'PENDING'
         );
         "#,
     )
@@ -160,8 +164,12 @@ async fn staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at() {
     assert_eq!(first_seen_2, first_seen, "first_seen_at is set once");
     assert!(last_seen_2 > last_seen, "a re-run bumps last_seen_at");
     assert_eq!(run_id_2, run_2, "the latest run stamps sync_run_id");
-    assert!(processed_2.is_some(), "the ingestion never touches the worker's processed_at");
-    assert!(pending, "a refreshed row is pending again for the worker");
+    // Since ADR-20260728-011344 (#226) re-seeing a record is NOT the same as it changing. The typed
+    // payload is byte-identical, so the conflict arm carries `processed_at` forward and the row stays
+    // NON-pending — that is the line that stopped ~200k unchanged établissements being re-translated
+    // every Monday. `last_seen_at` still advances, because detect-by-absence depends on that freshness.
+    assert!(processed_2.is_some(), "an unchanged record keeps its processed checkpoint");
+    assert!(!pending, "re-seeing an UNCHANGED record must not re-pend it");
 }
 
 #[tokio::test]
@@ -240,8 +248,9 @@ async fn staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent() {
     assert_eq!(first_seen_2, first_seen, "first_seen_at is set once, never bumped by a re-batch");
     assert!(last_seen_2 > last_seen, "a re-batch bumps last_seen_at");
     assert_eq!(run_id_2, run_2, "the latest run stamps sync_run_id");
-    assert!(processed_2.is_some(), "the batched ingestion never touches the worker's processed_at");
-    assert!(pending, "a re-batched row is pending again for the worker");
+    // Same contract as the row-by-row path above (#226): unchanged means non-pending.
+    assert!(processed_2.is_some(), "an unchanged record keeps its processed checkpoint");
+    assert!(!pending, "re-batching an UNCHANGED record must not re-pend it");
 }
 
 #[tokio::test]
@@ -268,4 +277,84 @@ async fn staging_batch_upsert_falls_back_to_row_by_row_on_batch_error() {
         .await
         .expect("count rows");
     assert_eq!(rows, 1, "the duplicate SIRET collapses to a single row via the fallback");
+}
+
+/// The steady-state property #231 exists for: once the worker has translated a row and dropped its
+/// payload, re-seeing the SAME record must NOT write the payload back.
+///
+/// Without this, every weekly sweep would re-inflate the whole mirror to ~1.8 kB a row and the
+/// compaction would be undone within days — the change would look done and buy nothing, which is the
+/// failure mode worth a test rather than a comment.
+#[tokio::test]
+async fn an_unchanged_processed_row_does_not_get_its_payload_written_back() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP an_unchanged_processed_row_does_not_get_its_payload_written_back: DATABASE_URL not set");
+        return;
+    };
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+
+    // Sweep 1 stages the record with its payload; the row is pending.
+    upsert_staging_row(&pool, &sample_record(), "37", uuid::Uuid::new_v4()).await.expect("first upsert");
+    let payload: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT payload FROM external_sirene_restaurants WHERE siret = '85242109900021'")
+            .fetch_one(&pool)
+            .await
+            .expect("staged row");
+    assert!(payload.is_some(), "a pending row carries the payload the worker will translate");
+
+    // The worker translates it and drops the payload (what `mark_processed(.., true)` does).
+    sqlx::query("UPDATE external_sirene_restaurants SET processed_at = last_seen_at, payload = NULL")
+        .execute(&pool)
+        .await
+        .expect("simulate the worker's transient-payload mark");
+
+    // Sweep 2 sees the identical record again.
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    upsert_staging_row(&pool, &sample_record(), "37", uuid::Uuid::new_v4()).await.expect("second upsert");
+
+    let (payload_2, pending): (Option<serde_json::Value>, bool) = sqlx::query_as(
+        "SELECT payload, (processed_at IS NULL OR processed_at < last_seen_at) AS pending \
+         FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("re-staged row");
+    assert!(payload_2.is_none(), "an unchanged, already-processed record must NOT get its payload back");
+    assert!(!pending, "and it must not re-pend — the hash matched");
+}
+
+/// The other half: a record that ACTUALLY changed must get its payload back, or the worker would pend
+/// a row with nothing to translate.
+#[tokio::test]
+async fn a_changed_record_gets_its_payload_written_again() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP a_changed_record_gets_its_payload_written_again: DATABASE_URL not set");
+        return;
+    };
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+
+    upsert_staging_row(&pool, &sample_record(), "37", uuid::Uuid::new_v4()).await.expect("first upsert");
+    sqlx::query("UPDATE external_sirene_restaurants SET processed_at = last_seen_at, payload = NULL")
+        .execute(&pool)
+        .await
+        .expect("simulate the worker's transient-payload mark");
+
+    // `record_with_siret` carries the same SIRET but a different record (no enseigne, no address
+    // lines) — a real change to fields the ACL reads, so a different hash.
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    upsert_staging_row(&pool, &record_with_siret("85242109900021"), "37", uuid::Uuid::new_v4())
+        .await
+        .expect("changed upsert");
+
+    let (payload, pending): (Option<serde_json::Value>, bool) = sqlx::query_as(
+        "SELECT payload, (processed_at IS NULL OR processed_at < last_seen_at) AS pending \
+         FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("re-staged row");
+    assert!(payload.is_some(), "a CHANGED record must carry its payload — the worker has to translate it");
+    assert!(pending, "and it must pend");
 }

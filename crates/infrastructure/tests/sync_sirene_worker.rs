@@ -23,7 +23,7 @@ fn db_lock() -> &'static tokio::sync::Mutex<()> {
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
         r#"
-        DROP TABLE IF EXISTS external_sirene_restaurants, domain_events, restaurant, command_journal CASCADE;
+        DROP TABLE IF EXISTS external_sirene_restaurants, domain_events, restaurant, command_journal, inbound_events CASCADE;
         CREATE TABLE command_journal (
           message_id UUID PRIMARY KEY,
           correlation_id UUID NOT NULL,
@@ -41,16 +41,37 @@ async fn reset_schema(pool: &PgPool) {
           received_at TIMESTAMPTZ NOT NULL,
           completed_at TIMESTAMPTZ NULL
         );
+        -- The worker stages registrations here since ADR-20260728-011344 (#227) — INSEE cannot be
+        -- told "no", so a registry record is an inbound FACT, not a command. Missing from this fixture
+        -- until #231; every drain assertion failed on `relation "inbound_events" does not exist`, and
+        -- nothing caught it because CI has no DATABASE_URL and these tests skip.
+        CREATE TABLE inbound_events (
+          inbound_event_id UUID PRIMARY KEY,
+          source TEXT NOT NULL,
+          external_id TEXT NOT NULL,
+          correlation_id UUID NOT NULL,
+          event_type TEXT NOT NULL,
+          payload JSONB NOT NULL,
+          status INTEGER NOT NULL,
+          error JSONB NULL,
+          received_at TIMESTAMPTZ NOT NULL,
+          delivered_at TIMESTAMPTZ NULL,
+          UNIQUE (source, external_id)
+        );
         CREATE TABLE external_sirene_restaurants (
           siret TEXT PRIMARY KEY,
-          payload JSONB NOT NULL,
+          -- NULLable since #231: the payload is TRANSIENT, present only while the row is pending
+          -- (or when the record could not be mapped and it is kept as evidence).
+          payload JSONB NULL,
           etat TEXT NOT NULL,
           naf TEXT NOT NULL,
           department TEXT NOT NULL,
           first_seen_at TIMESTAMPTZ NOT NULL,
           last_seen_at TIMESTAMPTZ NOT NULL,
           sync_run_id UUID NOT NULL,
-          processed_at TIMESTAMPTZ NULL
+          payload_hash TEXT NOT NULL DEFAULT 'unhashed-pre-20260728',
+          processed_at TIMESTAMPTZ NULL,
+          status TEXT NOT NULL DEFAULT 'PENDING'
         );
         CREATE TABLE domain_events (
           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -145,6 +166,96 @@ async fn stage_row(pool: &PgPool, etat: &str) {
     .execute(pool)
     .await
     .expect("stage row");
+}
+
+/// Stage a row carrying an arbitrary payload (the `stage_row` helper always stages a mappable one).
+async fn stage_row_with_payload(pool: &PgPool, siret: &str, payload: serde_json::Value) {
+    sqlx::query(
+        "INSERT INTO external_sirene_restaurants \
+           (siret, payload, etat, naf, department, first_seen_at, last_seen_at, sync_run_id, processed_at) \
+         VALUES ($1, $2, 'A', '56.10A', '37', now(), now(), $3, NULL) \
+         ON CONFLICT (siret) DO UPDATE SET \
+           payload = EXCLUDED.payload, last_seen_at = EXCLUDED.last_seen_at, \
+           sync_run_id = EXCLUDED.sync_run_id",
+    )
+    .bind(siret)
+    .bind(payload)
+    .bind(uuid::Uuid::new_v4())
+    .execute(pool)
+    .await
+    .expect("stage row with payload");
+}
+
+/// The payload lifetime (#231, ADR-20260728-143000): the worker DROPS the payload it has translated and
+/// KEEPS the one it could not map.
+///
+/// Both halves matter. Dropping the translated payload is the 655 MB — the mirror was 77% of the
+/// database because it kept verbatim records forever to read five fields out of them. Keeping the
+/// unmappable one is the diagnostic: that payload is the only evidence of WHY INSEE's record was
+/// unusable, and a silent unmappable row with no evidence is how a systematic mapping bug hides.
+#[tokio::test]
+async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map: DATABASE_URL not set");
+        return;
+    };
+    let _guard = db_lock().lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    let worker = SireneSyncWorker::new(pool.clone());
+
+    // A mappable record, and one that parses as an établissement but that the ACL rejects (no
+    // enseigne/denomination anywhere, so there is no usable name).
+    stage_row(&pool, "A").await;
+    stage_row_with_payload(
+        &pool,
+        "85242109900039",
+        serde_json::json!({
+            "siret": "85242109900039",
+            "adresseEtablissement": { "codePostalEtablissement": "37000",
+                                      "libelleCommuneEtablissement": "TOURS" },
+            "periodesEtablissement": [ { "dateFin": null,
+                                         "etatAdministratifEtablissement": "A",
+                                         "activitePrincipaleEtablissement": "56.10A" } ]
+        }),
+    )
+    .await;
+
+    let summary = worker.run_once().await.expect("drain");
+    assert_eq!(summary.processed, 2, "both rows drained");
+    assert_eq!(summary.registered, 1, "one staged as an inbound registry fact");
+    assert_eq!(summary.skipped, 1, "one could not be mapped");
+
+    let (payload, hash, status): (Option<serde_json::Value>, String, String) = sqlx::query_as(
+        "SELECT payload, payload_hash, status FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("translated row");
+    assert!(payload.is_none(), "a translated payload is spent — it is never read again");
+    assert!(!hash.is_empty(), "the hash persists: it is what stops the next sweep re-pending the row");
+    assert_eq!(status, "SYNCED", "the row says plainly that it HAS been synced");
+
+    let (unmappable, unmappable_status): (Option<serde_json::Value>, String) = sqlx::query_as(
+        "SELECT payload, status FROM external_sirene_restaurants WHERE siret = '85242109900039'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("unmappable row");
+    assert!(unmappable.is_some(), "the evidence of an unusable INSEE record is kept");
+    // Both rows now hold different things and say why. Without `status` these two would be
+    // "payload NULL" vs "payload present" with no way to tell evidence from a pending translation.
+    assert_eq!(unmappable_status, "UNMAPPABLE", "and it is NOT reported as synced");
+
+    // Both rows are checkpointed either way — an unmappable row must not be retried forever.
+    let still_pending: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM external_sirene_restaurants \
+          WHERE processed_at IS NULL OR processed_at < last_seen_at",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("pending count");
+    assert_eq!(still_pending, 0, "keeping a payload is not the same as leaving the row pending");
 }
 
 #[tokio::test]

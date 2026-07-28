@@ -1,9 +1,9 @@
 # PROP-20260728-120931 — The SIRENE mirror's payload is TRANSIENT; the hash is what persists
 
-- **Status**: Proposed
+- **Status**: **Approved** — all five decisions answered by the product owner 2026-07-28 (register §8 + [ADR-20260728-143000](../adr/ADR-20260728-143000-sirene-mirror-payload-is-transient.md)). Two divergences recorded in the ADR rather than here, per the never-rewrite-an-approved-proposal rule: **D2's `bytea` change is sequenced AFTER compaction** (`ALTER … TYPE` rewrites the table and needs ~655 MB free), and **compaction runs in CI** by product-owner choice, which costs D3 for historical rows only.
 - **Date**: 2026-07-28
 - **Tracking issue**: [#231 "The SIRENE mirror stores verbatim INSEE payloads (~1.8 kB/row) to read 5 fields — it is 77% of the database and blocks national coverage"](https://github.com/TheCaptainCompany/captain-food/issues/231)
-- **Realized by**: _(filled at completion)_
+- **Realized by**: [ADR-20260728-143000](../adr/ADR-20260728-143000-sirene-mirror-payload-is-transient.md) · PR #234
 
 ---
 

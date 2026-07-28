@@ -30,13 +30,56 @@ external_sirene_restaurants:
     about INSEE and belongs here, in the adapter. "Is this a meaningful change to the Restaurant?" is a
     domain question and belongs only in the aggregate's fold. Both exist, and neither substitutes for
     the other.
+
+    `payload` is TRANSIENT and `payload_hash` is PERMANENT (ADR-20260728-143000) — the single most
+    important thing to know about this table, because the two used to have the same lifetime and the
+    asymmetry is what makes national coverage affordable. The payload is an INPUT TO TRANSLATION: needed
+    from the moment INSEE reports a change until the worker has turned it into a domain fact, and never
+    again. The hash is the change-detection key and is needed forever, because every future sweep
+    compares against it. So a payload is present exactly while a row is PENDING; the worker NULLs it on
+    successful translation. At steady state almost every row is processed, so the table is
+    `siret + payload_hash + etat/naf/department + timestamps` ~ 200 bytes/row instead of ~1.8 kB.
+    Measured before the change: 655 MB for 339k rows -- 77% of the whole database, at department 37 of
+    101, projecting to ~2 GB for full France on a 2 GB disk.
+
+    The ONE exception is deliberate: a row the ACL could not MAP (no usable name, no postal code,
+    unparsable JSON) KEEPS its payload. It is the only evidence of why INSEE's record was unusable, and
+    deleting it is how a systematic mapping bug hides. The set is bounded (~5.4k historically).
+
+    `status` answers "HAS THIS ROW BEEN SYNCED, OR NOT?" directly, instead of leaving it to be inferred.
+    It exists because making the payload transient would otherwise have made the table ambiguous: once
+    `payload` is nullable, a row that HAS one is either still awaiting translation or was kept as
+    evidence, and nothing distinguishes the two. Values, written by the worker (except PENDING, written
+    by the ingestion):
+      * PENDING    — ingested or refreshed, not yet translated. Payload PRESENT, because the worker needs it.
+      * SYNCED     — translated into a domain fact (a staged registry fact, or an explicit closure).
+                     Payload DROPPED: it has been consumed and is never read again.
+      * UNMAPPABLE — parsed but rejected by the ACL, or not parsable at all. Payload KEPT as evidence.
+                     Checkpointed, so it is NOT retried forever — a refresh from INSEE re-pends it.
+      * FAILED     — a write/staging failure. The row is left PENDING and retried on the next pass;
+                     the status records that the last attempt did not get there.
+    It is deliberately TEXT rather than a scalar enum `$ref`. Enums persist as declaration-order ints
+    (ADR-0037/0041), and the CI `sirene_ingest` crate that writes PENDING cannot see the domain types at
+    all (ADR-0045 keeps domain crates out of that build) — it would have to hardcode ordinals, so a
+    future reordering of the enum would silently reinterpret every row. Text has no such failure mode,
+    and matches its sibling columns (`etat`, `naf`) on this adapter-owned table.
+    Note it does NOT replace `processed_at`: that is the CHECKPOINT (`< last_seen_at ⇒ pending`, the
+    concurrency-safe high-water mark), while `status` is the OUTCOME. `GROUP BY status` is the operator's
+    per-sweep report.
+
+    What this costs: an ACL that learns to read a NEW INSEE field cannot re-translate from the mirror.
+    It does not need to. The hash covers the TYPED projection, so adding a field to the wire types
+    changes the digest of every record, and the next ordinary paced sweep re-pends and re-translates the
+    whole mirror on its own -- the backfill is the normal sweep, not a special operation (D5).
     Scope: all active food-service NAF (56.10A/B/C + 56.30Z) across France; the ingestion partitions its
     INSEE queries by `department` when the deep-pagination cap bites.
-    NO RETENTION (ADR-20260721-025159): this is a full mirror — detect-by-absence needs the complete
-    row set, and it holds company (not consumer) data; sweep_retention() never touches it.
+    NO ROW RETENTION (ADR-20260721-025159): this is a full mirror — detect-by-absence needs the complete
+    ROW set, and it holds company (not consumer) data; sweep_retention() never touches it. That is a
+    statement about rows, NOT about payloads: payloads have the lifetime described above, and conflating
+    the two is exactly what a future reader will trip on.
   columns:
     siret:         { type: text, pk: true }                 # 14-digit SIRET — the idempotent external key
-    payload:       { type: jsonb }                          # raw INSEE établissement record, verbatim
+    payload:       { type: jsonb, nullable: true }          # raw INSEE record, verbatim — present only while PENDING (or unmappable); see the note above
     etat:          { type: text, index: true }              # etatAdministratifEtablissement (A=active / F=closed)
     naf:           { type: text, index: true }              # activitePrincipale (56.10A/B/C, 56.30Z)
     department:    { type: text, index: true }              # code département — partitioned sweeps + worker batching
@@ -45,6 +88,7 @@ external_sirene_restaurants:
     sync_run_id:   { type: uuid }                           # correlates all rows touched by one ingestion run
     payload_hash:  { type: text, index: true }              # see the note below -- the "did this actually change?" key
     processed_at:  { type: timestamptz, nullable: true }    # worker high-water mark: NULL / < last_seen_at ⇒ pending
+    status:        { type: text, index: true }              # what the worker DECIDED -- see the status note below
 
 external_stripe_events:
   staging: true
