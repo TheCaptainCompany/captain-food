@@ -23,12 +23,24 @@
 //!   `x-internal-token` header; the server rejects the ping without it.
 
 use sirene_ingest::{
-    french_departments, restauration_query, upsert_staging_batch, SireneClient, SireneScope,
-    MAX_PAGE_SIZE, STAGING_BATCH_SIZE,
+    departments_by_staleness, french_departments, restauration_query, upsert_staging_batch,
+    SireneClient, SireneScope, MAX_PAGE_SIZE, STAGING_BATCH_SIZE,
 };
 
 /// The new INSEE portal's public quota is ~30 requests/minute — pace page fetches accordingly.
 const PAGE_PAUSE: std::time::Duration = std::time::Duration::from_millis(2100);
+
+/// How long one run may spend fetching before it stops and leaves the rest to the next run (#218).
+///
+/// The bottleneck is INSEE's ~30 req/min quota, not our DB (that was #215/#216), so a full France
+/// sweep needs ~4 hours and CANNOT fit a single CI job — the previous behaviour was to run until the
+/// 90-minute `timeout-minutes` ceiling KILLED it, which loses the summary, the worker ping and the
+/// exit status, and reports a red job for working as designed.
+///
+/// So the run budgets itself and stops cleanly instead. Default 75 minutes, comfortably inside the
+/// workflow's 90, leaving room for the final drain ping and shutdown. Coverage completes across
+/// successive runs because [`departments_by_staleness`] resumes at the stalest partition.
+const DEFAULT_BUDGET_MINUTES: u64 = 75;
 
 #[tokio::main]
 async fn main() {
@@ -53,20 +65,49 @@ async fn main() {
     // One run id correlates every row this ingestion touched (staging column `sync_run_id`).
     let sync_run_id = uuid::Uuid::new_v4();
     let departments: Vec<String> = match std::env::var("SIRENE_DEPARTMENTS") {
+        // An explicit list is honoured verbatim and in the given order — debugging and the
+        // single-market V0 scope must stay predictable, not get reordered under the operator.
         Ok(list) if !list.trim().is_empty() => {
             list.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect()
         }
-        _ => french_departments(),
+        // Otherwise sweep stalest-first so successive runs converge on full coverage instead of
+        // restarting at department 01 every time and never passing 37 (#218).
+        _ => departments_by_staleness(&pool, &french_departments()).await,
     };
+    let budget = std::time::Duration::from_secs(
+        std::env::var("SIRENE_BUDGET_MINUTES")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_BUDGET_MINUTES)
+            * 60,
+    );
+    let started = std::time::Instant::now();
     println!(
-        "sirene_ingest: run {sync_run_id} — {} department partition(s), active food-service scope",
-        departments.len()
+        "sirene_ingest: run {sync_run_id} — {} department partition(s), stalest first, \
+         budget {} min, active food-service scope",
+        departments.len(),
+        budget.as_secs() / 60
     );
 
     let (mut fetched, mut upserted, mut failed_rows) = (0usize, 0usize, 0usize);
     let mut failed_departments: Vec<String> = Vec::new();
 
+    let mut covered: Vec<&str> = Vec::new();
+    let mut budget_exhausted = false;
     for department in &departments {
+        // Stop BETWEEN departments, never mid-partition: a half-swept department would look fully
+        // swept to `departments_by_staleness` (its max(last_seen_at) is now), so the next run would
+        // deprioritise it and its unfetched tail would silently rot.
+        if started.elapsed() >= budget {
+            budget_exhausted = true;
+            println!(
+                "sirene_ingest: budget of {} min reached after {} department(s) — stopping cleanly, \
+                 the next run resumes at the stalest partition",
+                budget.as_secs() / 60,
+                covered.len()
+            );
+            break;
+        }
         let query = restauration_query(&SireneScope::Department(department.clone()));
         let mut cursor = "*".to_string();
         let mut department_fetched = 0usize;
@@ -100,6 +141,7 @@ async fn main() {
             }
         }
         fetched += department_fetched;
+        covered.push(department.as_str());
         if department_fetched > 0 {
             println!("sirene_ingest: department {department} — {department_fetched} établissements");
         }
@@ -107,9 +149,12 @@ async fn main() {
     }
 
     println!(
-        "sirene_ingest: done — fetched {fetched}, upserted {upserted}, failed rows {failed_rows}, \
-         failed departments {:?}",
-        failed_departments
+        "sirene_ingest: done — {} of {} department(s) this run, fetched {fetched}, upserted {upserted}, \
+         failed rows {failed_rows}, failed departments {:?}{}",
+        covered.len(),
+        departments.len(),
+        failed_departments,
+        if budget_exhausted { " (budget-limited — remaining partitions next run)" } else { "" }
     );
 
     // Wake the on-app worker so staged rows are translated without waiting for its poll interval.

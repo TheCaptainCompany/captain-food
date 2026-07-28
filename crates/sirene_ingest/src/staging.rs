@@ -243,3 +243,67 @@ mod hash_tests {
         assert_eq!(payload_hash(&etablissement(raw)), payload_hash(&etablissement(raw)));
     }
 }
+
+/// Order the sweep's departments **least-recently-swept first** (#218).
+///
+/// The sweep used to walk `french_departments()` in fixed numeric order from 01 every run, and died at
+/// the CI time ceiling around department 37 — so 38–101 were never ingested at all, no matter how many
+/// times it ran. Restarting from the same end of the list cannot converge.
+///
+/// This derives the order from data already in the staging table: a department's `max(last_seen_at)` is
+/// when it was last swept, so ascending that column is a natural round-robin. Departments with no rows
+/// yet are not in the table at all and sort FIRST — the never-ingested tail gets priority until the
+/// country is covered, after which the order becomes a refresh rotation.
+///
+/// No cursor table, no migration, no state to get out of sync with reality: if a sweep dies halfway,
+/// the rows it did write are its own record of progress.
+pub async fn departments_by_staleness(pool: &sqlx::PgPool, all: &[String]) -> Vec<String> {
+    let swept: Vec<(String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT department, max(last_seen_at) FROM external_sirene_restaurants \
+         WHERE department IS NOT NULL GROUP BY department",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default(); // a read failure must not stop the sweep — fall back to declaration order
+
+    let seen: std::collections::HashMap<&str, chrono::DateTime<chrono::Utc>> =
+        swept.iter().map(|(d, t)| (d.as_str(), *t)).collect();
+    let mut ordered: Vec<String> = all.to_vec();
+    // Stable sort: never-swept (None) first, then oldest sweep first, ties keeping numeric order.
+    ordered.sort_by_key(|d| seen.get(d.as_str()).copied());
+    ordered
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    /// Rebuilds `departments_by_staleness`'s ordering rule against an explicit map, so the property can
+    /// be asserted without a database: never-swept first, then oldest sweep first.
+    fn order(all: &[&str], swept: &[(&str, i64)]) -> Vec<String> {
+        let seen: std::collections::HashMap<&str, chrono::DateTime<Utc>> =
+            swept.iter().map(|(d, days_ago)| (*d, Utc::now() - Duration::days(*days_ago))).collect();
+        let mut ordered: Vec<String> = all.iter().map(|d| d.to_string()).collect();
+        ordered.sort_by_key(|d| seen.get(d.as_str()).copied());
+        ordered
+    }
+
+    /// The bug behind #218: the sweep restarted at department 01 every run and died at the time
+    /// ceiling around 37, so 38-101 were NEVER ingested however often it ran. Stalest-first makes
+    /// successive runs converge instead of re-treading the same prefix.
+    #[test]
+    fn never_swept_departments_come_first() {
+        // 01 and 02 were swept recently; 75 and 59 have never been touched.
+        let ordered = order(&["01", "02", "59", "75"], &[("01", 1), ("02", 2)]);
+        assert_eq!(&ordered[..2], &["59".to_string(), "75".to_string()]);
+    }
+
+    /// Once the country is covered, the same rule becomes a refresh rotation: the department nobody
+    /// has looked at in longest goes first.
+    #[test]
+    fn once_covered_the_stalest_department_goes_first() {
+        let ordered = order(&["01", "02", "03"], &[("01", 3), ("02", 30), ("03", 10)]);
+        assert_eq!(ordered, vec!["02".to_string(), "03".to_string(), "01".to_string()]);
+    }
+}

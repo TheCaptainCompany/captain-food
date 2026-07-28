@@ -32,7 +32,7 @@ pub use client::{
     SireneClient, SireneError, SirenePage, SireneRecord, API_KEY_HEADER, DEFAULT_BASE_URL,
     INSEE_API_BASE_URL_ENV, INSEE_API_TOKEN_ENV, MAX_PAGE_SIZE,
 };
-pub use staging::{upsert_staging_batch, upsert_staging_row, StagingCounts, STAGING_BATCH_SIZE};
+pub use staging::{upsert_staging_batch, upsert_staging_row, StagingCounts, STAGING_BATCH_SIZE, departments_by_staleness};
 pub use wire::{AdresseEtablissement, Etablissement, PeriodeEtablissement, UniteLegale};
 
 /// Code commune INSEE of Tours (the V0 target market).
