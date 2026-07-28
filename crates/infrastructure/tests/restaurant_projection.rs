@@ -42,7 +42,8 @@ async fn reset_schema(pool: &PgPool) {
           listing_status INTEGER NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
-          slug TEXT NOT NULL UNIQUE,
+          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
+          slug TEXT UNIQUE,
           display_name TEXT NOT NULL,
           description TEXT,
           tags JSONB,
@@ -144,7 +145,6 @@ async fn restaurant_event_folds_into_the_read_model() {
         serde_json::json!({
             "restaurantId": restaurant_id,
             "listingStatus": "ACTIVE_PARTNER",
-            "slug": "chez-marco",
             "displayName": "Chez Marco",
             "marginRate": 62.0,
             "cuisineCategory": "TRADITIONAL",
@@ -163,17 +163,23 @@ async fn restaurant_event_folds_into_the_read_model() {
     let worker = ProjectionWorker::new(pool.clone());
     worker.run_once().await.expect("run_once (registered)");
 
-    // The row materialized, enums stored as declaration-order ordinals.
-    let (slug, display_name, status, listing_status, acceptance): (String, String, i32, i32, i32) =
-        sqlx::query_as(
-            "SELECT slug, display_name, status, listing_status, order_acceptance \
+    // The row materialized, enums stored as declaration-order ordinals. No slug yet: registration no
+    // longer carries one (the #220 slug lifecycle) — the storefront address is configured separately.
+    let (slug, display_name, status, listing_status, acceptance): (
+        Option<String>,
+        String,
+        i32,
+        i32,
+        i32,
+    ) = sqlx::query_as(
+        "SELECT slug, display_name, status, listing_status, order_acceptance \
              FROM restaurant WHERE restaurant_id = $1",
-        )
-        .bind(restaurant_id)
-        .fetch_one(&pool)
-        .await
-        .expect("projected restaurant row");
-    assert_eq!(slug, "chez-marco");
+    )
+    .bind(restaurant_id)
+    .fetch_one(&pool)
+    .await
+    .expect("projected restaurant row");
+    assert_eq!(slug, None, "a freshly-registered listing has no storefront address yet (#220)");
     assert_eq!(display_name, "Chez Marco");
     assert_eq!(status, 0); // RestaurantStatus::DRAFT
     assert_eq!(listing_status, 2); // RestaurantListingStatus::ACTIVE_PARTNER
@@ -188,18 +194,27 @@ async fn restaurant_event_folds_into_the_read_model() {
         assert!(st.last_tick_at.is_some());
     }
 
-    // 2) A follow-up lifecycle fact folds over the existing row (and run_once is idempotent past it).
+    // 2) Follow-up lifecycle facts fold over the existing row (and run_once is idempotent past them):
+    //    the storefront address is configured (#220), then the listing goes live.
     append_event(
         &pool,
         &stream,
         2,
+        "RestaurantSlugConfigured",
+        serde_json::json!({ "restaurantId": restaurant_id, "slug": "chez-marco" }),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        3,
         "RestaurantActivated",
         serde_json::json!({ "restaurantId": restaurant_id }),
     )
     .await;
-    worker.run_once().await.expect("run_once (activated)");
+    worker.run_once().await.expect("run_once (slug configured + activated)");
     worker.run_once().await.expect("run_once (no-op)");
-    assert_eq!(checkpoint(&pool).await, 2);
+    assert_eq!(checkpoint(&pool).await, 3);
 
     // 3) The read repository sees the folded state through the typed row.
     let repo = PgRestaurantRepository::new(pool.clone());

@@ -22,7 +22,8 @@ async fn reset_schema(pool: &PgPool) {
           listing_status INTEGER NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
-          slug TEXT NOT NULL UNIQUE,
+          -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
+          slug TEXT UNIQUE,
           display_name TEXT NOT NULL,
           description TEXT,
           tags JSONB,

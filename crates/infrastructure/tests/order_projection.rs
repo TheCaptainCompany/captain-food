@@ -59,6 +59,10 @@ async fn reset_schema(pool: &PgPool) {
           restaurant_stars INTEGER,
           rating_comment TEXT,
           rider_thumb INTEGER,
+          -- Added by migrations/20260722000000; the projector's upsert names it, so a fixture
+          -- without it fails the whole INSERT and the row never materializes (caught when #230
+          -- first ran this suite in CI).
+          delivery_timeliness INTEGER,
           rider_tip_cents BIGINT,
           restaurant_tip_cents BIGINT,
           captain_tip_cents BIGINT,
