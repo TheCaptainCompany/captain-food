@@ -235,11 +235,12 @@ async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map(
     .fetch_one(&pool)
     .await
     .expect("translated row");
-    assert!(payload.is_none(), "a translated payload is spent — it is never read again");
-    assert!(!hash.is_empty(), "the hash persists: it is what stops the next sweep re-pending the row");
     // STAGED, not SYNCED: the fact has been handed to the inbox but the AGGREGATE has not decided yet.
-    // Claiming SYNCED here would assert a success this worker never observed.
+    // Claiming SYNCED here would assert a success this worker never observed — and the payload must
+    // survive with it, because an unaccepted translation is exactly when the raw record is still needed.
     assert_eq!(status, "STAGED", "handed over — the verdict is not in yet");
+    assert!(payload.is_some(), "nothing is confirmed, so the only original is not thrown away");
+    assert!(!hash.is_empty(), "the hash persists: it is what stops the next sweep re-pending the row");
 
     let (unmappable, unmappable_status): (Option<serde_json::Value>, String) = sqlx::query_as(
         "SELECT payload, status FROM external_sirene_restaurants WHERE siret = '85242109900039'",
@@ -540,6 +541,13 @@ async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
     .expect("staged row");
     assert_eq!(status, "STAGED");
     assert!(synced_at.is_none(), "nothing has reached the domain yet, so nothing may claim a sync time");
+    let payload: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT payload FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("staged row payload");
+    assert!(payload.is_some(), "the payload survives hand-over — the verdict is not in yet");
 
     // The drain worker delivers it and the aggregate decides. Simulated here by writing the verdict the
     // real InboundEventsDrainWorker writes — DELIVERED (ordinal 1).
@@ -563,6 +571,15 @@ async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
     .expect("resolved row");
     assert_eq!(status, "SYNCED", "the aggregate accepted it, so now the mirror may say so");
     assert!(synced_at.is_some(), "and records WHEN it reached the domain");
+    // Only NOW is the payload spent — dropped in the same statement that recorded the certainty, never
+    // on the strength of an assumption made earlier.
+    let payload: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT payload FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("resolved row payload");
+    assert!(payload.is_none(), "confirmed synced — the payload is finally released");
 }
 
 /// A no-change verdict is a SUCCESS, not a failure. The aggregate folding "nothing moved" (IGNORED) means
@@ -635,4 +652,40 @@ async fn a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload() {
     .expect("row");
     assert!(payload.is_some(), "its payload is the evidence needed to diagnose it — never dropped");
     assert_eq!(status, "POISON", "and it stays quarantined until INSEE sends something different");
+}
+
+/// A FAILED verdict must not cost the payload. The record still has to be re-translated, and the raw
+/// staging copy is the only original we hold — the inbound row carries the TRANSLATED form, which is
+/// exactly what is suspect when a delivery fails.
+#[tokio::test]
+async fn a_failed_verdict_keeps_the_payload() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP a_failed_verdict_keeps_the_payload: DATABASE_URL not set");
+        return;
+    };
+    let _guard = db_lock().lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    let worker = SireneSyncWorker::new(pool.clone());
+
+    stage_row(&pool, "A").await;
+    worker.run_once().await.expect("stage the fact");
+    // FAILED = 2 (declaration-order ordinal).
+    sqlx::query("UPDATE inbound_events SET status = 2 WHERE source = 'sirene'")
+        .execute(&pool)
+        .await
+        .expect("simulate a failed delivery");
+
+    worker.run_once().await.expect("reconcile");
+    let (status, payload, synced_at): (String, Option<serde_json::Value>, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as(
+            "SELECT status, payload, synced_at FROM external_sirene_restaurants \
+              WHERE siret = '85242109900021'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("row");
+    assert_eq!(status, "FAILED");
+    assert!(payload.is_some(), "a failed delivery is precisely when the raw record is still needed");
+    assert!(synced_at.is_none(), "and nothing may claim it reached the domain");
 }

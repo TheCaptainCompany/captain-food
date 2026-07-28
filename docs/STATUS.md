@@ -3,6 +3,26 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — a payload is now removed ONLY against recorded evidence of a successful sync
+> ([#231](https://github.com/TheCaptainCompany/captain-food/issues/231)/[#238](https://github.com/TheCaptainCompany/captain-food/issues/238); PR #240).**
+> Product-owner correction, and it caught a real flaw. The first implementation removed payloads on an
+> INFERENCE: the compaction read `processed_at >= last_seen_at` as "already translated", wrote `SYNCED`
+> itself, then deleted the payload on the strength of its own decision — and the worker deleted it at
+> hand-over, before the aggregate had decided anything. But `processed_at` is a CHECKPOINT, not a verdict
+> (the worker advances it for unmappable rows and failed writes; the ingestion advances it again on
+> unchanged ones), so certainty was being derived from a column that never carried it — for an
+> irreversible delete whose only recovery is a ~4h INSEE re-fetch. **The rule is now `status = 'SYNCED'
+> AND synced_at IS NOT NULL`** — two independent witnesses, both written by the code that observed the
+> fact. The register path drops the payload in `reconcile_staged` (same statement as the verdict), the
+> closure path at mark time (the command has executed); `STAGED`/`FAILED`/`POISON`/`UNMAPPABLE` and
+> pre-`status` rows all keep theirs. Note the inbound row's copy is the TRANSLATED form — exactly what is
+> in question if the ACL mistranslated — so the raw staging payload is the only original.
+> **Consequence: the historical 655 MB is reclaimed by RE-SYNCING, not by compaction.** Pre-#231 rows
+> keep the hash sentinel, so the first sweep re-pends each exactly once (as migration `20260728040000`
+> already documented), and the payload is released on confirmation. Compaction reports `left_unconfirmed`
+> so "nothing left to do" cannot be confused with "nothing is confirmed yet". Silver lining: it no longer
+> classifies anything, so the ACL gap from running it in CI is gone.
+
 > ✅ **2026-07-28 — the SIRENE compaction is now RUNNABLE against production
 > ([#238](https://github.com/TheCaptainCompany/captain-food/issues/238); PR #239).** `sirene_ingest --compact`
 > shipped with the change below, but nothing could invoke it: `DATABASE_URL` lives only in CI secrets and

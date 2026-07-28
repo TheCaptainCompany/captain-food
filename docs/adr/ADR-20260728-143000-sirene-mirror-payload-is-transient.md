@@ -40,8 +40,8 @@ So the payload is present exactly while a row is **pending**. Concretely:
 
 1. The ingestion writes a payload only when the row will pend — an unchanged, already-processed record
    keeps whatever the row holds (`NULL`, once compacted).
-2. The worker NULLs the payload in the **same statement** that advances the `processed_at` checkpoint,
-   so a row can never be marked processed while still holding one, or stripped without being marked.
+2. The worker NULLs the payload in the **same statement that records the sync as CERTAIN** — never
+   earlier. See "Evidence before removal" below; this is the correction that matters most.
 3. A record the ACL could not **map** (or could not parse) **keeps** its payload — it is the only
    evidence of why INSEE's record was unusable.
 4. A one-shot compaction pass (`sirene_ingest --compact`) applies this to rows already in the table.
@@ -202,6 +202,53 @@ the sibling columns (`etat`, `naf`) on this adapter-owned table.
 row that keeps failing is visible instead of being indistinguishable from one not yet reached. The write
 is best-effort: it runs on a path that is already failing, and turning a retryable error into a hard one
 to record an annotation would be strictly worse.
+
+### Evidence before removal (correction, product owner)
+
+> *"Before removing the existing payload we need to know if the sync has been done successfully. Once you
+> have indicated the column `synced_at` and the status you can remove the payload without doubt."*
+
+The first implementation of this ADR removed payloads on an **inference**, and the inference was wrong.
+Two places:
+
+- the compaction pass read `processed_at >= last_seen_at` as "already translated", wrote `SYNCED` on the
+  strength of that reading, and then dropped the payload — deciding the outcome itself and then trusting
+  its own decision;
+- the worker dropped the payload at **hand-over** (`STAGED`), before the aggregate had decided anything.
+
+`processed_at` is a **checkpoint, not a verdict**. The worker advances it for an unmappable row, for one
+whose write failed, and for one merely handed to the inbox; the ingestion advances it again on every
+unchanged row it re-sees. It never carried the information that was being read out of it. Deleting the
+only original record on that basis is irreversible without a ~4h re-fetch from INSEE.
+
+**The rule is now: a payload is removed only from a row that positively records having reached the
+domain** — `status = 'SYNCED'` **and** `synced_at IS NOT NULL`, two independent witnesses of the same
+fact, both written by the code path that observed it. Concretely:
+
+- the register path drops the payload in `reconcile_staged`, the same statement that writes the
+  aggregate's verdict back;
+- the explicit-closure path drops it at mark time, because `MarkRestaurantClosed` has actually executed
+  by then;
+- `STAGED`, `FAILED`, `POISON`, `UNMAPPABLE` and pre-`status` rows all keep theirs.
+
+Note what "the inbound row has its own copy" does not buy: that copy is the **translated** form, which is
+exactly what is in question if the ACL mistranslated the record. The raw payload is the only original.
+
+#### The consequence: historical rows are reclaimed by re-syncing, not by compaction
+
+Rows predating the `status` column carry `PENDING` and the `unhashed-pre-20260728` hash sentinel, so no
+evidence of their outcome exists and compaction will not touch them. That sentinel means the next sweep
+**re-pends each of them exactly once** — which migration `20260728040000` already documented as its cost
+— the worker translates them, the verdict comes back, and the payload is released there, confirmed.
+
+So reclaiming the historical 655 MB now **depends on the sweep resuming**; the compaction pass alone will
+not shrink a mirror full of pre-#231 rows, and it reports `left_unconfirmed` so a run that reclaimed
+nothing because nothing was confirmed cannot be mistaken for one that found nothing to do. Those need
+opposite responses.
+
+One thing this correction removes: compaction no longer classifies anything, so **the ACL gap from
+running it in CI is gone**. It cannot mistake an ACL-unmappable row for a translated one, because it no
+longer decides — it only reads a verdict someone else recorded.
 
 ### What is unaffected
 
