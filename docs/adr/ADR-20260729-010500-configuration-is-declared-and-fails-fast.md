@@ -39,17 +39,33 @@ key. `from_env()` is the strict wrapper. Lenient `bool` parsing (ADR-20260728-22
 generated reader, so every toggle gets it uniformly. An empty or whitespace-only value counts as
 **absent** — a dashboard field someone cleared must not satisfy a requirement.
 
-**3. Missing required keys stop the app**, reporting **all** of them with their `gates`, then exiting
-`78` (`EX_CONFIG`). Not the first one: an operator who learns of one missing variable per deploy cycle
-fixes a three-key outage in three deploys.
+**3. Every value is TYPED by a scalar, and validated against its `pattern` at startup.** *Present is
+not usable*: a live Stripe key pasted into the test slot, a webhook secret carrying a trailing newline
+from a dashboard copy-paste, a 31-byte `AUTH_SESSION_KEY` — each boots happily without this and fails
+later, at the worst moment, looking like a code bug. Nine configuration scalars live in `scalars.yaml`
+alongside every other type in the system; splitting `StripeSecretKeyTest` from `StripeSecretKeyLive` is
+what makes "a LIVE key in the test slot" a startup failure rather than a way for a job whose whole
+premise is that it cannot move real money to do exactly that.
 
-**4. A boot report states what resolved** — key, value for non-secrets, `set`/`unset` for secrets, and
+**4. Missing OR malformed keys stop the app**, reporting **all** of them at once — grouped `MISSING`
+(absent) and `INVALID` (present but malformed), because those are different problems with different
+fixes — then exiting `78` (`EX_CONFIG`). Not the first one: an operator who learns of one bad variable
+per deploy cycle fixes a three-key outage in three deploys. **A secret's value is never printed**; the
+report names the key and the expected shape only.
+
+**5. Enforcement follows the PROFILE, not a second toggle** (product-owner directive, 2026-07-29:
+*"fast fail to avoid misconfiguration on production"*). Production and staging stop; development
+reports and continues. An earlier draft gated this on a `CONFIG_ENFORCE` flag for a warn-only rollout;
+that flag is gone, because the risk it hedged against does not exist — see below — and a second knob is
+a second thing to get wrong.
+
+**6. A boot report states what resolved** — key, value for non-secrets, `set`/`unset` for secrets, and
 for `STRIPE_SECRET_KEY` the **mode** derived from its `sk_test_`/`sk_live_` prefix. Never a secret value.
 
-**5. `consumer` scopes a key to its binary.** The CI `sirene_ingest` job's keys are declared — so the
+**7. `consumer` scopes a key to its binary.** The CI `sirene_ingest` job's keys are declared — so the
 drift gate and the docs cover them — without being injected into the server, which never reads them.
 
-**6. A drift test pins the declaration to reality.** Every `env::var` / `env_flag` call site in
+**8. A drift test pins the declaration to reality.** Every `env::var` / `env_flag` call site in
 `crates/**` must correspond to a declared key, or the build fails. This is the load-bearing part: any
 hand-maintained inventory drifts, and this one already had.
 
@@ -70,9 +86,11 @@ quietly; with this, it cannot take over at all.
 
 ## Consequences
 
-- **Rollout is two steps** (PROP D5). `CONFIG_ENFORCE` defaults to **false**: the first deploy prints the
-  full report without stopping, so production tells us what it is missing before enforcement can bite.
-  Flipping that default to `true` is the reviewed second step, and it belongs in its own change.
+- **The warn-only rollout (PROP D5) was dropped, deliberately.** It hedged against "the first enforced
+  deploy fails because production is missing a key" — but a container that exits **fails the deploy and
+  the previous version keeps serving**. The hedge protected against nothing: the failure mode it feared
+  is a deploy that does not take over, which is precisely the desired outcome. Enforcing immediately is
+  therefore both simpler and safer than phasing it in.
 - **`APP_PROFILE` is declared, never inferred** (default `development`). Inferring it from the host or
   from a key prefix is wrong exactly when it matters most — during a test→live switch-over.
 - **A new env var is now a spec change.** Adding one to the code without declaring it fails the build.
