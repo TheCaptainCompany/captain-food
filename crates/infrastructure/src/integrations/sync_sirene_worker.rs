@@ -12,6 +12,14 @@
 //! processed_at < last_seen_at ⇒ pending`. Marking a drained row `processed_at = last_seen_at` (the
 //! value READ, not `now()`) makes a concurrent ingestion bump re-pend the row instead of being lost.
 //!
+//! **The payload is TRANSIENT** (ADR-20260728-143000, #231). It is an input to TRANSLATION — needed
+//! from the moment INSEE reports a change until this worker has turned it into a domain fact, and never
+//! again — so [`SireneSyncWorker::mark_processed`] NULLs it in the same statement that advances the
+//! checkpoint. At ~1.8 kB a row the mirror was 77% of the database (655 MB at department 37 of 101, on
+//! a 2 GB disk), which is what gated national coverage. The hash persists; only the payload goes.
+//! One class of row keeps it: anything the ACL could not MAP, because that payload is the only evidence
+//! of why INSEE's record was unusable.
+//!
 //! **Deletion reconciliation** (ADR-0045 deletion policy) reuses the already-modeled
 //! `MarkRestaurantClosed` → `RestaurantMarkedClosed`:
 //! - explicit signal: a staged row whose `etat` is `F` (fermé) is a confident closure;
@@ -149,6 +157,40 @@ pub struct SireneSyncSummary {
     pub failed: u64,
 }
 
+/// What the worker decided about one staged row — the value behind
+/// `external_sirene_restaurants.status`, which answers "has this row been SYNCED, or not?" (#231).
+///
+/// It exists because the payload became transient. Once `payload` is nullable, a row that HAS one is
+/// either still awaiting translation or was kept as evidence of an unmappable record, and nothing
+/// distinguishes the two — so the status is not decoration, it is what makes the table readable.
+/// `GROUP BY status` is the operator's per-sweep report.
+///
+/// Deliberately NOT a domain scalar: the value is also written by the CI `sirene_ingest` crate, which
+/// cannot see domain types (ADR-0045), and enums persist as declaration-order ints (ADR-0037/0041) — so
+/// a shared enum would mean hardcoded ordinals there and silent reinterpretation on any reordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowOutcome {
+    /// Translated into a domain fact (a staged registry fact, or an explicit closure). Payload spent.
+    Synced,
+    /// Parsed but rejected by the ACL, or not parsable at all. Payload KEPT as evidence. Still
+    /// checkpointed, so it is not retried forever — a refresh from INSEE re-pends it.
+    Unmappable,
+}
+
+impl RowOutcome {
+    fn status(self) -> &'static str {
+        match self {
+            RowOutcome::Synced => "SYNCED",
+            RowOutcome::Unmappable => "UNMAPPABLE",
+        }
+    }
+
+    /// Only a spent payload is dropped. Evidence is never discarded.
+    fn clears_payload(self) -> bool {
+        matches!(self, RowOutcome::Synced)
+    }
+}
+
 /// The worker: owns the pool, guards against overlapping drains (the ping endpoint and the poll loop
 /// share one instance behind an `Arc`).
 pub struct SireneSyncWorker {
@@ -226,7 +268,9 @@ impl SireneSyncWorker {
             }
             for row in rows {
                 let siret: String = row.try_get("siret").map_err(db_err)?;
-                let payload: serde_json::Value = row.try_get("payload").map_err(db_err)?;
+                // Nullable since #231: the payload lives only while the row is pending, so a pending
+                // row normally HAS one — a NULL here is an anomaly, handled in `process_row`.
+                let payload: Option<serde_json::Value> = row.try_get("payload").map_err(db_err)?;
                 let etat: String = row.try_get("etat").map_err(db_err)?;
                 let last_seen_at: DateTime<Utc> = row.try_get("last_seen_at").map_err(db_err)?;
                 let staged_hash: String = row.try_get("payload_hash").map_err(db_err)?;
@@ -253,7 +297,7 @@ impl SireneSyncWorker {
         inbox: &PgInboundEvents,
         correlation_id: uuid::Uuid,
         siret: &str,
-        payload: serde_json::Value,
+        payload: Option<serde_json::Value>,
         etat: &str,
         last_seen_at: DateTime<Utc>,
         staged_hash: &str,
@@ -261,14 +305,27 @@ impl SireneSyncWorker {
     ) -> Result<(), DomainError> {
         summary.processed += 1;
 
+        // A pending row with no payload cannot happen by design (the ingestion writes the payload for
+        // exactly the rows it pends, #231) — but if it ever does, leaving it pending would spin the
+        // worker on it forever. Mark it processed, keep nothing to clear, and say so loudly.
+        let Some(payload) = payload else {
+            summary.skipped += 1;
+            eprintln!(
+                "sirene sync worker: siret {siret}: pending row has NO payload — nothing to translate. \
+                 This should be impossible; the next ingestion refresh will re-pend it with one."
+            );
+            return self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await;
+        };
+
         let etablissement: Etablissement = match serde_json::from_value(payload) {
             Ok(e) => e,
             Err(e) => {
                 // A poison payload will not fix itself on retry — skip until the ingestion
-                // refreshes it (which re-pends the row).
+                // refreshes it (which re-pends the row). The payload is KEPT: it is the evidence of
+                // what could not be parsed (#231 D3).
                 summary.skipped += 1;
                 eprintln!("sirene sync worker: siret {siret}: unparsable staged payload: {e}");
-                return self.mark_processed(siret, last_seen_at).await;
+                return self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await;
             }
         };
 
@@ -280,10 +337,11 @@ impl SireneSyncWorker {
                 .close_if_prospect(store, restaurants, journal, correlation_id, siret, last_seen_at, "SIRENE: establishment administratively closed (etat=F)", summary)
                 .await
             {
-                Ok(()) => return self.mark_processed(siret, last_seen_at).await,
+                Ok(()) => return self.mark_processed(siret, last_seen_at, RowOutcome::Synced).await,
                 Err(e) => {
                     summary.failed += 1; // left pending → retried next pass
                     eprintln!("sirene sync worker: close failed for siret {siret}: {e}");
+                    self.mark_failed(siret).await;
                     return Ok(());
                 }
             }
@@ -326,17 +384,18 @@ impl SireneSyncWorker {
                 match inbox.stage(&row).await {
                     Ok(StageOutcome::Staged) => {
                         summary.registered += 1;
-                        self.mark_processed(siret, last_seen_at).await
+                        self.mark_processed(siret, last_seen_at, RowOutcome::Synced).await
                     }
                     // Already staged: this exact (siret, payload_hash) is in the inbox — either awaiting
                     // the drain or already delivered. Nothing to re-stage, and the staging row is done.
                     Ok(StageOutcome::Duplicate) => {
                         summary.skipped += 1;
-                        self.mark_processed(siret, last_seen_at).await
+                        self.mark_processed(siret, last_seen_at, RowOutcome::Synced).await
                     }
                     Err(e) => {
                         summary.failed += 1; // left pending → retried next pass
                         eprintln!("sirene sync worker: staging failed for siret {siret}: {e}");
+                        self.mark_failed(siret).await;
                         Ok(())
                     }
                 }
@@ -344,23 +403,65 @@ impl SireneSyncWorker {
             Err(e) => {
                 // Unusable record (redacted, nameless, no address…) — log + mark processed; the next
                 // ingestion refresh re-pends it if INSEE's data improves.
+                // UNMAPPABLE — payload deliberately RETAINED (#231 D3): it is the only evidence of
+                // why INSEE's record was unusable, and a silent unmappable row with no evidence is
+                // how a systematic mapping bug hides.
                 summary.skipped += 1;
                 eprintln!("sirene sync worker: skipped: {e}");
-                self.mark_processed(siret, last_seen_at).await
+                self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await
             }
         }
     }
 
     /// Advance the per-row checkpoint to the `last_seen_at` we READ (not `now()`): if an ingestion
     /// bumped the row meanwhile, `processed_at < last_seen_at` still holds and it is re-drained.
-    async fn mark_processed(&self, siret: &str, last_seen_at: DateTime<Utc>) -> Result<(), DomainError> {
-        sqlx::query("UPDATE external_sirene_restaurants SET processed_at = $2 WHERE siret = $1")
+    ///
+    /// `outcome` carries BOTH the recorded status and the payload lifetime (ADR-20260728-143000, #231),
+    /// written in the SAME statement as the checkpoint so the three can never disagree — a row can
+    /// never end up marked processed while still holding a spent payload, or stripped without being
+    /// marked, or stripped without saying why.
+    ///
+    /// The payload is an INPUT TO TRANSLATION: once this row has been turned into a domain fact it is
+    /// never read again, and at ~1.8 kB a row it was 77% of the database. [`RowOutcome::Unmappable`] is
+    /// the one case that keeps it, deliberately — that payload is the only evidence of why INSEE's
+    /// record was unusable, and deleting it is how a systematic mapping bug hides (~5.4k rows
+    /// historically).
+    async fn mark_processed(
+        &self,
+        siret: &str,
+        last_seen_at: DateTime<Utc>,
+        outcome: RowOutcome,
+    ) -> Result<(), DomainError> {
+        sqlx::query(
+            "UPDATE external_sirene_restaurants \
+                SET processed_at = $2, status = $3, \
+                    payload = CASE WHEN $4 THEN NULL ELSE payload END \
+              WHERE siret = $1",
+        )
+        .bind(siret)
+        .bind(last_seen_at)
+        .bind(outcome.status())
+        .bind(outcome.clears_payload())
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Record that the last attempt on this row FAILED, WITHOUT advancing the checkpoint — the row stays
+    /// pending and is retried on the next pass. Only the status moves, so a row that keeps failing is
+    /// visible (`SELECT status, count(*) ... GROUP BY status`) instead of being indistinguishable from
+    /// one that has simply not been reached yet. Best-effort by design: this runs on a path that is
+    /// ALREADY failing, so letting a status write turn a retryable error into a hard one would be
+    /// strictly worse than losing the annotation.
+    async fn mark_failed(&self, siret: &str) {
+        if let Err(e) = sqlx::query("UPDATE external_sirene_restaurants SET status = 'FAILED' WHERE siret = $1")
             .bind(siret)
-            .bind(last_seen_at)
             .execute(&self.pool)
             .await
-            .map_err(db_err)?;
-        Ok(())
+        {
+            eprintln!("sirene sync worker: could not record FAILED status for siret {siret}: {e}");
+        }
     }
 
     /// Detect-by-absence (ADR-0045): SIRENE never sends deletes — the active-only ingestion means a

@@ -7,7 +7,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-07-28** · 12 proposals `Proposed` · **66 open decisions** (PROP-004616's six closed, proposal `Approved`; PROP-120931 adds five)
+Last reconciled: **2026-07-28** · 11 proposals `Proposed` · **61 open decisions** (PROP-004616's six and PROP-120931's five both closed, both proposals `Approved`)
 
 ---
 
@@ -164,7 +164,7 @@ is whether the originator can be told no.
 
 ---
 
-## 8. SIRENE mirror storage — the disk constraint on national coverage
+## 8. SIRENE mirror storage — ✅ DECIDED 2026-07-28
 
 [PROP-20260728-120931](PROP-20260728-120931-sirene-mirror-payload-is-transient.md)
 ([#231](https://github.com/TheCaptainCompany/captain-food/issues/231)). Measured on production
@@ -181,13 +181,18 @@ translated. ~1.8 kB/row → ~200 B/row; ~655 MB → ~90 MB today, ~250 MB at ful
 replay/backfill from the mirror is acceptable, given INSEE is the system of record and (since #218) a
 full re-fetch is a normal paced operation rather than a special one.
 
-| # | Decision | Recommendation |
-|---|---|---|
-| D1 | What the mirror retains | Payload transient (NULL after successful processing), hash permanent |
-| D2 | Hash algorithm + encoding | Keep SHA-256, store as `bytea` not hex text. Keep the column named `payload_hash`, never `payload_md5` — naming a column after an algorithm pins the schema to it |
-| D3 | Unmappable / failed rows | KEEP their payload — it is the only evidence of why the record was unusable |
-| D4 | Migration on ~580 MB free | Batched `UPDATE … SET payload = NULL` with `VACUUM` interleaved; a single whole-table UPDATE would likely hit `No space left on device` again |
-| **D5** | **Replay/backfill posture** | **Accept re-fetch from INSEE when a new field is needed** — the mirror is a cache, INSEE is the system of record |
+**✅ CLOSED 2026-07-28 — all five answered, proposal `Approved`, implemented in PR #234.** Kept here for
+the audit trail; the reasoning is in
+[ADR-20260728-143000](../adr/ADR-20260728-143000-sirene-mirror-payload-is-transient.md).
+
+| # | Decision | Recommendation | **Answer** |
+|---|---|---|---|
+| D1 | What the mirror retains | Payload transient (NULL after successful processing), hash permanent | ✅ as recommended |
+| D2 | Hash algorithm + encoding | Keep SHA-256, store as `bytea` not hex text. Keep the column named `payload_hash`, never `payload_md5` — naming a column after an algorithm pins the schema to it | ✅ as recommended, **sequenced after compaction**: `ALTER … TYPE` rewrites the whole table and needs ~655 MB free against ~580 MB. Cheap once live data is ~90 MB |
+| D3 | Unmappable / failed rows | KEEP their payload — it is the only evidence of why the record was unusable | ✅ as recommended, with a limit: the CI compaction has no ACL, so **historical** ACL-unmappable payloads are dropped. Holds going forward via the worker |
+| D4 | Migration on ~580 MB free | Batched `UPDATE … SET payload = NULL` with `VACUUM` interleaved; a single whole-table UPDATE would likely hit `No space left on device` again | ✅ as recommended |
+| **D5** | **Replay/backfill posture** | **Accept re-fetch from INSEE when a new field is needed** — the mirror is a cache, INSEE is the system of record | ✅ accepted, and **cheaper than the proposal argued**: the hash covers the TYPED projection, so adding a field to the wire types invalidates every digest and the next ordinary paced sweep re-translates the whole mirror by itself. The backfill is not an operation to build |
+| — | Where the compaction runs | Server-side (it has the ACL, so D3 holds for historical rows too) | ⚠️ **against the recommendation** — the **CI `sirene_ingest` job**. Cost recorded under D3 |
 
 ---
 

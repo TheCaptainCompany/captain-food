@@ -228,7 +228,7 @@ CREATE INDEX ON hubrise_connection_locations (restaurant_account_id);
 
 CREATE TABLE external_sirene_restaurants (
   siret TEXT PRIMARY KEY,
-  payload JSONB NOT NULL,
+  payload JSONB NULL,
   etat TEXT NOT NULL,
   naf TEXT NOT NULL,
   department TEXT NOT NULL,
@@ -236,13 +236,15 @@ CREATE TABLE external_sirene_restaurants (
   last_seen_at TIMESTAMPTZ NOT NULL,
   sync_run_id UUID NOT NULL,
   payload_hash TEXT NOT NULL,
-  processed_at TIMESTAMPTZ NULL
+  processed_at TIMESTAMPTZ NULL,
+  status TEXT NOT NULL
 );
 CREATE INDEX ON external_sirene_restaurants (etat);
 CREATE INDEX ON external_sirene_restaurants (naf);
 CREATE INDEX ON external_sirene_restaurants (department);
 CREATE INDEX ON external_sirene_restaurants (last_seen_at);
 CREATE INDEX ON external_sirene_restaurants (payload_hash);
+CREATE INDEX ON external_sirene_restaurants (status);
 
 CREATE TABLE external_stripe_events (
   stripe_event_id TEXT PRIMARY KEY,

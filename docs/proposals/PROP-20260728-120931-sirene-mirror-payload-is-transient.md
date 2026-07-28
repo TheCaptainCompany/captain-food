@@ -1,9 +1,9 @@
 # PROP-20260728-120931 — The SIRENE mirror's payload is TRANSIENT; the hash is what persists
 
-- **Status**: Proposed
+- **Status**: **Approved** — all five decisions answered by the product owner 2026-07-28 (register §8 + [ADR-20260728-143000](../adr/ADR-20260728-143000-sirene-mirror-payload-is-transient.md)). Two divergences recorded in the ADR rather than here, per the never-rewrite-an-approved-proposal rule: **D2's `bytea` change is sequenced AFTER compaction** (`ALTER … TYPE` rewrites the table and needs ~655 MB free), and **compaction runs in CI** by product-owner choice, which costs D3 for historical rows only.
 - **Date**: 2026-07-28
 - **Tracking issue**: [#231 "The SIRENE mirror stores verbatim INSEE payloads (~1.8 kB/row) to read 5 fields — it is 77% of the database and blocks national coverage"](https://github.com/TheCaptainCompany/captain-food/issues/231)
-- **Realized by**: _(filled at completion)_
+- **Realized by**: [ADR-20260728-143000](../adr/ADR-20260728-143000-sirene-mirror-payload-is-transient.md) · PR #234
 
 ---
 
@@ -239,6 +239,24 @@ algorithm pins the schema to it — changing algorithm later would cost a migrat
 | Null it like any other processed row | Uniform rule, marginally smaller | Throws away the diagnostic exactly where it is needed. A silent unmappable row with no evidence is how a systematic mapping bug hides |
 
 ### D4 — Migration strategy on a disk with ~580 MB free
+
+> **⚠️ The hash must be recomputed BEFORE any payload is dropped.** Every existing row carries the
+> sentinel `payload_hash = 'unhashed-pre-20260728'` from #226's backfill — a deliberate
+> matches-nothing value. If payloads are nulled while that sentinel stands, the next sweep sees a hash
+> mismatch on all 339k rows, re-pends every one of them and re-writes all 655 MB, defeating the change
+> entirely. So the one-shot compaction is: **for each row — parse payload → compute real hash → store
+> hash → null payload**, in that order, batched.
+>
+> That ordering also constrains WHERE it can run. Parsing the payload to hash it is the ingest crate's
+> typed projection (`sirene_ingest::wire`), and deciding whether a row is *unmappable* (D3 — those keep
+> their payload) is the ACL, which lives only on the deployed server (ADR-0045). A compaction that runs
+> in CI can hash but cannot classify, so it would strip the diagnostic payloads D3 exists to preserve.
+>
+> Note also that a plain `VACUUM` makes the freed space **reusable but does not return it to the OS** —
+> the file stays 655 MB. What actually reclaims disk is a `VACUUM FULL` *after* compaction, which
+> becomes affordable precisely because the live data is then ~90 MB rather than 620 MB (the earlier
+> attempt failed with `No space left on device` needing ~620 MB of headroom).
+
 
 | option | pros | cons |
 |---|---|---|

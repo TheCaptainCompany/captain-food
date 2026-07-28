@@ -9,7 +9,8 @@
 //!
 //! On completion it optionally POSTs the server's internal drain endpoint to wake the worker.
 //!
-//! Usage: `sirene_ingest --once` (designed for a scheduled GitHub Actions run).
+//! Usage: `sirene_ingest --once`    (designed for a scheduled GitHub Actions run)
+//!        `sirene_ingest --compact` (one-shot payload compaction, #231 — no INSEE calls, DB only)
 //! Env:
 //! - `DATABASE_URL`           (required) — Postgres; only the staging table is written (a
 //!   limited-privilege role scoped to it is recommended, ADR-0045).
@@ -23,8 +24,8 @@
 //!   `x-internal-token` header; the server rejects the ping without it.
 
 use sirene_ingest::{
-    departments_by_staleness, french_departments, restauration_query, upsert_staging_batch,
-    SireneClient, SireneScope, MAX_PAGE_SIZE, STAGING_BATCH_SIZE,
+    compact_payloads, departments_by_staleness, french_departments, restauration_query,
+    upsert_staging_batch, SireneClient, SireneScope, MAX_PAGE_SIZE, STAGING_BATCH_SIZE,
 };
 
 /// The new INSEE portal's public quota is ~30 requests/minute — pace page fetches accordingly.
@@ -42,10 +43,30 @@ const PAGE_PAUSE: std::time::Duration = std::time::Duration::from_millis(2100);
 /// successive runs because [`departments_by_staleness`] resumes at the stalest partition.
 const DEFAULT_BUDGET_MINUTES: u64 = 75;
 
+/// Wall-clock budget for `--compact` (#231). Same self-limiting shape as the sweep's, and for the same
+/// reason: the pass is resumable (`payload IS NOT NULL` is its own progress marker), so stopping early
+/// costs nothing and being KILLED at the CI ceiling loses the summary.
+const DEFAULT_COMPACTION_BUDGET_MINUTES: u64 = 60;
+
+/// `SIRENE_BUDGET_MINUTES` or the given default, as a Duration.
+fn budget_from_env(default_minutes: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(
+        std::env::var("SIRENE_BUDGET_MINUTES")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(default_minutes)
+            * 60,
+    )
+}
+
 #[tokio::main]
 async fn main() {
-    if !std::env::args().any(|a| a == "--once") {
-        eprintln!("usage: sirene_ingest --once   (one full ingestion pass, then exit)");
+    let compact_only = std::env::args().any(|a| a == "--compact");
+    if !compact_only && !std::env::args().any(|a| a == "--once") {
+        eprintln!(
+            "usage: sirene_ingest --once      (one full ingestion pass, then exit)\n\
+             \x20      sirene_ingest --compact   (one-shot payload compaction pass, then exit)"
+        );
         std::process::exit(2);
     }
 
@@ -56,6 +77,29 @@ async fn main() {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
+
+    // The compaction pass (#231) touches no INSEE API at all — it only reads payloads already in the
+    // staging table — so it runs before the client is even constructed, and needs no INSEE_API_TOKEN.
+    if compact_only {
+        let budget = budget_from_env(DEFAULT_COMPACTION_BUDGET_MINUTES);
+        println!(
+            "sirene_ingest: compaction pass — budget {} min, recomputing hashes and dropping \
+             translated payloads",
+            budget.as_secs() / 60
+        );
+        match compact_payloads(&pool, budget).await {
+            Ok(counts) => {
+                println!("sirene_ingest: compaction done — {counts:?}");
+                // Re-runnable: rows left pending or unparsable are picked up next time (or drained by
+                // the worker), so an incomplete pass is normal, not a failure.
+            }
+            Err(e) => {
+                eprintln!("sirene_ingest: compaction failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
 
     let client = SireneClient::from_env().unwrap_or_else(|e| {
         eprintln!("sirene_ingest: {e}");
@@ -74,13 +118,7 @@ async fn main() {
         // restarting at department 01 every time and never passing 37 (#218).
         _ => departments_by_staleness(&pool, &french_departments()).await,
     };
-    let budget = std::time::Duration::from_secs(
-        std::env::var("SIRENE_BUDGET_MINUTES")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_BUDGET_MINUTES)
-            * 60,
-    );
+    let budget = budget_from_env(DEFAULT_BUDGET_MINUTES);
     let started = std::time::Instant::now();
     println!(
         "sirene_ingest: run {sync_run_id} — {} department partition(s), stalest first, \
