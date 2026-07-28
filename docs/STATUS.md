@@ -3,6 +3,32 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-29 — configuration is DECLARED in the DSL and validated at startup
+> ([#246](https://github.com/TheCaptainCompany/captain-food/issues/246), PROP-20260729-004500,
+> ADR-20260729-010500).**
+> Product-owner directive, approved in-session (*"Fail-fast: approved"*). Configuration was the one part
+> of this system with no source of truth — ~21 env vars existing only as scattered `env::var` calls plus
+> a stale, unapplied `render.yaml` mirror of 9. That gap is what let `RUN_SIRENE_WORKER` gate a paused
+> pipeline while being written down **nowhere** (6,649 rows PENDING for 4h), left `API_SECRET`
+> configured on production and read by nothing, and made an unset `STRIPE_WEBHOOK_SECRET` silently
+> produce the worst failure this product has (payment captured, domain never told).
+> Now: **`specs/configuration.yaml`** declares every key — type, per-profile `required`, `default`,
+> `secret`, `consumer`, and **`gates`** (what breaks without it, *printed* in the failure report, so a
+> key without one fails validation). Codegen emits the typed reader; startup reports **every** missing
+> required key with its purpose and exits `78` (`EX_CONFIG`); a boot report shows what resolved —
+> secrets as `set`/`unset`, `STRIPE_SECRET_KEY` additionally as **test/live mode**. The rule that keeps
+> it honest is a **drift test**: every `env::var`/`env_flag` call site in `crates/**` must be declared,
+> or the build fails — it immediately caught three undeclared `sirene_ingest` keys, and a sixth `RUN_*`
+> toggle (`RUN_DELIVERY_OFFER_TIMEOUT`) still on the old strict parsing.
+> Reconciles with ADR-0043 rather than contradicting it: **missing configuration cannot self-heal
+> (refuse to start); an unavailable dependency can (start, report 503)**. On Render this is strictly
+> safer — an exiting container fails the deploy, so a misconfigured build cannot replace a working one.
+> **Rollout is two steps**: `CONFIG_ENFORCE` defaults to **false**, so the next deploy prints the full
+> report without stopping and tells us what production is actually missing; flipping that default to
+> `true` is the reviewed second step. Deferred by design: injecting `Config` into `router()` (the drift
+> gate already makes every read *declared*, just not yet *injected*) and the presence-only `/config`
+> endpoint (PROP D4).
+
 > ✅ **2026-07-28 — the SIRENE mirror's disk is RECLAIMED (655 MB → 14 MB), department 37 is re-swept,
 > and every background loop now publishes readiness
 > ([#238](https://github.com/TheCaptainCompany/captain-food/issues/238) /

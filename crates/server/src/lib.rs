@@ -497,7 +497,7 @@ pub fn router() -> Router {
 
                     // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next
                     // ranked channel. Env-gated like the other in-process workers.
-                    if std::env::var("RUN_DELIVERY_OFFER_TIMEOUT").map(|v| v != "false").unwrap_or(true) {
+                    if env_flag("RUN_DELIVERY_OFFER_TIMEOUT", true) {
                         let timeout_worker =
                             Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(pool.clone()));
                         tokio::spawn(timeout_worker.run_loop());
@@ -990,6 +990,44 @@ mod tests {
         assert!(body.get("reason").is_none(), "a running loop needs no reason");
         assert_eq!(body["lastSummary"]["processed"], 6649);
         assert!(body["lastTickAt"].is_string());
+    }
+
+    /// The generated configuration reader (PROP-20260729-004500) must agree with the spec on the two
+    /// things the startup gate depends on: what is REQUIRED in production, and that a missing key is
+    /// reported rather than defaulted away. A drift here silently re-opens the hole the spec closed.
+    #[test]
+    fn generated_config_requires_the_money_and_identity_keys_in_production() {
+        use crate::generated::config::DECLARED_KEYS;
+        for k in [
+            "DATABASE_URL",
+            "STRIPE_SECRET_KEY",
+            "STRIPE_WEBHOOK_SECRET",
+            "AUTH_SESSION_KEY",
+            "SUPABASE_URL",
+            "RUN_SIRENE_WORKER",
+        ] {
+            assert!(DECLARED_KEYS.contains(&k), "{k} must be declared in specs/configuration.yaml");
+        }
+    }
+
+    /// The report must name EVERY missing key, not the first — an operator who learns about one
+    /// variable per deploy cycle fixes a three-key outage in three deploys.
+    #[test]
+    fn missing_config_report_lists_every_key_with_its_purpose() {
+        use crate::generated::config::{MissingConfig, MissingKey, Profile};
+        let report = MissingConfig {
+            profile: Profile::Production,
+            missing: vec![
+                MissingKey { name: "DATABASE_URL", gates: "Postgres pool." },
+                MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "Webhook signature verification." },
+            ],
+        }
+        .to_string();
+        assert!(report.contains("DATABASE_URL"), "first key named");
+        assert!(report.contains("STRIPE_WEBHOOK_SECRET"), "second key named too");
+        assert!(report.contains("Webhook signature verification."), "the `gates` text is printed");
+        assert!(report.contains("production"), "the profile is named");
+        assert!(report.contains("Nothing was started."), "says what did NOT happen");
     }
 
     /// A loop that runs and fails every pass must not look like a healthy one: `running` stays true

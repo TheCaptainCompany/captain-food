@@ -1,6 +1,12 @@
 # PROP-20260729-004500 — Configuration is declared in the DSL and validated at startup
 
-- **Status**: Proposed
+- **Status**: **Approved** (partially) — product owner, in-session 2026-07-29: *"Fail-fast: approved"*.
+  **D2** (which keys become hard requirements) and **D5** (warn-only for one deploy, then enforce) are
+  approved as recommended. **D1** (per-profile required-ness) and **D3** (explicit `APP_PROFILE`) are
+  taken as recommended — fail-fast without them would prevent any local run lacking a full production
+  secret set, so they are entailed by making the approved mechanism workable, not separate choices.
+  **D4** (`/config` endpoint) is **deferred** to a follow-up to keep the realizing change scoped to the
+  approved mechanism.
 - **Date**: 2026-07-29
 - **Tracking issue**: [#246 "Declare the app's configuration in specs/, validate it at startup, and refuse to boot when a required key is missing"](https://github.com/TheCaptainCompany/captain-food/issues/246)
 - **Realized by**: _(filled at completion)_

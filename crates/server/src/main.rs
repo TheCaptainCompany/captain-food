@@ -12,8 +12,30 @@ async fn main() {
     // by the deploy hook) is the platform-side source of truth for a container that never execs at all.
     println!("captain-food server starting — version {}", server::build_version());
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
-    let addr = format!("0.0.0.0:{port}");
+    // Configuration gate (PROP-20260729-004500, issue #246) — BEFORE the router, the pool or the port.
+    //
+    // Missing configuration cannot self-heal, so the app refuses to start; an unavailable DEPENDENCY
+    // can, so that case still starts and reports 503 at /health (ADR-0043). On Render an exiting
+    // container FAILS THE DEPLOY and the previous version keeps serving — a misconfigured build cannot
+    // replace a working one, which is strictly safer than booting into silent degradation.
+    //
+    // Every missing key is reported at once: one deploy fixes them all, rather than one per cycle.
+    let (config, missing) = server::generated::config::Config::resolve();
+    if !missing.is_empty() {
+        let report =
+            server::generated::config::MissingConfig { profile: config.profile, missing };
+        eprintln!("{report}");
+        if config.config_enforce {
+            // 78 = EX_CONFIG (sysexits.h): a configuration error, not a crash.
+            std::process::exit(78);
+        }
+        eprintln!(
+            "\nCONFIG_ENFORCE=false — starting anyway (warn-only rollout). Set it true to enforce."
+        );
+    }
+    print!("{}", config.boot_report());
+
+    let addr = format!("0.0.0.0:{}", config.port);
 
     let app = server::router();
 
