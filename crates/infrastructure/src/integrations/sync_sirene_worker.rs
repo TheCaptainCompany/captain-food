@@ -4,7 +4,7 @@
 //! The thin CI ingestion (`sirene_ingest` bin) UPSERTs raw INSEE records into the
 //! `external_sirene_restaurants` staging table; THIS worker — running on the deployed server, i.e.
 //! versioned exactly like the in-process projector — drains the pending rows, runs the SIRENE
-//! Anti-Corruption Layer ([`super::sirene::etablissement_to_command`]) and calls the ordinary command
+//! Anti-Corruption Layer ([`super::sirene::etablissement_to_registered_event`]) and STAGES the fact
 //! handlers (`register_restaurant`, `mark_restaurant_closed`), so ALL domain logic executes on the
 //! deployed version (the version-skew hazard of the retired direct-write CI binary is gone).
 //!
@@ -38,26 +38,29 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use application::commands::{mark_restaurant_closed, register_restaurant};
+use application::commands::mark_restaurant_closed;
 use application::dispatch::{dispatch_journaled, JournaledOutcome};
-use application::journal::{payload_hash, CommandJournalEntry};
+use application::journal::{
+    payload_hash, CommandJournalEntry, InboundEventRow, InboundEvents, StageOutcome,
+};
+use domain::generated::scalars::InboundEventStatus;
 use application::ports::Actor;
 use application::repository::Repository;
 use domain::restaurant::RestaurantState;
 use chrono::{DateTime, Utc};
 use domain::generated::commands::MarkRestaurantClosed;
 use domain::generated::scalars::{
-    CommandChannel, CommandJournalStatus, RestaurantListingStatus, RestaurantStatus,
+    CommandChannel, RestaurantListingStatus, RestaurantStatus,
 };
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 
 use crate::integrations::sirene::{
-    etablissement_to_command, restaurant_id_for_siret, sirene_system_user_id, sirene_uuid,
+    etablissement_to_registered_event, restaurant_id_for_siret, sirene_system_user_id, sirene_uuid,
     Etablissement,
 };
 use crate::persistence::db_err;
-use crate::{PgCommandJournal, PgEventStore, PgRestaurantRepository};
+use crate::{PgCommandJournal, PgEventStore, PgInboundEvents, PgRestaurantRepository};
 
 /// Safety-net poll interval. The PRIMARY trigger is the ingestion's ping on
 /// `POST /internal/sirene/drain`; the loop only catches missed pings, so it can be slow.
@@ -73,6 +76,11 @@ const FRESH_INGESTION_DAYS: i64 = 10;
 /// `UserType::EXTERNAL` ordinal for the event envelope (enums stored as declaration-order ints,
 /// ADR-0037/0041) — the sync writes as the fixed external system principal.
 const EXTERNAL_USER_TYPE: i32 = 6;
+
+/// The `inbound_events.source` this adapter owns. `(source, external_id)` is the delivery-level dedupe,
+/// and unlike `command_journal`'s `last_seen_at`-seeded message_id it is STABLE across sweeps
+/// (ADR-20260728-011344).
+const SIRENE_SOURCE: &str = "sirene";
 
 /// The WORKER-channel journal entry for one command a staged row caused (#15). `message_id` is
 /// deterministic over (command type, SIRET, the row's `last_seen_at` as READ) — a re-drain of the
@@ -123,7 +131,11 @@ fn serialize_command<T: serde::Serialize>(command_type: &str, cmd: &T) -> Result
 pub struct SireneSyncSummary {
     /// Pending staging rows drained (marked processed or left for retry).
     pub processed: u64,
-    /// `RegisterRestaurant` issued — new prospects AND idempotent replays of known SIRETs.
+    /// Inbound registry facts STAGED for the drain (ADR-20260728-011344). No longer "commands issued",
+    /// and no longer conflating new prospects with replays: what each staged fact turned out to MEAN
+    /// (created / updated / no-change) is the drain's verdict, readable as
+    /// `SELECT status, count(*) FROM inbound_events WHERE source = 'sirene'`. This counter only says how
+    /// many rows we handed over.
     pub registered: u64,
     /// `MarkRestaurantClosed` issued (NON_PARTNER prospects only).
     pub closed: u64,
@@ -184,8 +196,11 @@ impl SireneSyncWorker {
         // Backs register_restaurant's SlugAlreadyTaken check; a re-synced SIRET matches its own row
         // (same deterministic id) and stays an idempotent no-op.
         let restaurants = PgRestaurantRepository::new(self.pool.clone());
-        // Every command send of this pass converges on command_journal (channel WORKER, #15).
+        // The closure path is still a COMMAND (absence is our inference and can be refused), so the
+        // journal stays for it. Registrations no longer touch it.
         let journal = PgCommandJournal::new(self.pool.clone());
+        // Registrations are staged as inbound FACTS instead (ADR-20260728-011344 D4).
+        let inbox = PgInboundEvents::new(self.pool.clone());
         // Fresh correlation id per pass so all journal rows + events of one drain are traceable
         // together; each send derives its own message_id/cause_id ([`journal_entry`]).
         let correlation_id = uuid::Uuid::new_v4();
@@ -195,7 +210,7 @@ impl SireneSyncWorker {
         let mut after = String::new();
         loop {
             let rows = sqlx::query(
-                "SELECT siret, payload, etat, last_seen_at FROM external_sirene_restaurants \
+                "SELECT siret, payload, etat, last_seen_at, payload_hash FROM external_sirene_restaurants \
                  WHERE siret > $1 AND (processed_at IS NULL OR processed_at < last_seen_at) \
                  ORDER BY siret LIMIT $2",
             )
@@ -212,8 +227,9 @@ impl SireneSyncWorker {
                 let payload: serde_json::Value = row.try_get("payload").map_err(db_err)?;
                 let etat: String = row.try_get("etat").map_err(db_err)?;
                 let last_seen_at: DateTime<Utc> = row.try_get("last_seen_at").map_err(db_err)?;
+                let staged_hash: String = row.try_get("payload_hash").map_err(db_err)?;
                 after = siret.clone();
-                self.process_row(&store, &restaurants, &journal, correlation_id, &siret, payload, &etat, last_seen_at, &mut summary)
+                self.process_row(&store, &restaurants, &journal, &inbox, correlation_id, &siret, payload, &etat, last_seen_at, &staged_hash, &mut summary)
                     .await?;
             }
         }
@@ -232,11 +248,13 @@ impl SireneSyncWorker {
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
         journal: &PgCommandJournal,
+        inbox: &PgInboundEvents,
         correlation_id: uuid::Uuid,
         siret: &str,
         payload: serde_json::Value,
         etat: &str,
         last_seen_at: DateTime<Utc>,
+        staged_hash: &str,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
         summary.processed += 1;
@@ -269,69 +287,54 @@ impl SireneSyncWorker {
             }
         }
 
-        // Active record → ACL → the ordinary registration write path (idempotent by UUIDv5 id).
-        match etablissement_to_command(&etablissement) {
-            Ok(mut cmd) => {
-                // Legacy-id adoption: listings registered before today's UUIDv5(SIRET) derivation
-                // exist under other aggregate ids. The projection's external_identifiers is the
-                // source of truth — a row already carrying this SIRET means "already registered
-                // under THAT id", so the replay targets it (and the slug check sees its own row)
-                // instead of deriving a colliding sibling.
-                if let Some(existing) = restaurants.by_external_identifier("siret", siret).await? {
-                    cmd.restaurant_id = existing.restaurant_id;
-                }
-                let payload = serialize_command("RegisterRestaurant", &cmd)?;
-                let entry =
-                    journal_entry("RegisterRestaurant", siret, last_seen_at, correlation_id, payload);
-                let actor = send_actor(&entry);
-                let outcome = dispatch_journaled(journal, entry, || async {
-                    register_restaurant(store, restaurants, cmd, &actor).await
-                })
-                .await?;
-                match outcome {
-                    // A journal dedup of a SUCCEEDED send = this exact staged version already
-                    // registered (e.g. mark_processed failed last pass) — same acknowledgement.
-                    JournaledOutcome::Executed(Ok(()))
-                    | JournaledOutcome::Deduplicated(CommandJournalStatus::SUCCEEDED) => {
+        // Active record → ACL → STAGED as an inbound fact (ADR-20260728-011344 D4).
+        //
+        // No command, no command_journal, and no read-model lookup. What changed and why:
+        //
+        // * INSEE cannot be told "no", so a command was always the wrong shape — the old path's
+        //   rejections went to an eprintln! and nobody. This stages the fact and lets the AGGREGATE
+        //   decide: record / update / nothing (see `record_inbound_restaurant_registration`).
+        // * The legacy-id adoption lookup is GONE. It ran `external_identifiers @> $1` against the
+        //   `Restaurant` projection — a JSONB containment scan with no GIN index, once per staged SIRET,
+        //   which made it quadratic and very likely the single largest disk-IO consumer of a sweep. It
+        //   was also asking the eventually-consistent READ side to make a write decision. The aggregate
+        //   id is `UUIDv5(SIRET)`, deterministic, so no lookup is needed to find "the same restaurant".
+        // * `external_id` is `{siret}:{payload_hash}` — a STABLE dedupe key. `command_journal`'s
+        //   message_id was seeded on `last_seen_at`, so it could never dedupe across sweeps and every
+        //   SIRET produced a fresh journal row every week.
+        match etablissement_to_registered_event(&etablissement) {
+            Ok(event) => {
+                let external_id = format!("{siret}:{staged_hash}");
+                let row = InboundEventRow {
+                    inbound_event_id: uuid::Uuid::new_v4(),
+                    source: SIRENE_SOURCE.to_string(),
+                    external_id: external_id.clone(),
+                    // The established ACL convention: UUIDv5 of the external id, so the whole chain
+                    // (staging row → inbound row → appended fact) shares one correlation.
+                    correlation_id: sirene_uuid(&format!("inbound:{external_id}")),
+                    event_type: "RestaurantRegistered".to_string(),
+                    payload: serde_json::to_value(&event).map_err(|e| {
+                        DomainError::Repository(format!("serialize RestaurantRegistered: {e}"))
+                    })?,
+                    status: InboundEventStatus::RECEIVED,
+                    error: None,
+                    received_at: Utc::now(),
+                    delivered_at: None,
+                };
+                match inbox.stage(&row).await {
+                    Ok(StageOutcome::Staged) => {
                         summary.registered += 1;
                         self.mark_processed(siret, last_seen_at).await
                     }
-                    JournaledOutcome::Executed(Err(e @ DomainError::Rejected { .. })) => {
-                        // A catalogued invariant rejection is DETERMINISTIC — replaying the same
-                        // staged row can only be rejected again, so retrying forever is pure churn
-                        // (the 605-row SlugAlreadyTaken log storm). Mark processed; the next
-                        // ingestion refresh re-pends the row if the data changes.
-                        summary.skipped += 1;
-                        eprintln!("sirene sync worker: register rejected for siret {siret} (permanent, not retried): {e}");
-                        self.mark_processed(siret, last_seen_at).await
-                    }
-                    JournaledOutcome::Deduplicated(CommandJournalStatus::REJECTED)
-                    | JournaledOutcome::Deduplicated(CommandJournalStatus::RECEIVED) => {
-                        // REJECTED replay = same permanent skip; RECEIVED = a crashed in-flight send
-                        // (the stale sweep will flip it FAILED, making the next pass a retry) —
-                        // either way this staged version needs no re-dispatch now.
+                    // Already staged: this exact (siret, payload_hash) is in the inbox — either awaiting
+                    // the drain or already delivered. Nothing to re-stage, and the staging row is done.
+                    Ok(StageOutcome::Duplicate) => {
                         summary.skipped += 1;
                         self.mark_processed(siret, last_seen_at).await
                     }
-                    JournaledOutcome::PayloadConflict { existing_status } => {
-                        // Same (SIRET, last_seen_at) with a different payload: the staged payload
-                        // changed without a last_seen_at bump — an ingestion contract violation.
-                        summary.skipped += 1;
-                        eprintln!(
-                            "sirene sync worker: register payload conflict for siret {siret} \
-                             (journaled {existing_status:?}, same staged version): not re-sent"
-                        );
-                        self.mark_processed(siret, last_seen_at).await
-                    }
-                    JournaledOutcome::Executed(Err(e)) => {
-                        summary.failed += 1; // infra failure — left pending → retried next pass
-                        eprintln!("sirene sync worker: register failed for siret {siret}: {e}");
-                        Ok(())
-                    }
-                    // FAILED duplicates are re-executed inside dispatch_journaled, never surfaced.
-                    JournaledOutcome::Deduplicated(status) => {
-                        summary.failed += 1;
-                        eprintln!("sirene sync worker: unexpected journal dedup {status:?} for siret {siret}");
+                    Err(e) => {
+                        summary.failed += 1; // left pending → retried next pass
+                        eprintln!("sirene sync worker: staging failed for siret {siret}: {e}");
                         Ok(())
                     }
                 }
@@ -431,9 +434,17 @@ impl SireneSyncWorker {
         reason: &str,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
-        // Same legacy-id adoption as the register path: the projection row carrying this SIRET
-        // names the real aggregate; the UUIDv5 derivation is only the fallback for never-projected
-        // listings (where the load finds nothing and the close is a no-op anyway).
+        // KEPT deliberately, unlike the register path (ADR-20260728-011344). This is the legacy-id
+        // adoption: listings registered before the UUIDv5(SIRET) derivation live under other aggregate
+        // ids, and the projection row carrying this SIRET is the only thing that names them. Deriving
+        // the id instead would silently fail to close them — a closed restaurant left orderable is a
+        // worse outcome than a scan.
+        //
+        // The cost argument that killed this call on the register path does not apply here: that ran
+        // once per staged SIRET (~200k a sweep, quadratic against the projection). This runs only for
+        // rows ABSENT for 21+ days, behind a freshness guard — a handful per sweep, bounded by actual
+        // closures. If it ever stops being bounded, the fix is a GIN index on
+        // `Restaurant.external_identifiers` (there is none today), not another derivation.
         let restaurant_id = match restaurants.by_external_identifier("siret", siret).await? {
             Some(row) => row.restaurant_id,
             None => restaurant_id_for_siret(siret),

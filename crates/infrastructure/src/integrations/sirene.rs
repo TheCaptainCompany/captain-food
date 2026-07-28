@@ -245,6 +245,43 @@ pub fn etablissement_to_command(e: &Etablissement) -> Result<RegisterRestaurant,
     })
 }
 
+/// The same mapping, expressed as the INBOUND FACT the registry is actually reporting
+/// (ADR-20260728-011344 D4).
+///
+/// INSEE cannot be told "no" — there is nobody to reject to, which is why the old command path's
+/// rejections were dropped to an `eprintln!`. So SIRENE stages an event, not a command, and the
+/// aggregate decides what it means: record it, turn it into `RestaurantUpdated`, or nothing at all.
+///
+/// This deliberately reuses [`etablissement_to_command`] rather than duplicating the field mapping: the
+/// translation from an INSEE établissement to our vocabulary is one piece of logic with one set of
+/// tests, and only its ENVELOPE changes. `listingStatus` becomes required (a registry listing is always
+/// NON_PARTNER, so the `Option` had exactly one inhabitant here).
+pub fn etablissement_to_registered_event(
+    e: &Etablissement,
+) -> Result<domain::generated::events::RestaurantRegistered, DomainError> {
+    let cmd = etablissement_to_command(e)?;
+    Ok(domain::generated::events::RestaurantRegistered {
+        mode: cmd.mode,
+        restaurant_id: cmd.restaurant_id,
+        account_id: cmd.account_id,
+        listing_status: cmd.listing_status.unwrap_or(RestaurantListingStatus::NON_PARTNER),
+        r#ref: cmd.r#ref,
+        external_identifiers: cmd.external_identifiers,
+        display_name: cmd.display_name,
+        contact: cmd.contact,
+        website: cmd.website,
+        tags: cmd.tags,
+        margin_rate: cmd.margin_rate,
+        cuisine_category: cmd.cuisine_category,
+        uber_prices_opt_in: cmd.uber_prices_opt_in,
+        address: cmd.address,
+        location: cmd.location,
+        timezone: cmd.timezone,
+        preparation_time_minutes: cmd.preparation_time_minutes,
+        opening_hours: cmd.opening_hours,
+    })
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tests (pure — no network, no DB). Client/pagination/query tests live in `sirene_ingest`.
 // ---------------------------------------------------------------------------------------------
