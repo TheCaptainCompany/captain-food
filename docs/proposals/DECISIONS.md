@@ -7,7 +7,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-07-28** · 11 proposals `Proposed` · **61 open decisions** (PROP-004616's six closed, proposal `Approved`)
+Last reconciled: **2026-07-28** · 12 proposals `Proposed` · **66 open decisions** (PROP-004616's six closed, proposal `Approved`; PROP-120931 adds five)
 
 ---
 
@@ -161,6 +161,33 @@ becomes a live-storefront rename. SIRENE stays paused at both halves until the w
 Reverses part of **ADR-0045** (SIRENE → `RegisterRestaurant` via the command path), so the realizing
 change needs an ADR. The `ImportCatalog`-stays-a-command contrast in CLAUDE.md survives intact: the test
 is whether the originator can be told no.
+
+---
+
+## 8. SIRENE mirror storage — the disk constraint on national coverage
+
+[PROP-20260728-120931](PROP-20260728-120931-sirene-mirror-payload-is-transient.md)
+([#231](https://github.com/TheCaptainCompany/captain-food/issues/231)). Measured on production
+2026-07-28: `external_sirene_restaurants` is **655 MB — 77% of the database** — at department 37 of 101,
+on a **2 GB disk with ~580 MB free** (Free plan, already flagged *exceeding usage limits*). Full France
+is ~2 GB for that one table. [#218](https://github.com/TheCaptainCompany/captain-food/issues/218) paced
+the sweep correctly, but pacing does not create disk, so this is what actually gates national coverage.
+
+The proposal: the payload is an input to translation with a **lifetime**, the hash is the
+change-detection key that persists. Keep the payload only while a row is pending, drop it once
+translated. ~1.8 kB/row → ~200 B/row; ~655 MB → ~90 MB today, ~250 MB at full France.
+
+**D5 is the one that needs real thought** — everything else has a clear answer. It asks whether losing
+replay/backfill from the mirror is acceptable, given INSEE is the system of record and (since #218) a
+full re-fetch is a normal paced operation rather than a special one.
+
+| # | Decision | Recommendation |
+|---|---|---|
+| D1 | What the mirror retains | Payload transient (NULL after successful processing), hash permanent |
+| D2 | Hash algorithm + encoding | Keep SHA-256, store as `bytea` not hex text. Keep the column named `payload_hash`, never `payload_md5` — naming a column after an algorithm pins the schema to it |
+| D3 | Unmappable / failed rows | KEEP their payload — it is the only evidence of why the record was unusable |
+| D4 | Migration on ~580 MB free | Batched `UPDATE … SET payload = NULL` with `VACUUM` interleaved; a single whole-table UPDATE would likely hit `No space left on device` again |
+| **D5** | **Replay/backfill posture** | **Accept re-fetch from INSEE when a new field is needed** — the mirror is a cache, INSEE is the system of record |
 
 ---
 
