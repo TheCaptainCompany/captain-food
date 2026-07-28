@@ -3,6 +3,18 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ⏳ **2026-07-28 — SIRENE sync is PAUSED, both halves (product-owner directive).** Until
+> [#220](https://github.com/TheCaptainCompany/captain-food/issues/220) is resolved: the weekly CI cron in
+> `.github/workflows/sirene-sync.yml` is commented out (`workflow_dispatch` deliberately kept, so a scoped
+> debug run stays possible), and the on-app drain loop's `RUN_SIRENE_WORKER` gate now **defaults to OFF**
+> (`crates/server/src/lib.rs`) so the pause survives deploys without depending on a dashboard setting. The
+> `POST /internal/sirene/drain` ping is already fail-closed (503) because `INTERNAL_TRIGGER_TOKEN` is unset,
+> so no third path can trigger a drain. **Consequence to know:** detect-by-absence is guarded by
+> `FRESH_INGESTION_DAYS = 10` (`sync_sirene_worker.rs:71`), so a stalled ingestion skips the absence pass
+> entirely — the pause cannot cause false mass closures. Prospect data simply goes stale, and the Tours
+> (dept 37) listings already ingested are unaffected. **Resume BOTH halves together** — CI-only piles up
+> unprocessed staging rows, worker-only re-drains whatever is already pending.
+
 > 📋 **2026-07-28 — a Supabase disk-IO alert exposed three write-path defects, now proposed as one
 > coupled change (PROP-20260728-004616, [#220](https://github.com/TheCaptainCompany/captain-food/issues/220)).**
 > A "depleting Disk IO Budget" email led to a trace of the SIRENE write path. The IO was the symptom.
@@ -1326,8 +1338,8 @@
 | `external_sirene_restaurants` staging table | ✅ | Migration applied by CI |
 | Thin CI ingestion crate `sirene_ingest` (fetch → UPSERT raw rows, France-wide by department, active-only) | ✅ | No domain deps; scheduled workflow builds only this crate |
 | On-app `sync_sirene_worker` (ACL on deployed version) + deletion reconciliation | ✅ | Per-row checkpoint; detect-by-absence (21d debounce) + explicit `F`/`C`; NON_PARTNER auto-close, partners flagged; `POST /internal/sirene/drain` (token-gated, fail-closed) |
-| `INSEE_API_TOKEN` repo secret | ✅ | Added; SIRENE runs live on deploy (scheduled ingestion → staging → worker) |
-| `INTERNAL_TRIGGER_TOKEN` (Render env + repo secret) to enable the CI→worker ping | ⏳ | Optional; without it CI ingests and the worker drains on its own poll loop (`RUN_SIRENE_WORKER`, default on) |
+| `INSEE_API_TOKEN` repo secret | ✅ | Added. **⏳ PAUSED 2026-07-28** — the scheduled ingestion → staging → worker chain is stopped at both ends until [#220](https://github.com/TheCaptainCompany/captain-food/issues/220) |
+| `INTERNAL_TRIGGER_TOKEN` (Render env + repo secret) to enable the CI→worker ping | ⏳ | Optional; unset, so `POST /internal/sirene/drain` is fail-closed (503). `RUN_SIRENE_WORKER` now **defaults OFF** (paused, #220) |
 
 ## 🔌 External integrations — partner adapters & M2M (ADR-20260718-145856 / -213352)
 
