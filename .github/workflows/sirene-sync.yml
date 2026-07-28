@@ -20,9 +20,28 @@
 #                            (sent as the x-internal-token header).
 name: sirene-sync
 
+# PAUSED 2026-07-28 (product-owner directive) — the weekly schedule is commented out until the write-path
+# defects in issue #220 "Slug lifecycle + SIRENE as inbound event" are resolved. Reason: every sweep bumps
+# `last_seen_at` on every row, which re-pends ~200k staging rows, and the drain path then (a) issues one
+# `RegisterRestaurant` per SIRET whose idempotency is a DELIBERATE `UNIQUE (stream_name, version)`
+# violation — Postgres writes the heap tuple before the constraint fires, so the sweep leaves ~200k dead
+# tuples in `domain_events` and its indexes — and (b) resolves identity via an UNINDEXED
+# `external_identifiers @> $1` scan of the whole `Restaurant` projection, once per SIRET. That combination
+# is what drained the Supabase Disk IO budget. Worse, the sweep cannot even apply what it reads: there is
+# no `UpdateRestaurant` in the SIRENE worker, so INSEE changes are swallowed by the same conflict.
+#
+# `workflow_dispatch` is deliberately KEPT so a scoped debug run stays possible (e.g. one department via
+# SIRENE_DEPARTMENTS below) — pausing the schedule is not the same as removing the capability.
+#
+# The on-app drain half is paused separately: `RUN_SIRENE_WORKER` now defaults to OFF
+# (crates/server/src/lib.rs). Both halves must be re-enabled together.
+#
+# TO RESUME: uncomment the cron below AND set `RUN_SIRENE_WORKER=true` in the Render dashboard (or revert
+# the default). Do not resume one half alone — CI-only leaves staging rows piling up unprocessed, and
+# worker-only re-drains whatever is already pending.
 on:
-  schedule:
-    - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC — the ADR-0020 Sirene-sync cadence
+  # schedule:
+  #   - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC — the ADR-0020 Sirene-sync cadence (PAUSED, see above)
   workflow_dispatch: {} # manual runs for the first import / debugging
 
 permissions:

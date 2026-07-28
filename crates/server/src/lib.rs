@@ -22,7 +22,8 @@
 //! The projection worker (ADR-0040) runs **in-process** here for now (Render Background Workers are paid),
 //! gated by `RUN_PROJECTOR` (default on) so it can graduate to a dedicated worker with no logic change.
 //! The SIRENE sync worker (ADR-0045) follows the same pattern: in-process, primarily woken by the CI
-//! ingestion's ping, with a slow safety-net poll loop gated by `RUN_SIRENE_WORKER` (default on).
+//! ingestion's ping, with a slow safety-net poll loop gated by `RUN_SIRENE_WORKER` — **default OFF since
+//! 2026-07-28**, paused with the CI ingestion until the write-path defects in issue #220 are resolved.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -444,7 +445,7 @@ pub fn router() -> Router {
                 // SIRENE sync worker (ADR-0045): drains the `external_sirene_restaurants` staging
                 // table through the ACL into the ordinary write path. Always constructed (the
                 // /internal/sirene/drain ping needs it); the slow safety-net poll loop is gated by
-                // RUN_SIRENE_WORKER (default on) like the projector.
+                // RUN_SIRENE_WORKER — default OFF since 2026-07-28 (paused, issue #220).
                 // Inbound-events drain worker (ADR-20260720-015400): delivers adapter-staged
                 // business events through the normal write path, and runs the command_journal
                 // stale-RECEIVED sweep (ADR-20260720-015300). Always constructed (the webhook nudge
@@ -580,13 +581,21 @@ pub fn router() -> Router {
 
                 let worker = Arc::new(SireneSyncWorker::new(pool.clone()));
                 sirene_worker = Some(worker.clone());
-                if std::env::var("RUN_SIRENE_WORKER").map(|v| v != "false").unwrap_or(true) {
+                // PAUSED 2026-07-28 (product-owner directive): the default is OFF until the write-path
+                // defects in issue #220 are resolved — a drain pass issues one `RegisterRestaurant` per
+                // pending SIRET whose idempotency is a deliberate UNIQUE(stream_name, version) violation
+                // (~200k dead tuples in `domain_events` per sweep) and resolves identity through an
+                // unindexed `external_identifiers @> $1` scan of the whole Restaurant projection, per row.
+                // It also cannot apply what it reads: no `UpdateRestaurant` exists here, so INSEE changes
+                // are swallowed by that same conflict. The CI half is paused in sirene-sync.yml.
+                // Re-enable BOTH halves together: `RUN_SIRENE_WORKER=true` + the workflow's cron.
+                if std::env::var("RUN_SIRENE_WORKER").map(|v| v == "true").unwrap_or(false) {
                     tokio::spawn(worker.run_loop());
                     println!(
                         "sirene sync worker: running in-process (set RUN_SIRENE_WORKER=false to keep only the ping trigger)"
                     );
                 } else {
-                    println!("RUN_SIRENE_WORKER=false — sirene sync worker poll loop not started (ping trigger stays active)");
+                    println!("sirene sync worker: PAUSED (issue #220) — poll loop not started; set RUN_SIRENE_WORKER=true to resume");
                 }
             }
             Err(e) => eprintln!("DATABASE_URL set but pool init failed: {e}"),
