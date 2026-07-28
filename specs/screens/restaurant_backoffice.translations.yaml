@@ -100,3 +100,18 @@ back.claims.filter.overdue:  { messages: { en: "SLA", fr: "SLA" } }
 back.claims.overdue.all:     { messages: { en: "All", fr: "Toutes" } }
 back.claims.overdue.only:    { messages: { en: "Overdue only", fr: "En retard uniquement" } }
 back.claims.overdue.badge:   { messages: { en: "Overdue", fr: "En retard" } }
+
+# --- Storefront address (ADR-20260728-011344) ---
+# The slug is the tenant HOST, so the copy has to make the consequences of changing it legible BEFORE
+# the owner commits: old links keep working via a 301, and the previous address stays reserved to them.
+back.storefront.title:          { messages: { en: "Storefront address", fr: "Adresse de la boutique" } }
+back.storefront.current.label:  { messages: { en: "Current address", fr: "Adresse actuelle" } }
+back.storefront.unset:          { messages: { en: "Not chosen yet — customers cannot reach your restaurant without one.", fr: "Pas encore choisie — vos clients ne peuvent pas accéder à votre restaurant sans elle." } }
+back.storefront.field.label:    { messages: { en: "Address", fr: "Adresse" } }
+back.storefront.field_ph:       { messages: { en: "your-restaurant", fr: "votre-restaurant" } }
+back.storefront.suffix:         { messages: { en: ".captain.food", fr: ".captain.food" } }
+back.storefront.help:           { messages: { en: "Lowercase letters, numbers and dashes. This goes on your menus and your Google listing, so choose carefully.", fr: "Minuscules, chiffres et tirets. Elle figurera sur vos menus et votre fiche Google, choisissez-la avec soin." } }
+back.storefront.consequences.title: { messages: { en: "What happens when you change it", fr: "Ce qui se passe si vous la changez" } }
+back.storefront.consequences.redirect: { messages: { en: "Your old address redirects here, so printed menus and QR codes keep working.", fr: "Votre ancienne adresse redirige ici : menus imprimés et QR codes continuent de fonctionner." } }
+back.storefront.consequences.reserved: { messages: { en: "The old address stays reserved to you — nobody else can take it.", fr: "L'ancienne adresse vous reste réservée — personne d'autre ne peut la prendre." } }
+back.storefront.save:           { messages: { en: "Save address", fr: "Enregistrer l'adresse" } }

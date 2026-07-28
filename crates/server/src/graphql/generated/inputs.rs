@@ -150,6 +150,17 @@ pub struct RegisterRestaurantInput {
     pub r#ref: Option<ExternalReference>,
 }
 
+/// The owner chooses (or changes) the restaurant's STOREFRONT ADDRESS -- the {slug}.captain.food host (ADR-20260728-011344). A real command precisely because it CAN be refused: the label may already belong to another restaurant, and the person asking is a human who can pick again -- contrast the SIRENE registry feed, which states facts nobody can be told "no" about. Issued during onboarding after ownership is verified and before activation (a restaurant cannot be activated without a configured slug), and again later from the back office to rename. The aggregate decides which fact it is: first configuration emits RestaurantSlugConfigured, a change emits RestaurantSlugReconfigured carrying the previous label, and re-submitting the CURRENT label is an idempotent no-op (no event, no error).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigureRestaurantSlugInput {
+    #[graphql(name = "restaurantId")]
+    pub restaurant_id: RestaurantId,
+    /// The requested storefront host label. Rejected with SlugAlreadyTaken if reserved by another restaurant -- including a label another restaurant has RELEASED by renaming, which stays reserved so its redirect cannot be hijacked.
+    #[graphql(name = "slug")]
+    pub slug: Slug,
+}
+
 /// Admin makes a restaurant visible and orderable by customers.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
