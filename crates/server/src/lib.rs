@@ -1010,24 +1010,74 @@ mod tests {
         }
     }
 
-    /// The report must name EVERY missing key, not the first — an operator who learns about one
-    /// variable per deploy cycle fixes a three-key outage in three deploys.
+    /// The report must name EVERY problem, not the first — an operator who learns about one bad key
+    /// per deploy cycle fixes a three-key outage in three deploys — and it must separate "absent" from
+    /// "present but unusable", which are different fixes.
     #[test]
-    fn missing_config_report_lists_every_key_with_its_purpose() {
-        use crate::generated::config::{MissingConfig, MissingKey, Profile};
+    fn config_report_lists_every_problem_and_never_prints_a_secret() {
+        use crate::generated::config::{ConfigProblems, InvalidKey, MissingConfig, MissingKey, Profile};
         let report = MissingConfig {
             profile: Profile::Production,
-            missing: vec![
-                MissingKey { name: "DATABASE_URL", gates: "Postgres pool." },
-                MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "Webhook signature verification." },
-            ],
+            problems: ConfigProblems {
+                missing: vec![MissingKey { name: "DATABASE_URL", gates: "Postgres pool." }],
+                invalid: vec![InvalidKey {
+                    name: "STRIPE_SECRET_KEY",
+                    scalar: "StripeSecretKey",
+                    pattern: "^sk_(test|live)_[A-Za-z0-9]+$",
+                    gates: "Stripe API key for PaymentIntents.",
+                }],
+            },
         }
         .to_string();
-        assert!(report.contains("DATABASE_URL"), "first key named");
-        assert!(report.contains("STRIPE_WEBHOOK_SECRET"), "second key named too");
-        assert!(report.contains("Webhook signature verification."), "the `gates` text is printed");
+        assert!(report.contains("DATABASE_URL"), "the missing key is named");
+        assert!(report.contains("STRIPE_SECRET_KEY"), "the invalid key is named too");
+        assert!(report.contains("MISSING"), "absent keys are grouped");
+        assert!(report.contains("INVALID"), "malformed keys are grouped separately — a different fix");
+        assert!(report.contains("^sk_(test|live)_"), "the EXPECTED shape is shown");
         assert!(report.contains("production"), "the profile is named");
         assert!(report.contains("Nothing was started."), "says what did NOT happen");
+    }
+
+    /// Enforcement follows the PROFILE (product-owner directive 2026-07-29): production and staging
+    /// stop, development reports and continues. No second toggle to get wrong.
+    #[test]
+    fn only_development_continues_past_a_configuration_problem() {
+        use crate::generated::config::Profile;
+        for (profile, stops) in
+            [(Profile::Production, true), (Profile::Staging, true), (Profile::Development, false)]
+        {
+            assert_eq!(
+                !matches!(profile, Profile::Development),
+                stops,
+                "{profile} enforcement"
+            );
+        }
+    }
+
+    /// The scalars are what turn "present" into "usable". Each pattern must accept the real shape and
+    /// reject the plausible mistake — a LIVE key in the test slot, a truncated session key, a bare host.
+    #[test]
+    fn config_scalars_reject_the_plausible_mistakes() {
+        let cases: &[(&str, &str, bool)] = &[
+            ("^sk_(test|live)_[A-Za-z0-9]+$", "sk_test_abc123", true),
+            ("^sk_(test|live)_[A-Za-z0-9]+$", "sk_live_abc123", true),
+            ("^sk_(test|live)_[A-Za-z0-9]+$", "pk_test_abc123", false), // publishable in a secret slot
+            ("^sk_test_[A-Za-z0-9]+$", "sk_live_abc123", false),        // LIVE key in the test slot
+            ("^whsec_[A-Za-z0-9_-]+$", "whsec_abc123", true),
+            ("^whsec_[A-Za-z0-9_-]+$", "sk_test_abc123", false),        // wrong secret entirely
+            ("^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", &"a".repeat(64), true),
+            ("^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", &"a".repeat(63), false), // 31 bytes, not 32
+            ("^postgres(ql)?://", "postgresql://u:p@h:5432/db", true),
+            ("^postgres(ql)?://", "h:5432/db", false),                  // bare host
+            ("^([0-9]{2,3}|2[AB])(,([0-9]{2,3}|2[AB]))*$", "37,2A", true), // Corsica: 2A is 1 digit + letter
+            ("^([0-9]{2,3}|2[AB])(,([0-9]{2,3}|2[AB]))*$", "37;41", false), // wrong separator
+            ("^(?i)(true|yes|1|on|false|no|0|off)$", "TRUE", true),     // the #245 failure
+            ("^(?i)(true|yes|1|on|false|no|0|off)$", "oui", false),
+        ];
+        for (pattern, value, expected) in cases {
+            let re = regex::Regex::new(pattern).expect("pattern compiles");
+            assert_eq!(re.is_match(value), *expected, "{pattern} vs {value:?}");
+        }
     }
 
     /// A loop that runs and fails every pass must not look like a healthy one: `running` stays true

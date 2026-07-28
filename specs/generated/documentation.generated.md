@@ -9724,7 +9724,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(41)_
+### 🔤 Scalars _(50)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -9769,6 +9769,15 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-deliverychannelkind"></a>🔤 `DeliveryChannelKind` | enum (POOL \| PARTNER) | Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60). |
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
 | <a id="scalar-usertype"></a>🔤 `UserType` | enum (PUBLIC \| CUSTOMER \| RESTAURANT_ACCOUNT \| RESTAURANT \| RIDER \| ADMIN \| EXTERNAL) |  |
+| <a id="scalar-configboolean"></a>🔤 `ConfigBoolean` | string `^(?i)(true|yes|1|on|false|no|0|off)$` | A boolean configuration value. Accepts true/yes/1/on and false/no/0/off, CASE-INSENSITIVE, with surrounding whitespace and wrapping quotes trimmed before matching (ADR-20260728-224500). Deliberately generous, because the failure it prevents was real: `RUN_SIRENE_WORKER=TRUE` silently meant PAUSED under an exact `== "true"` gate, and 6,649 rows sat unprocessed for four hours. Anything NOT in this set is a misconfiguration, not a false — it is reported, never guessed.  |
+| <a id="scalar-stripesecretkey"></a>🔤 `StripeSecretKey` | string `^sk_(test|live)_[A-Za-z0-9]+$` | A Stripe secret API key, either mode. The app is mode-agnostic by design: the deployed value decides, and its `sk_test_` / `sk_live_` prefix is what the boot report renders as the MODE (never the key). Accepting both is deliberate for now — V0 runs TEST keys on production pre-launch. At go-live, swapping this key's scalar to StripeSecretKeyLive makes "production must be live mode" a startup guarantee instead of a thing someone remembers to check.  |
+| <a id="scalar-stripesecretkeytest"></a>🔤 `StripeSecretKeyTest` | string `^sk_test_[A-Za-z0-9]+$` | A Stripe TEST-mode secret key. Typing the test slot separately is what stops a LIVE key being pasted into it — which would move real money from a job whose entire premise is that it cannot (`prod-smoke.sh` already refuses to confirm a payment unless the key is `sk_test_`; this makes the same rule declarative and checked at startup rather than only in one script).  |
+| <a id="scalar-stripesecretkeylive"></a>🔤 `StripeSecretKeyLive` | string `^sk_live_[A-Za-z0-9]+$` | A Stripe LIVE-mode secret key. The counterpart slot: it rejects a test key, so a go-live that silently kept test credentials cannot boot as if it were taking real payments.  |
+| <a id="scalar-stripewebhooksecret"></a>🔤 `StripeWebhookSecret` | string `^whsec_[A-Za-z0-9_-]+$` | A Stripe webhook signing secret. Stripe issues a DIFFERENT one per mode, so it must be switched together with the secret key; a mismatched pair verifies nothing and the endpoint fails closed — the customer is charged and the restaurant is never told.  |
+| <a id="scalar-authsessionkey"></a>🔤 `AuthSessionKey` | string `^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$` | The AES-256-GCM key encrypting parked auth sessions: exactly 32 bytes, as 64 hex chars or standard base64. A key of the wrong length currently makes the store fall back to the no-op, so login SILENTLY degrades to anonymous-only — the pattern turns that into a startup failure.  |
+| <a id="scalar-postgresurl"></a>🔤 `PostgresUrl` | string `^postgres(ql)?://` | A PostgreSQL connection string. On Supabase this must be the SESSION POOLER host (IPv4); the direct `db.<ref>.supabase.co` host is IPv6-only and unreachable from Render — a distinction the URL shape cannot express, so it stays documented in the key's `gates`.  |
+| <a id="scalar-httpsurl"></a>🔤 `HttpsUrl` | string `^https?://` | An absolute HTTP(S) endpoint. Catches the common paste error of a bare host, which fails later as an opaque request error rather than at startup.  |
+| <a id="scalar-departmentlist"></a>🔤 `DepartmentList` | string `^([0-9]{2,3}|2[AB])(,([0-9]{2,3}|2[AB]))*$` | A comma-separated INSEE department list for a scoped SIRENE sweep (e.g. `37`, `37,41`). Allows the Corsican `2A`/`2B` codes, which a naive numeric check would reject.  |
 
 ### ⛔ Errors _(11)_
 

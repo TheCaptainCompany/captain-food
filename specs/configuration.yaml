@@ -28,8 +28,25 @@ description: >
     - gates     : WHAT BREAKS without it, in one sentence. This is not a comment: it is printed next to
                   the key in the fail-fast report, so it must read usefully to an operator who has never
                   seen the Rust. A key without `gates` fails validation.
+    - scalar    : $ref into scalars.yaml. The generated reader VALIDATES the supplied value against the
+                  scalar's `pattern` at startup — "present" is not "usable". A live Stripe key in the
+                  test slot, a webhook secret with a pasted trailing newline, a 31-byte session key:
+                  each boots happily without this and fails later, at the worst moment, looking like a
+                  code bug. A malformed value is reported exactly like a missing one, and a SECRET's
+                  value is never printed — only the key name and the expected shape.
     - mode_of   : optional. Names a secret whose MODE is derivable from its value prefix and safe to
                   report (never the value itself) — e.g. Stripe `sk_test_` / `sk_live_`.
+
+  ENFORCEMENT is decided by the profile, not by a separate toggle (product-owner directive,
+  2026-07-29 — "fast fail to avoid misconfiguration on production"):
+
+    - production / staging : any missing OR malformed key is logged in full and the app STOPS (exit 78).
+    - development          : the same report is printed, and the app continues.
+
+  Stopping is SAFE on Render, which is what makes it the right default rather than a brave one: a
+  container that exits fails the deploy and the PREVIOUS version keeps serving. A misconfigured build
+  cannot replace a working one — where booting into silent degradation, which is what happened before,
+  replaces it immediately and quietly.
 
   Profiles (`APP_PROFILE`, default `development`): development | staging | production. The profile is
   DECLARED, never inferred from the host or from a key's prefix — an inferred profile is wrong exactly
@@ -48,21 +65,14 @@ keys:
       Which keys are REQUIRED at startup. Defaults to `development` so a local run needs no production
       secrets; production must set it explicitly, or it inherits development's leniency.
 
-  CONFIG_ENFORCE:
-    type: bool
-    default: false
-    gates: >
-      Whether a missing REQUIRED key STOPS the app (PROP-20260729-004500 D5). Default false for the
-      warn-only rollout: the first deploy reports exactly what production is missing without taking
-      anything down. Flipping this default to true is the reviewed second step, once the report is
-      clean. Warn-only still prints the full report — it just does not exit.
-
   # ===================================================================
   # Persistence — without this nothing is durable
   # ===================================================================
 
   DATABASE_URL:
     type: string
+    scalar:
+      $ref: 'scalars.yaml#/PostgresUrl'
     secret: true
     required: [staging, production]
     gates: >
@@ -75,6 +85,8 @@ keys:
 
   SUPABASE_URL:
     type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
     required: [staging, production]
     gates: >
       Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is
@@ -89,6 +101,8 @@ keys:
 
   SUPABASE_JWKS_URL:
     type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
     required: [staging, production]
     gates: >
       JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every
@@ -96,6 +110,8 @@ keys:
 
   AUTH_SESSION_KEY:
     type: string
+    scalar:
+      $ref: 'scalars.yaml#/AuthSessionKey'
     secret: true
     required: [staging, production]
     gates: >
@@ -115,6 +131,8 @@ keys:
 
   STRIPE_SECRET_KEY:
     type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripeSecretKey'
     secret: true
     mode_of: stripe
     required: [staging, production]
@@ -125,6 +143,8 @@ keys:
 
   STRIPE_WEBHOOK_SECRET:
     type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripeWebhookSecret'
     secret: true
     required: [staging, production]
     gates: >
@@ -170,6 +190,8 @@ keys:
 
   RUN_PROJECTOR:
     type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
     gates: >
       In-process projection worker (ADR-0040). OFF, no read model advances — queries serve stale data
@@ -177,6 +199,8 @@ keys:
 
   RUN_PROCESS_MANAGERS:
     type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
     gates: >
       In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires.
@@ -184,6 +208,8 @@ keys:
 
   RUN_INBOUND_DRAIN:
     type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
     gates: >
       Inbound-events drain (ADR-20260720-015400) delivering adapter-staged facts through the write path,
@@ -191,6 +217,8 @@ keys:
 
   RUN_RETENTION_SWEEP:
     type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
     gates: >
       Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without
@@ -198,6 +226,8 @@ keys:
 
   RUN_SIRENE_WORKER:
     type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
     gates: >
       SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and
@@ -207,6 +237,8 @@ keys:
 
   RUN_DELIVERY_OFFER_TIMEOUT:
     type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
     default: true
     gates: >
       Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on
@@ -222,6 +254,8 @@ keys:
 
   SIRENE_DEPARTMENTS:
     type: string
+    scalar:
+      $ref: 'scalars.yaml#/DepartmentList'
     consumer: sirene_ingest
     gates: >
       Comma-separated departments to sweep, honoured VERBATIM and in order (e.g. `37` for Tours only).
@@ -236,6 +270,8 @@ keys:
 
   INTERNAL_TRIGGER_URL:
     type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
     consumer: sirene_ingest
     gates: >
       The deployed server's drain endpoint, pinged at the end of a sweep so the worker starts in seconds

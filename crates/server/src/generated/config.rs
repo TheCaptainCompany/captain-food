@@ -59,6 +59,20 @@ fn raw(name: &str) -> Option<String> {
     std::env::var(name).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
+/// Validate a value against its scalar's regex. Compiled once per pattern and cached: startup
+/// cost is a handful of small regexes, paid to make "present but unusable" impossible to miss.
+fn matches_pattern(pattern: &str, value: &str) -> bool {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, regex::Regex>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());
+    let re = guard.entry(pattern.to_string()).or_insert_with(|| {
+        regex::Regex::new(pattern).expect("configuration pattern compiles (checked by codegen)")
+    });
+    re.is_match(value)
+}
+
 /// Stripe mode from the key prefix — reportable where the key itself never is.
 fn stripe_mode(value: &str) -> &'static str {
     if value.starts_with("sk_live_") {
@@ -77,26 +91,73 @@ pub struct MissingKey {
     pub gates: &'static str,
 }
 
-/// Every missing required key — never just the first.
+/// A key that WAS supplied but does not satisfy its scalar. Carries the expected shape, never
+/// the offending value: a malformed secret is still a secret.
+#[derive(Debug, Clone)]
+pub struct InvalidKey {
+    pub name: &'static str,
+    pub scalar: &'static str,
+    pub pattern: &'static str,
+    pub gates: &'static str,
+}
+
+/// Everything wrong with the configuration, in one report — never just the first problem. An
+/// operator who learns of one bad key per deploy cycle fixes a three-key outage in three deploys.
+#[derive(Debug, Clone, Default)]
+pub struct ConfigProblems {
+    pub missing: Vec<MissingKey>,
+    pub invalid: Vec<InvalidKey>,
+}
+
+impl ConfigProblems {
+    pub fn is_empty(&self) -> bool {
+        self.missing.is_empty() && self.invalid.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.missing.len() + self.invalid.len()
+    }
+}
+
+/// The report the app prints before it stops (production/staging) or continues (development).
 #[derive(Debug, Clone)]
 pub struct MissingConfig {
     pub profile: Profile,
-    pub missing: Vec<MissingKey>,
+    pub problems: ConfigProblems,
 }
 
 impl fmt::Display for MissingConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "FATAL: {} required configuration key(s) missing (profile: {})\n",
-            self.missing.len(),
+            "FATAL: {} configuration problem(s) (profile: {})\n",
+            self.problems.len(),
             self.profile
         )?;
-        let width = self.missing.iter().map(|m| m.name.len()).max().unwrap_or(0);
-        for m in &self.missing {
-            writeln!(f, "  {:width$}  {}", m.name, m.gates, width = width)?;
+        let width = self
+            .problems
+            .missing
+            .iter()
+            .map(|m| m.name.len())
+            .chain(self.problems.invalid.iter().map(|i| i.name.len()))
+            .max()
+            .unwrap_or(0);
+        if !self.problems.missing.is_empty() {
+            writeln!(f, "MISSING — required in this profile:")?;
+            for m in &self.problems.missing {
+                writeln!(f, "  {:width$}  {}", m.name, m.gates, width = width)?;
+            }
+            writeln!(f)?;
         }
-        write!(f, "\nSet them in the service environment and redeploy. Nothing was started.")
+        if !self.problems.invalid.is_empty() {
+            writeln!(f, "INVALID — supplied but malformed (the value is never printed):")?;
+            for i in &self.problems.invalid {
+                writeln!(f, "  {:width$}  expected {} matching {}", i.name, i.scalar, i.pattern, width = width)?;
+                writeln!(f, "  {:width$}  {}", "", i.gates, width = width)?;
+            }
+            writeln!(f)?;
+        }
+        write!(f, "Fix them in the service environment and redeploy. Nothing was started.")
     }
 }
 
@@ -104,8 +165,6 @@ impl fmt::Display for MissingConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub profile: Profile,
-    /// Whether a missing REQUIRED key STOPS the app (PROP-20260729-004500 D5). Default false for the warn-only rollout: the first deploy reports exactly what production is missing without taking anything down. Flipping this default to true is the reviewed second step, once the report is clean. Warn-only still prints the full report — it just does not exit.
-    pub config_enforce: bool,
     /// Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all.
     pub database_url: String,
     /// Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused.
@@ -155,23 +214,31 @@ impl Config {
     /// key. Both, always: the warn-only rollout phase (`CONFIG_ENFORCE=false`, D5) has to boot
     /// with the config it managed to build while still reporting what was absent. A missing
     /// required string resolves to empty — the caller decides whether that is fatal.
-    pub fn resolve() -> (Self, Vec<MissingKey>) {
-        let (cfg, missing) = Self::resolve_inner();
-        (cfg, missing)
+    pub fn resolve() -> (Self, ConfigProblems) {
+        Self::resolve_inner()
     }
 
     /// Strict form: `Err` when anything required is missing. Used by tests and any caller that
     /// wants no warn-only escape hatch.
     pub fn from_env() -> Result<Self, MissingConfig> {
-        let (cfg, missing) = Self::resolve_inner();
-        if missing.is_empty() {
+        let (cfg, problems) = Self::resolve_inner();
+        if problems.is_empty() {
             Ok(cfg)
         } else {
-            Err(MissingConfig { profile: cfg.profile, missing })
+            Err(MissingConfig { profile: cfg.profile, problems })
         }
     }
 
-    fn resolve_inner() -> (Self, Vec<MissingKey>) {
+    /// Whether a configuration problem must STOP the app. Decided by the PROFILE, not by a
+    /// separate toggle (product-owner directive 2026-07-29): production and staging stop,
+    /// development reports and continues. Stopping is safe on Render — an exiting container
+    /// fails the deploy and the PREVIOUS version keeps serving, so a misconfigured build can
+    /// never replace a working one.
+    pub fn must_stop_on_problems(&self) -> bool {
+        !matches!(self.profile, Profile::Development)
+    }
+
+    fn resolve_inner() -> (Self, ConfigProblems) {
         let profile = match raw("APP_PROFILE").as_deref() {
             Some("production") => Profile::Production,
             Some("staging") => Profile::Staging,
@@ -181,42 +248,41 @@ impl Config {
                 Profile::Development
             }
         };
-        let mut missing: Vec<MissingKey> = Vec::new();
-        let config_enforce = raw("CONFIG_ENFORCE").map(|v| parse_bool("CONFIG_ENFORCE", &v, false)).unwrap_or(false);
+        let mut problems = ConfigProblems::default();
         let database_url = raw("DATABASE_URL");
         if database_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            missing.push(MissingKey { name: "DATABASE_URL", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
+            problems.missing.push(MissingKey { name: "DATABASE_URL", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
         }
         let database_url = database_url.unwrap_or_default();
         let supabase_url = raw("SUPABASE_URL");
         if supabase_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            missing.push(MissingKey { name: "SUPABASE_URL", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
+            problems.missing.push(MissingKey { name: "SUPABASE_URL", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
         }
         let supabase_url = supabase_url.unwrap_or_default();
         let supabase_publishable_key = raw("SUPABASE_PUBLISHABLE_KEY");
         if supabase_publishable_key.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            missing.push(MissingKey { name: "SUPABASE_PUBLISHABLE_KEY", gates: "Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed (auth stays anonymous-only)." });
+            problems.missing.push(MissingKey { name: "SUPABASE_PUBLISHABLE_KEY", gates: "Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed (auth stays anonymous-only)." });
         }
         let supabase_publishable_key = supabase_publishable_key.unwrap_or_default();
         let supabase_jwks_url = raw("SUPABASE_JWKS_URL");
         if supabase_jwks_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            missing.push(MissingKey { name: "SUPABASE_JWKS_URL", gates: "JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous." });
+            problems.missing.push(MissingKey { name: "SUPABASE_JWKS_URL", gates: "JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous." });
         }
         let supabase_jwks_url = supabase_jwks_url.unwrap_or_default();
         let auth_session_key = raw("AUTH_SESSION_KEY");
         if auth_session_key.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            missing.push(MissingKey { name: "AUTH_SESSION_KEY", gates: "AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest. Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login." });
+            problems.missing.push(MissingKey { name: "AUTH_SESSION_KEY", gates: "AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest. Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login." });
         }
         let auth_session_key = auth_session_key.unwrap_or_default();
         let supabase_sms_hook_secret = raw("SUPABASE_SMS_HOOK_SECRET");
         let stripe_secret_key = raw("STRIPE_SECRET_KEY");
         if stripe_secret_key.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            missing.push(MissingKey { name: "STRIPE_SECRET_KEY", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
+            problems.missing.push(MissingKey { name: "STRIPE_SECRET_KEY", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
         }
         let stripe_secret_key = stripe_secret_key.unwrap_or_default();
         let stripe_webhook_secret = raw("STRIPE_WEBHOOK_SECRET");
         if stripe_webhook_secret.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
-            missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
+            problems.missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
         }
         let stripe_webhook_secret = stripe_webhook_secret.unwrap_or_default();
         let hubrise_client_id = raw("HUBRISE_CLIENT_ID");
@@ -234,10 +300,39 @@ impl Config {
         let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
         let captain_build_version = captain_build_version.unwrap_or_else(|| "dev".to_string());
+        if let Some(v) = Some(database_url.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^postgres(ql)?://", v) {
+                problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: r"^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
+            }
+        }
+        if let Some(v) = Some(supabase_url.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "SUPABASE_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
+            }
+        }
+        if let Some(v) = Some(supabase_jwks_url.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "SUPABASE_JWKS_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous." });
+            }
+        }
+        if let Some(v) = Some(auth_session_key.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", v) {
+                problems.invalid.push(InvalidKey { name: "AUTH_SESSION_KEY", scalar: "AuthSessionKey", pattern: r"^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", gates: "AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest. Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login." });
+            }
+        }
+        if let Some(v) = Some(stripe_secret_key.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^sk_(test|live)_[A-Za-z0-9]+$", v) {
+                problems.invalid.push(InvalidKey { name: "STRIPE_SECRET_KEY", scalar: "StripeSecretKey", pattern: r"^sk_(test|live)_[A-Za-z0-9]+$", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
+            }
+        }
+        if let Some(v) = Some(stripe_webhook_secret.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^whsec_[A-Za-z0-9_-]+$", v) {
+                problems.invalid.push(InvalidKey { name: "STRIPE_WEBHOOK_SECRET", scalar: "StripeWebhookSecret", pattern: r"^whsec_[A-Za-z0-9_-]+$", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
+            }
+        }
         (
             Self {
                 profile,
-                config_enforce,
                 database_url,
                 supabase_url,
                 supabase_publishable_key,
@@ -260,7 +355,7 @@ impl Config {
                 web_assets_dir,
                 captain_build_version,
             },
-            missing,
+            problems,
         )
     }
 
@@ -269,7 +364,6 @@ impl Config {
     /// "is production actually live?" is answerable without reading a secret.
     pub fn boot_report(&self) -> String {
         let mut out = format!("config: profile={}, {} keys resolved\n", self.profile, KEY_COUNT);
-        out.push_str(&format!("  CONFIG_ENFORCE             = {}\n", self.config_enforce));
         out.push_str(&format!("  DATABASE_URL               = {}\n", if self.database_url.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  SUPABASE_URL               = {}\n", self.supabase_url));
         out.push_str(&format!("  SUPABASE_PUBLISHABLE_KEY   = {}\n", self.supabase_publishable_key));
@@ -296,12 +390,11 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 22;
+pub const KEY_COUNT: usize = 21;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
     "APP_PROFILE",
-    "CONFIG_ENFORCE",
     "DATABASE_URL",
     "SUPABASE_URL",
     "SUPABASE_PUBLISHABLE_KEY",

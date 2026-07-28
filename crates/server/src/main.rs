@@ -20,17 +20,18 @@ async fn main() {
     // replace a working one, which is strictly safer than booting into silent degradation.
     //
     // Every missing key is reported at once: one deploy fixes them all, rather than one per cycle.
-    let (config, missing) = server::generated::config::Config::resolve();
-    if !missing.is_empty() {
+    let (config, problems) = server::generated::config::Config::resolve();
+    if !problems.is_empty() {
         let report =
-            server::generated::config::MissingConfig { profile: config.profile, missing };
+            server::generated::config::MissingConfig { profile: config.profile, problems };
         eprintln!("{report}");
-        if config.config_enforce {
+        if config.must_stop_on_problems() {
             // 78 = EX_CONFIG (sysexits.h): a configuration error, not a crash.
             std::process::exit(78);
         }
         eprintln!(
-            "\nCONFIG_ENFORCE=false — starting anyway (warn-only rollout). Set it true to enforce."
+            "\nprofile={} — starting anyway. Production and staging STOP here.",
+            config.profile
         );
     }
     print!("{}", config.boot_report());

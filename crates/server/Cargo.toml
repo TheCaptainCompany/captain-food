@@ -7,6 +7,7 @@ publish = false
 description = "Captain.Food Axum BFF: the composition root that injects infrastructure adapters into the application, exposes GraphQL (role-as-path) + the SDUI hydration endpoint, and hosts tenant/auth/tracing middleware. Depends on `application` + `infrastructure` + `shared_types` (ADR-0035). Exposes a lib (wiring) so `desktop` can embed it."
 
 [dependencies]
+regex = "1"
 application = { path = "../application" }
 # The generated GraphQL layer wraps the domain scalars/enums (orphan rule: the async-graphql wrapper
 # newtypes + From conversions live here, `domain` stays GraphQL-free — ADR-0035).
