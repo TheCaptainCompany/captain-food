@@ -89,13 +89,44 @@ declares its own override); its scalar type is the aggregate's id type. This clo
 the companion proposal: `identity` is to *addressing* what `state:` lineage is to *folding* —
 nothing left for a handler to know by convention.
 
+**The partition count is declared on the actor too** (product-owner refinement, 2026-07-28):
+
+```yaml
+Order:
+  type: aggregate
+  identity: orderId
+  mailbox:
+    partitions: 100      # keyspace WIDTH for this actor type — see below: workers own RANGES of it
+```
+
+`partitions` is the **keyspace width**, not the worker count — fixed and deliberately wide (default
+100), because changing it re-maps every `actor_id` and is a drain-then-resize migration, while
+*worker* scaling never touches it (D3/D6). The DSL is the single source: codegen emits the constant
+into the generated GraphQL dispatch and the adapter ACLs (both stamp
+`partition = hash(actor_id) mod N` at insert), seeds the partition registry (§3), and the validator
+checks `1 ≤ partitions ≤ smallint` and that the value never silently changes between generations
+(a diff in the generated constant is a reviewable, deliberate act).
+
+One correctness detail the stamping forces: the hash must be **stable and documented** — the same
+`actor_id` must land in the same partition from every writer, every language, every deploy. Rust's
+default hasher (SipHash with per-process random keys) is disqualified by design; use a fixed,
+boring function over the uuid bytes (e.g. CRC32C, or the uuid's low 64 bits) `mod N`, named in the
+generated code and never changed without a keyspace migration.
+
 ## 3. Consumption: partitions, ordering, checkpoint
 
-- **One worker per `actor_type`, N partitions per type** (N=1 to start; a config knob, not a
-  schema change). Worker `(actor_type, partition)` consumes
-  `WHERE actor_type = T AND partition = P AND status = RECEIVED ORDER BY position` — claiming rows
-  `FOR UPDATE SKIP LOCKED`, single-flight per partition across instances (#193's constraint,
-  answered by the claim itself).
+- **Workers own partition RANGES, not single partitions** (product-owner refinement, 2026-07-28):
+  with `partitions: 100`, one worker instance serves the whole range 0–99; two instances split it
+  (0–49 / 50–99); ten split it again — the Kafka consumer-group shape. The mechanism is a
+  **partition registry**: `mailbox_partitions` with one row per `(actor_type, partition)`, seeded
+  from the DSL's `partitions` count, each row carrying BOTH the partition's **checkpoint** and its
+  **lease** (`claimed_by`, `lease_until`). A worker starts with an actor type and a capacity,
+  acquires leases on unclaimed-or-expired partition rows up to capacity, heartbeats to renew, and
+  processes each owned partition with
+  `WHERE actor_type = T AND partition = P AND status = RECEIVED ORDER BY position`
+  (rows claimed `FOR UPDATE SKIP LOCKED`). A crashed worker's leases expire and are picked up by
+  the survivors — rebalancing and failover with no coordinator, which also answers #193's
+  single-flight concern for this path.
 - **The guarantee that matters**: all messages for one `actor_id` hash to one partition, so one
   aggregate instance is processed by exactly one worker at a time, in position order — the actor's
   single-threaded illusion. Across aggregates: no ordering promised (Vernon/Young: don't promise
@@ -150,7 +181,7 @@ rehydration p99 or acceptance→execution lag breaching the checkout SLO at peak
 
 | Option | Pros | Cons |
 |---|---|---|
-| **Per `(actor_type, partition)` workers, partition = `hash(actor_id) mod N`** ✅ directed | Per-instance ordering by construction; per-type isolation (a Catalog import storm cannot starve Order acceptance — the ETA/notify path, the product's worst failure mode, gets its own lane); N is a knob | Hot single aggregate still bounds at one lane (correct — that is the aggregate's own serialization); rebalancing N re-maps partitions (drain-then-resize, or consistent hashing later) |
+| **Per-`actor_type` workers owning partition RANGES over a fixed-wide keyspace (`partitions: 100` in the DSL), `partition = hash(actor_id) mod N`** ✅ directed | Per-instance ordering by construction; per-type isolation (a Catalog import storm cannot starve Order acceptance — the ETA/notify path, the product's worst failure mode, gets its own lane); worker scaling re-divides ranges and NEVER touches N — no keyspace re-map on scale-out | Hot single aggregate still bounds at one lane (correct — that is the aggregate's own serialization); 100 checkpoint/lease rows per actor type to maintain (trivial); changing N itself remains a drain-then-resize migration — which is why it starts wide |
 | One global worker | Simplest; total order everywhere | One slow Catalog import delays a paid Order's acceptance — unacceptable at peak |
 | Per-instance workers (one per actor_id) | Maximum parallelism | Thousands of idle claimers; the partition IS this, amortized |
 
@@ -170,9 +201,17 @@ Yes, by shape — a PM is an actor with an inbox of events (`actors.yaml` alread
 natural follow-up once the Order/Conversation lanes prove the mechanics. Recorded as a follow-up,
 not silently deferred.
 
+### D6 — How workers acquire their partition ranges
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Lease rows in the partition registry** (`mailbox_partitions.claimed_by / lease_until`, heartbeat renewal; the checkpoint table doubles as the lease table) ✅ recommended | No coordinator, no new infrastructure; crash → lease expiry → automatic takeover by survivors; scaling out = new instance leases whatever is free; the registry is also the ops surface (§6 monitor reads it); resolves #193's single-flight need for this path | Lease/heartbeat tuning (too short = flapping, too long = slow takeover — start 30s lease / 10s heartbeat); a paused-then-resumed worker (GC-style stall) must re-check its lease before completing work it started |
+| Static ranges from deployment config (env: `MAILBOX_RANGES=Order:0-49`) | Dead simple; deterministic | No failover — a dead instance's range goes dark until a human redeploys; config drift between replicas is silent double-ownership risk (caught only by SKIP LOCKED and the version check) |
+| Advisory locks taken per pass, no standing ownership | No lease bookkeeping at all | With 100 partitions × several types, every pass is a lock-shopping spree; ownership churn defeats the hot-aggregate cache (D2's evolution valve) which needs stable placement |
+
 ## 5. Sequence diagram — PostMessage through the mailbox
 
-<a href="https://mermaid.live/view#pako:eNqNVtFu4zYQ_JWFXyqjPqQ9FH0w2gCOzB58Fzs-y77cwwEBLdISEYlUScpJmubfb0lRluRzgeYlscNdzs7OjPQ6ShXjoymMDP-75jLlc0EzTctvEvCH1lbJutxz3XyuqLYiFRWVFmKgBuLaWFVyDWkhuLTNqb16hg-aVvnnW-As4xAJedDUWF2nttZ83Bw7b_gBj2PL2XNdDsr_2Our60irgkNGLYefodJCuqICNDeqqK1QMjTlkv0IdXnjGgu5V7VkDyU3hmbcQElFgVib_kpyqJQRrhe0ZEyaNv67PyGnJo9oapV-EGwMpWKwGncjPyn9yLX5n9PeO0j3vgRCU_tScbwmVvKIfai7dQigGjdY04KK0sCGxGTxhcxBqyc3Xodfacb1OSMOI62qQqS-NaRK88vYZlXlN9E7zISpqE3zywUbXilX4X4jBKVfIHrSApdlBPsvBmZZ5iXUGxdolmnuttwMmnHJNX5iHvjL1UEVDPevcT0CVw9pztNH_ILxFO-Bb_X7X379DaqO9cHww70AZbSyePNldCRx4NYZOaKuExwJZWwVMIWqkQ_cfWv6lzR_xu-ur1HHU7cKu2yEFvltLNjE2SlXeoNKnkK8S7Z3S7KZeNTvfw-9sLhtgayIwwt8vN9OGp0feU_5JyyAk0uUCFLeunHBBt2WN1Oc3XBtO8kEqh6FZBDfLZez1RzxdTIcirAVPWowDAMRcl5Qjatp7x9POgEetCrB5rj_3J9pDdXBQlzxFGZxTNZbxPMaXLlgby02qWwuZIY-a3W6UqgohbggnrihmtABVEXhHHAUFFTlBIMQEkttbQCvRTEqff6POKcyc8DqvUm1qNx_zi9xV1AJ5OuWbFazWzggDRAlFo9jMiSLDVmRMRRUMu8-N24yW5I2V5x-PL_kC1ltPTph0VXxbXPRfViNdzNI_mwHjsaxMBnOwmDckvPX3QZ26_lsSyD5tFjD7V38ieAKT8R3ueFNUinRxrO7F609PXk6CtyHPaOej7xAvoKI8CxWOGtPUYf5C3OOHNrWQW010hS541hFEldDkWeLv8ouPZtTJHl3at1YalCNCTF122VR8Fs7vRvQt_rJwFlGRAb3i6P4inaCLOvu6QN3WuCv6ck2rRnfejBatnxfoBbSWmsnO9flpJqGJA8YlcUKHq27BJhAAOUx90CFim6EU7JVmqdKsmaDYWqsRj9MGsEEpmhhnVG6lYf4unI7cQJ3z80u4QITfiAU-mzdK_kXXDIthSmHQd-M5pWqyqrgyMKGfCSxty3XWukY3yF6th2skheGh-AT_3B2GUrI78gn9xQCbY7BQUVPiIYe-UkVGF4dttZ9zkLJDvOFzLu8u1uhX_C9wmoqjeOz3d-ZZlFKmOoQ7XnuHOzZVdqeBLhbLT7vSNSoetJKYQzC-LMHITGiMXEFLXBqffYwap1P2ZFiKPYc-qPfK3xi4XCYsFmtMNDwiVX67v6hH-G7GjYoaBZUtbwJyXo576Y9StCzl_Y4msAIzYA0MnwvfB3hPKV_Q2T8QOvCjt7evgNZ72eJ" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a> —
+<a href="https://mermaid.live/view#pako:eNqNVtFu4zYQ_JWFXyqjzuXuUPTBaAM4ihr4LnZytnPpwwEBLdIycRKpkpSTXJp_75CSLNl1geYlic1dzs7OjPQ6SDUXgzENrPirEioVV5JlhhXfFOGHVU6rqlgLU_9fMuNkKkumHMXELMWVdboQhtJcCuXqU2v9TNeGldsvNyR4JiiSamOYdaZKXWXEsD523PAax9Fy8lwVB-W_rc35RWR0LihjTtDPVBqpfFFORlidV05q1TQViv8b6uzSN5ZqrSvFHwthLcuEpYLJHFjr_loJKrWVvhe1ZIzqNuGz32nL7DZiqdPmUfIhFZrTfNiN_KTNd2Hs_5z2wUN6CCXUNHUvpcA1sVY79GFhqhpcLpgFYEaLyfw6Ib0htxX0_t27-dmHDqIdYQ1MFpYWSZxMvyZXZPSTH7ybTBsuzDFXHj0ry1ym4VJKtRGnUU_KMuyod5hLWzKXbk8XLESpfYX_DQjavFD0ZCTWaCX_L24mWRbE1SOCWJYZ4fdfM5IJJQz-4wH4y_lG5xzKMFichCgo3Yr0Oz7gIsU99K36-P7DL1R2-zgY_nBjxDgrHW4-jS5ZenB3WbKD4pcYCQJ3mriGntSj8J_a_iX1n_HZxQUUPvarcLNaglHYxpSPvNG22iyg8THF98vV7SxZjALqj782vVDctgArcvNCnx5Wo9oBO9HzxB4LYXIFaYDy1qdTftBtdjnG7FYY10mmoeq7VJzi29lsMr8Cvk6g_a20X0gO3TbDUATOc2awmvb-4agT4MboIqjXbsOZ1modLOCKxzSJ4-RuBTyvjV-n_K3FprTbSpXBga1O5xqK0sBF8cgPVccRQRW5d8BOMtKlFwwgLB1zlSVcCzFqc_xFvGUq88CqtU2NLP03x5f4K5ii5M9VsphPbmgDGihaOhxHZiyni2SeDClnigf3-XGXk1nSJo7XT-A3-ZrMVwGddHBVfFNf9NCsJti-5--OPFhBQq_YbMpKloLjsxBuwG08fDCOY6rOA1Li2R1kAmFk0k8Kx7uAa8j943ZB93dXk1VCy8_TO7q5jT8nkEBzN3NdyU-Nz0ot2-z30JEO430sRM36GqnAEjuRg_JGhziLCp8OYwy1feHe1IfO36CqlVld5I-jKln6GoZVOfwqumiuTyXLs33r2pUH1QiZsRcIjxrLtgR4fkMrjHcUM5GFRDBKqGgnyLLunj5wLyfxmu6d1_r5rQejZSv0JXCbVsZ45foue-HVJAXAECfPRXTXhciIGlABcw9UU9GNsA_H0ohUK36wdlTDUu0TpHn85857LTDST8BzvxPvEf9Q7kKyYSIMBK9M7nolf5MPt5m0xeGzoh4tWFYXZS7AwiL5lMTB-cIYbWK8oPScf7BKkcMfdXbKH4KfhtI8AqIQ_mNqaPMMHlT0hGjZTuxVgfzrsLUG9h5a3iOikqsuMm_nsAxeWhwsaD2f7f6ONAsp4cFA0VpsfQgEdrVxewHez6df7pOoVvWolcKQpA1nN1Ih5RHakuWY2hw9z9rwYHzHkKs9h0aH0V0OsVQLyWmEdFZpZCIeekXoHt4bIrwIokHOskZVs8smnE9H5rhHCTx7ao-DEQ1gBtDI8dL5OsA8RXj95GLDqtwN3t7-AVgHiNs" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a> —
 regenerate this link (snippet in docs/claude/mermaid.md) whenever the fenced block below changes.
 
 ```mermaid
@@ -184,7 +223,7 @@ sequenceDiagram
     end
     participant MB as inbound_messages mailbox<br/>(one position sequence, partition = hash(actor_id) mod N)
     box workers (infrastructure)
-        participant W as Worker (actor_type = Conversation, partition = p)<br/>(claims RECEIVED rows in position order)
+        participant W as Worker (actor_type = Conversation)<br/>(leases a RANGE of the 0..N-1 partitions, claims RECEIVED rows in position order)
     end
     box application core
         participant App as Application dispatch
@@ -201,7 +240,7 @@ sequenceDiagram
     GQL-->>C: ACCEPTED {messageId} — nothing more
     Note over C,MB: client follows via operationStatus query or operationStatusChanged subscription
     Note over MB: an EXTERNAL fact (Stripe, SIRENE) lands in the SAME mailbox as kind EVENT via its ACL
-    W->>MB: claim next RECEIVED row for (Conversation, p) — FOR UPDATE SKIP LOCKED, from the partition checkpoint
+    W->>MB: lease partitions from the registry (capacity-bounded range), then claim next RECEIVED row per owned partition — FOR UPDATE SKIP LOCKED, from that partition's checkpoint
     W->>App: dispatch(message, actor envelope)
     App->>Repo: rehydrate Conversation for actor_id
     Repo->>ES: read stream(actor_id)
@@ -262,12 +301,15 @@ split exists for.
 ## 8. What this changes, where
 
 1. `specs/database/tables/journals.yaml`: `inbound_messages` replaces the two tables (plan-mode).
-2. `specs/actors.yaml`: the `identity:` declaration per aggregate (plan-mode; validator rule
-   `id-missing`/`id-not-in-payload`).
+2. `specs/actors.yaml`: the `identity:` declaration per aggregate, and the `mailbox.partitions`
+   keyspace width (plan-mode; validator rules `id-missing`/`id-not-in-payload`,
+   `mb-partitions-range`).
 3. `tools/codegen-rs`: validation (actor_type/message_type/identity against the catalog); the
    generated GraphQL dispatch inserts mailbox rows instead of spawning.
 4. `crates/infrastructure`: the partitioned worker (generalizing `InboundEventsDrainWorker`);
-   claim/checkpoint/audit; `OperationStatusBus` publish moves post-commit.
+   the `mailbox_partitions` registry (checkpoint + lease per `(actor_type, partition)`, seeded
+   from the DSL width); lease acquisition/heartbeat/takeover (D6); claim/checkpoint/audit;
+   `OperationStatusBus` publish moves post-commit.
 5. `crates/application`: dispatch completes the mailbox row in the append's transaction.
 6. Migration: backfill both old tables into `inbound_messages` in `received_at` order, then drop.
 
