@@ -3,6 +3,22 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-28 — the SIRENE compaction is now RUNNABLE against production
+> ([#238](https://github.com/TheCaptainCompany/captain-food/issues/238); PR #239).** `sirene_ingest --compact`
+> shipped with the change below, but nothing could invoke it: `DATABASE_URL` lives only in CI secrets and
+> the `sirene-sync` workflow only ever ran `--once`. A capability that exists and cannot be reached is
+> not a capability. The workflow's `workflow_dispatch` now takes `mode` (`sweep` | `compact`, default
+> `sweep`), plus optional `budget_minutes` and `departments` — blank meaning "binary default", so an
+> untouched form behaves exactly as the schedule does. **Compaction is unaffected by the SIRENE pause**:
+> it reads payloads already in staging, makes no INSEE calls and never pings the worker — the pause is
+> about the sweep's write-path cost, while compaction is what makes national coverage affordable.
+> Expect to run it several times (budgeted + resumable; re-run until `compacted` is 0), and note the
+> table will NOT shrink from this alone — plain `VACUUM` makes the space reusable, only a later
+> `VACUUM FULL` returns it to the OS, and that becomes affordable only afterwards. **Still not run**:
+> [#238](https://github.com/TheCaptainCompany/captain-food/issues/238) carries the ordered runbook
+> (compact -> `VACUUM FULL` -> `bytea`) and dropping payloads is irreversible without a ~4h re-fetch, so
+> triggering it is a product-owner call.
+
 > ✅ **2026-07-28 — the SIRENE mirror now records whether a row actually SYNCED, and quarantines the ones
 > that cannot (ADR-20260728-143000 follow-up, [#231](https://github.com/TheCaptainCompany/captain-food/issues/231); PR #237).**
 > Follow-up to the transient-payload change below, from three product-owner observations, each of which
