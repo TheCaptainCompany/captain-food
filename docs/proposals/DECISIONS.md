@@ -196,6 +196,25 @@ the audit trail; the reasoning is in
 
 ---
 
+## 9. Configuration is declared and validated at startup — PROP-20260729-004500
+
+Tracking issue: [#246 "Declare the app's configuration in specs/, validate it at startup, and refuse to boot when a required key is missing"](https://github.com/TheCaptainCompany/captain-food/issues/246).
+Product-owner directive of 2026-07-29 (the *what* is decided; these are the *how* questions it raises).
+
+Context in one line: configuration is the only part of the system with no source of truth — which is
+why `RUN_SIRENE_WORKER` had no home, `API_SECRET` is configured and read by nothing, and a missing
+`STRIPE_WEBHOOK_SECRET` would silently produce the worst failure mode in the product.
+
+| Decision | Question | Recommendation |
+|---|---|---|
+| PROP-004500 D1 | Required-ness model | **Per-profile** (`required: [production, staging]`) — production cannot boot misconfigured, dev/CI still start on a partial secret set |
+| PROP-004500 D2 | Which currently-degrading keys become HARD requirements in production | `STRIPE_WEBHOOK_SECRET`, `AUTH_SESSION_KEY`, `DATABASE_URL`, `SUPABASE_URL`/`SUPABASE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`. **Behavioural change** — see D5 for sequencing |
+| PROP-004500 D3 | Where the profile comes from | An explicit `APP_PROFILE` key defaulting to `development` — not inferred from the host or from key prefixes |
+| PROP-004500 D4 | A `/config` readiness endpoint | Yes, **presence-only** (never values) — the same one-curl answer `/sirene` just proved worth having |
+| PROP-004500 D5 | Rollout sequencing | **Warn-only for one deploy, then enforce** — the first deploy reports what production is missing without taking anything down |
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions
