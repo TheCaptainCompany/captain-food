@@ -1,9 +1,15 @@
 # PROP-20260728-004616 — Slug becomes a lifecycle, SIRENE becomes an inbound event
 
-- **Status**: Proposed
+- **Status**: **Approved** — all six decisions answered by the product owner on 2026-07-28 (D1 in
+  session, D2–D6 via the approval prompt), recorded in
+  [ADR-20260728-011344](../adr/ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md) and in
+  [DECISIONS.md §5](DECISIONS.md). **D4 was answered against the recommendation** — see §5 D4 below;
+  the answer is `RestaurantRegistered` **only**, with the aggregate deciding record/ignore/update, which
+  is stricter than either option offered. Per the honest-residuals rule this file is **not** rewritten to
+  match: the decision lives in the header, the register and the ADR.
 - **Date**: 2026-07-28
 - **Tracking issue**: [#220 "Slug lifecycle + SIRENE as inbound event: a failed INSERT is the idempotency mechanism, and INSEE updates are silently dropped"](https://github.com/TheCaptainCompany/captain-food/issues/220)
-- **Realized by**: _(filled at completion)_
+- **Realized by**: ADR-20260728-011344 · PRs per §10 _(in progress)_
 
 ---
 

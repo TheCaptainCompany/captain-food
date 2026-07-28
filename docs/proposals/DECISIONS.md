@@ -7,7 +7,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 > The `architect` agent enforces this — an issue whose proposal has unanswered questions is classified
 > 🔴 RED and never dispatched. So this page is the throttle on the whole pipeline.
 
-Last reconciled: **2026-07-28** · 12 proposals `Proposed` · **67 open decisions**
+Last reconciled: **2026-07-28** · 11 proposals `Proposed` · **61 open decisions** (PROP-004616's six closed, proposal `Approved`)
 
 ---
 
@@ -109,6 +109,7 @@ saying "yes to all" is a reasonable use of five minutes.
 
 | Date | Decision | Answer | Recorded in |
 |---|---|---|---|
+| 2026-07-28 | **PROP-004616 D1–D6** — slug lifecycle + SIRENE inbound events | **All six answered.** D1 `RestaurantSlugConfigured` + `RestaurantSlugReconfigured` (in session) · D2 slug chosen **between claim and activation**, gated by "no activation without a configured slug" · D3 **write-side reservation table** with a real `UNIQUE` (also holds released slugs) · D4 the ACL stages **`RestaurantRegistered` only** — *against the recommendation*, and stricter: no registry-fact event, no ACL branching, the **aggregate** decides record/ignore/update · D5 **null the slug on `NON_PARTNER` rows** · D6 **both** `IGNORED` and `DUPLICATE`. Partially supersedes ADR-0045. | Product owner, this register + [ADR-20260728-011344](../adr/ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md) |
 | 2026-07-26 | **PROP-193000 D1–D4** — continuous development loop | **Deferred.** The daily architecture-review routine is sufficient for now; the dev loop stays off until the proposals are under control. `dev-loop.yml` remains `workflow_dispatch`-only with `dry_run` defaulting true. | Product owner, this register |
 
 ## 6. Newest — the daily cycle itself
@@ -131,7 +132,7 @@ questions and still be unable to act on the answers.
 
 ---
 
-## 7. Newest — slug lifecycle + SIRENE inbound events
+## 7. Slug lifecycle + SIRENE inbound events — ✅ DECIDED 2026-07-28
 
 [PROP-20260728-004616](PROP-20260728-004616-slug-lifecycle-and-sirene-inbound-events.md)
 ([#220](https://github.com/TheCaptainCompany/captain-food/issues/220)) came out of a Supabase disk-IO
@@ -141,20 +142,21 @@ idempotency mechanism** for six creation handlers, **INSEE updates are silently 
 **unindexed JSONB scan of the read model** once per staged SIRET. All three trace to deriving the slug
 at seeding time.
 
-**D1 is already answered** (product owner, in session): the slug leaves `RestaurantRegistered` and
-becomes `RestaurantSlugConfigured` / `RestaurantSlugReconfigured`. **The gating question is D2** — when
-the owner chooses their address — because it is the only one that changes the onboarding flow, and
-everything else follows the model. **Sequencing note:** the slug change must land *before* the SIRENE
-update path, or an INSEE rename becomes a live-storefront rename.
+**✅ CLOSED 2026-07-28 — all six answered, proposal `Approved`, implementation under way.** Kept here for
+the audit trail; the answers are in §5 and in
+[ADR-20260728-011344](../adr/ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md).
 
-| # | Decision | Recommendation |
-|---|---|---|
-| D1 | Naming of the rename event | **Answered in session** — `RestaurantSlugConfigured` + `RestaurantSlugReconfigured` |
-| **D2** | **When is the slug chosen?** | **Between claim and activation, gated by "no activation without a configured slug"** — keeps activation a lifecycle transition, not a form |
-| D3 | How slug uniqueness is enforced on the write side | Write-side reservation table with a real `UNIQUE` constraint (also holds released slugs, so a rename's old address stays reserved) |
-| D4 | What the ACL stages as the inbound event | A registry fact (`RestaurantObservedInRegistry`) plus a policy that decides listing — not `RestaurantRegistered` directly |
-| D5 | Migration of the ~200k existing derived slugs | Null them on `NON_PARTNER` rows, keep them for claimed ones |
-| D6 | Is the `IGNORED` / `DUPLICATE` split worth two statuses? | Both — a redelivery and a genuine no-op have different causes and different fixes |
+| # | Decision | Recommendation | **Answer** |
+|---|---|---|---|
+| D1 | Naming of the rename event | `Configured` + `Reconfigured` | ✅ as recommended (in session) |
+| D2 | When is the slug chosen? | Between claim and activation, gated by "no activation without a configured slug" | ✅ as recommended |
+| D3 | How slug uniqueness is enforced on the write side | Write-side reservation table with a real `UNIQUE` | ✅ as recommended |
+| D4 | What the ACL stages as the inbound event | A registry fact (`RestaurantObservedInRegistry`) plus a policy | ⚠️ **against the recommendation** — `RestaurantRegistered` **only**, unconditionally, with the **aggregate** deciding record/ignore/update. Stricter than either option offered: no new event, no ACL branching, no domain decision in the adapter |
+| D5 | Migration of the ~200k existing derived slugs | Null them on `NON_PARTNER` rows | ✅ as recommended |
+| D6 | Is the `IGNORED` / `DUPLICATE` split worth two statuses? | Both | ✅ as recommended |
+
+**Sequencing (binding):** the slug change lands *before* the SIRENE update path, or an INSEE rename
+becomes a live-storefront rename. SIRENE stays paused at both halves until the whole chain is complete.
 
 Reverses part of **ADR-0045** (SIRENE → `RegisterRestaurant` via the command path), so the realizing
 change needs an ADR. The `ImportCatalog`-stays-a-command contrast in CLAUDE.md survives intact: the test
