@@ -75,13 +75,19 @@ fixtures:
     data: { restaurantAccountId: "acct-1", reason: "Closed business" }
   restaurantRegistered:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+    data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+  restaurantSlugConfigured:
+    type: { $ref: 'events.yaml#/RestaurantSlugConfigured' }
+    data: { restaurantId: "resto-1", slug: "chez-marco" }
+  restaurantSlugReconfigured:
+    type: { $ref: 'events.yaml#/RestaurantSlugReconfigured' }
+    data: { restaurantId: "resto-1", slug: "chez-marco-tours", previousSlug: "chez-marco" }
   restaurantRegisteredTest:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-1", accountId: "acct-1", mode: "TEST", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+    data: { restaurantId: "resto-1", accountId: "acct-1", mode: "TEST", listingStatus: "ACTIVE_PARTNER", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
   restaurantSeeded:
     type: { $ref: 'events.yaml#/RestaurantRegistered' }
-    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], cuisineCategory: "BISTRONOMIC", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
+    data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", tags: ["bistronomie", "français"], cuisineCategory: "BISTRONOMIC", address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
   restaurantUpdated:
     type: { $ref: 'events.yaml#/RestaurantUpdated' }
     data: { restaurantId: "resto-1", displayName: "Chez Marco — Centre" }
@@ -619,35 +625,102 @@ tests:
   # -------------------------- Restaurant -----------------------------
   TestRestaurantLocationRegistered:
     name: "Registers a location under an existing account"
-    rules: [{ $ref: 'rules.yaml#/LocationRegistrationUnderAccountUniqueSlug' }]
+    rules: [{ $ref: 'rules.yaml#/LocationRegistrationUnderAccount' }]
     actor: { $ref: 'actors.yaml#/Restaurant' }
     given:
       - { $ref: '#/fixtures/restaurantAccountRegistered' }
     when:
       type: { $ref: 'commands.yaml#/RegisterRestaurant' }
-      data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", slug: "chez-marco", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
+      data: { restaurantId: "resto-1", accountId: "acct-1", listingStatus: "ACTIVE_PARTNER", displayName: "Chez Marco", marginRate: 62.0, cuisineCategory: "PIZZA", uberPricesOptIn: true, address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }, timezone: "Europe/Paris" }
     then:
       - { $ref: '#/fixtures/restaurantRegistered' }
 
   TestRestaurantRegisterIsRejected:
-    name: "Rejects registering a location when the account is missing, the slug is taken, or the external ref is already used"
-    rules: [{ $ref: 'rules.yaml#/LocationRegistrationUnderAccountUniqueSlug' }]
+    name: "Rejects registering a location when the account is missing or the external ref is already used"
+    # SlugAlreadyTaken is gone from this command: a registration no longer carries a slug
+    # (ADR-20260728-011344), so it cannot collide. See TestStorefrontSlugTakenIsRejected.
+    rules: [{ $ref: 'rules.yaml#/LocationRegistrationUnderAccount' }]
     actor: { $ref: 'actors.yaml#/Restaurant' }
     given: []
     when:
       type: { $ref: 'commands.yaml#/RegisterRestaurant' }
-      data: { restaurantId: "resto-1", accountId: "acct-missing", slug: "chez-marco", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" } }
+      data: { restaurantId: "resto-1", accountId: "acct-missing", displayName: "Chez Marco", address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" } }
     thrown:
       - { $ref: 'errors.yaml#/RestaurantAccountNotFound' }
-      - { $ref: 'errors.yaml#/SlugAlreadyTaken' }
       - { $ref: 'errors.yaml#/RefAlreadyUsed' }
 
+  # --- Storefront slug lifecycle (ADR-20260728-011344) ---
+
+  TestStorefrontSlugConfigured:
+    name: "The owner chooses the storefront address for the first time"
+    rules: [{ $ref: 'rules.yaml#/StorefrontSlugChosenByOwner' }]
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
+      data: { restaurantId: "resto-1", slug: "chez-marco" }
+    then:
+      - { $ref: '#/fixtures/restaurantSlugConfigured' }
+
+  TestStorefrontSlugReconfigured:
+    name: "Renaming the storefront carries the previous address so it can keep resolving"
+    rules: [{ $ref: 'rules.yaml#/StorefrontSlugRenameKeepsThePreviousAddress' }]
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantSlugConfigured' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
+      data: { restaurantId: "resto-1", slug: "chez-marco-tours" }
+    then:
+      - { $ref: '#/fixtures/restaurantSlugReconfigured' }
+
+  TestStorefrontSlugUnchangedIsANoOp:
+    name: "Re-submitting the current storefront address emits nothing"
+    rules: [{ $ref: 'rules.yaml#/StorefrontSlugChosenByOwner' }]
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantSlugConfigured' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
+      data: { restaurantId: "resto-1", slug: "chez-marco" }
+    then: []
+
+  TestStorefrontSlugTakenIsRejected:
+    name: "Rejects a storefront address held by another restaurant, or released by one"
+    rules: [{ $ref: 'rules.yaml#/StorefrontSlugUniqueAndNeverReused' }]
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
+      data: { restaurantId: "resto-1", slug: "already-held" }
+    thrown:
+      - { $ref: 'errors.yaml#/SlugAlreadyTaken' }
+      - { $ref: 'errors.yaml#/RestaurantNotFound' }
+
+  TestActivationWithoutSlugIsRejected:
+    name: "Rejects going live before a storefront address is chosen"
+    rules: [{ $ref: 'rules.yaml#/ActivationRequiresStorefrontSlug' }]
+    actor: { $ref: 'actors.yaml#/Restaurant' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/ActivateRestaurant' }
+      data: { restaurantId: "resto-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/SlugNotConfigured' }
+
   TestRestaurantActivated:
-    name: "Activates a registered restaurant"
+    name: "Activates a registered restaurant that has a storefront address"
     rules: [{ $ref: 'rules.yaml#/RestaurantActivationVisibility' }]
     actor: { $ref: 'actors.yaml#/Restaurant' }
     given:
       - { $ref: '#/fixtures/restaurantRegistered' }
+      # Required since ADR-20260728-011344 -- see TestActivationWithoutSlugIsRejected for the gate.
+      - { $ref: '#/fixtures/restaurantSlugConfigured' }
     when:
       type: { $ref: 'commands.yaml#/ActivateRestaurant' }
       data: { restaurantId: "resto-1" }
@@ -660,6 +733,7 @@ tests:
     actor: { $ref: 'actors.yaml#/Restaurant' }
     given:
       - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantSlugConfigured' }
       - { $ref: '#/fixtures/restaurantActivated' }
     when:
       type: { $ref: 'commands.yaml#/ActivateRestaurant' }
@@ -761,7 +835,7 @@ tests:
     given: []
     when:
       type: { $ref: 'commands.yaml#/RegisterRestaurant' }
-      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", slug: "le-saint-honore", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", cuisineCategory: "BISTRONOMIC", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
+      data: { restaurantId: "resto-2", listingStatus: "NON_PARTNER", displayName: "Le Saint-Honoré", website: "https://le-saint-honore.fr", cuisineCategory: "BISTRONOMIC", tags: ["bistronomie", "français"], address: { line1: "5 Rue Colbert", postalCode: "37000", city: "Tours", country: "FR" }, location: { latitude: 47.3941, longitude: 0.6848 }, externalIdentifiers: [{ key: "siret", value: "12345678900012" }, { key: "google_place_id", value: "ChIJxyz" }] }
     then:
       - { $ref: '#/fixtures/restaurantSeeded' }
   TestRestaurantGoogleBusinessProfileUpdated:

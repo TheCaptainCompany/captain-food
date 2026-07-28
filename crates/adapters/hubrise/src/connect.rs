@@ -397,16 +397,11 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
         for loc in &locations {
             let restaurant_id = derive_restaurant_id(&loc.id);
             let name = loc.name.clone().unwrap_or_else(|| format!("Location {}", loc.id));
-            // slugify(name)-slugify(location id): deterministic and unique per location (SIRENE's
-            // name+NIC pattern), so two same-named locations never collide.
-            let base = slugify(&name);
-            let suffix = slugify(&loc.id);
-            let slug = match (base.is_empty(), suffix.is_empty()) {
-                (false, false) => format!("{base}-{suffix}"),
-                (false, true) => base,
-                (true, false) => format!("restaurant-{suffix}"),
-                (true, true) => format!("restaurant-{}", restaurant_id.0.simple()),
-            };
+            // No derived slug (ADR-20260728-011344). A connected HubRise location is a real partner
+            // onboarding, so its storefront address is the OWNER's to choose via
+            // ConfigureRestaurantSlug — before activation, which is already a human decision here.
+            // Inventing `bella-pizza-loc-1` would hand a merchant a hostname built from a HubRise
+            // internal location id.
             let city = loc.city.clone().unwrap_or_default();
             let cmd = RegisterRestaurant {
                 mode: None,
@@ -417,7 +412,6 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
                 // "Menu synced (e.g. HubRise) but no signed contract; not orderable" — exactly a
                 // freshly connected account. Activation stays a human decision.
                 listing_status: Some(RestaurantListingStatus::PASSIVE_PARTNER),
-                slug: Slug(slug),
                 display_name: RestaurantDisplayName(name),
                 contact: None, // HubRise locations expose no email/phone (hubrise.md §4.1)
                 website: None,
@@ -639,12 +633,12 @@ mod tests {
 
     fn dummy_row(id: RestaurantIdScalar) -> RestaurantRow {
         RestaurantRow {
+            slug: None,   // a connected location has no storefront address until the owner picks one
             restaurant_id: id,
             restaurant_account_id: None,
             listing_status: RestaurantListingStatus::PASSIVE_PARTNER,
             external_identifiers: None,
             google_place_id: None,
-            slug: Slug("x".into()),
             display_name: RestaurantDisplayName("x".into()),
             description: None,
             tags: None,
@@ -790,7 +784,8 @@ mod tests {
         assert_eq!(acc.r#ref, Some(ExternalReference("acc_1".into())));
         assert_eq!(acc.timezone, Some(TimeZone("Europe/Paris".into())));
 
-        // The location aggregate: derived id, owned by the account, PASSIVE_PARTNER, slugged
+        // The location aggregate: derived id, owned by the account, PASSIVE_PARTNER, and
+        // deliberately WITHOUT a storefront address -- the owner picks that during onboarding
         // name-locationid, ref = the HubRise location id (what callbacks carry).
         let restaurant_stream = format!("Restaurant-{}", derive_restaurant_id("loc_1").0);
         let events = store.events(&restaurant_stream);
@@ -800,7 +795,6 @@ mod tests {
         };
         assert_eq!(r.account_id, Some(derive_restaurant_account_id("acc_1")));
         assert_eq!(r.listing_status, RestaurantListingStatus::PASSIVE_PARTNER);
-        assert_eq!(r.slug.0, "bella-pizza-loc-1");
         assert_eq!(r.r#ref, Some(ExternalReference("loc_1".into())));
         assert_eq!(r.address.city.0, "Tours");
         assert_eq!(r.timezone, Some(TimeZone("Europe/Paris".into())));

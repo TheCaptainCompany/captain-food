@@ -9513,7 +9513,7 @@ fn emit_server_types(model: &Model) -> String {
     // jsonb columns deserialize into the typed structs (serde camelCase); `orderable` is the derived
     // flag documented in api.yaml; nav fields resolve empty until the read resolvers land.
     out.push_str(
-        "\n/// Read-model row → API type (Stage 1a worked example). jsonb columns deserialize into the typed\n/// structs; `orderable` = ACTIVE_PARTNER + status ACTIVE + acceptance != PAUSED (api.yaml); navigation\n/// fields resolve empty until the read resolvers land.\nimpl From<RestaurantRow> for Restaurant {\n    fn from(row: RestaurantRow) -> Self {\n        Self {\n            id: row.restaurant_id.into(),\n            account_id: row.restaurant_account_id.map(Into::into),\n            listing_status: row.listing_status.into(),\n            orderable: row.listing_status == ds::RestaurantListingStatus::ACTIVE_PARTNER\n                && row.status == ds::RestaurantStatus::ACTIVE\n                && row.order_acceptance != ds::OrderAcceptanceMode::PAUSED,\n            external_identifiers: row\n                .external_identifiers\n                .and_then(|v| serde_json::from_value(v).ok())\n                .unwrap_or_default(),\n            slug: row.slug.into(),\n            display_name: row.display_name.into(),\n            description: row.description,\n            tags: row.tags.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),\n            cuisine_category: row.cuisine_category.map(Into::into),\n            rating: row.rating.map(Into::into),\n            reviews_count: row.reviews_count,\n            website: row.website.map(Into::into),\n            gbp_order_url: row.gbp_order_url.map(Into::into),\n            gbp_link_status: row.gbp_link_status.map(Into::into),\n            address: serde_json::from_value(row.address).expect(\"Restaurant.address: invalid jsonb\"),\n            location: row.location.and_then(|v| serde_json::from_value(v).ok()),\n            opening_hours: serde_json::from_value(row.opening_hours).unwrap_or_default(),\n            status: row.status.into(),\n            order_acceptance: row.order_acceptance.into(),\n            default_currency: row.default_currency.into(),\n            timezone: row.timezone.map(Into::into),\n            preparation_time_minutes: row.preparation_time_minutes,\n            updated_at: row.updated_at,\n            delivery_jobs: Vec::new(),\n            prospects: Vec::new(),\n            catalogs: Vec::new(),\n            carts: Vec::new(),\n            orders: Vec::new(),\n        }\n    }\n}\n",
+        "\n/// Read-model row → API type (Stage 1a worked example). jsonb columns deserialize into the typed\n/// structs; `orderable` = ACTIVE_PARTNER + status ACTIVE + acceptance != PAUSED (api.yaml); navigation\n/// fields resolve empty until the read resolvers land.\nimpl From<RestaurantRow> for Restaurant {\n    fn from(row: RestaurantRow) -> Self {\n        Self {\n            id: row.restaurant_id.into(),\n            account_id: row.restaurant_account_id.map(Into::into),\n            listing_status: row.listing_status.into(),\n            orderable: row.listing_status == ds::RestaurantListingStatus::ACTIVE_PARTNER\n                && row.status == ds::RestaurantStatus::ACTIVE\n                && row.order_acceptance != ds::OrderAcceptanceMode::PAUSED,\n            external_identifiers: row\n                .external_identifiers\n                .and_then(|v| serde_json::from_value(v).ok())\n                .unwrap_or_default(),\n            slug: row.slug.map(Into::into),\n            display_name: row.display_name.into(),\n            description: row.description,\n            tags: row.tags.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),\n            cuisine_category: row.cuisine_category.map(Into::into),\n            rating: row.rating.map(Into::into),\n            reviews_count: row.reviews_count,\n            website: row.website.map(Into::into),\n            gbp_order_url: row.gbp_order_url.map(Into::into),\n            gbp_link_status: row.gbp_link_status.map(Into::into),\n            address: serde_json::from_value(row.address).expect(\"Restaurant.address: invalid jsonb\"),\n            location: row.location.and_then(|v| serde_json::from_value(v).ok()),\n            opening_hours: serde_json::from_value(row.opening_hours).unwrap_or_default(),\n            status: row.status.into(),\n            order_acceptance: row.order_acceptance.into(),\n            default_currency: row.default_currency.into(),\n            timezone: row.timezone.map(Into::into),\n            preparation_time_minutes: row.preparation_time_minutes,\n            updated_at: row.updated_at,\n            delivery_jobs: Vec::new(),\n            prospects: Vec::new(),\n            catalogs: Vec::new(),\n            carts: Vec::new(),\n            orders: Vec::new(),\n        }\n    }\n}\n",
     );
     // Prospect: the FK-derived `restaurant` navigation field is NON-NULL, so the mapping takes the
     // joined Restaurant row alongside the pipeline row (the resolver performs the join).
@@ -10038,6 +10038,9 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
         /// `RestaurantReadRepository` — backs the SlugAlreadyTaken/RestaurantNotFound and
         /// CurrencyMismatch (default currency) checks.
         Restaurants,
+        /// `SlugReservationRepository` -- the write-side arbiter of storefront-slug uniqueness
+        /// (ADR-20260728-011344 D3). Deliberately NOT a read repository.
+        SlugReservations,
         /// `GoogleOwnershipVerifier` — GBP ownership proof (ADR-0019).
         Ownership,
         /// `GbpOrderLinkProbe` — GBP 'Order online' link ping (ADR-0021).
@@ -10055,6 +10058,9 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
     }
     let (command, handler, extra) = match name {
         "registerRestaurant" => ("RegisterRestaurant", "register_restaurant", Extra::Restaurants),
+        "configureRestaurantSlug" => {
+            ("ConfigureRestaurantSlug", "configure_restaurant_slug", Extra::SlugReservations)
+        }
         "activateRestaurant" => ("ActivateRestaurant", "activate_restaurant", Extra::None),
         "updateRestaurant" => ("UpdateRestaurant", "update_restaurant", Extra::None),
         "deactivateRestaurant" => ("DeactivateRestaurant", "deactivate_restaurant", Extra::None),
@@ -10200,6 +10206,10 @@ fn wired_mutation_dispatch(name: &str) -> Option<(String, String)> {
         Extra::Restaurants => (
             "        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?.clone();\n".to_string(),
             ", restaurants.as_ref()",
+        ),
+        Extra::SlugReservations => (
+            "        let slugs = ctx.data::<std::sync::Arc<dyn application::queries::SlugReservationRepository>>()?.clone();\n".to_string(),
+            ", slugs.as_ref()",
         ),
         Extra::Ownership => (
             "        let ownership = ctx.data::<std::sync::Arc<dyn application::ports::GoogleOwnershipVerifier>>()?.clone();\n".to_string(),
@@ -12438,6 +12448,12 @@ fn bt_command_call(cmd: &str) -> String {
         "DenyRefund" => "crate::process_managers::refund::deny_refund(&bed.store, &bed.refund_pm, cmd, &support::actor()).await".to_string(),
         "RegisterRestaurant" | "CreateCatalog" | "AddProduct" | "UpdateProduct" | "MarkRestaurantAsFavorite" => {
             format!("crate::commands::{}(&bed.store, &bed.restaurants, cmd, &support::actor()).await", snake)
+        }
+        // Slug uniqueness is arbitrated by a write-side reservation (ADR-20260728-011344 D3), never by
+        // the eventually-consistent Restaurant projection -- so the handler takes that port, not a
+        // read repo.
+        "ConfigureRestaurantSlug" => {
+            format!("crate::commands::{}(&bed.store, &bed.slugs, cmd, &support::actor()).await", snake)
         }
         "ClaimRestaurantListing" | "OptOutRestaurantListing" => {
             format!("crate::commands::{}(&bed.store, &bed.ownership, cmd, &support::actor()).await", snake)

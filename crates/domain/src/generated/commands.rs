@@ -56,7 +56,6 @@ pub struct RegisterRestaurant {
     pub restaurant_id: RestaurantId,
     pub account_id: Option<RestaurantAccountId>,
     pub listing_status: Option<RestaurantListingStatus>,
-    pub slug: Slug,
     pub display_name: RestaurantDisplayName,
     pub contact: Option<RestaurantContact>,
     pub website: Option<WebUrl>,
@@ -74,6 +73,14 @@ pub struct RegisterRestaurant {
     #[serde(default)]
     pub external_identifiers: Vec<ExternalIdentifier>,
     pub r#ref: Option<ExternalReference>,
+}
+
+/// The owner chooses (or changes) the restaurant's STOREFRONT ADDRESS -- the {slug}.captain.food host (ADR-20260728-011344). A real command precisely because it CAN be refused: the label may already belong to another restaurant, and the person asking is a human who can pick again -- contrast the SIRENE registry feed, which states facts nobody can be told "no" about. Issued during onboarding after ownership is verified and before activation (a restaurant cannot be activated without a configured slug), and again later from the back office to rename. The aggregate decides which fact it is: first configuration emits RestaurantSlugConfigured, a change emits RestaurantSlugReconfigured carrying the previous label, and re-submitting the CURRENT label is an idempotent no-op (no event, no error).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigureRestaurantSlug {
+    pub restaurant_id: RestaurantId,
+    pub slug: Slug,
 }
 
 /// Admin makes a restaurant visible and orderable by customers.

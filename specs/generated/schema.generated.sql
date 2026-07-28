@@ -457,7 +457,7 @@ CREATE TABLE Restaurant (
   listing_status INTEGER NOT NULL,
   external_identifiers JSONB,
   google_place_id TEXT,
-  slug TEXT NOT NULL UNIQUE,
+  slug TEXT UNIQUE,
   display_name TEXT NOT NULL,
   description TEXT,
   tags JSONB,

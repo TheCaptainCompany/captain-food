@@ -48,7 +48,6 @@ pub struct RestaurantRegistered {
     pub r#ref: Option<ExternalReference>,
     #[serde(default)]
     pub external_identifiers: Vec<ExternalIdentifier>,
-    pub slug: Slug,
     pub display_name: RestaurantDisplayName,
     pub contact: Option<RestaurantContact>,
     pub website: Option<WebUrl>,
@@ -63,6 +62,23 @@ pub struct RestaurantRegistered {
     pub preparation_time_minutes: Option<i64>,
     #[serde(default)]
     pub opening_hours: Vec<OpeningHoursSlot>,
+}
+
+/// The restaurant's STOREFRONT ADDRESS has been chosen for the first time — {slug}.captain.food now resolves to it (ADR-20260728-011344). Emitted from ConfigureRestaurantSlug during onboarding, after ownership is verified and before activation: a restaurant cannot be activated without one. The acting user and the moment are envelope metadata (domain_events.user_id / occurred_at, ADR-0041), never payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantSlugConfigured {
+    pub restaurant_id: RestaurantId,
+    pub slug: Slug,
+}
+
+/// The restaurant's storefront address has been CHANGED (ADR-20260728-011344). Distinct from RestaurantSlugConfigured because a rename carries an obligation the first configuration does not: the previous host is already on printed menus, QR codes, Google listings and inbound links, so it must keep resolving. `previousSlug` is business data — it feeds the slug-alias read model that serves the 301, and it keeps the old label RESERVED so a competitor cannot claim it and inherit the redirect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantSlugReconfigured {
+    pub restaurant_id: RestaurantId,
+    pub slug: Slug,
+    pub previous_slug: Slug,
 }
 
 /// One or more editable LOCATION fields of a restaurant have changed.
@@ -1029,6 +1045,8 @@ pub enum DomainEvent {
     RestaurantAccountUpdated(RestaurantAccountUpdated),
     RestaurantAccountDeleted(RestaurantAccountDeleted),
     RestaurantRegistered(RestaurantRegistered),
+    RestaurantSlugConfigured(RestaurantSlugConfigured),
+    RestaurantSlugReconfigured(RestaurantSlugReconfigured),
     RestaurantUpdated(RestaurantUpdated),
     RestaurantActivated(RestaurantActivated),
     RestaurantDeactivated(RestaurantDeactivated),

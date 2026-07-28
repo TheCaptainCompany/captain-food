@@ -27,7 +27,7 @@ pub fn project_restaurant<C: RestaurantCompute>(c: &C, state: Option<RestaurantR
             listing_status: e.listing_status.clone(),
             external_identifiers: Some(serde_json::to_value(&e.external_identifiers).unwrap_or(serde_json::Value::Null)),
             google_place_id: None,
-            slug: e.slug.clone(),
+            slug: None,
             display_name: e.display_name.clone(),
             description: c.description(state.as_ref(), env),
             tags: Some(serde_json::to_value(&e.tags).unwrap_or(serde_json::Value::Null)),
@@ -62,6 +62,8 @@ pub fn project_restaurant<C: RestaurantCompute>(c: &C, state: Option<RestaurantR
         DomainEvent::RestaurantListingStatusChanged(e) => { let mut row = state?; row.listing_status = e.listing_status.clone(); Some(row) },
         DomainEvent::RestaurantGoogleBusinessProfileOrderLinkConfigured(e) => { let mut row = state?; row.gbp_order_url = Some(e.gbp_order_url.clone()); Some(row) },
         DomainEvent::RestaurantGoogleBusinessProfileOrderLinkVerified(e) => { let mut row = state?; row.gbp_link_status = Some(e.status.clone()); Some(row) },
+        DomainEvent::RestaurantSlugConfigured(e) => { let mut row = state?; row.slug = Some(e.slug.clone()); Some(row) },
+        DomainEvent::RestaurantSlugReconfigured(e) => { let mut row = state?; row.slug = Some(e.slug.clone()); Some(row) },
         DomainEvent::RestaurantAccountRegistered(_) => { let mut row = state?; let v = c.default_currency(Some(&row), env); row.default_currency = v; Some(row) },
         _ => return state,
     };

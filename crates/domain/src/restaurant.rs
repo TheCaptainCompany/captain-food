@@ -38,8 +38,10 @@ pub struct RestaurantState {
     pub listing_claimed: bool,
     /// The configured GBP 'Order online' link, if any — `GbpOrderLinkNotConfigured` (ADR-0021).
     pub gbp_order_url: Option<WebUrl>,
-    /// Current slug (registration value; identity of the storefront host).
-    pub slug: Slug,
+    /// The storefront host label, or `None` while the restaurant has no storefront
+    /// (ADR-20260728-011344). Registration never sets it; `RestaurantSlugConfigured` does. This is
+    /// what the activation gate reads — `SlugNotConfigured` is decidable from the fold alone.
+    pub slug: Option<Slug>,
     /// Display name, carried into rejection contexts (errors.yaml `restaurantName`).
     pub display_name: RestaurantDisplayName,
     /// External idempotent import key, when seeded from an external source.
@@ -112,7 +114,7 @@ fn apply(state: Option<RestaurantState>, event: &DomainEvent) -> Option<Restaura
                 listing_status: e.listing_status,
                 listing_claimed: false,
                 gbp_order_url: None,
-                slug: e.slug.clone(),
+                slug: None,
                 display_name: e.display_name.clone(),
                 r#ref: e.r#ref.clone(),
                 contact: e.contact.clone(),
@@ -174,6 +176,12 @@ fn apply(state: Option<RestaurantState>, event: &DomainEvent) -> Option<Restaura
             }
             s.opening_hours = replaced_vec(&s.opening_hours, &e.opening_hours);
         }
+        // The storefront address lifecycle. `Reconfigured` also carries `previousSlug`, but the
+        // aggregate does not need to remember the chain — the released labels live in the slug
+        // reservation table (uniqueness) and the alias read model (redirects), both of which are fed
+        // from the event. The fold only needs the CURRENT label.
+        DomainEvent::RestaurantSlugConfigured(e) => s.slug = Some(e.slug.clone()),
+        DomainEvent::RestaurantSlugReconfigured(e) => s.slug = Some(e.slug.clone()),
         DomainEvent::RestaurantListingClaimed(_) => s.listing_claimed = true,
         DomainEvent::RestaurantListingStatusChanged(e) => s.listing_status = e.listing_status,
         DomainEvent::RestaurantGoogleBusinessProfileOrderLinkConfigured(e) => {
@@ -208,7 +216,6 @@ mod tests {
             listing_status: RestaurantListingStatus::NON_PARTNER,
             r#ref: None,
             external_identifiers: vec![],
-            slug: Slug("chez-marco".into()),
             display_name: RestaurantDisplayName("Chez Marco".into()),
             contact: None,
             website: None,

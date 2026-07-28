@@ -208,7 +208,6 @@ fn registered_restaurant() -> Vec<DomainEvent> {
         listing_status: RestaurantListingStatus::ACTIVE_PARTNER,
         r#ref: None,
         external_identifiers: Vec::new(),
-        slug: Slug("chez-marco".into()),
         display_name: RestaurantDisplayName("Chez Marco".into()),
         contact: None,
         website: None,

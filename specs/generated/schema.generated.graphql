@@ -580,7 +580,7 @@ type Restaurant {
   listingStatus: RestaurantListingStatus!
   orderable: Boolean!
   externalIdentifiers: [ExternalIdentifier!]!
-  slug: Slug!
+  slug: Slug
   displayName: RestaurantDisplayName!
   description: String
   tags: [Tag!]!
@@ -928,7 +928,6 @@ input RegisterRestaurantInput {
   restaurantId: RestaurantId!
   accountId: RestaurantAccountId
   listingStatus: RestaurantListingStatus
-  slug: Slug!
   displayName: RestaurantDisplayName!
   contact: RestaurantContactInput
   website: WebUrl

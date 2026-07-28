@@ -47,6 +47,29 @@ pub const RESTAURANT_PAGE_MAX: i64 = 200;
 
 /// Read port over the `Restaurant` projection table (ADR-0040). Backs the `restaurants`/`restaurant`
 /// GraphQL queries.
+/// Write-side arbiter of storefront-slug uniqueness (ADR-20260728-011344 D3).
+///
+/// NOT a read model. `Restaurant.slug` on the projection is eventually consistent, so two concurrent
+/// claims could both pass a projection lookup and only diverge once the projector caught up — by which
+/// point both owners were told "yes". This port is backed by a table with a real `UNIQUE` constraint,
+/// so the DATABASE decides, once, atomically.
+///
+/// It also remembers RELEASED labels: renaming frees a restaurant's old address for *redirect*
+/// purposes but must never free it for *reuse*, or a competitor could claim it and inherit the 301.
+#[async_trait]
+pub trait SlugReservationRepository: Send + Sync {
+    /// Claim `slug` for `restaurant_id`.
+    ///
+    /// `Ok(true)` = reserved (or already held by this same restaurant — an idempotent replay).
+    /// `Ok(false)` = held by another restaurant, or released by one and therefore still off-limits.
+    /// The caller maps `false` to `SlugAlreadyTaken`.
+    async fn reserve(&self, slug: Slug, restaurant_id: RestaurantId) -> Result<bool, DomainError>;
+
+    /// Mark `slug` as released by `restaurant_id` on a rename: the row stays (so nobody else may take
+    /// it) but stops being the restaurant's current address.
+    async fn release(&self, slug: Slug, restaurant_id: RestaurantId) -> Result<(), DomainError>;
+}
+
 #[async_trait]
 pub trait RestaurantReadRepository: Send + Sync {
     /// Discovery list (public), newest-first, honouring the filter.

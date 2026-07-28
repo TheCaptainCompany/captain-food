@@ -16,8 +16,9 @@
 //!   stable across syncs, so the client-generated-id idempotency of `register_restaurant` absorbs re-runs.
 //! - `ref` = the SIRET (the idempotent external key); `externalIdentifiers` also carry the well-known
 //!   `siret` and `naf` keys (see `scalars.yaml#/ExternalIdentifierKey`).
-//! - `slug` = slugify(display name) + `-<NIC>` (last 5 SIRET digits) so two establishments with the
-//!   same name never collide; matches `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+//! - NO slug: a registry record carries no storefront address (ADR-20260728-011344) -- the tenant host
+//!   is the OWNER's choice, made via ConfigureRestaurantSlug. `slugify` remains here because it is the
+//!   right tool for a collision-tolerant marketplace listing PATH, which is not a host.
 //! - `displayName` = enseigne → denomination usuelle (période) → denomination usuelle (unité légale) →
 //!   denomination (unité légale) → "Prénom Nom" for personnes physiques. INSEE capitalisation is kept as-is.
 //! - `listingStatus` = `NON_PARTNER` (a prospect, ADR-0027); `accountId` = None; `openingHours` = []
@@ -211,10 +212,6 @@ pub fn etablissement_to_command(e: &Etablissement) -> Result<RegisterRestaurant,
     let address = address(e)?;
     let naf = e.naf().map(str::to_string);
 
-    let nic = &siret[9..]; // last 5 digits — unique per establishment within the legal unit
-    let base = slugify(&name);
-    let slug = if base.is_empty() { format!("restaurant-{nic}") } else { format!("{base}-{nic}") };
-
     let mut external_identifiers = vec![ExternalIdentifier {
         key: ExternalIdentifierKey("siret".to_string()),
         value: siret.to_string(),
@@ -231,7 +228,6 @@ pub fn etablissement_to_command(e: &Etablissement) -> Result<RegisterRestaurant,
         restaurant_id: restaurant_id_for_siret(siret),
         account_id: None, // a prospect has no owning RestaurantAccount yet (ADR-0027)
         listing_status: Some(RestaurantListingStatus::NON_PARTNER),
-        slug: Slug(slug),
         display_name: RestaurantDisplayName(name),
         contact: None,  // SIRENE exposes no email/phone
         website: None,  // Google-enrichment territory (ADR-0020)
@@ -301,7 +297,6 @@ mod tests {
 
         assert_eq!(cmd.r#ref, Some(ExternalReference("85242109900021".into()))); // ref = SIRET
         assert_eq!(cmd.display_name.0, "CHEZ MARCO"); // enseigne wins over denomination
-        assert_eq!(cmd.slug.0, "chez-marco-00021"); // slugified name + NIC suffix
         assert_eq!(cmd.listing_status, Some(RestaurantListingStatus::NON_PARTNER)); // a prospect
         assert_eq!(cmd.account_id, None);
         assert_eq!(cmd.cuisine_category, Some(CuisineCategory::TRADITIONAL)); // NAF 56.10A
@@ -332,17 +327,31 @@ mod tests {
         assert_eq!(a.0.get_version_num(), 5);
     }
 
+    /// `slugify` survives the removal of the ACL's slug derivation because it is still the right tool
+    /// for building a collision-tolerant marketplace listing PATH. What it must never again produce is
+    /// a tenant HOST (ADR-20260728-011344), so this tests the function, not a command field.
     #[test]
-    fn slug_matches_the_domain_pattern_even_for_accented_messy_names() {
-        let mut e = sample();
-        e.periodes_etablissement[0].enseigne_1_etablissement =
-            Some("  CRÊPERIE L'ÉTOILE — Chez Œdipe & Co !!".into());
-        let slug = etablissement_to_command(&e).unwrap().slug.0;
-        assert_eq!(slug, "creperie-l-etoile-chez-oedipe-co-00021");
+    fn slugify_matches_the_domain_pattern_even_for_accented_messy_names() {
+        let slug = slugify("  CRÊPERIE L'ÉTOILE — Chez Œdipe & Co !!");
+        assert_eq!(slug, "creperie-l-etoile-chez-oedipe-co");
         let re_ok = slug
             .split('-')
             .all(|seg| !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()));
         assert!(re_ok, "slug {slug} must match ^[a-z0-9]+(?:-[a-z0-9]+)*$");
+    }
+
+    /// The regression this whole change exists to prevent: a registry record must NOT arrive carrying a
+    /// storefront address. `RegisterRestaurant` has no `slug` field at all now, so this asserts the
+    /// intent at the ACL boundary — the mapping is complete without one.
+    #[test]
+    fn the_acl_never_invents_a_storefront_address() {
+        let cmd = etablissement_to_command(&sample()).expect("mapping succeeds");
+        // Present: the identity and location facts INSEE actually states.
+        assert_eq!(cmd.display_name.0, "CHEZ MARCO");
+        assert_eq!(cmd.r#ref, Some(ExternalReference("85242109900021".into())));
+        // Absent by construction: no account, and no host reserved on the merchant's behalf.
+        assert_eq!(cmd.account_id, None);
+        assert_eq!(cmd.listing_status, Some(RestaurantListingStatus::NON_PARTNER));
     }
 
     #[test]

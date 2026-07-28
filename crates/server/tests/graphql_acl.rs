@@ -126,7 +126,6 @@ async fn unauthorized_execution_is_forbidden() {
     let mutation = r#"mutation {
         registerRestaurant(input: {
             restaurantId: "00000000-0000-0000-0000-000000000001",
-            slug: "chez-marco",
             displayName: "Chez Marco",
             address: { line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }
         }) { correlationId }

@@ -130,8 +130,9 @@ RegisterRestaurant:
       $ref: 'scalars.yaml#/RestaurantListingStatus'
       nullable: true
       description: "Partnership funnel; defaults to NON_PARTNER when omitted (e.g. sync-seeded listing)."
-    slug:
-      $ref: 'scalars.yaml#/Slug'
+    # NOTE: no `slug` (ADR-20260728-011344) -- the storefront host is chosen by the OWNER during
+    # onboarding via ConfigureRestaurantSlug, not derived at registration. A registration that
+    # invented one reserved a hostname the merchant never picked.
     displayName:
       $ref: 'scalars.yaml#/RestaurantDisplayName'
     contact:
@@ -184,7 +185,27 @@ RegisterRestaurant:
       $ref: 'scalars.yaml#/ExternalReference'
       nullable: true
       description: "Set only when seeded from an external source (e.g. HubRise location)."
-  required: [restaurantId, slug, displayName, address]
+  required: [restaurantId, displayName, address]
+
+ConfigureRestaurantSlug:
+  description: >
+    The owner chooses (or changes) the restaurant's STOREFRONT ADDRESS -- the {slug}.captain.food host
+    (ADR-20260728-011344). A real command precisely because it CAN be refused: the label may already
+    belong to another restaurant, and the person asking is a human who can pick again -- contrast the
+    SIRENE registry feed, which states facts nobody can be told "no" about.
+    Issued during onboarding after ownership is verified and before activation (a restaurant cannot be
+    activated without a configured slug), and again later from the back office to rename. The aggregate
+    decides which fact it is: first configuration emits RestaurantSlugConfigured, a change emits
+    RestaurantSlugReconfigured carrying the previous label, and re-submitting the CURRENT label is an
+    idempotent no-op (no event, no error).
+  type: object
+  properties:
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    slug:
+      $ref: 'scalars.yaml#/Slug'
+      description: "The requested storefront host label. Rejected with SlugAlreadyTaken if reserved by another restaurant -- including a label another restaurant has RELEASED by renaming, which stays reserved so its redirect cannot be hijacked."
+  required: [restaurantId, slug]
 
 ActivateRestaurant:
   description: "Admin makes a restaurant visible and orderable by customers."

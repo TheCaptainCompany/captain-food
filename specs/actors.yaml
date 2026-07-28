@@ -99,10 +99,22 @@ Restaurant:
   receives:
     - message: { $ref: 'commands.yaml#/RegisterRestaurant' }
       emits: [{ $ref: 'events.yaml#/RestaurantRegistered' }]
+      # No SlugAlreadyTaken any more: registration no longer carries a slug (ADR-20260728-011344), so
+      # it cannot collide. Uniqueness moved to ConfigureRestaurantSlug — where the asker is a human
+      # who can be told "no" and pick again.
       throws:
         - { $ref: 'errors.yaml#/RestaurantAccountNotFound' }
-        - { $ref: 'errors.yaml#/SlugAlreadyTaken' }
         - { $ref: 'errors.yaml#/RefAlreadyUsed' }
+    - message: { $ref: 'commands.yaml#/ConfigureRestaurantSlug' }
+      # ONE command, TWO possible facts — the aggregate folds its own stream and decides which:
+      # never configured → Configured; a different label → Reconfigured (carrying the previous one);
+      # the same label → no fact at all (idempotent no-op, no event, no error).
+      emits:
+        - { $ref: 'events.yaml#/RestaurantSlugConfigured' }
+        - { $ref: 'events.yaml#/RestaurantSlugReconfigured' }
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/SlugAlreadyTaken' }
     - message: { $ref: 'commands.yaml#/ActivateRestaurant' }
       emits: [{ $ref: 'events.yaml#/RestaurantActivated' }]
       # Idempotent: activating an already-ACTIVE restaurant is a no-op (no event, no error) — the command
@@ -110,6 +122,9 @@ Restaurant:
       throws:
         - { $ref: 'errors.yaml#/RestaurantNotFound' }
         - { $ref: 'errors.yaml#/RestaurantNotReadyForActivation' }
+        # No storefront address means no host a customer could reach. Aggregate-local: the fold sees
+        # whether RestaurantSlugConfigured ever landed, so no read model is consulted.
+        - { $ref: 'errors.yaml#/SlugNotConfigured' }
     - message: { $ref: 'commands.yaml#/UpdateRestaurant' }
       emits: [{ $ref: 'events.yaml#/RestaurantUpdated' }]
       throws:

@@ -11,7 +11,7 @@ pub struct RestaurantRow {
     pub listing_status: RestaurantListingStatus,
     pub external_identifiers: Option<serde_json::Value>,
     pub google_place_id: Option<GooglePlaceId>,
-    pub slug: Slug,
+    pub slug: Option<Slug>,
     pub display_name: RestaurantDisplayName,
     pub description: Option<String>,
     pub tags: Option<serde_json::Value>,

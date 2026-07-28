@@ -233,7 +233,7 @@ fn restaurant_row(restaurant_id: uuid::Uuid) -> RestaurantRow {
         listing_status: ds::RestaurantListingStatus::ACTIVE_PARTNER,
         external_identifiers: None,
         google_place_id: None,
-        slug: ds::Slug("chez-marco".into()),
+        slug: Some(ds::Slug("chez-marco".into())),
         display_name: ds::RestaurantDisplayName("Chez Marco".into()),
         description: None,
         tags: None,

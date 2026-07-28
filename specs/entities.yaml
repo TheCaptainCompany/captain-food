@@ -306,6 +306,11 @@ Restaurant:
       description: "Google Place id, when known (enrichment / GBP)."
     slug:
       $ref: 'scalars.yaml#/Slug'
+      nullable: true
+      description: >
+        The storefront host label ({slug}.captain.food) — NULL until the owner configures one
+        (ADR-20260728-011344). An open-data listing has no storefront and therefore no slug; only a
+        claimed restaurant that has been through onboarding does. Unique across the non-NULL set.
     displayName:
       $ref: 'scalars.yaml#/RestaurantDisplayName'
     contact:
