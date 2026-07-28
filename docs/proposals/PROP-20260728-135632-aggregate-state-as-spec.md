@@ -121,7 +121,31 @@ Semantics (all fail-closed):
   `actor.id`). The generated check rejects with `RoleMismatch` when they differ.
 - Failing `acting` rejects with `NotAParticipant` (new `errors.yaml` entries per #235's DoD).
 
-### 2.3 `principals:` — the role → domain-identity type map (file header, declared once)
+### 2.3 The fold is generated INTO the actor — `apply(state, event)` methods on the aggregate
+
+> **Amended 2026-07-28 (product-owner objection, same principle as D4):** the first draft had the
+> Repository folding "via generated states.rs" — the state build would live **outside the actor**,
+> so unit tests of the actor would never execute it. The fold is the actor's own behaviour and must
+> be testable AS the actor.
+
+Codegen therefore emits, **on the aggregate itself** (the shape the hand-written aggregates and the
+`crates/domain` `Aggregate` trait already have — generation replaces them at parity, it does not
+invent a new contract):
+
+- one **`apply` per (state, received event)** pair, derived from that event's `state:` lineage —
+  e.g. `ConversationState apply(ConversationState state, MessagePosted e)` appends `e.messageId`
+  to `messageIds` and nothing else, because that is all `MessagePosted` carries lineage for;
+- **`fold(events)`** = the birth event's constructor + the left-fold of `apply` — the existing
+  `Aggregate` trait contract (`None` until the birth event, exactly like today's hand-written
+  `conversation.rs::fold`).
+
+The emission can still land in `generated/states.rs` as a file, but its content is `impl` blocks
+**on the actor types** — the Repository calls `Conversation::fold(events)`, the actor's own method,
+and holds no fold logic of its own. Actor unit tests then exercise the state build directly (events
+in, state fields asserted), which is also what makes the `requires` negatives ordinary actor tests
+(D4): one test surface — the actor — covers fold, authorization, and invariants.
+
+### 2.4 `principals:` — the role → domain-identity type map (file header, declared once)
 
 `state.customerId` is a `CustomerId`; the actor envelope today carries an auth `sub`
 (consequence B of #235: comparing those value spaces would silently never match). The validator
@@ -263,7 +287,7 @@ Order:
 
 | Option | Pros | Cons |
 |---|---|---|
-| **Generate the state structs + folds (`generated/states.rs`, like `lifecycles.rs`) and port `Conversation` to them as the pilot; other aggregates adopt under an `st-missing` warning** ✅ recommended | No declared-vs-hand-written drift for the pilot; proves the whole chain (DSL → fold → `requires` check) on the aggregate #235's holes live in; incremental adoption is the proven `lifecycle` playbook (`lc-missing`) | The pilot PR touches domain + application code, not just specs |
+| **Generate the state structs + the actor's `apply`/`fold` methods (§2.3, emitted like `lifecycles.rs`) and port `Conversation` to them as the pilot; other aggregates adopt under an `st-missing` warning** ✅ recommended | No declared-vs-hand-written drift for the pilot; proves the whole chain (DSL → fold → `requires` check) on the aggregate #235's holes live in; incremental adoption is the proven `lifecycle` playbook (`lc-missing`) | The pilot PR touches domain + application code, not just specs |
 | Validate-only first (declare state, check `requires` refs; folds stay hand-written) | Spec-only change, straight to `main` | The declaration can silently diverge from the Rust fold — a strongly-typed DSL whose types are *aspirational* is worse than none; postpones the actual #235 fix |
 | Generate everything for every aggregate at once | No warning period | Big-bang port of five+ hand-written folds in one change; high regression surface at exactly the layer that guards money-moving commands |
 
@@ -317,7 +341,7 @@ sequenceDiagram
     participant J as command_journal
     participant App as Application dispatch
     participant Repo as Repository (write side)
-    participant Agg as Conversation aggregate<br/>(generated requires check + decide — pure)
+    participant Agg as Conversation aggregate<br/>(generated apply/fold + requires check + decide — pure)
     participant ES as PgEventStore
 
     C->>GQL: postMessage(orderId, authorRole: CUSTOMER, …)
@@ -327,7 +351,9 @@ sequenceDiagram
     App->>Repo: require Conversation state for orderId
     Repo->>ES: read stream(orderId)
     ES-->>Repo: events
-    Repo-->>App: fold via generated states.rs into ConversationState{customerId, …}
+    Repo->>Agg: fold(events) — the actor's generated apply(state, event), event by event
+    Agg-->>Repo: ConversationState{customerId, …}
+    Repo-->>App: rehydrated state (current version)
     App->>Agg: handle(PostMessage, state, actor)
     Agg->>Agg: generated requires precondition — acting[CUSTOMER]: actor.id equals state.customerId ?
     Agg->>Agg: claims: cmd.authorRole equals actor.role ?
@@ -343,7 +369,7 @@ sequenceDiagram
     end
 ```
 
-[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:eNptVWFv0zAQ_SunfAqi62BCfIjQUFWqaRODsQ7xgSHk2VfXW2J7tlNWuv53zkm8NLT9EkW-9-7de-dmk3EjMCsg8_hYo-b4STHpWHWrgX6sDkbX1R269t0yFxRXlukAU2AeprUPpkIHvFSow37V2bfPsW7yVFdw5phd0jsKiR_u3PFp7kyJIFlAeA3WKR1BJTj0pqyDMvrVPuFFpOOmqpgWv-9N7TQr96sm1jZtrS0VZ5EKhPKWBb7cL75Ga2J1fHoVjFtD_scpUuWVwAMaJlI2wxu9QudbeialwzhKO5lEjY7eBE3zWCsaCfgS-QMNKpATLdzWJ2_evgNbu0MtZvPY4UrOVmTrnDThrW6rpkenp-RqASQ2XKL3TGJunEB3LkYxsaVx1-RrAdPv85uvl7PrUdPr5H3XhsCJguSrxRouftyMWtdXuJNDMCBMxZQG0quDCuRLCvxcDNguCuiySNlAzjhHGxjt1NFCOR9GkaayJtCareEB1wMGiqp4ySjnVZyF09wbJQrou5LOwWzbjoTgRBITLJLjw3x8iGu2MA46r1pcRBBwNo8wJqiMHlXysyOfzY9eyDEG4nfASfvClAJWikEffdPTj50HpcnMXT3zeLThO3O1GW13x6E9K2BJZpaYX_Vpj1rizqBkgJQJcWD3rENutFCNFd3mEVpp-TM5-ato-cZKAMFY6ds2414kfNzrxUumKk_PSoz73UsELWFzyzsoKwNoEyAscbDvxzEaGSVTcVuaOiWDv5gwudqBPENsdal81V_r5F1acIf3yOPQ_XFcNzqeUpTO0TrkaXGjRU74RtoLrnMXS4_d3VJ_URwW2F3svLnSBXRpxeBorud0l5quQ7VptzxbYd4u2AjwyZIEQsad6ZX8t7TMWtTi0HTD9patS8O6QkJkI8goU1Ik6N9_k9HQVfMdELhgdRmy7fYfhPYLWQ) —
+[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:eNptVd9v0zAQ_ldOfSEV3QYT4iFCQ1Wppk0MxjrEA0PIs6-pt8Q2tlMWuv7vnGOnadf2JU1z3919P5yuBlwLHOQwcPinRsXxk2SFZdWdAvqw2mtVV_do471h1ksuDVMeJsAcTGrndYUWeClR-f2q82-fQ934qa7g3DKzoHsUBX64tydnmdUlQsE8wmswVqoAKsGi02XtpVbD_YaXoR3XVcWU-P2ga6tYuV81NqYda0wpOQutQEhnmOeL_eIbNDpUh6uTXtsGsr9W0lZOCjyww7goWvJaLdG62J4VhcVAJTIrUKGlOwGMdmhO5roURNKSypL4AV8gf6QfBHKaAXf16Zu378DU9tC86SyMuy6mS9J4RgvinYpVk6OzM5I4B9rcX6FzrMBMW4H2QoyCfQttb0jkHCbfZ7dfr6Y3o3bW6fs0hsBdC-Ii5w1c_rgdRQuWuGWK1yB0xaQC2ld56Umkzv0LsdPtModkTGcUZIxzNJ5RwI7m0jo_Cm0qoz1lroFHbHY6kG_5xrCMV4ELJ94rKXLop9KeO9zWqQnBqUmwM-8U3zXL-ZC5ubaQtIq4gCDgdBZgTFAZXapOz9R8OjvaNMdgiNsBUzZyCG5n8eGw89YvMJJ45eBFOrJ2n1FsN0xXuG_il8SpKPq522RmAbviW6JEg9dba3WSWlw0Ig6OEmS8tjYMC-36AxcFbKksyL4Ss-s-XyNI67Zshv16CdGT26TdWORaCdmKn_QgtFTFz867X3nsdywFEIyVLo457pnBx71ZvGSycnStxHGf9q5BbNi-ZBKUlR6U9q0Z2yfsJIShCCtTcSzdEr3V7ov24-styDOEUVfSVf1bpdOuO1IWH5AH0v3jEHB6PKHwWEsBzLqjEiSywrWrbXBJXSwdptMs_6E4vGB6lWTtSySH5FYwjng9d6e3nbq7bZcqx5aYUksZfDK0AiF3k_HimFB8UYlD7HbHG9aUmqVCQgxGMCBPaSNBfz6rAZGu2r8hgXNWl36wXv8HI1A1WA) —
 regenerate this link (snippet in docs/claude/mermaid.md) whenever the fenced block above changes.
 
 ## 7. Mockups — the user-visible surface is a refusal
@@ -378,8 +404,9 @@ nothing changes visually for legitimate users — which is the point.
    the ones #235 lists as failing today).
 3. `actors.yaml`: header `principals:` map + field-meaning doc; `state:` + `requires:` on
    `Conversation` (pilot); other aggregates follow under `st-missing`.
-4. `tools/codegen-rs`: the `st-*`/`req-*` validator rules; `states.rs` emitter; `requires`
-   precondition emitter; documentation emitter section (state table per actor).
+4. `tools/codegen-rs`: the `st-*`/`req-*` validator rules; the state emitter — struct + per-event
+   `apply(state, event)` + `fold` as methods ON the actor (§2.3); `requires` precondition emitter;
+   documentation emitter section (state table per actor).
 5. `crates/`: port `Conversation` to the generated state; generate the `requires` precondition into
    the aggregate's handler entry (the actor runs the check — D4 as amended, so the negatives are
    ordinary actor unit tests); extend `Actor` with the resolved domain identity (shared with #144's
