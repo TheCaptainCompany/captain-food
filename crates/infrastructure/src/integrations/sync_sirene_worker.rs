@@ -15,9 +15,9 @@
 //! **Deletion reconciliation** (ADR-0045 deletion policy) reuses the already-modeled
 //! `MarkRestaurantClosed` → `RestaurantMarkedClosed`:
 //! - explicit signal: a staged row whose `etat` is `F` (fermé) is a confident closure;
-//! - detect-by-absence: rows not refreshed for [`ABSENCE_GRACE_DAYS`] past the LATEST ingestion
-//!   (≈ 3 missed weekly runs — the debounce), guarded by a freshness check so a stalled CI can never
-//!   mass-close anything;
+//! - detect-by-absence: rows not refreshed for [`ABSENCE_GRACE_DAYS`] past their OWN DEPARTMENT's
+//!   latest sweep (≈ 3 missed weekly runs — the debounce), guarded by a per-department freshness check
+//!   so neither a stalled CI nor a budget-limited rotating sweep (#218) can mass-close anything;
 //! - gate by the partnership funnel: only **NON_PARTNER** prospects are auto-closed; PASSIVE/ACTIVE
 //!   partners are flagged for manual review (a registry datum must never take down a live partner);
 //! - never hard-delete: closure is an event, the projection folds it, the staging mirror keeps the row.
@@ -67,11 +67,13 @@ use crate::{PgCommandJournal, PgEventStore, PgInboundEvents, PgRestaurantReposit
 const POLL_INTERVAL: Duration = Duration::from_secs(3600);
 /// Pending rows are drained in keyset batches (ordered by SIRET) of this size.
 const BATCH_SIZE: i64 = 200;
-/// Detect-by-absence debounce: a row must be unseen for this long PAST the latest ingestion before a
-/// closure is inferred (≈ 3 missed weekly runs, per ADR-0045).
+/// Detect-by-absence debounce: a row must be unseen for this long past ITS DEPARTMENT's latest sweep
+/// before a closure is inferred (≈ 3 missed weekly runs, per ADR-0045).
 const ABSENCE_GRACE_DAYS: i64 = 21;
-/// Absence is only meaningful against a FRESH mirror: skip the absence pass entirely unless the
-/// latest ingestion ran within this window (a stalled CI must never look like mass closures).
+/// Absence is only meaningful against a FRESHLY-SWEPT department: a department whose latest sweep is
+/// older than this yields NO absence signal (#218). Scoped per department rather than globally because
+/// the sweep is budget-limited and rotates — most departments are legitimately stale at any moment, and
+/// a global freshness check would read that as mass closure.
 const FRESH_INGESTION_DAYS: i64 = 10;
 /// `UserType::EXTERNAL` ordinal for the event envelope (enums stored as declaration-order ints,
 /// ADR-0037/0041) — the sync writes as the fixed external system principal.
@@ -362,9 +364,10 @@ impl SireneSyncWorker {
     }
 
     /// Detect-by-absence (ADR-0045): SIRENE never sends deletes — the active-only ingestion means a
-    /// closed établissement simply stops appearing. Rows unseen for [`ABSENCE_GRACE_DAYS`] past the
-    /// latest ingestion are treated as closures, with the same partner gate as the explicit signal.
-    /// Already-INACTIVE prospects fold to a no-op, so re-scanning stale rows every pass is idempotent.
+    /// closed établissement simply stops appearing. Rows unseen for [`ABSENCE_GRACE_DAYS`] past their
+    /// OWN DEPARTMENT's latest sweep are treated as closures, with the same partner gate as the
+    /// explicit signal. Already-INACTIVE prospects fold to a no-op, so re-scanning stale rows every
+    /// pass is idempotent.
     async fn reconcile_absent(
         &self,
         store: &PgEventStore,
@@ -373,26 +376,37 @@ impl SireneSyncWorker {
         correlation_id: uuid::Uuid,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
-        let latest: Option<DateTime<Utc>> =
-            sqlx::query_scalar("SELECT max(last_seen_at) FROM external_sirene_restaurants")
-                .fetch_one(&self.pool)
-                .await
-                .map_err(db_err)?;
-        let Some(latest) = latest else {
-            return Ok(()); // empty mirror — nothing ingested yet
-        };
-        if Utc::now() - latest > chrono::Duration::days(FRESH_INGESTION_DAYS) {
-            // The mirror itself is stale (CI not running) — absence means nothing; never mass-close.
-            return Ok(());
-        }
-        let cutoff = latest - chrono::Duration::days(ABSENCE_GRACE_DAYS);
-        // last_seen_at rides along as the journal-idempotency version of the absence signal: the
-        // same stale row re-scanned across passes replays the same message_id.
+        // PER-DEPARTMENT, not global (#218). The sweep is budget-limited and resumes at the stalest
+        // partition, so at any moment most departments were last swept days or weeks ago — that is
+        // NORMAL, not evidence that their restaurants closed.
+        //
+        // The previous global form (`max(last_seen_at)` over the whole mirror, cutoff = latest − 21d)
+        // was safe only because coverage never rotated: departments 38–101 had no rows and 01–37 were
+        // re-swept every run. Under a rotating sweep it would close every establishment in every
+        // department not reached in 21 days — entire regions dropped from discovery, from a job doing
+        // exactly what it was designed to do.
+        //
+        // So absence is judged relative to a row's OWN department: the department must itself have been
+        // swept recently enough to trust (`FRESH_INGESTION_DAYS`), and the row must have missed that
+        // department's own latest sweep by the grace period. A department nobody has swept lately
+        // simply yields no absence signal, which is the correct answer rather than a dangerous one.
         let absent: Vec<(String, DateTime<Utc>)> = sqlx::query_as(
-            "SELECT siret, last_seen_at FROM external_sirene_restaurants \
-             WHERE etat <> 'F' AND last_seen_at < $1 ORDER BY siret",
+            "WITH swept AS ( \
+                 SELECT department, max(last_seen_at) AS swept_at \
+                   FROM external_sirene_restaurants \
+                  WHERE department IS NOT NULL \
+                  GROUP BY department \
+             ) \
+             SELECT s.siret, s.last_seen_at \
+               FROM external_sirene_restaurants s \
+               JOIN swept d ON d.department = s.department \
+              WHERE s.etat <> 'F' \
+                AND now() - d.swept_at <= make_interval(days => $1) \
+                AND s.last_seen_at < d.swept_at - make_interval(days => $2) \
+              ORDER BY s.siret",
         )
-        .bind(cutoff)
+        .bind(FRESH_INGESTION_DAYS as i32)
+        .bind(ABSENCE_GRACE_DAYS as i32)
         .fetch_all(&self.pool)
         .await
         .map_err(db_err)?;
