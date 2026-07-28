@@ -1,0 +1,49 @@
+version: 1
+description: >
+  WRITE-SIDE RESERVATION tables (ADR-20260728-011344) — a table category of their own, alongside the
+  event store, the event-fed projections, the seeded referential tables, the adapter-owned integration
+  staging/connection tables and the write-path journals.
+
+  A reservation table exists for ONE reason: to let the DATABASE arbitrate a cross-aggregate uniqueness
+  invariant that no single aggregate's fold can answer. It is NOT a projection (nothing replays into it,
+  it is not computed from `domain_events`, and a rebuild would not reproduce it), NOT a read model (no
+  `api.yaml` query reads it — a reservation is a write-path decision, never displayed), and NOT a
+  journal (it records no submissions). It is domain-owned write state whose whole content is a `UNIQUE`
+  constraint plus enough provenance to explain a rejection.
+
+  Why not simply query the projection? Because a projection is eventually consistent. Two owners
+  claiming the same storefront address in the same second would both pass a read-model lookup and only
+  diverge once the projector caught up — by which point both were told "yes". A `UNIQUE` constraint
+  decides once, atomically, and cannot be raced.
+
+  Why not let the projection's own `UNIQUE` column do it? Because that constraint fires in the
+  PROJECTOR, after the event is already recorded and the owner has been told the operation succeeded.
+  The failure then surfaces as a stuck projection, not a rejection — the worst possible split.
+
+slug_reservations:
+  description: >
+    One row per storefront label ever claimed. The `UNIQUE` primary key IS the invariant
+    (`StorefrontSlugUniqueAndNeverReused`): `configure_restaurant_slug` inserts before appending its
+    event, and an insert that loses maps to `errors.yaml#/SlugAlreadyTaken` — a rejection delivered to a
+    human who can pick another address.
+
+    RELEASED IS NOT FREE. A rename sets `released_at` but KEEPS the row, so the label stays
+    un-claimable. Otherwise a competitor could take a restaurant's former address and silently inherit
+    the 301 redirect the alias read model serves from it — inheriting its printed menus, its QR codes
+    and its search results. Reuse is therefore permanently barred; if a quarantine-and-recycle policy is
+    ever wanted, it is a deliberate product decision with a deletion path, not a default.
+
+    Ordering note: the reservation is written BEFORE the event. A reservation with no event is a
+    harmless orphan (the owner re-drives it by re-submitting, and the row is already theirs, so the
+    retry succeeds); an event with no reservation would mean two restaurants believing they own one
+    host, which no amount of replay can repair.
+  columns:
+    slug:          { type: { $ref: 'scalars.yaml#/Slug' }, pk: true }          # the label itself IS the key
+    restaurant_id: { type: { $ref: 'scalars.yaml#/RestaurantId' }, index: true } # who holds (or held) it
+    reserved_at:   { type: timestamptz }
+    released_at:   { type: timestamptz, nullable: true, note: "Set when a rename supersedes this label. The row REMAINS -- released never means reusable." }
+  retention:
+    policy: >
+      NONE, deliberately. A released label must stay un-claimable for as long as anything might still
+      resolve it -- old menus, QR codes and search results have no expiry we control. Sweeping these
+      rows would re-open the redirect-hijack hole this table exists to close.

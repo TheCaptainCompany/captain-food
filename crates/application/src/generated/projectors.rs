@@ -74,6 +74,31 @@ pub fn project_restaurant<C: RestaurantCompute>(c: &C, state: Option<RestaurantR
     })
 }
 
+/// Hand-written business logic for `SlugAlias`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait SlugAliasCompute {
+}
+
+pub fn project_slug_alias<C: SlugAliasCompute>(c: &C, state: Option<SlugAliasRow>, env: &Envelope) -> Option<SlugAliasRow> {
+    let _ = c;
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::RestaurantSlugReconfigured(e) => Some(SlugAliasRow {
+            previous_slug: e.previous_slug.clone(),
+            restaurant_id: e.restaurant_id.clone(),
+            current_slug: e.slug.clone(),
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}
+
 /// Hand-written business logic for `ProspectionPipeline`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait ProspectionPipelineCompute {

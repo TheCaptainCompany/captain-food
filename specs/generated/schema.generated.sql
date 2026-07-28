@@ -451,6 +451,14 @@ CREATE TABLE RestaurantDispatchConfig (
 );
 CREATE INDEX ON RestaurantDispatchConfig (city_id);
 
+CREATE TABLE slug_reservations (
+  slug TEXT PRIMARY KEY,
+  restaurant_id UUID NOT NULL,
+  reserved_at TIMESTAMPTZ NOT NULL,
+  released_at TIMESTAMPTZ NULL
+);
+CREATE INDEX ON slug_reservations (restaurant_id);
+
 CREATE TABLE Restaurant (
   restaurant_id UUID PRIMARY KEY,
   restaurant_account_id UUID,
@@ -482,6 +490,15 @@ CREATE TABLE Restaurant (
 );
 CREATE INDEX ON Restaurant (restaurant_account_id);
 CREATE INDEX ON Restaurant (listing_status);
+
+CREATE TABLE SlugAlias (
+  previous_slug TEXT PRIMARY KEY,
+  restaurant_id UUID NOT NULL,
+  current_slug TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON SlugAlias (restaurant_id);
 
 CREATE TABLE ProspectionPipeline (
   restaurant_id UUID PRIMARY KEY,

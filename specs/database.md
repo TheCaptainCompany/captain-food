@@ -272,6 +272,21 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `SlugAlias` · 🛶 V0 · source aggregate `Restaurant`
+
+- **Fed by**: `RestaurantSlugReconfigured`
+- **Rules**: One row per superseded label, keyed by that label. A restaurant renamed N times leaves N rows -- each recording the address that superseded it AT THAT MOMENT, which is a historical fact and therefore never stale. `current_slug` is NOT how a redirect is resolved: after A->B->C, row A still says B. `hosts.rs` resolves the alias to `restaurant_id` and reads that restaurant's CURRENT slug from the Restaurant projection, so every superseded label lands on the live address in ONE hop rather than walking a 301 chain. Rows are never deleted: the reservation table bars reuse of a released label, so an alias can never start pointing at a different business.
+- **Note**: Superseded storefront labels, so a renamed restaurant's OLD host keeps resolving (ADR-20260728-011344). `hosts.rs` resolves an incoming Host header against `Restaurant.slug` first and falls back here, answering 301 -> the current address. Without this, a rename instantly 404s every printed menu, QR code, inbound link and search result pointing at the old label -- which is why `RestaurantSlugReconfigured` carries `previousSlug` as business data rather than leaving it to be re-derived by folding history. Host resolution runs on EVERY request and must never fold.
+
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `previous_slug` | `Slug` | `TEXT` | PK |  |
+| `restaurant_id` | `RestaurantId` | `UUID` | index |  |
+| `current_slug` | `Slug` | `TEXT` | — | The address that superseded `previous_slug` at the time of the rename. Historical, not authoritative -- see the rules above: resolution goes through `restaurant_id`. |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 ### `ProspectionPipeline` · 🔭 V1 · source aggregate `Prospect`
 
 - **Fed by**: `RestaurantRegistered`, `RestaurantGoogleBusinessProfileUpdated`, `RestaurantListingStatusChanged`, `ProspectContacted`, `ProspectMarkedCold`, `ProspectReplied`

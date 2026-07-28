@@ -30,6 +30,8 @@ pub mod refund_queue;
 pub mod restaurant;
 pub mod restaurant_store;
 pub mod status_bus;
+pub mod slug_alias_store;
+pub mod slug_reservation;
 
 pub use auth_sessions::PgAuthSessionStore;
 pub use cart::PgCartRepository;
@@ -37,6 +39,7 @@ pub use catalog::PgCatalogRepository;
 pub use command_journal::PgCommandJournal;
 pub use customer::PgCustomerRepository;
 pub use customer_credit_balance::PgCustomerCreditRepository;
+pub use slug_reservation::PgSlugReservationRepository;
 pub use delivery::PgDeliveryRepository;
 pub use delivery_satisfaction::PgDeliverySatisfactionRepository;
 pub use event_bus::{AppendedEvent, EventBus};

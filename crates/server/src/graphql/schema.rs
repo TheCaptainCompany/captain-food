@@ -78,6 +78,11 @@ pub struct WriteDeps {
     /// Cookie-pickup parking (#112): VerifyPhone/verify-email park the provider session here for
     /// `POST /auth/session` to claim. Fail-closed stand-in (refuses) until AUTH_SESSION_KEY + DB.
     pub auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore>,
+    /// The write-side arbiter of storefront-slug uniqueness (ADR-20260728-011344 D3) that
+    /// `configureRestaurantSlug` reserves through. NOT a read repository: a reservation is a write-path
+    /// decision backed by a real `UNIQUE` constraint, never a lookup against the eventually-consistent
+    /// `Restaurant` projection.
+    pub slug_reservations: Arc<dyn application::queries::SlugReservationRepository>,
 }
 
 /// Build the master schema served under every role path. With `Some(deps)`/`Some(writes)` the
@@ -120,6 +125,7 @@ pub fn build_schema(
         builder = builder.data(w.journal);
         builder = builder.data(w.status_bus);
         builder = builder.data(w.auth_sessions);
+        builder = builder.data(w.slug_reservations);
     }
     if let Some(bus) = events {
         builder = builder.data(bus);

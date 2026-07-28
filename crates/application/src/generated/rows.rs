@@ -35,6 +35,16 @@ pub struct RestaurantRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Superseded storefront labels, so a renamed restaurant's OLD host keeps resolving (ADR-20260728-011344). `hosts.rs` resolves an incoming Host header against `Restaurant.slug` first and falls back here, answering 301 -> the current address. Without this, a rename instantly 404s every printed menu, QR code, inbound link and search result pointing at the old label -- which is why `RestaurantSlugReconfigured` carries `previousSlug` as business data rather than leaving it to be re-derived by folding history. Host resolution runs on EVERY request and must never fold. 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlugAliasRow {
+    pub previous_slug: Slug,
+    pub restaurant_id: RestaurantId,
+    pub current_slug: Slug,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// B2B prospection pipeline (ADR-0020): one row per worked listing, with the COMPUTED score and outreach state. Read by the admin prospectionPipeline query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProspectionPipelineRow {

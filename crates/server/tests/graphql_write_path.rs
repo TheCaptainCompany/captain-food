@@ -178,10 +178,38 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             status_bus: infrastructure::OperationStatusBus::default(),
             // #112: no session storage needed for the write-path test — the noop store.
             auth_sessions: std::sync::Arc::new(application::auth_sessions::NoopAuthSessionStore),
+            // ADR-20260728-011344: this test drives no slug configuration, so a permissive local
+            // double is enough (see `AlwaysFreeSlugs` — deliberately NOT reused in production, where
+            // the arbiter is a real UNIQUE constraint).
+            slug_reservations: std::sync::Arc::new(AlwaysFreeSlugs),
         }),
         // No event bus: this test exercises the POST write path, not the domain-fact subscriptions.
         None,
     )
+}
+
+/// A `SlugReservationRepository` that grants every request. Fine here because this test never issues
+/// `configureRestaurantSlug` — the field only has to be inhabited. Real uniqueness is arbitrated by the
+/// `slug_reservations` UNIQUE constraint (ADR-20260728-011344 D3), and the behaviour tests cover the
+/// conflict path against an in-memory double that actually refuses.
+struct AlwaysFreeSlugs;
+
+#[async_trait::async_trait]
+impl application::queries::SlugReservationRepository for AlwaysFreeSlugs {
+    async fn reserve(
+        &self,
+        _slug: domain::generated::scalars::Slug,
+        _restaurant_id: domain::generated::scalars::RestaurantId,
+    ) -> Result<bool, domain::shared::errors::DomainError> {
+        Ok(true)
+    }
+    async fn release(
+        &self,
+        _slug: domain::generated::scalars::Slug,
+        _restaurant_id: domain::generated::scalars::RestaurantId,
+    ) -> Result<(), domain::shared::errors::DomainError> {
+        Ok(())
+    }
 }
 
 /// Poll `operationStatus(messageId)` (as `role`, optionally with a session) until non-PENDING;

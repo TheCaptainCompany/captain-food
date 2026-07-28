@@ -129,7 +129,31 @@ async fn tenant_page(
 ) -> Response {
     let registered = match &lookup.0 {
         Some(repo) => match repo.by_slug(Slug(slug.to_string())).await {
-            Ok(found) => found.is_some(),
+            Ok(Some(_)) => true,
+            // Not a current address. Before treating it as unclaimed, check whether it is a SUPERSEDED
+            // one (ADR-20260728-011344): a renamed storefront's old label is on printed menus, QR codes,
+            // Google listings and inbound links, so it must keep working. 301 to whatever the restaurant's
+            // current address is -- resolved through the restaurant row, so one hop lands on the live
+            // label however many times it has been renamed.
+            Ok(None) => {
+                match repo.by_previous_slug(Slug(slug.to_string())).await {
+                    Ok(Some(current)) => match &current.slug {
+                        Some(current_slug) if current_slug.0 != slug => {
+                            let target = format!("https://{}.{APEX}{path}", current_slug.0);
+                            return (
+                                StatusCode::MOVED_PERMANENTLY,
+                                [(axum::http::header::LOCATION, target)],
+                            )
+                                .into_response();
+                        }
+                        // No current address, or it somehow equals this one: nothing to redirect to.
+                        // Fall through rather than emit a self-redirect loop.
+                        _ => false,
+                    },
+                    Ok(None) => false,
+                    Err(_) => true, // fail open to the storefront shell
+                }
+            }
             Err(_) => true, // fail open to the storefront shell
         },
         None => true, // no database (dev): every slug is a storefront
@@ -221,6 +245,8 @@ mod tests {
     struct StubRestaurants {
         registered: &'static str,
         erroring: bool,
+        /// A label this restaurant has renamed away from, if any (ADR-20260728-011344).
+        renamed_from: Option<&'static str>,
     }
 
     fn row(slug: &str) -> RestaurantRow {
@@ -254,6 +280,14 @@ mod tests {
         async fn by_id(&self, _id: RestaurantId) -> Result<Option<RestaurantRow>, DomainError> {
             Ok(None)
         }
+        /// `renamed_from` stands in for a `slugalias` hit: it resolves to the restaurant that moved
+        /// away from that label, whose CURRENT slug is `registered`.
+        async fn by_previous_slug(&self, slug: Slug) -> Result<Option<RestaurantRow>, DomainError> {
+            if self.erroring {
+                return Err(DomainError::Repository("read model down".into()));
+            }
+            Ok((Some(slug.0.as_str()) == self.renamed_from).then(|| row(self.registered)))
+        }
     }
 
     fn ssr() -> crate::web_ssr::SsrExec {
@@ -266,10 +300,50 @@ mod tests {
         String::from_utf8_lossy(&bytes).into_owned()
     }
 
+    /// The behaviour that protects printed menus, QR codes and search results: a renamed storefront's
+    /// OLD host keeps working, with a 301 to the current one (ADR-20260728-011344).
+    #[tokio::test]
+    async fn a_superseded_host_redirects_to_the_current_address() {
+        let lookup = TenantLookup(Some(Arc::new(StubRestaurants {
+            registered: "chez-test",
+            erroring: false,
+            renamed_from: Some("chez-test-old"),
+        })));
+        let response = tenant_page(
+            &lookup,
+            &ssr(),
+            "chez-test-old",
+            "chez-test-old.captain.food",
+            "/menu",
+            "fr",
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY);
+        let location = response.headers().get(axum::http::header::LOCATION).expect("Location");
+        // The PATH is preserved -- a deep link into the old storefront lands on the same page, not the
+        // homepage. Losing it would turn every shared menu link into a bounce.
+        assert_eq!(location, "https://chez-test.captain.food/menu");
+    }
+
+    /// An unknown label with no alias is still the claim offer, not a redirect -- the fallback must not
+    /// swallow the acquisition path.
+    #[tokio::test]
+    async fn an_unknown_host_with_no_alias_still_sees_the_offer() {
+        let lookup = TenantLookup(Some(Arc::new(StubRestaurants {
+            registered: "chez-test",
+            erroring: false,
+            renamed_from: Some("chez-test-old"),
+        })));
+        let response =
+            tenant_page(&lookup, &ssr(), "nobody", "nobody.captain.food", "/", "fr").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(body_of(response).await.contains("join.captain.food"));
+    }
+
     #[tokio::test]
     async fn registered_tenant_root_serves_its_storefront() {
         let lookup =
-            TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: false })));
+            TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: false, renamed_from: None })));
         let response = tenant_page(&lookup, &ssr(), "chez-test", "chez-test.captain.food", "/", "fr").await;
         let html = body_of(response).await;
         assert!(html.contains("data-hydrate=\"restaurant\""), "{html}");
@@ -279,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn unclaimed_slug_gets_the_join_landing_on_every_path() {
         let lookup =
-            TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: false })));
+            TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: false, renamed_from: None })));
         for path in ["/", "/anything"] {
             let response = tenant_page(&lookup, &ssr(), "chezmarco", "chezmarco.captain.food", path, "fr").await;
             let html = body_of(response).await;
@@ -292,7 +366,7 @@ mod tests {
     async fn lookup_failure_fails_open_to_the_storefront_never_the_offer() {
         // A DB hiccup must not show "this address is available" for a real restaurant.
         let lookup =
-            TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: true })));
+            TenantLookup(Some(Arc::new(StubRestaurants { registered: "chez-test", erroring: true, renamed_from: None })));
         let response = tenant_page(&lookup, &ssr(), "chez-test", "chez-test.captain.food", "/", "fr").await;
         let html = body_of(response).await;
         assert!(html.contains("data-hydrate=\"restaurant\""), "{html}");
