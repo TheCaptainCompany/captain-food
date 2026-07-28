@@ -14,8 +14,10 @@
 //!
 //! **The payload is TRANSIENT** (ADR-20260728-143000, #231). It is an input to TRANSLATION — needed
 //! from the moment INSEE reports a change until this worker has turned it into a domain fact, and never
-//! again — so [`SireneSyncWorker::mark_processed`] NULLs it in the same statement that advances the
-//! checkpoint. At ~1.8 kB a row the mirror was 77% of the database (655 MB at department 37 of 101, on
+//! again. It is dropped only once that is CERTAIN, in the same statement that records the certainty:
+//! `reconcile_staged` for the register path (when the aggregate's verdict comes back) and
+//! [`SireneSyncWorker::mark_processed`] for the explicit closure (whose command executes inline). Never
+//! at hand-over — a staged fact has not been accepted yet, and the raw record is the only original. At ~1.8 kB a row the mirror was 77% of the database (655 MB at department 37 of 101, on
 //! a 2 GB disk), which is what gated national coverage. The hash persists; only the payload goes.
 //! One class of row keeps it: anything the ACL could not MAP, because that payload is the only evidence
 //! of why INSEE's record was unusable.
@@ -189,8 +191,11 @@ enum RowOutcome {
     /// this worker knows: a later delivery failure or rejection would leave the mirror asserting a
     /// success that never happened. `reconcile_staged` resolves it on a later pass.
     ///
-    /// The payload is still dropped here, because the inbound row carries its own translated copy — the
-    /// staging payload has done its job either way.
+    /// The payload is KEPT. It was previously dropped here on the argument that the inbound row carries
+    /// its own translated copy — true, but it is the TRANSLATED copy, and if the ACL turns out to have
+    /// mistranslated the record, re-running it needs the RAW one. Dropping at hand-over destroys the
+    /// only original before anything has confirmed the translation was even accepted. The payload goes
+    /// in `reconcile_staged`, at the moment the verdict makes the sync certain.
     Staged,
     /// Actually completed. Only the explicit-closure path reaches this synchronously: `MarkRestaurantClosed`
     /// is a real command executed inline, so its outcome is known when this is written.
@@ -209,9 +214,12 @@ impl RowOutcome {
         }
     }
 
-    /// Only a spent payload is dropped. Evidence is never discarded.
+    /// A payload is dropped ONLY once the sync is certain. `Synced` qualifies because the only outcome
+    /// that reaches it synchronously is the explicit closure, where `MarkRestaurantClosed` has actually
+    /// executed. `Staged` does not: the aggregate has not decided yet. `Unmappable` does not: the
+    /// payload is the evidence of why the record was unusable.
     fn clears_payload(self) -> bool {
-        matches!(self, RowOutcome::Staged | RowOutcome::Synced)
+        matches!(self, RowOutcome::Synced)
     }
 
     /// `synced_at` is a claim that the record REACHED THE DOMAIN, so only a known-complete outcome may
@@ -572,10 +580,14 @@ impl SireneSyncWorker {
     /// surfaced as FAILED. RECEIVED (0) is still in flight and left alone.
     async fn reconcile_staged(&self, summary: &mut SireneSyncSummary) -> Result<(), DomainError> {
         let resolved = sqlx::query(
+            // The payload is dropped HERE, in the same statement that records the verdict — never
+            // before it. A FAILED verdict keeps the payload: that is the row that may need
+            // re-translating, and it is the only original we hold.
             "UPDATE external_sirene_restaurants s \
                 SET status = CASE WHEN i.status = 2 THEN 'FAILED' ELSE 'SYNCED' END, \
                     synced_at = CASE WHEN i.status = 2 THEN s.synced_at \
-                                     ELSE COALESCE(i.delivered_at, now()) END \
+                                     ELSE COALESCE(i.delivered_at, now()) END, \
+                    payload = CASE WHEN i.status = 2 THEN s.payload ELSE NULL END \
                FROM inbound_events i \
               WHERE s.status = 'STAGED' \
                 AND i.source = $1 \

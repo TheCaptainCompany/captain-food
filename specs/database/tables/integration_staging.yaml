@@ -36,15 +36,26 @@ external_sirene_restaurants:
     asymmetry is what makes national coverage affordable. The payload is an INPUT TO TRANSLATION: needed
     from the moment INSEE reports a change until the worker has turned it into a domain fact, and never
     again. The hash is the change-detection key and is needed forever, because every future sweep
-    compares against it. So a payload is present exactly while a row is PENDING; the worker NULLs it on
-    successful translation. At steady state almost every row is processed, so the table is
+    compares against it. A payload is dropped only once the sync is CERTAIN, in the same statement that
+    records the certainty -- when the aggregate's verdict comes back (STAGED -> SYNCED), or, for the
+    explicit-closure path, when the command has actually executed. NEVER at hand-over: a staged fact has
+    not been accepted yet, and while the inbound row carries the TRANSLATED copy, the raw record here is
+    the only ORIGINAL -- which is exactly what is needed if the translation turns out to be wrong. At steady state almost every row is processed, so the table is
     `siret + payload_hash + etat/naf/department + timestamps` ~ 200 bytes/row instead of ~1.8 kB.
     Measured before the change: 655 MB for 339k rows -- 77% of the whole database, at department 37 of
     101, projecting to ~2 GB for full France on a 2 GB disk.
 
-    The ONE exception is deliberate: a row the ACL could not MAP (no usable name, no postal code,
-    unparsable JSON) KEEPS its payload. It is the only evidence of why INSEE's record was unusable, and
-    deleting it is how a systematic mapping bug hides. The set is bounded (~5.4k historically).
+    Everything not confirmed keeps its payload, and each case has its own reason. A row the ACL could not
+    MAP keeps it because that payload is the only evidence of why INSEE's record was unusable, and
+    deleting it is how a systematic mapping bug hides (bounded, ~5.4k historically). A FAILED delivery
+    keeps it because that is precisely when the record must be re-translated. A POISON row keeps it
+    because it is what a human needs to diagnose the quarantine. And a row predating the `status` column
+    keeps it because nothing ever recorded its outcome -- `processed_at` is a CHECKPOINT, not a verdict
+    (the worker advances it for unmappable rows too, and the ingestion advances it again on unchanged
+    ones), so reading it as success would be deriving certainty from a column that never carried any.
+    Those rows still hold the hash sentinel, so the next sweep re-pends each exactly once, the worker
+    translates them, and the payload is released THERE -- with the sync confirmed. Reclamation of the
+    historical mirror therefore runs through the ordinary path rather than around it.
 
     `status` answers "HAS THIS ROW BEEN SYNCED, OR NOT?" directly, instead of leaving it to be inferred.
     It exists because making the payload transient would otherwise have made the table ambiguous: once
