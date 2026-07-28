@@ -30,7 +30,8 @@ async fn reset_schema(pool: &PgPool) {
           sync_run_id UUID NOT NULL,
           payload_hash TEXT NOT NULL DEFAULT 'unhashed-pre-20260728',
           processed_at TIMESTAMPTZ NULL,
-          status TEXT NOT NULL DEFAULT 'PENDING'
+          status TEXT NOT NULL DEFAULT 'PENDING',
+          synced_at TIMESTAMPTZ NULL
         );
         "#,
     )
@@ -57,9 +58,12 @@ async fn seed(pool: &PgPool, siret: &str, payload: &str, done: bool) {
     .expect("seed staging row");
 }
 
-async fn row(pool: &PgPool, siret: &str) -> (Option<serde_json::Value>, String, String) {
+async fn row(
+    pool: &PgPool,
+    siret: &str,
+) -> (Option<serde_json::Value>, String, String, Option<chrono::DateTime<chrono::Utc>>) {
     sqlx::query_as(
-        "SELECT payload, payload_hash, status FROM external_sirene_restaurants WHERE siret = $1",
+        "SELECT payload, payload_hash, status, synced_at FROM external_sirene_restaurants WHERE siret = $1",
     )
     .bind(siret)
     .fetch_one(pool)
@@ -96,28 +100,33 @@ async fn compaction_hashes_before_dropping_and_keeps_what_it_cannot_translate() 
     // 1. The translated row: payload gone, and a REAL hash in place of the sentinel. The order matters
     //    — a payload dropped while the sentinel stood would make the next sweep re-pend the row and
     //    re-write the payload, undoing the whole change.
-    let (payload, hash, status) = row(&pool, "85242109900021").await;
+    let (payload, hash, status, synced_at) = row(&pool, "85242109900021").await;
     assert!(payload.is_none(), "a translated row loses its payload — that is the 655 MB");
     assert_ne!(hash, SENTINEL, "and gains a real hash, so the next sweep sees 'unchanged'");
     assert_eq!(hash.len(), 64, "SHA-256 as hex");
     assert_eq!(status, "SYNCED", "and says so — the column answers 'has this been synced?' directly");
+    // Backfilled from `processed_at`, not stamped now(): these rows were synced in the PAST, and
+    // pretending otherwise would make the whole mirror look freshly translated the day it compacts.
+    assert!(synced_at.is_some(), "a row known to have been synced records WHEN");
 
     // 2. The pending row keeps its payload — the worker still has to translate it — but is re-hashed,
     //    because the worker seeds its inbound `external_id` with that hash.
-    let (payload, hash, status) = row(&pool, "85242109900039").await;
+    let (payload, hash, status, synced_at) = row(&pool, "85242109900039").await;
     assert!(payload.is_some(), "a row the worker has not drained must keep what it will translate");
     assert_ne!(hash, SENTINEL);
     assert_eq!(status, "PENDING", "not yet synced");
+    assert!(synced_at.is_none(), "and therefore has no sync timestamp");
 
     // 3. The unparsable row is left completely alone: no computable hash, and the payload is the only
     //    evidence of why INSEE's record was unusable (D3).
-    let (payload, hash, status) = row(&pool, "85242109900047").await;
+    let (payload, hash, status, synced_at) = row(&pool, "85242109900047").await;
     assert!(payload.is_some(), "evidence of an unusable record is never discarded");
     assert_eq!(hash, SENTINEL, "and nothing is half-written");
     // THE reason `status` exists: without it this row is indistinguishable from the PENDING one above
     // — both simply "have a payload". The status is what makes the table readable once the payload
     // stopped being universal.
     assert_eq!(status, "UNMAPPABLE", "and the operator can see WHY the payload is still there");
+    assert!(synced_at.is_none(), "never reached the domain, so it never synced");
 
     // Re-running is a no-op on what it already did: the compacted row has dropped out of the
     // `payload IS NOT NULL` predicate, which is what makes the pass resumable across CI runs.

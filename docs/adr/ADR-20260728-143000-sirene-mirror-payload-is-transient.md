@@ -133,9 +133,59 @@ rather than by inference from `processed_at >= last_seen_at`:
 | value | meaning | payload |
 |---|---|---|
 | `PENDING` | ingested/refreshed, not yet translated | present — the worker needs it |
-| `SYNCED` | translated into a domain fact | dropped — spent |
+| `STAGED` | handed to `inbound_events`; the aggregate has not decided | dropped — the inbound row carries its own copy |
+| `SYNCED` | reached the domain (verdict resolved, or a synchronous closure) | dropped |
 | `UNMAPPABLE` | ACL-rejected or unparsable | kept — it is the evidence |
 | `FAILED` | last attempt failed; row stays pending and retries | present |
+| `POISON` | quarantined after 10 consecutive failures; the drain skips it | kept — needed to diagnose it |
+
+#### `STAGED` exists because the worker does not know the aggregate's verdict
+
+Raised by the product owner during implementation, and it is a correctness issue rather than a
+refinement. Since ADR-20260728-011344 the register path **stages an inbound fact** instead of issuing a
+command — `InboundEventsDrainWorker` delivers it later and the *aggregate* decides. So at hand-over the
+SIRENE worker genuinely does not know whether the record was accepted. Marking the row `SYNCED` there
+would have made the mirror assert a success nobody observed, and a later delivery failure would never
+correct it.
+
+The fix needs no new bookkeeping, because the link already exists: the ACL writes
+`inbound_events.external_id = '{siret}:{payload_hash}'`, and both halves are columns on the staging row.
+Each drain pass therefore resolves its `STAGED` rows with a single joined `UPDATE`:
+
+- `DELIVERED` / `IGNORED` / `DUPLICATE` → **`SYNCED`**. All three mean the record reached the domain and
+  the domain is now correct about it. A no-change verdict is a real answer, not a failure — conflating
+  the two is what once made a sweep unable to tell 200,000 registrations from 200,000 no-ops.
+- `FAILED` → `FAILED`.
+- `RECEIVED` → still in flight, left alone.
+
+This necessarily **lags by at least one drain**, because the verdict does not exist at hand-over time.
+`synced_at` is stamped from the inbound row's `delivered_at`, so it dates the moment the domain actually
+accepted the record rather than the moment we handed it over.
+
+#### `POISON` stops the retry, rather than just labelling it
+
+A failed sync deliberately leaves the row pending **with** its payload — the retry needs something to
+translate — so nothing in the pending predicate ever excludes a permanently-broken row. It would be
+re-attempted every pass forever, burning the sweep's budget and emitting an error nobody acts on. That
+is not hypothetical: the 605-row `SlugAlreadyTaken` log storm was exactly this shape.
+
+So `attempt_sync_retry_count` counts **consecutive** failures (resetting on any checkpointed outcome,
+which is what makes it answer "is this stuck *now*?"), and at 10 the row becomes `POISON` and the drain
+filters it out. Ten is generous enough that no transient outage can quarantine a healthy row, small
+enough that a broken one stops costing anything within a sweep or two.
+
+Recovery is automatic: a **changed** record from INSEE re-pends the row through the ordinary conflict
+arm, which writes `PENDING` and so releases the quarantine. Quarantine therefore holds a row exactly as
+long as it keeps arriving unchanged and broken — no operator step, and no permanent leak.
+
+#### `synced_at` and `last_attempt_sync_at` are not `processed_at`
+
+`processed_at` is a **checkpoint**, not a wall clock: the worker sets it to the `last_seen_at` it *read*
+so a concurrent ingestion bump re-pends the row rather than being swallowed, and the ingestion then
+advances it to `now()` on every unchanged row it re-sees. So it moves for rows nothing happened to.
+`synced_at` moves only when a fact actually reached the domain and survives a re-pend ("last synced 3
+weeks ago, PENDING again since yesterday"); `last_attempt_sync_at` moves on every attempt, successful or
+not.
 
 `GROUP BY status` is the per-sweep report. It does NOT replace `processed_at`: that remains the
 concurrency-safe checkpoint (marking a row at the `last_seen_at` that was READ is what makes a

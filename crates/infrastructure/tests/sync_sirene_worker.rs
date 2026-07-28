@@ -71,7 +71,10 @@ async fn reset_schema(pool: &PgPool) {
           sync_run_id UUID NOT NULL,
           payload_hash TEXT NOT NULL DEFAULT 'unhashed-pre-20260728',
           processed_at TIMESTAMPTZ NULL,
-          status TEXT NOT NULL DEFAULT 'PENDING'
+          status TEXT NOT NULL DEFAULT 'PENDING',
+          synced_at TIMESTAMPTZ NULL,
+          last_attempt_sync_at TIMESTAMPTZ NULL,
+          attempt_sync_retry_count INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE domain_events (
           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -234,7 +237,9 @@ async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map(
     .expect("translated row");
     assert!(payload.is_none(), "a translated payload is spent — it is never read again");
     assert!(!hash.is_empty(), "the hash persists: it is what stops the next sweep re-pending the row");
-    assert_eq!(status, "SYNCED", "the row says plainly that it HAS been synced");
+    // STAGED, not SYNCED: the fact has been handed to the inbox but the AGGREGATE has not decided yet.
+    // Claiming SYNCED here would assert a success this worker never observed.
+    assert_eq!(status, "STAGED", "handed over — the verdict is not in yet");
 
     let (unmappable, unmappable_status): (Option<serde_json::Value>, String) = sqlx::query_as(
         "SELECT payload, status FROM external_sirene_restaurants WHERE siret = '85242109900039'",
@@ -503,4 +508,131 @@ async fn worker_marks_a_deterministically_rejected_row_processed_instead_of_retr
     // The row is checkpointed: the next pass has nothing to do — the churn is gone.
     let replay = worker.run_once().await.expect("no-op drain");
     assert_eq!(replay.processed, 0);
+}
+
+/// The worker does NOT know, at hand-over, whether the aggregate accepted the record — since
+/// ADR-20260728-011344 the register path stages an inbound FACT and `InboundEventsDrainWorker` delivers
+/// it later. So `STAGED -> SYNCED` has to be resolved from the aggregate's verdict on a subsequent pass,
+/// and this pins that it actually happens: without it the mirror would sit on STAGED forever, or (worse)
+/// claim a success nobody observed.
+///
+/// The join needs no extra bookkeeping — the ACL already writes
+/// `inbound_events.external_id = '{siret}:{payload_hash}'`, and both halves are columns on the row.
+#[tokio::test]
+async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP staged_rows_resolve_to_synced_from_the_aggregates_verdict: DATABASE_URL not set");
+        return;
+    };
+    let _guard = db_lock().lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    let worker = SireneSyncWorker::new(pool.clone());
+
+    stage_row(&pool, "A").await;
+    worker.run_once().await.expect("first drain stages the fact");
+
+    let (status, synced_at): (String, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT status, synced_at FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("staged row");
+    assert_eq!(status, "STAGED");
+    assert!(synced_at.is_none(), "nothing has reached the domain yet, so nothing may claim a sync time");
+
+    // The drain worker delivers it and the aggregate decides. Simulated here by writing the verdict the
+    // real InboundEventsDrainWorker writes — DELIVERED (ordinal 1).
+    let updated = sqlx::query(
+        "UPDATE inbound_events SET status = 1, delivered_at = now() WHERE source = 'sirene'",
+    )
+    .execute(&pool)
+    .await
+    .expect("simulate delivery")
+    .rows_affected();
+    assert_eq!(updated, 1, "the register path staged exactly one inbound fact");
+
+    let summary = worker.run_once().await.expect("second drain reconciles");
+    assert_eq!(summary.resolved, 1, "the verdict is read back onto the mirror");
+
+    let (status, synced_at): (String, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT status, synced_at FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("resolved row");
+    assert_eq!(status, "SYNCED", "the aggregate accepted it, so now the mirror may say so");
+    assert!(synced_at.is_some(), "and records WHEN it reached the domain");
+}
+
+/// A no-change verdict is a SUCCESS, not a failure. The aggregate folding "nothing moved" (IGNORED) means
+/// the record reached the domain and the domain is now correct about it — conflating that with a failure
+/// is what once made a sweep unable to tell 200,000 registrations from 200,000 no-ops.
+#[tokio::test]
+async fn an_ignored_verdict_still_counts_as_synced() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP an_ignored_verdict_still_counts_as_synced: DATABASE_URL not set");
+        return;
+    };
+    let _guard = db_lock().lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    let worker = SireneSyncWorker::new(pool.clone());
+
+    stage_row(&pool, "A").await;
+    worker.run_once().await.expect("stage the fact");
+    // IGNORED = 3 (declaration-order ordinal): the aggregate decided nothing had changed.
+    sqlx::query("UPDATE inbound_events SET status = 3, delivered_at = now() WHERE source = 'sirene'")
+        .execute(&pool)
+        .await
+        .expect("simulate a no-change verdict");
+
+    worker.run_once().await.expect("reconcile");
+    let status: String = sqlx::query_scalar(
+        "SELECT status FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("row");
+    assert_eq!(status, "SYNCED", "'nothing changed' is a real answer, not a failure");
+}
+
+/// The quarantine has to actually STOP the retry, or it is just a label.
+///
+/// A failed sync deliberately leaves the row pending WITH its payload — the retry needs something to
+/// translate — so nothing in the pending predicate ever excludes a permanently-broken row. It would be
+/// re-attempted on every pass forever, burning the sweep's budget and emitting an error nobody acts on.
+/// (Not hypothetical: the 605-row SlugAlreadyTaken log storm was exactly this shape.) So the drain
+/// filters on `status <> 'POISON'`, and this pins it.
+#[tokio::test]
+async fn a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP a_poisoned_row_is_skipped_by_the_drain_and_keeps_its_payload: DATABASE_URL not set");
+        return;
+    };
+    let _guard = db_lock().lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    let worker = SireneSyncWorker::new(pool.clone());
+
+    // A pending row that has already exhausted its attempts.
+    stage_row(&pool, "A").await;
+    sqlx::query(
+        "UPDATE external_sirene_restaurants SET status = 'POISON', attempt_sync_retry_count = 10",
+    )
+    .execute(&pool)
+    .await
+    .expect("quarantine the row");
+
+    let summary = worker.run_once().await.expect("drain");
+    assert_eq!(summary.processed, 0, "a quarantined row is not re-attempted");
+
+    let (payload, status): (Option<serde_json::Value>, String) = sqlx::query_as(
+        "SELECT payload, status FROM external_sirene_restaurants WHERE siret = '85242109900021'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("row");
+    assert!(payload.is_some(), "its payload is the evidence needed to diagnose it — never dropped");
+    assert_eq!(status, "POISON", "and it stays quarantined until INSEE sends something different");
 }
