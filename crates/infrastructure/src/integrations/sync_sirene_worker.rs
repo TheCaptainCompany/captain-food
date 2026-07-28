@@ -59,6 +59,7 @@ use application::repository::Repository;
 use domain::restaurant::RestaurantState;
 use chrono::{DateTime, Utc};
 use domain::generated::commands::MarkRestaurantClosed;
+use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{
     CommandChannel, RestaurantListingStatus, RestaurantStatus,
 };
@@ -420,9 +421,13 @@ impl SireneSyncWorker {
                     // (staging row → inbound row → appended fact) shares one correlation.
                     correlation_id: sirene_uuid(&format!("inbound:{external_id}")),
                     event_type: "RestaurantRegistered".to_string(),
-                    payload: serde_json::to_value(&event).map_err(|e| {
-                        DomainError::Repository(format!("serialize RestaurantRegistered: {e}"))
-                    })?,
+                    // The ADJACENTLY-TAGGED union form (`{"eventType", "payload"}`) — the drain
+                    // worker deserializes `DomainEvent`, so a bare payload here is undeliverable:
+                    // every staged fact would come back FAILED ("missing field eventType").
+                    payload: serde_json::to_value(DomainEvent::RestaurantRegistered(event))
+                        .map_err(|e| {
+                            DomainError::Repository(format!("serialize RestaurantRegistered: {e}"))
+                        })?,
                     status: InboundEventStatus::RECEIVED,
                     error: None,
                     received_at: Utc::now(),
@@ -761,5 +766,36 @@ impl SireneSyncWorker {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The compaction's journal arm (#238) re-derives, in the `sirene_ingest` crate, the deterministic
+    /// `command_journal.message_id` this worker seeds — same namespace, same seed shape. The two crates
+    /// cannot share the code (ADR-0045: the CI ingestion sees no domain layers), so this pins them
+    /// together: if either derivation moves, the journal evidence silently stops matching and the
+    /// historical payloads stop being reclaimable — a drift this test turns into a loud failure.
+    #[test]
+    fn journal_message_id_parity_with_the_compaction() {
+        let last_seen_at = chrono::DateTime::parse_from_rfc3339("2026-07-20T12:00:00.123456+00:00")
+            .expect("fixed timestamp")
+            .with_timezone(&Utc);
+        for command_type in ["RegisterRestaurant", "MarkRestaurantClosed"] {
+            let entry = journal_entry(
+                command_type,
+                "85242109900021",
+                last_seen_at,
+                uuid::Uuid::nil(),
+                serde_json::json!({}),
+            );
+            assert_eq!(
+                entry.message_id,
+                sirene_ingest::journal_message_id(command_type, "85242109900021", last_seen_at),
+                "the {command_type} message_id derivations drifted apart"
+            );
+        }
     }
 }

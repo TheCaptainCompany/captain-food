@@ -80,6 +80,10 @@ async fn seed_restaurant(
 #[tokio::test]
 async fn by_account_returns_only_the_accounts_locations() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP by_account_returns_only_the_accounts_locations: DATABASE_URL not set");
         return;
     };

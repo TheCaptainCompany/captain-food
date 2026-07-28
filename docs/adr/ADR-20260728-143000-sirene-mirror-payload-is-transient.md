@@ -108,6 +108,9 @@ D3 holds **going forward** — the on-app worker has the ACL and keeps those pay
 one-shot historical pass that cannot. Moving the pass server-side would close the gap and is a
 contained change if that tail turns out to matter.
 
+*Superseded by "Evidence before removal" below: the pass no longer classifies rows at all — both of
+its arms only transcribe verdicts recorded elsewhere — so the gap this section weighed is gone.*
+
 ### Disk is reclaimed in two steps, and the first one does not shrink the file
 
 A plain `VACUUM` makes freed space **reusable by this table**; it does not return it to the OS, so
@@ -133,7 +136,7 @@ rather than by inference from `processed_at >= last_seen_at`:
 | value | meaning | payload |
 |---|---|---|
 | `PENDING` | ingested/refreshed, not yet translated | present — the worker needs it |
-| `STAGED` | handed to `inbound_events`; the aggregate has not decided | dropped — the inbound row carries its own copy |
+| `STAGED` | handed to `inbound_events`; the aggregate has not decided | kept — the inbound row holds only the TRANSLATED copy (see "Evidence before removal") |
 | `SYNCED` | reached the domain (verdict resolved, or a synchronous closure) | dropped |
 | `UNMAPPABLE` | ACL-rejected or unparsable | kept — it is the evidence |
 | `FAILED` | last attempt failed; row stays pending and retries | present |
@@ -234,21 +237,49 @@ fact, both written by the code path that observed it. Concretely:
 Note what "the inbound row has its own copy" does not buy: that copy is the **translated** form, which is
 exactly what is in question if the ACL mistranslated the record. The raw payload is the only original.
 
-#### The consequence: historical rows are reclaimed by re-syncing, not by compaction
+#### The pre-#227 verdicts were recorded all along — in the command journal (correction, product owner)
 
-Rows predating the `status` column carry `PENDING` and the `unhashed-pre-20260728` hash sentinel, so no
-evidence of their outcome exists and compaction will not touch them. That sentinel means the next sweep
-**re-pends each of them exactly once** — which migration `20260728040000` already documented as its cost
-— the worker translates them, the verdict comes back, and the payload is released there, confirmed.
+> *"Before we were using a command `RegisterRestaurant`, which means the data of the existing sync are
+> in the `command_journal`."*
 
-So reclaiming the historical 655 MB now **depends on the sweep resuming**; the compaction pass alone will
-not shrink a mirror full of pre-#231 rows, and it reports `left_unconfirmed` so a run that reclaimed
-nothing because nothing was confirmed cannot be mistaken for one that found nothing to do. Those need
-opposite responses.
+The first version of this correction concluded that pre-`status` rows carry **no** evidence of their
+outcome, so the historical 655 MB could only come back by re-syncing through a resumed sweep. That
+overlooked where the old write path put its evidence. Until ADR-20260728-011344 every sync was a
+`RegisterRestaurant` / `MarkRestaurantClosed` **command** sent through the journaling dispatch (#15),
+and `command_journal` therefore holds, per submission:
 
-One thing this correction removes: compaction no longer classifies anything, so **the ACL gap from
-running it in CI is gone**. It cannot mistake an ACL-unmappable row for a translated one, because it no
-longer decides — it only reads a verdict someone else recorded.
+- a **deterministic `message_id`** — UUIDv5 over (command type, SIRET, the staged version's
+  `last_seen_at` as read) — which pins the verdict to the **exact version the row still carries**
+  (a later refresh would have re-pended it and changed `last_seen_at`);
+- a **verdict** (`SUCCEEDED` / `REJECTED` / `FAILED`) plus `completed_at`, written by the dispatch when
+  the handler returned — a recorded observation, the same standard `status`/`synced_at` meet.
+
+So the compaction gained a **journal arm**: for a checkpointed pre-`status` row it re-derives the
+expected `message_id` and, on a `SUCCEEDED` verdict, transcribes it — `status = 'SYNCED'`,
+`synced_at = journal.completed_at`, payload dropped, one statement. `REJECTED`/`FAILED` verdicts, missing
+journal rows (drained before #15's journal existed, or an `etat=F` signal that had nothing to close) and
+non-checkpointed rows are left untouched and fall back to reclamation-by-re-sync. The derivation is
+duplicated into `sirene_ingest` (which cannot see the domain layers, ADR-0045) and pinned to the worker's
+by a parity test, `journal_message_id_parity_with_the_compaction`.
+
+Two bounds, stated so nobody discovers them operationally:
+
+- **The evidence expires.** `sweep_retention()` deletes terminal journal rows 90 days after
+  `completed_at`, and journaling itself only began 2026-07-20 — run the compaction before the verdicts
+  age out; afterwards those rows need the sweep again.
+- **`SUCCEEDED` certifies the submission, not every field.** The pre-#227 register path absorbed changed
+  records as idempotent no-op replays, so a row's latest INSEE data may not all be in the domain. The
+  sync still happened and the payload is still spent — INSEE is the system of record, the hash sentinel
+  re-pends every historical row once on the next sweep regardless, and the aggregate then decides on
+  fresh data.
+
+Reclaiming the historical 655 MB therefore no longer waits on resuming SIRENE for journal-covered rows;
+what the journal cannot confirm is reported as `left_unconfirmed` — a run that reclaimed nothing because
+nothing was confirmed must not be mistaken for one that found nothing to do. Those need opposite
+responses.
+
+One thing the correction keeps removed: compaction still classifies nothing, so **the ACL gap from
+running it in CI stays gone**. Both arms only read verdicts someone else recorded.
 
 ### What is unaffected
 

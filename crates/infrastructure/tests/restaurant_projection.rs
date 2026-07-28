@@ -122,6 +122,10 @@ async fn checkpoint(pool: &PgPool) -> i64 {
 #[tokio::test]
 async fn restaurant_event_folds_into_the_read_model() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP restaurant_event_folds_into_the_read_model: DATABASE_URL not set");
         return;
     };

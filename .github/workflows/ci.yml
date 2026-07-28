@@ -21,6 +21,20 @@ permissions:
 jobs:
   codegen:
     runs-on: ubuntu-latest
+    # A real Postgres for the DATABASE_URL-gated integration suites (#230). Without one they take
+    # their early-return branch and report ok — a green that covers nothing, which is how the #236
+    # drift (and the undeliverable staged-fact bug it hid) went unnoticed.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -37,8 +51,29 @@ jobs:
           rustup target add wasm32-unknown-unknown
           make wasm
 
+      # Kept WITHOUT a DATABASE_URL on purpose: this run proves the offline path (every DB-gated test
+      # must skip cleanly on a contributor machine with no Postgres). The DB suites run for real below.
       - name: Unit tests (whole workspace)
         run: cargo test --workspace --verbose
+
+      - uses: taiki-e/install-action@v2 # prebuilt sqlx-cli in seconds, same as db-migrate.yml
+        with:
+          tool: sqlx-cli
+      - name: Apply migrations to the CI Postgres (#230 — the DB suites assume the schema exists)
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: sqlx migrate run --source migrations
+
+      # --test-threads=1 because the suites share one database and reset the same tables; the per-file
+      # db_lock() does not cover cross-file runs. DB_TESTS_REQUIRED makes a skip LOUD: if this step
+      # ever loses its DATABASE_URL, the gated tests panic instead of silently reporting ok (#230).
+      - name: DB integration tests (previously these always skipped — no Postgres in CI)
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          DB_TESTS_REQUIRED: '1'
+        run: >-
+          cargo test -p infrastructure -p sirene_ingest -p server -p hubrise-adapter
+          --tests --verbose -- --test-threads=1
 
       - name: Validate the specs (full validator §1–§11 — the blocking gate)
         run: cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --check --specs specs

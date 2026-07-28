@@ -58,6 +58,10 @@ fn location(id: &str, account: uuid::Uuid) -> ConnectedLocation {
 #[tokio::test]
 async fn upserts_connections_and_resolves_tokens_by_location() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("DATABASE_URL not set — skipping Pg-gated hubrise connections test");
         return;
     };

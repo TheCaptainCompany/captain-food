@@ -241,6 +241,10 @@ async fn poll_operation(
 #[tokio::test]
 async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP acceptance_first_write_path: DATABASE_URL not set");
         return;
     };

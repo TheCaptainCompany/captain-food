@@ -116,6 +116,10 @@ fn sample_etablissement() -> Etablissement {
 #[tokio::test]
 async fn sirene_mapped_command_flows_through_the_write_path_idempotently() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!(
             "SKIP sirene_mapped_command_flows_through_the_write_path_idempotently: DATABASE_URL not set"
         );

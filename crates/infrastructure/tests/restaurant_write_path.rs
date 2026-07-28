@@ -134,6 +134,10 @@ fn register_restaurant_cmd(restaurant_id: uuid::Uuid) -> RegisterRestaurant {
 #[tokio::test]
 async fn command_appends_event_and_projects_the_restaurant_row() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
         eprintln!("SKIP command_appends_event_and_projects_the_restaurant_row: DATABASE_URL not set");
         return;
     };

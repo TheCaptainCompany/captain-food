@@ -16,26 +16,59 @@
 //!
 //! # What this means for rows that predate the status column
 //!
-//! They are NOT compacted here, deliberately. They carry `status = 'PENDING'` (the migration default) and
-//! the `unhashed-pre-20260728` hash sentinel, so the next sweep re-pends each of them exactly once --
-//! which is what migration `20260728040000` already documented as its cost -- the worker translates them,
-//! the aggregate's verdict comes back, and the payload is dropped THERE, with the sync confirmed.
-//! Reclamation runs through the ordinary path rather than around it.
+//! They carry `status = 'PENDING'` (the migration default) and no `synced_at`, so the rule above will
+//! never touch them -- but for most of them the evidence the rule demands EXISTS, one table over. Until
+//! #227 every sync was a `RegisterRestaurant`/`MarkRestaurantClosed` COMMAND sent through the journaling
+//! dispatch (#15): `command_journal` holds one row per submission, with a deterministic `message_id`
+//! (UUIDv5 over the command type, the SIRET and the staged version's `last_seen_at` -- exactly the
+//! version this row still carries, since a later refresh would have re-pended it), and a verdict
+//! (`SUCCEEDED`/`REJECTED`/`FAILED` + `completed_at`) written by the dispatch when the handler returned.
+//! That is a RECORDED outcome for the exact staged version -- the same standard `status`/`synced_at`
+//! meet -- so this pass transcribes it: `status = 'SYNCED'`, `synced_at = journal.completed_at`, payload
+//! dropped, all in one statement. Rows whose journal verdict is a rejection or a failure, and rows with
+//! no journal row at all (drained before journaling existed, or an `etat=F` signal that had nothing to
+//! close), are left untouched: the sweep re-pends them once on resume (their hash sentinel guarantees
+//! it, migration `20260728040000`) and the ordinary path confirms them.
 //!
-//! Two consequences worth stating plainly, because they change WHEN disk comes back:
+//! Two bounds on the journal evidence, worth stating plainly:
 //!
-//! - Historical reclamation now depends on the sweep resuming. This pass alone will not shrink a mirror
-//!   full of pre-#231 rows, and it says so in its summary rather than reporting a quiet success.
-//! - The ACL gap that came with running compaction in CI is GONE. This pass no longer classifies
-//!   anything, so it no longer needs the ACL it does not have, and no unmappable row can lose its
-//!   evidence to a crate that cannot recognise one.
+//! - **It expires.** The retention sweep (ADR-20260721-025159) deletes terminal `command_journal` rows
+//!   90 days after `completed_at`. Run this pass before the pre-#227 verdicts age out, or their rows
+//!   fall back to reclamation-by-re-sync.
+//! - **`SUCCEEDED` means the submission succeeded, not that the record's every field reached the
+//!   domain**: the pre-#227 register path absorbed changed records as idempotent no-op replays. The
+//!   sync HAPPENED -- the aggregate holds the record -- but a later INSEE change may not have been
+//!   applied. That is not a reason to keep the payload: INSEE is the system of record, the row's hash
+//!   sentinel makes the next sweep re-pend it regardless, and the aggregate then decides on fresh data.
 //!
-//! # Why the pass still exists
+//! The ACL gap that came with running compaction in CI stays GONE: this pass still classifies nothing --
+//! both arms only read verdicts someone else recorded.
+//!
+//! # Why the SYNCED arm exists
 //!
 //! As a backstop. The worker drops a confirmed payload in the SAME statement that records the
 //! confirmation, so the two cannot normally drift -- but a row holding both `SYNCED` and a payload is
 //! exactly what should be swept up, and doing that in bounded batches with `VACUUM` interleaved is the
 //! only shape that fits the disk this table has left.
+
+use chrono::{DateTime, Utc};
+
+/// UUIDv5 in the SIRENE integration namespace. DUPLICATED from
+/// `infrastructure::integrations::sirene::sirene_uuid` -- this CI crate cannot see the domain layers
+/// (ADR-0045), and the namespace is a fixed published constant, not logic. A parity unit test in
+/// `crates/infrastructure` (`journal_message_id_parity_with_the_compaction`) pins the two derivations
+/// together so they cannot drift silently.
+fn sirene_uuid(seed: &str) -> uuid::Uuid {
+    let ns = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"https://captain.food/integrations/sirene");
+    uuid::Uuid::new_v5(&ns, seed.as_bytes())
+}
+
+/// The deterministic `command_journal.message_id` the retired command path (#15, pre-#227) wrote for
+/// one staged version: UUIDv5 over (command type, SIRET, the row's `last_seen_at` as READ). Public so
+/// the infrastructure parity test can compare it against the worker's own derivation.
+pub fn journal_message_id(command_type: &str, siret: &str, last_seen_at: DateTime<Utc>) -> uuid::Uuid {
+    sirene_uuid(&format!("command:{command_type}:{siret}:{}", last_seen_at.to_rfc3339()))
+}
 
 /// Rows updated per batch. One round-trip each rather than one per row -- the #215/#216 lesson.
 pub const COMPACTION_BATCH_SIZE: i64 = 2_000;
@@ -48,12 +81,16 @@ pub const VACUUM_EVERY_BATCHES: usize = 25;
 /// What one compaction run did.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CompactionCounts {
-    /// Payloads dropped from rows confirmed SYNCED. The disk win.
+    /// Payloads dropped from rows already confirmed SYNCED. The backstop arm.
     pub compacted: u64,
-    /// Rows still holding a payload that this pass REFUSED to touch, because their sync is not confirmed.
-    /// Reported rather than silently ignored: a run that reclaimed nothing because nothing was confirmed
-    /// must not look like a run that found nothing to do. Those two need opposite responses -- resume the
-    /// sweep, versus do nothing -- and silence would make them identical.
+    /// Pre-#227 rows whose sync was confirmed FROM THE COMMAND JOURNAL's recorded verdict (see the
+    /// module doc) -- marked `SYNCED`, `synced_at` transcribed, payload dropped, in one statement.
+    /// On a mirror full of historical rows this is the disk win.
+    pub journal_confirmed: u64,
+    /// Rows still holding a payload that this pass REFUSED to touch, because their sync is not confirmed
+    /// by either arm. Reported rather than silently ignored: a run that reclaimed nothing because nothing
+    /// was confirmed must not look like a run that found nothing to do. Those two need opposite
+    /// responses -- resume the sweep, versus do nothing -- and silence would make them identical.
     pub left_unconfirmed: u64,
 }
 
@@ -69,6 +106,88 @@ pub async fn compact_payloads(
     let mut counts = CompactionCounts::default();
     let mut batches = 0usize;
 
+    // Arm 1 -- transcribe the command journal's recorded verdicts onto pre-#227 rows (module doc).
+    //
+    // The candidate set is NOT its own progress marker (a row with a REJECTED verdict, or none at all,
+    // stays a candidate forever), so unlike arm 2 this loop carries a keyset cursor. The expected
+    // message_id is derived per row from the SAME `last_seen_at` the retired command path read when it
+    // drained the row -- a version refreshed since then no longer matches its journal row and is left
+    // alone, which errs on the conservative side.
+    let mut cursor = String::new();
+    loop {
+        if started.elapsed() >= budget {
+            println!(
+                "sirene_ingest: compaction budget of {}s reached in the journal arm -- stopping \
+                 cleanly; re-run to continue",
+                budget.as_secs()
+            );
+            break;
+        }
+
+        let candidates: Vec<(String, chrono::DateTime<chrono::Utc>, String)> = sqlx::query_as(
+            "SELECT siret, last_seen_at, etat FROM external_sirene_restaurants \
+              WHERE siret > $1 \
+                AND payload IS NOT NULL \
+                AND status = 'PENDING' \
+                AND synced_at IS NULL \
+                AND processed_at IS NOT NULL \
+                AND processed_at >= last_seen_at \
+              ORDER BY siret LIMIT $2",
+        )
+        .bind(&cursor)
+        .bind(COMPACTION_BATCH_SIZE)
+        .fetch_all(pool)
+        .await?;
+        let Some(last) = candidates.last() else { break };
+        cursor = last.0.clone();
+
+        let sirets: Vec<String> = candidates.iter().map(|(siret, _, _)| siret.clone()).collect();
+        let expected: Vec<uuid::Uuid> = candidates
+            .iter()
+            .map(|(siret, last_seen_at, etat)| {
+                // The path the retired worker took for this row decided WHICH command it journaled:
+                // an explicit closure signal went through MarkRestaurantClosed, everything else
+                // through RegisterRestaurant.
+                let command = if etat == "F" { "MarkRestaurantClosed" } else { "RegisterRestaurant" };
+                journal_message_id(command, siret, *last_seen_at)
+            })
+            .collect();
+
+        // `SUCCEEDED` resolves through the ref_* lookup (ADR-0037 ordinals) -- never a hardcoded
+        // integer, same idiom as the retention sweep function. A REJECTED or FAILED verdict simply
+        // never matches, so those rows keep their payload and fall to reclamation-by-re-sync.
+        let confirmed = sqlx::query(
+            "UPDATE external_sirene_restaurants s \
+                SET status = 'SYNCED', synced_at = j.completed_at, payload = NULL \
+               FROM unnest($1::text[], $2::uuid[]) AS v(siret, message_id) \
+               JOIN command_journal j ON j.message_id = v.message_id \
+              WHERE s.siret = v.siret \
+                AND s.payload IS NOT NULL \
+                AND s.status = 'PENDING' \
+                AND j.status = (SELECT sort_order FROM ref_command_journal_status \
+                                 WHERE value = 'SUCCEEDED') \
+                AND j.completed_at IS NOT NULL",
+        )
+        .bind(&sirets)
+        .bind(&expected)
+        .execute(pool)
+        .await?
+        .rows_affected();
+        counts.journal_confirmed += confirmed;
+
+        batches += 1;
+        if batches % VACUUM_EVERY_BATCHES == 0 {
+            if let Err(e) = sqlx::query("VACUUM external_sirene_restaurants").execute(pool).await {
+                eprintln!("sirene_ingest: compaction VACUUM skipped ({e})");
+            }
+            println!(
+                "sirene_ingest: compaction progress -- {} journal-confirmed payload(s) dropped",
+                counts.journal_confirmed
+            );
+        }
+    }
+
+    // Arm 2 -- the backstop: rows already confirmed SYNCED that somehow still hold a payload.
     loop {
         if started.elapsed() >= budget {
             println!(
