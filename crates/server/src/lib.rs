@@ -110,7 +110,10 @@ pub fn wire() -> HealthDto {
 /// longer carries a slug, so the projector writes NULL for every listing without a configured storefront
 /// — against the old NOT NULL column that fails on the first projected registration. This gate is what
 /// holds the new projector back until CI has applied the migration.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260728020000;
+/// `20260728030000` = `slug_reservations` + `SlugAlias` (ADR-20260728-011344, slice 3): the projection
+/// worker now upserts alias rows for every rename, and the slug handler reserves through the former, so
+/// the app must not serve without either table.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260728030000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -338,6 +341,9 @@ pub fn router() -> Router {
                     // journal + the journal-transition broadcast behind operationStatus(+Changed).
                     journal: Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
                     status_bus: operation_status_bus.clone(),
+                    slug_reservations: Arc::new(
+                        infrastructure::PgSlugReservationRepository::new(pool.clone()),
+                    ),
                     auth_sessions: {
                         // Encrypted parking store when AUTH_SESSION_KEY is set; else stays the no-op
                         // (fail-closed: no key ⇒ no session cookies, never plaintext at rest).

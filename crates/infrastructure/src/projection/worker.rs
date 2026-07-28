@@ -22,7 +22,7 @@ use std::time::Duration;
 use application::projections::{
     project_cart, project_catalog, project_customer, project_customer_credit_balance,
     project_order_conversation, project_order_tracking, project_prospection_pipeline,
-    project_restaurant, Envelope,
+    project_restaurant, project_slug_alias, Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
@@ -32,6 +32,7 @@ use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
+use application::projectors::slug_alias::SlugAliasProjector;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{CartId, CatalogId, CustomerId, OrderId, RestaurantId};
@@ -41,6 +42,7 @@ use sqlx::{PgPool, Row};
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
     order_conversation_store, order_tracking_store, prospection_store, restaurant_store,
+    slug_alias_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -63,6 +65,9 @@ enum ReadModelProjector {
     OrderTracking,
     OrderConversation,
     CustomerCreditBalance,
+    /// Keyed by the SUPERSEDED slug from the event payload, not by an aggregate id — one row per
+    /// rename, so a restaurant renamed N times leaves N rows on the same stream.
+    SlugAlias,
 }
 
 impl ReadModelProjector {
@@ -157,6 +162,18 @@ impl ReadModelProjector {
                     order_conversation_store::upsert(pool, &next).await?;
                 }
             }
+            Self::SlugAlias => {
+                // Only a rename produces an alias. Every other Restaurant-stream event falls through
+                // the generated dispatch's `_ => state` arm, so there is nothing to key or load.
+                let previous_slug = match &env.event {
+                    DomainEvent::RestaurantSlugReconfigured(e) => e.previous_slug.clone(),
+                    _ => return Ok(()),
+                };
+                let state = slug_alias_store::load(pool, previous_slug).await?;
+                if let Some(next) = project_slug_alias(&SlugAliasProjector, state, env) {
+                    slug_alias_store::upsert(pool, &next).await?;
+                }
+            }
             Self::CustomerCreditBalance => {
                 // Single-stream: the ledger lives on `CustomerCredit-{customerId}`; both fed events
                 // carry customerId, so the row key resolves from the stream uuid (payload fallback).
@@ -227,6 +244,15 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "OrderConversation",
         stream_prefixes: &["Conversation-", "Order-", "Reclamation-"],
         projectors: &[ReadModelProjector::OrderConversation],
+    },
+    // The SlugAlias read model (ADR-20260728-011344): superseded storefront labels, so a renamed
+    // restaurant's old host keeps resolving. Its own checkpoint on the Restaurant category, because the
+    // row key is the payload's `previousSlug` -- NOT the aggregate id -- so it cannot share the
+    // Restaurant group's per-row resolution.
+    ProjectorGroup {
+        checkpoint: "SlugAlias",
+        stream_prefixes: &["Restaurant-"],
+        projectors: &[ReadModelProjector::SlugAlias],
     },
     // The CustomerCreditBalance read model (#158, Part B of #207): the per-customer store-credit
     // balance, folded from the ledger stream `CustomerCredit-{customerId}` (CustomerCreditGranted /

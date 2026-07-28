@@ -558,7 +558,7 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | [📩 `MarkProspectCold`](#command-markprospectcold) | [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold) | [⛔ `ProspectNotFound`](#error-prospectnotfound) |
 | [📩 `RecordProspectReply`](#command-recordprospectreply) | [⚡ `ProspectReplied`](#event-prospectreplied) | [⛔ `ProspectNotFound`](#error-prospectnotfound) |
 
-### 🗄️ Views (read models) _(3)_
+### 🗄️ Views (read models) _(4)_
 
 <a id="view-view_restaurantaccount"></a>
 #### 🗄️ View: `View_RestaurantAccount`
@@ -610,6 +610,22 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `default_currency` | [🔤 `CurrencyCode`](#scalar-currencycode) _(derived)_ | [⚡ `RestaurantAccountRegistered`.`defaultCurrency`](#event-restaurantaccountregistered--defaultcurrency) | — |  |
 | `timezone` | [🔤 `TimeZone`](#scalar-timezone) _(derived)_ | [⚡ `RestaurantRegistered`.`timezone`](#event-restaurantregistered--timezone), [⚡ `RestaurantUpdated`.`timezone`](#event-restaurantupdated--timezone) | nullable | Location timezone; falls back to the account's when null. |
 | `preparation_time_minutes` | `integer` _(derived)_ | [⚡ `RestaurantRegistered`.`preparationTimeMinutes`](#event-restaurantregistered--preparationtimeminutes), [⚡ `RestaurantUpdated`.`preparationTimeMinutes`](#event-restaurantupdated--preparationtimeminutes) | nullable |  |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+<a id="view-slugalias"></a>
+#### 🗄️ View: `SlugAlias`
+
+- **Source**: [🎭 `Restaurant`](#actor-restaurant) · 🛶 V0
+- **Note**: Superseded storefront labels, so a renamed restaurant's OLD host keeps resolving (ADR-20260728-011344). `hosts.rs` resolves an incoming Host header against `Restaurant.slug` first and falls back here, answering 301 -> the current address. Without this, a rename instantly 404s every printed menu, QR code, inbound link and search result pointing at the old label -- which is why `RestaurantSlugReconfigured` carries `previousSlug` as business data rather than leaving it to be re-derived by folding history. Host resolution runs on EVERY request and must never fold. 
+- **Rules**: One row per superseded label, keyed by that label. A restaurant renamed N times leaves N rows -- each recording the address that superseded it AT THAT MOMENT, which is a historical fact and therefore never stale. `current_slug` is NOT how a redirect is resolved: after A->B->C, row A still says B. `hosts.rs` resolves the alias to `restaurant_id` and reads that restaurant's CURRENT slug from the Restaurant projection, so every superseded label lands on the live address in ONE hop rather than walking a 301 chain. Rows are never deleted: the reservation table bars reuse of a released label, so an alias can never start pointing at a different business.
+- **Fed by**: [⚡ `RestaurantSlugReconfigured`](#event-restaurantslugreconfigured)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `previous_slug` | [🔤 `Slug`](#scalar-slug) _(derived)_ | [⚡ `RestaurantSlugReconfigured`.`previousSlug`](#event-restaurantslugreconfigured--previousslug) | PK |  |
+| `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ | [⚡ `RestaurantSlugReconfigured`.`restaurantId`](#event-restaurantslugreconfigured--restaurantid) | index |  |
+| `current_slug` | [🔤 `Slug`](#scalar-slug) _(derived)_ | [⚡ `RestaurantSlugReconfigured`.`slug`](#event-restaurantslugreconfigured--slug) | — | The address that superseded `previous_slug` at the time of the rename. Historical, not authoritative -- see the rules above: resolution goes through `restaurant_id`. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -1059,7 +1075,7 @@ The restaurant's storefront address has been CHANGED (ADR-20260728-011344). Dist
 
 - **Emitted by**: [🎭 `Restaurant`](#actor-restaurant)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Restaurant`](#view-restaurant)
+- **Projected into**: [🗄️ `Restaurant`](#view-restaurant), [🗄️ `SlugAlias`](#view-slugalias)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

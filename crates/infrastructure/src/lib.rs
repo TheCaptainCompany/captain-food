@@ -33,7 +33,8 @@ pub use persistence::{
     PgEventStore, PgInboundEvents, PgOrderConversationRepository, PgOrderRepository,
     PgPricingPolicyRepository,
     PgProspectionRepository, PgReclamationRepository, PgRefundQueueRepository,
-    PgRestaurantRepository, PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
+    PgRestaurantRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,
+    PgUberSplitPolicyRepository,
 };
 pub use process_manager::{ProcessManagerRunner, ProcessManagerStatus};
 pub use projection::{ProjectionStatus, ProjectionWorker};

@@ -103,6 +103,23 @@ impl RestaurantReadRepository for PgRestaurantRepository {
         rows.iter().map(restaurant_store::decode).collect()
     }
 
+    /// Resolve a SUPERSEDED label to the restaurant that renamed away from it, so `hosts.rs` can 301 to
+    /// whatever its current address is (ADR-20260728-011344). One statement: the alias row names the
+    /// restaurant, the join yields its live row.
+    async fn by_previous_slug(&self, previous_slug: Slug) -> Result<Option<RestaurantRow>, DomainError> {
+        // `r.*` rather than the shared COLUMNS list: only the restaurant's own columns come back, so
+        // `decode`'s try_get-by-name stays unambiguous against the joined alias row.
+        let sql = "SELECT r.* FROM restaurant r \
+             JOIN slugalias a ON a.restaurant_id = r.restaurant_id \
+             WHERE a.previous_slug = $1 LIMIT 1";
+        let row = sqlx::query(sql)
+            .bind(previous_slug.0)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+        row.as_ref().map(restaurant_store::decode).transpose()
+    }
+
     async fn by_slug(&self, slug: Slug) -> Result<Option<RestaurantRow>, DomainError> {
         let sql = format!(
             "SELECT {} FROM restaurant WHERE slug = $1",

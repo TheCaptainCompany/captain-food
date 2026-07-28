@@ -20,6 +20,9 @@ use domain::shared::errors::DomainError;
 pub use crate::generated::rows::CartRow;
 pub use crate::generated::rows::CatalogRow;
 pub use crate::generated::rows::CustomerCreditBalanceRow;
+/// Superseded storefront labels (ADR-20260728-011344). Read by `hosts.rs` for the 301, not by any
+/// GraphQL query -- see `projectors::slug_alias`.
+pub use crate::generated::rows::SlugAliasRow;
 pub use crate::generated::rows::CustomerRow;
 pub use crate::generated::rows::OrderConversationRow;
 pub use crate::generated::rows::OrderTrackingRow;
@@ -76,6 +79,17 @@ pub trait RestaurantReadRepository: Send + Sync {
     async fn list(&self, filter: RestaurantFilter) -> Result<Vec<RestaurantRow>, DomainError>;
     /// A single restaurant by its slug (the per-restaurant storefront), or `None` if absent.
     async fn by_slug(&self, slug: Slug) -> Result<Option<RestaurantRow>, DomainError>;
+
+    /// The restaurant that USED to hold `previous_slug`, for host resolution after a rename
+    /// (ADR-20260728-011344). Returns the restaurant row, so the caller reads its CURRENT slug and
+    /// redirects there in one hop — rather than walking the `SlugAlias.current_slug` chain, which after
+    /// A→B→C still records B on row A.
+    ///
+    /// Provided: `Ok(None)` — a store with no alias knowledge simply never redirects. The Pg adapter
+    /// overrides it with the `slugalias` join.
+    async fn by_previous_slug(&self, _previous_slug: Slug) -> Result<Option<RestaurantRow>, DomainError> {
+        Ok(None)
+    }
     /// A single restaurant by id — the FK-navigation join other read slices hydrate from.
     async fn by_id(&self, id: RestaurantId) -> Result<Option<RestaurantRow>, DomainError>;
 
