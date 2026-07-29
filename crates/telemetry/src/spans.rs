@@ -1,0 +1,280 @@
+//! Span constructors for the instrumented boundaries.
+//!
+//! Every span required by `specs/observability.yaml` is built here, in ONE place, rather than by a
+//! `tracing::info_span!` at each call site. Two reasons, both practical:
+//!
+//! - The `command.*` spans are emitted from ~100 GENERATED mutation resolvers. Inlining the macro would
+//!   copy the field list a hundred times into `mutation.rs`, so a contract change would mean re-reading
+//!   generated output to check it landed everywhere.
+//! - `tracing` field names must be literals in the macro, so they cannot be the `contract::attr`
+//!   constants. Confining the literals to this file means the conformance test has exactly one file to
+//!   check against the spec, instead of trusting that a literal somewhere in generated code is right.
+//!
+//! `otel.kind` is the field `tracing-opentelemetry` reads to set the OTel span kind, so the
+//! SERVER/INTERNAL/CLIENT/PRODUCER/CONSUMER kinds the contracts declare are set through it.
+//!
+//! ## Holding a span across an await
+//!
+//! These return a `Span`; they do not enter it. Callers use `.instrument(span)` on the future, or
+//! `span.in_scope(|| ...)` for synchronous work. Calling `Span::enter()` and holding the guard across an
+//! `.await` attributes every later span on that worker thread to the wrong parent — a bug whose symptom
+//! is a trace tree that looks plausible and is wrong, which is worse than a missing span.
+
+use tracing::field::Empty;
+use tracing::Span;
+
+use crate::contract::attr;
+
+/// `command.receive` (SERVER) — the synchronous acceptance entry point.
+///
+/// Opened BEFORE any work, so a resolver that fails on input deserialization still produces a span
+/// naming the command that was attempted — the failures you most want a trace for are the ones that
+/// never reach the journal.
+///
+/// `correlation_id` and `message_id` are late-bound on purpose: both may be server-generated (UUIDv7)
+/// inside `request_envelope`, so neither is knowable when the span opens.
+///
+/// `business.journal_status` is NOT declared here; it belongs to `command.journal`. Late-bound fields
+/// that do belong to this span are declared `Empty` so `record` can fill them: `tracing` cannot add a
+/// field that was not declared when the span was created, and a silent no-op `record` is exactly the
+/// kind of hole that makes a contract pass review and fail in production.
+pub fn command_receive(command_type: &str, actor: &str, channel: &str) -> Span {
+    tracing::info_span!(
+        "command.receive",
+        otel.kind = "server",
+        business.command_type = command_type,
+        business.actor = actor,
+        business.channel = channel,
+        business.correlation_id = Empty,
+        business.message_id = Empty,
+        business.order_id = Empty,
+    )
+}
+
+/// `command.journal` (INTERNAL) — the `command_journal` insert.
+pub fn command_journal(message_id: &str) -> Span {
+    tracing::info_span!(
+        "command.journal",
+        otel.kind = "internal",
+        business.message_id = message_id,
+        business.journal_status = Empty,
+    )
+}
+
+/// `command.dispatch` (INTERNAL) — handing the command to the async handler, or declining to.
+pub fn command_dispatch(message_id: &str, outcome: &str) -> Span {
+    tracing::info_span!(
+        "command.dispatch",
+        otel.kind = "internal",
+        business.message_id = message_id,
+        business.dispatch_outcome = outcome,
+    )
+}
+
+/// `command.validate` (INTERNAL) — the handler-boundary wrapper's invariant check. Emitted by the
+/// dispatch wrapper, never by the aggregate: `c4-l3.yaml` marks `command-handlers`
+/// `instrumented: false`, and an aggregate that imports a telemetry SDK stops being testable without a
+/// subscriber.
+pub fn command_validate() -> Span {
+    tracing::info_span!(
+        "command.validate",
+        otel.kind = "internal",
+        business.validation_status = Empty,
+    )
+}
+
+/// `event.store.append` (INTERNAL) — appending to `domain_events`.
+pub fn event_store_append(event_type: &str, stream_id: &str) -> Span {
+    tracing::info_span!(
+        "event.store.append",
+        otel.kind = "internal",
+        business.event_type = event_type,
+        business.stream_id = stream_id,
+    )
+}
+
+/// `event.publish` (PRODUCER) — publishing an appended event onto the bus.
+pub fn event_publish(event_type: &str) -> Span {
+    tracing::info_span!(
+        "event.publish",
+        otel.kind = "producer",
+        messaging.system = "captain.eventbus",
+        business.event_type = event_type,
+    )
+}
+
+/// `event.consume.projection` (CONSUMER) — a projector applying events to a read model.
+pub fn event_consume_projection(projection_name: &str) -> Span {
+    tracing::info_span!(
+        "event.consume.projection",
+        otel.kind = "consumer",
+        business.projection_name = projection_name,
+    )
+}
+
+/// `payment.intent.create` (CLIENT) — the outbound Stripe call, the riskiest leg of checkout.
+pub fn payment_intent_create() -> Span {
+    tracing::info_span!(
+        "payment.intent.create",
+        otel.kind = "client",
+        messaging.system = "stripe",
+        business.result = Empty,
+    )
+}
+
+/// `pricing.compute` (INTERNAL) — the 3-way split (ADR-0017).
+pub fn pricing_compute() -> Span {
+    tracing::info_span!(
+        "pricing.compute",
+        otel.kind = "internal",
+        business.service_fee = Empty,
+        business.split_ok = Empty,
+    )
+}
+
+/// `cart.read` (INTERNAL) — loading the cart aggregate for repricing.
+pub fn cart_read(aggregate_id: &str) -> Span {
+    tracing::info_span!(
+        "cart.read",
+        otel.kind = "internal",
+        business.aggregate_id = aggregate_id,
+    )
+}
+
+// --- late-bound recorders -----------------------------------------------------------------------
+//
+// Each takes the span explicitly rather than using `Span::current()`. After an `.instrument(..).await`
+// the instrumented span is no longer current, so `Span::current()` would silently record onto the
+// caller's span instead — a wrong value, not a missing one.
+
+/// Record `business.journal_status` (`RECEIVED` | `duplicate` | `conflict`). The `conflict` value is
+/// what `status_rules.success` excludes: a duplicate IS a successful acceptance, a conflict is not.
+pub fn record_journal_status(span: &Span, status: &str) {
+    span.record(attr::JOURNAL_STATUS, status);
+}
+
+/// Record `business.message_id` on `command.receive` once the effective envelope is resolved (the id may
+/// be server-generated, so it is not known when the span opens).
+pub fn record_message_id(span: &Span, message_id: &str) {
+    span.record(attr::MESSAGE_ID, message_id);
+}
+
+/// Record the envelope's `run_identity` on `command.receive` — both ids, in one call, because the
+/// contracts mark both mandatory and it is the pair that makes a run findable: `correlation_id` is
+/// business-facing and survives the whole causality chain, `trace_id` is technical and may rotate at an
+/// async boundary. `trace_id` itself is set by the OTel layer, so only the correlation is recorded here.
+pub fn record_envelope(span: &Span, message_id: &str, correlation_id: &str) {
+    span.record(attr::MESSAGE_ID, message_id);
+    span.record(attr::CORRELATION_ID, correlation_id);
+}
+
+/// Record `business.validation_status` (`accepted` | `rejected`).
+pub fn record_validation_status(span: &Span, status: &str) {
+    span.record(attr::VALIDATION_STATUS, status);
+}
+
+/// Record `business.result` on `payment.intent.create` (`captured` is what the contract's success
+/// condition tests for).
+pub fn record_payment_result(span: &Span, result: &str) {
+    span.record(attr::RESULT, result);
+}
+
+/// Record the `pricing.compute` outputs.
+pub fn record_pricing(span: &Span, service_fee: i64, split_ok: bool) {
+    span.record(attr::SERVICE_FEE, service_fee);
+    span.record(attr::SPLIT_OK, if split_ok { "true" } else { "false" });
+}
+
+/// Record `business.order_id` — a `place-order` `run_identity` key, known only once the order exists.
+pub fn record_order_id(span: &Span, order_id: &str) {
+    span.record(attr::ORDER_ID, order_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Run `f` with a subscriber that enables every level.
+    ///
+    /// Without one, `info_span!` returns a DISABLED span whose `metadata()` is `None` — so a test that
+    /// inspected fields without this would pass vacuously no matter what the spans declared, which is
+    /// worse than having no test. Learned the direct way: the first version of these two tests failed
+    /// with `metadata() == None` rather than on any real assertion.
+    fn with_subscriber<T>(f: impl FnOnce() -> T) -> T {
+        let subscriber =
+            tracing_subscriber::fmt().with_max_level(tracing::Level::TRACE).with_test_writer().finish();
+        tracing::subscriber::with_default(subscriber, f)
+    }
+
+    /// A field must be DECLARED at span creation for `record` to work; `tracing` silently ignores a
+    /// `record` for an undeclared field. That silence is the trap: the contract would list the
+    /// attribute, the code would look like it sets it, and the span would ship without it. This asserts
+    /// the late-bound fields really are declared, by recording them and checking the span is still the
+    /// one we think it is.
+    #[test]
+    fn late_bound_fields_are_declared_on_their_spans() {
+        with_subscriber(late_bound_fields_body);
+    }
+
+    fn late_bound_fields_body() {
+        let journal = command_journal("m-1");
+        record_journal_status(&journal, crate::contract::journal_status::RECEIVED);
+        assert_eq!(journal.metadata().map(|m| m.name()), Some("command.journal"));
+        assert!(journal.metadata().unwrap().fields().field(attr::JOURNAL_STATUS).is_some());
+
+        let receive = command_receive("PlaceOrder", "CUSTOMER", "GRAPHQL");
+        record_envelope(&receive, "m-1", "c-1");
+        record_order_id(&receive, "o-1");
+        let fields = receive.metadata().unwrap().fields();
+        assert!(fields.field(attr::MESSAGE_ID).is_some(), "message_id is late-bound but declared");
+        assert!(fields.field(attr::CORRELATION_ID).is_some(), "correlation_id is late-bound but declared");
+        assert!(fields.field(attr::ORDER_ID).is_some(), "order_id is late-bound but declared");
+        assert!(fields.field(attr::COMMAND_TYPE).is_some());
+        assert!(fields.field(attr::ACTOR).is_some());
+        assert!(fields.field(attr::CHANNEL).is_some());
+
+        let payment = payment_intent_create();
+        record_payment_result(&payment, "captured");
+        assert!(payment.metadata().unwrap().fields().field(attr::RESULT).is_some());
+
+        let pricing = pricing_compute();
+        record_pricing(&pricing, 250, true);
+        let pf = pricing.metadata().unwrap().fields();
+        assert!(pf.field(attr::SERVICE_FEE).is_some());
+        assert!(pf.field(attr::SPLIT_OK).is_some());
+
+        let validate = command_validate();
+        record_validation_status(&validate, "accepted");
+        assert!(validate.metadata().unwrap().fields().field(attr::VALIDATION_STATUS).is_some());
+    }
+
+    /// The OTel span KIND is part of each contract (`kind: SERVER` etc). It travels as the `otel.kind`
+    /// field, so a span missing that field exports as INTERNAL regardless of what the contract says.
+    #[test]
+    fn every_span_declares_its_otel_kind() {
+        with_subscriber(every_span_kind_body);
+    }
+
+    fn every_span_kind_body() {
+        let spans = [
+            command_receive("C", "A", "GRAPHQL"),
+            command_journal("m"),
+            command_dispatch("m", "spawned"),
+            command_validate(),
+            event_store_append("E", "s"),
+            event_publish("E"),
+            event_consume_projection("P"),
+            payment_intent_create(),
+            pricing_compute(),
+            cart_read("a"),
+        ];
+        for s in spans {
+            let meta = s.metadata().expect("span has metadata");
+            assert!(
+                meta.fields().field("otel.kind").is_some(),
+                "{} declares no otel.kind -- it would export as INTERNAL",
+                meta.name()
+            );
+        }
+    }
+}

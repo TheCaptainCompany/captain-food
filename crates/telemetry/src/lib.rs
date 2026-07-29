@@ -46,8 +46,16 @@ use tracing_subscriber::EnvFilter;
 
 pub mod contract;
 mod http_client;
+pub mod meters;
+pub mod spans;
 
 pub use contract::{attr, dispatch_outcome, journal_status, metric, span};
+
+/// The `business.channel` value for the GraphQL dispatch surface — `scalars.yaml` `CommandChannel`.
+/// Named here so the generated resolvers do not each carry a bare string literal.
+pub const CHANNEL_GRAPHQL: &str = "GRAPHQL";
+/// `business.channel` for on-app workers routing through `dispatch_journaled`.
+pub const CHANNEL_WORKER: &str = "WORKER";
 
 /// Everything this crate needs, read from the generated configuration reader by the composition root.
 ///
