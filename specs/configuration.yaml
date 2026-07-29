@@ -244,6 +244,95 @@ keys:
         staging: STRIPE_WEBHOOK_SECRET
 
   # ===================================================================
+  # Telemetry (issue #191, PROP-170500 D1/D2) — without this, production is undiagnosable
+  #
+  # `specs/observability.yaml` declares 898 lines of REQUIRED spans, attributes, metrics and SLOs. None
+  # of it left the repo before #191: there was no OTel dependency and logging was 69 `println!` calls, so
+  # the mandatory `correlation_id` / `trace_id` in every contract's `run_identity` existed only on paper.
+  #
+  # The backend is Honeycomb, pinned to its **EU (eu1)** region. The region is not a default anyone can
+  # flip casually: ADR-0042 chose Frankfurt for compute AND data specifically for GDPR, and these traces
+  # carry `customerId` / `orderId`, which are personal data. Sending them to `api.honeycomb.io` (US)
+  # would move personal data out of the EU as a side effect of a telemetry setting.
+  #
+  # Telemetry DEGRADES, it never gates: absence of the key is the off switch, and the app then keeps
+  # emitting the same structured logs to stdout with no exporter attached. That asymmetry is deliberate.
+  # A missing payment secret must stop the boot, because money silently failing is the worst outcome this
+  # product has; a missing telemetry key must NOT, because refusing to serve orders in order to protest
+  # that it cannot describe itself is a self-inflicted outage. So no telemetry key is `required:`.
+  # ===================================================================
+
+  HONEYCOMB_API_KEY:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HoneycombIngestKey'
+    secret: true
+    gates: >
+      Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is
+      not constructed at all and the app runs with local structured logs only — every span is built and
+      dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation.
+      This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and
+      Query API use) has a different shape and is rejected at startup rather than failing as an opaque
+      401 on the first export.
+    deploy:
+      from_secret:
+        production: HONEYCOMB_API_KEY
+        staging: HONEYCOMB_API_KEY
+
+  HONEYCOMB_API_ENDPOINT:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    default: https://api.eu1.honeycomb.io
+    gates: >
+      OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the
+      US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and
+      order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an
+      account that does not hold the key and telemetry is silently absent.
+    deploy:
+      production: https://api.eu1.honeycomb.io
+      staging: https://api.eu1.honeycomb.io
+
+  HONEYCOMB_DATASET:
+    type: string
+    default: captain-food-dev
+    gates: >
+      The Honeycomb service/dataset traces land in, also reported as the OTel `service.name` resource
+      attribute. Baked per profile so staging traffic can never be read as production: sharing one dataset
+      makes a staging load test look like a Friday-night peak and corrupts every SLO computed from it.
+    deploy:
+      production: captain-food
+      staging: captain-food-staging
+
+  OTEL_TRACES_SAMPLE_RATIO:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/TraceSampleRatio'
+    default: "1.0"
+    gates: >
+      Head-sampling probability, parent-respecting. Baked at `1.0` (keep everything) because PROP-170500
+      D2's reasoning holds at V0 volume: "head-sampling would mostly discard the interesting traces".
+      This is the dial to turn DOWN if ingest cost becomes real — turning it down before there is volume
+      buys nothing and loses the traces that explain the incidents. Set to 0 and traces stop; the metrics
+      and logs continue, so the app looks healthy while being undiagnosable.
+    deploy:
+      production: "1.0"
+      staging: "1.0"
+
+  LOG_LEVEL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/LogLevel'
+    default: info
+    gates: >
+      Minimum severity for the structured JSON log layer. At `error` the boot report and every worker
+      lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the
+      baked value stays `info` and `debug` is an incident tool, not a default.
+    deploy:
+      production: info
+      staging: info
+
+  # ===================================================================
   # Integrations — feature-scoped, degrade to "unavailable", not "broken"
   # ===================================================================
 

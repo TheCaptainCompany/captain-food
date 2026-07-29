@@ -10,6 +10,7 @@
       { "env_key": "SUPABASE_SMS_HOOK_SECRET", "from_secret": "SUPABASE_SMS_HOOK_SECRET", "secret": true },
       { "env_key": "STRIPE_SECRET_KEY", "from_secret": "STRIPE_SECRET_KEY_TEST", "secret": true },
       { "env_key": "STRIPE_WEBHOOK_SECRET", "from_secret": "STRIPE_WEBHOOK_SECRET", "secret": true },
+      { "env_key": "HONEYCOMB_API_KEY", "from_secret": "HONEYCOMB_API_KEY", "secret": true },
       { "env_key": "HUBRISE_WEBHOOK_SECRET", "from_secret": "HUBRISE_WEBHOOK_SECRET", "secret": true },
       { "env_key": "EXTERNAL_API_TOKENS", "from_secret": "EXTERNAL_API_TOKENS", "secret": true },
       { "env_key": "INTERNAL_TRIGGER_TOKEN", "from_secret": "INTERNAL_TRIGGER_TOKEN", "secret": true }
@@ -20,6 +21,7 @@
       { "env_key": "SUPABASE_SMS_HOOK_SECRET", "from_secret": "SUPABASE_SMS_HOOK_SECRET", "secret": true },
       { "env_key": "STRIPE_SECRET_KEY", "from_secret": "STRIPE_SECRET_KEY_PROD", "secret": true },
       { "env_key": "STRIPE_WEBHOOK_SECRET", "from_secret": "STRIPE_WEBHOOK_SECRET", "secret": true },
+      { "env_key": "HONEYCOMB_API_KEY", "from_secret": "HONEYCOMB_API_KEY", "secret": true },
       { "env_key": "HUBRISE_WEBHOOK_SECRET", "from_secret": "HUBRISE_WEBHOOK_SECRET", "secret": true },
       { "env_key": "EXTERNAL_API_TOKENS", "from_secret": "EXTERNAL_API_TOKENS", "secret": true },
       { "env_key": "INTERNAL_TRIGGER_TOKEN", "from_secret": "INTERNAL_TRIGGER_TOKEN", "secret": true }

@@ -99,6 +99,9 @@ scalar AuthSessionKey
 scalar PostgresUrl
 scalar HttpsUrl
 scalar DepartmentList
+scalar HoneycombIngestKey
+scalar TraceSampleRatio
+scalar LogLevel
 
 # ==============================================================================
 # Enums

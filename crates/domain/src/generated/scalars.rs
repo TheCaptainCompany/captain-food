@@ -769,3 +769,17 @@ pub struct HttpsUrl(pub String);
 /// A comma-separated INSEE department list for a scoped SIRENE sweep (e.g. `37`, `37,41`). Allows the Corsican `2A`/`2B` codes, which a naive numeric check would reject.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DepartmentList(pub String);
+
+/// A Honeycomb INGEST key — the credential the OTLP exporter sends as `x-honeycomb-team` (ADR-20260729 telemetry backend, issue #191).
+/// Deliberately PERMISSIVE on charset and length, and that is a considered choice rather than laziness. Honeycomb has shipped several ingest-key formats (32-char hex "classic" keys, and the newer `hc?ik_`-prefixed keys), and this value gates STARTUP: on production a pattern that is stricter than reality turns a perfectly good key into `exit 78` and a failed deploy. An over-tight regex here would manufacture exactly the outage this file exists to prevent, so the rule encodes only what is genuinely invariant across formats.
+/// What it does still catch is the mistake people actually make: a **management** key (`<Key ID>:<Secret Key>`, used by the Honeycomb MCP server and the Query API) pasted into the ingest slot. Management keys contain a colon, ingest keys never do — so the colon exclusion is the load- bearing part of this pattern, in the same spirit as rejecting a `pk_` publishable key in a `StripeSecretKey` slot. It also rejects the empty, whitespace-padded and obviously-truncated value.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct HoneycombIngestKey(pub String);
+
+/// The head-sampling probability for traces, as a decimal in [0, 1] — `1.0` keeps every trace, `0.1` keeps a tenth. Rejects the two plausible mistakes that would otherwise be discovered as missing data weeks later: a percentage (`50`, `50%`) silently read as "way out of range", and a ratio above 1.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TraceSampleRatio(pub String);
+
+/// The minimum severity emitted by the structured-logging layer, case-insensitive. A closed set rather than a free-form `RUST_LOG` filter, because the failure mode of a typo'd directive is silence — the logs simply stop, which reads as a healthy quiet system.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LogLevel(pub String);
