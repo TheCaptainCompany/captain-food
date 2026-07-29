@@ -6,28 +6,20 @@
     ],
     "staging": [
       { "env_key": "DATABASE_URL", "from_secret": "DATABASE_URL", "secret": true },
-      { "env_key": "SUPABASE_URL", "from_secret": "SUPABASE_URL", "secret": false },
-      { "env_key": "SUPABASE_PUBLISHABLE_KEY", "from_secret": "SUPABASE_PUBLISHABLE_KEY", "secret": false },
-      { "env_key": "SUPABASE_JWKS_URL", "from_secret": "SUPABASE_JWKS_URL", "secret": false },
       { "env_key": "AUTH_SESSION_KEY", "from_secret": "AUTH_SESSION_KEY", "secret": true },
       { "env_key": "SUPABASE_SMS_HOOK_SECRET", "from_secret": "SUPABASE_SMS_HOOK_SECRET", "secret": true },
       { "env_key": "STRIPE_SECRET_KEY", "from_secret": "STRIPE_SECRET_KEY_TEST", "secret": true },
       { "env_key": "STRIPE_WEBHOOK_SECRET", "from_secret": "STRIPE_WEBHOOK_SECRET_TEST", "secret": true },
-      { "env_key": "HUBRISE_CLIENT_ID", "from_secret": "HUBRISE_CLIENT_ID", "secret": false },
       { "env_key": "HUBRISE_WEBHOOK_SECRET", "from_secret": "HUBRISE_WEBHOOK_SECRET", "secret": true },
       { "env_key": "EXTERNAL_API_TOKENS", "from_secret": "EXTERNAL_API_TOKENS", "secret": true },
       { "env_key": "INTERNAL_TRIGGER_TOKEN", "from_secret": "INTERNAL_TRIGGER_TOKEN", "secret": true }
     ],
     "production": [
       { "env_key": "DATABASE_URL", "from_secret": "DATABASE_URL", "secret": true },
-      { "env_key": "SUPABASE_URL", "from_secret": "SUPABASE_URL", "secret": false },
-      { "env_key": "SUPABASE_PUBLISHABLE_KEY", "from_secret": "SUPABASE_PUBLISHABLE_KEY", "secret": false },
-      { "env_key": "SUPABASE_JWKS_URL", "from_secret": "SUPABASE_JWKS_URL", "secret": false },
       { "env_key": "AUTH_SESSION_KEY", "from_secret": "AUTH_SESSION_KEY", "secret": true },
       { "env_key": "SUPABASE_SMS_HOOK_SECRET", "from_secret": "SUPABASE_SMS_HOOK_SECRET", "secret": true },
       { "env_key": "STRIPE_SECRET_KEY", "from_secret": "STRIPE_SECRET_KEY_PROD", "secret": true },
       { "env_key": "STRIPE_WEBHOOK_SECRET", "from_secret": "STRIPE_WEBHOOK_SECRET_PROD", "secret": true },
-      { "env_key": "HUBRISE_CLIENT_ID", "from_secret": "HUBRISE_CLIENT_ID", "secret": false },
       { "env_key": "HUBRISE_WEBHOOK_SECRET", "from_secret": "HUBRISE_WEBHOOK_SECRET", "secret": true },
       { "env_key": "EXTERNAL_API_TOKENS", "from_secret": "EXTERNAL_API_TOKENS", "secret": true },
       { "env_key": "INTERNAL_TRIGGER_TOKEN", "from_secret": "INTERNAL_TRIGGER_TOKEN", "secret": true }

@@ -74,10 +74,23 @@ they can enable behaviour but never change it.
   `specs/configuration.yaml`, review, build, deploy (~minutes) rather than a dashboard edit (seconds).
   For a flag whose job is stopping a production pipeline, reviewed-and-recorded is the feature — and the
   runtime env override survives for the case where minutes are too slow.
-- **A secret must never be baked** — validator-enforced (`config-secret-baked`), because the image is
-  public. The converse (a non-secret sourced from a repo secret) is only a **warning**: it is a
-  preference, not a safety rule, and is legitimate for values that are not secret yet are
-  environment-specific and better left out of the repo (a Supabase project URL, an OAuth client id).
+- **Two symmetric hard rules, both validator-enforced.** A secret must never be baked
+  (`config-secret-baked`) — the image is public. And a non-secret must never be sourced from a repo
+  secret (`config-nonsecret-from-secret`) — product-owner directive, 2026-07-29: *"the non secret keys
+  should not be put in the repo actions secrets"*. I first wrote the second as a mere warning, reasoning
+  that `from_secret` was a legitimate hiding place for values that are not secret but are
+  environment-specific. That was wrong on the proposal's own terms: **the purpose of declaring
+  configuration is that it can be read.** A non-secret in Actions secrets is exactly as opaque as one
+  typed into the dashboard — you still cannot open the repo and know what production runs. Visibility
+  was the whole point, and a warning does not deliver it.
+- **Consequently `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_JWKS_URL` and `HUBRISE_CLIENT_ID`
+  are declared but not yet deployed by us**: their values live only on the Render service and could not
+  be invented here. They carry no `deploy:` block until someone supplies literal per-profile values, and
+  the sync report lists them as `UNDECLARED` in the meantime — the honest signal that this is unfinished
+  rather than a silent gap. `SUPABASE_PUBLISHABLE_KEY` warrants a deliberate call: the anon key never
+  reaches a browser in this architecture (identity is wrapped behind our GraphQL), so committing it to a
+  PUBLIC repo would expose something currently unexposed. Safe if RLS is enforced; `secret: true` is the
+  answer if it is not.
 - **The dashboard becomes derived state.** Its remaining job is `APP_PROFILE` and whatever CI has
   pushed. `API_SECRET` now shows up in the sync report as `UNDECLARED` on every run.
 - **Still manual, deliberately**: the first `apply: true` run, and setting `APP_PROFILE=production`

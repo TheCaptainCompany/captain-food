@@ -64,19 +64,19 @@ jobs:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           PROFILE: ${{ inputs.profile }}
           APPLY: ${{ inputs.apply }}
-          # Every secret the manifest can name. Absent ones are reported and skipped, never written
-          # empty — a key that looks configured but is not is worse than one that is plainly missing.
+          # Every SECRET the manifest can name. Non-secrets are deliberately absent: they carry literal
+          # per-profile values in specs/configuration.yaml and are baked into the image, because a
+          # non-secret hidden in Actions secrets is as opaque as one typed into the dashboard — you
+          # still could not read the repo and know what production runs (directive, 2026-07-29).
+          # Absent secrets are reported and skipped, never written empty: a key that LOOKS configured
+          # but is not is worse than one plainly missing.
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           AUTH_SESSION_KEY: ${{ secrets.AUTH_SESSION_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-          SUPABASE_JWKS_URL: ${{ secrets.SUPABASE_JWKS_URL }}
           SUPABASE_SMS_HOOK_SECRET: ${{ secrets.SUPABASE_SMS_HOOK_SECRET }}
           STRIPE_SECRET_KEY_TEST: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
           STRIPE_SECRET_KEY_PROD: ${{ secrets.STRIPE_SECRET_KEY_PROD }}
           STRIPE_WEBHOOK_SECRET_TEST: ${{ secrets.STRIPE_WEBHOOK_SECRET_TEST }}
           STRIPE_WEBHOOK_SECRET_PROD: ${{ secrets.STRIPE_WEBHOOK_SECRET_PROD }}
-          HUBRISE_CLIENT_ID: ${{ secrets.HUBRISE_CLIENT_ID }}
           HUBRISE_WEBHOOK_SECRET: ${{ secrets.HUBRISE_WEBHOOK_SECRET }}
           EXTERNAL_API_TOKENS: ${{ secrets.EXTERNAL_API_TOKENS }}
           INTERNAL_TRIGGER_TOKEN: ${{ secrets.INTERNAL_TRIGGER_TOKEN }}
