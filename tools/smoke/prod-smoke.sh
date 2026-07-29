@@ -17,7 +17,9 @@
 # idempotent fixtures, fresh cart/order ids per run.
 #
 # Required env:
-#   STRIPE_SECRET_KEY   sk_test_... (refused otherwise — this script must never move live money)
+#   STRIPE_SECRET_KEY   sk_test_... (refused otherwise — this script must never move live money).
+#                       CI supplies it from the repo secret STRIPE_SECRET_KEY_TEST; the unsuffixed
+#                       repo secret was retired 2026-07-29 because its mode was not visible in its name.
 #   RENDER_API_KEY      used to read the deployed Supabase URL/secret so role JWTs can be minted
 #                       through the deployment's own auth provider (Supabase admin API).
 #                       Alternatively set SUPABASE_URL + SUPABASE_SECRET_KEY directly and
