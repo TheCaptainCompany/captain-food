@@ -223,6 +223,18 @@ pub struct Config {
     pub run_sirene_worker: bool,
     /// Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on a rider who is not coming.
     pub run_delivery_offer_timeout: bool,
+    /// OVH API application key — one of the THREE values the v1 signature needs (`X-Ovh-Application`). Missing any one of the three and the SMS client is None, so the Send-SMS hook 503s and Supabase surfaces an OTP delivery error to the customer.
+    pub ovh_application_key: Option<String>,
+    /// OVH API application secret — the HMAC key for `X-Ovh-Signature` (`sha1(secret + "+" + consumerKey + "+" + METHOD + "+" + URL + "+" + BODY + "+" + timestamp)`). The one value here that grants send capability; treat it as a payment credential.
+    pub ovh_application_secret: Option<String>,
+    /// OVH API consumer key — binds the application credentials to the authorised access rules (`POST /sms/*/jobs`). A key whose rules omit that path authenticates fine and then fails the send, which is why the rule set matters as much as the value.
+    pub ovh_consumer_key: Option<String>,
+    /// The OVH SMS account the messages are billed to (e.g. `sms-ab12345-1`), used as `POST /sms/{serviceName}/jobs`. BORDERLINE as a secret: it grants nothing on its own — the credential triplet does that — but it embeds the OVH account identifier. Declared `secret: true` because it is already held as a repo secret and its literal value is not in this repository; if you would rather it be readable, give it literal per-profile `deploy` values instead and drop `secret`. Also note the account must hold SMS CREDITS: with none, the credentials authenticate and the send still fails at OVH.
+    pub ovh_sms_service_name: Option<String>,
+    /// The sender name shown on the SMS. Unset, the client substitutes `CaptainFood`. Declares NO `default` deliberately: the fallback lives in `OvhSmsClient::from_env`, and a second copy here would be two sources of truth for one value. OVH requires a sender to be REGISTERED and approved before it can be used, so an unapproved name fails at send time, not at startup.
+    pub ovh_sms_sender: Option<String>,
+    /// OVH API base URL. Unset, the client substitutes `https://eu.api.ovh.com/1.0` — the EU region, which is the deliberate choice for data residency (ADR-20260722-174500) and must match the region the API credentials were created in. Declares NO `default` for the same reason as OVH_SMS_SENDER: the fallback is the client's.
+    pub ovh_endpoint: Option<String>,
     /// TCP port the HTTP server binds. Render injects this; a mismatch means the platform health check never reaches the app and the deploy fails.
     pub port: i64,
     /// Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
@@ -344,6 +356,12 @@ impl Config {
             .or_else(|| baked("RUN_DELIVERY_OFFER_TIMEOUT", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_DELIVERY_OFFER_TIMEOUT", &v, true))
             .unwrap_or(true);
+        let ovh_application_key = raw("OVH_APPLICATION_KEY");
+        let ovh_application_secret = raw("OVH_APPLICATION_SECRET");
+        let ovh_consumer_key = raw("OVH_CONSUMER_KEY");
+        let ovh_sms_service_name = raw("OVH_SMS_SERVICE_NAME");
+        let ovh_sms_sender = raw("OVH_SMS_SENDER");
+        let ovh_endpoint = raw("OVH_ENDPOINT");
         let port = raw("PORT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(8080);
         let web_assets_dir = raw("WEB_ASSETS_DIR");
         let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
@@ -424,6 +442,12 @@ impl Config {
                 run_retention_sweep,
                 run_sirene_worker,
                 run_delivery_offer_timeout,
+                ovh_application_key,
+                ovh_application_secret,
+                ovh_consumer_key,
+                ovh_sms_service_name,
+                ovh_sms_sender,
+                ovh_endpoint,
                 port,
                 web_assets_dir,
                 captain_build_version,
@@ -460,6 +484,12 @@ impl Config {
         out.push_str(&format!("  RUN_RETENTION_SWEEP        = {}\n", self.run_retention_sweep));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
         out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
+        out.push_str(&format!("  OVH_APPLICATION_KEY        = {}\n", if self.ovh_application_key.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  OVH_APPLICATION_SECRET     = {}\n", if self.ovh_application_secret.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  OVH_CONSUMER_KEY           = {}\n", if self.ovh_consumer_key.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  OVH_SMS_SERVICE_NAME       = {}\n", if self.ovh_sms_service_name.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  OVH_SMS_SENDER             = {}\n", self.ovh_sms_sender.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  OVH_ENDPOINT               = {}\n", self.ovh_endpoint.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  PORT                       = {}\n", self.port));
         out.push_str(&format!("  WEB_ASSETS_DIR             = {}\n", self.web_assets_dir));
         out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
@@ -468,7 +498,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 26;
+pub const KEY_COUNT: usize = 32;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -496,6 +526,12 @@ pub const DECLARED_KEYS: &[&str] = &[
     "RUN_RETENTION_SWEEP",
     "RUN_SIRENE_WORKER",
     "RUN_DELIVERY_OFFER_TIMEOUT",
+    "OVH_APPLICATION_KEY",
+    "OVH_APPLICATION_SECRET",
+    "OVH_CONSUMER_KEY",
+    "OVH_SMS_SERVICE_NAME",
+    "OVH_SMS_SENDER",
+    "OVH_ENDPOINT",
     "PORT",
     "WEB_ASSETS_DIR",
     "CAPTAIN_BUILD_VERSION",

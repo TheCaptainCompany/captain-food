@@ -457,6 +457,88 @@ keys:
       staging: "true"
 
   # ===================================================================
+  # SMS delivery (OVH, #118 / ADR-20260722-174500) — the Supabase Send-SMS hook's sender
+  #
+  # These were READ BY THE CODE AND DECLARED NOWHERE until 2026-07-29 — invisible to the startup
+  # validation, to the boot report and to the sync manifest. The drift gate missed them because
+  # `OvhSmsClient::from_env` reads through a closure (`var("OVH_APPLICATION_KEY")`) rather than a
+  # literal `env::var("…")` call, which string matching cannot see. The gate now catches that shape.
+  #
+  # ALL OPTIONAL: phone-OTP delivery is not the live login path. But they are all-or-nothing —
+  # `from_env` returns None unless the full credential set is present, and `/auth/sms-hook` then
+  # answers 503 (fail-closed: never a half-configured send path). So a partial set delivers nothing
+  # while looking configured, which is why the `gates` text below says so per key.
+  # ===================================================================
+
+  OVH_APPLICATION_KEY:
+    type: string
+    secret: true
+    gates: >
+      OVH API application key — one of the THREE values the v1 signature needs (`X-Ovh-Application`).
+      Missing any one of the three and the SMS client is None, so the Send-SMS hook 503s and Supabase
+      surfaces an OTP delivery error to the customer.
+    deploy:
+      from_secret:
+        production: OVH_APPLICATION_KEY
+        staging: OVH_APPLICATION_KEY
+
+  OVH_APPLICATION_SECRET:
+    type: string
+    secret: true
+    gates: >
+      OVH API application secret — the HMAC key for `X-Ovh-Signature`
+      (`sha1(secret + "+" + consumerKey + "+" + METHOD + "+" + URL + "+" + BODY + "+" + timestamp)`).
+      The one value here that grants send capability; treat it as a payment credential.
+    deploy:
+      from_secret:
+        production: OVH_APPLICATION_SECRET
+        staging: OVH_APPLICATION_SECRET
+
+  OVH_CONSUMER_KEY:
+    type: string
+    secret: true
+    gates: >
+      OVH API consumer key — binds the application credentials to the authorised access rules
+      (`POST /sms/*/jobs`). A key whose rules omit that path authenticates fine and then fails the
+      send, which is why the rule set matters as much as the value.
+    deploy:
+      from_secret:
+        production: OVH_CONSUMER_KEY
+        staging: OVH_CONSUMER_KEY
+
+  OVH_SMS_SERVICE_NAME:
+    type: string
+    secret: true
+    gates: >
+      The OVH SMS account the messages are billed to (e.g. `sms-ab12345-1`), used as
+      `POST /sms/{serviceName}/jobs`. BORDERLINE as a secret: it grants nothing on its own — the
+      credential triplet does that — but it embeds the OVH account identifier. Declared `secret: true`
+      because it is already held as a repo secret and its literal value is not in this repository; if
+      you would rather it be readable, give it literal per-profile `deploy` values instead and drop
+      `secret`. Also note the account must hold SMS CREDITS: with none, the credentials authenticate
+      and the send still fails at OVH.
+    deploy:
+      from_secret:
+        production: OVH_SMS_SERVICE_NAME
+        staging: OVH_SMS_SERVICE_NAME
+
+  OVH_SMS_SENDER:
+    type: string
+    gates: >
+      The sender name shown on the SMS. Unset, the client substitutes `CaptainFood`. Declares NO
+      `default` deliberately: the fallback lives in `OvhSmsClient::from_env`, and a second copy here
+      would be two sources of truth for one value. OVH requires a sender to be REGISTERED and approved
+      before it can be used, so an unapproved name fails at send time, not at startup.
+
+  OVH_ENDPOINT:
+    type: string
+    gates: >
+      OVH API base URL. Unset, the client substitutes `https://eu.api.ovh.com/1.0` — the EU region,
+      which is the deliberate choice for data residency (ADR-20260722-174500) and must match the
+      region the API credentials were created in. Declares NO `default` for the same reason as
+      OVH_SMS_SENDER: the fallback is the client's.
+
+  # ===================================================================
   # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
   #
   # Declared here so the drift gate and the docs cover them, but `consumer` keeps them OUT of the
