@@ -266,17 +266,17 @@ impl Config {
             problems.missing.push(MissingKey { name: "DATABASE_URL", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
         }
         let database_url = database_url.unwrap_or_default();
-        let supabase_url = raw("SUPABASE_URL");
+        let supabase_url = raw("SUPABASE_URL").or_else(|| baked("SUPABASE_URL", profile).map(str::to_string));
         if supabase_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
             problems.missing.push(MissingKey { name: "SUPABASE_URL", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
         }
         let supabase_url = supabase_url.unwrap_or_default();
-        let supabase_publishable_key = raw("SUPABASE_PUBLISHABLE_KEY");
+        let supabase_publishable_key = raw("SUPABASE_PUBLISHABLE_KEY").or_else(|| baked("SUPABASE_PUBLISHABLE_KEY", profile).map(str::to_string));
         if supabase_publishable_key.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
             problems.missing.push(MissingKey { name: "SUPABASE_PUBLISHABLE_KEY", gates: "Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed (auth stays anonymous-only)." });
         }
         let supabase_publishable_key = supabase_publishable_key.unwrap_or_default();
-        let supabase_jwks_url = raw("SUPABASE_JWKS_URL");
+        let supabase_jwks_url = raw("SUPABASE_JWKS_URL").or_else(|| baked("SUPABASE_JWKS_URL", profile).map(str::to_string));
         if supabase_jwks_url.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
             problems.missing.push(MissingKey { name: "SUPABASE_JWKS_URL", gates: "JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous." });
         }
@@ -450,6 +450,12 @@ pub const DECLARED_KEYS: &[&str] = &[
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR
 /// and carried by the image digest, so redeploying a digest reproduces its behaviour exactly.
 const BAKED: &[(&str, &str, &str)] = &[
+    ("SUPABASE_URL", "production", "https://zcshlzhiinwmpzujuiep.supabase.co"),
+    ("SUPABASE_URL", "staging", "https://zcshlzhiinwmpzujuiep.supabase.co"),
+    ("SUPABASE_PUBLISHABLE_KEY", "production", "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"),
+    ("SUPABASE_PUBLISHABLE_KEY", "staging", "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"),
+    ("SUPABASE_JWKS_URL", "production", "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"),
+    ("SUPABASE_JWKS_URL", "staging", "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"),
     ("RUN_PROJECTOR", "production", "true"),
     ("RUN_PROJECTOR", "staging", "true"),
     ("RUN_PROCESS_MANAGERS", "production", "true"),

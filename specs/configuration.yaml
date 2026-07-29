@@ -119,18 +119,17 @@ keys:
   # ===================================================================
   # Identity (Supabase, ADR-0015) — without these, auth is anonymous-only
   #
-  # ⚠️ AWAITING LITERAL VALUES. These three are NOT secrets, so per the 2026-07-29 directive they must
-  # carry literal per-profile `deploy` values here rather than hide in Actions secrets. Their values
-  # are not in this repository and could not be invented, so they are declared but NOT yet deployed by
-  # us: until each gains a `deploy:` block they remain whatever the Render dashboard holds, and the
-  # sync report lists them as UNDECLARED — which is the visible signal that the work is unfinished.
-  # (HUBRISE_CLIENT_ID was a fourth; it is optional and we simply do not have one yet — see its entry.)
+  # Values below are LITERAL and baked (2026-07-29), read off the production boot report. They are not
+  # secrets: a Supabase project URL and its JWKS endpoint are public addresses, and `sb_publishable_` is
+  # Supabase's own marker for a key designed to be shared — which retires the caveat this note used to
+  # carry about the older anon-key format.
   #
-  # One deserves a deliberate decision rather than a reflex: SUPABASE_PUBLISHABLE_KEY. Supabase treats
-  # the anon key as safe to publish WHEN row-level security is enforced, and in this architecture it
-  # never reaches a browser at all — identity is wrapped behind our GraphQL (ADR-0015). Committing it
-  # to a PUBLIC repo would therefore expose something currently unexposed. If RLS is not fully enforced
-  # on this project, mark it `secret: true` instead and let CI sync it.
+  # DECLARED FOR production/staging ONLY, deliberately: a developer running locally must not silently
+  # inherit the production Supabase project, so `development` is left to whatever the developer sets.
+  #
+  # ⚠️ FOR THESE TO GOVERN, the same three keys must be REMOVED from the Render service. Precedence is
+  # env > baked, so a leftover dashboard value silently wins and the digest stops determining behaviour.
+  # The sync is upsert-only (D1) and will never delete them for you — it reports them instead.
   # ===================================================================
 
   SUPABASE_URL:
@@ -141,6 +140,9 @@ keys:
     gates: >
       Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is
       the fail-closed stand-in and every login is refused.
+    deploy:
+      production: "https://zcshlzhiinwmpzujuiep.supabase.co"
+      staging: "https://zcshlzhiinwmpzujuiep.supabase.co"
 
   SUPABASE_PUBLISHABLE_KEY:
     type: string
@@ -148,6 +150,9 @@ keys:
     gates: >
       Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed
       (auth stays anonymous-only).
+    deploy:
+      production: "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"
+      staging: "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"
 
   SUPABASE_JWKS_URL:
     type: string
@@ -157,6 +162,9 @@ keys:
     gates: >
       JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every
       authenticated request falls back to anonymous.
+    deploy:
+      production: "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"
+      staging: "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"
 
   AUTH_SESSION_KEY:
     type: string
