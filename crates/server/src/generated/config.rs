@@ -205,8 +205,8 @@ pub struct Config {
     pub port: i64,
     /// Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
     pub web_assets_dir: String,
-    /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, every response claims `dev-<crate version>` and a deployed build cannot be identified.
-    pub captain_build_version: String,
+    /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
+    pub captain_build_version: Option<String>,
 }
 
 impl Config {
@@ -299,7 +299,6 @@ impl Config {
         let web_assets_dir = raw("WEB_ASSETS_DIR");
         let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
-        let captain_build_version = captain_build_version.unwrap_or_else(|| "dev".to_string());
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern(r"^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: r"^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -384,7 +383,7 @@ impl Config {
         out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
         out.push_str(&format!("  PORT                       = {}\n", self.port));
         out.push_str(&format!("  WEB_ASSETS_DIR             = {}\n", self.web_assets_dir));
-        out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version));
+        out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
         out
     }
 }
