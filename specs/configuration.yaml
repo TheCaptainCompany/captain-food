@@ -297,8 +297,10 @@ keys:
 
   CAPTAIN_BUILD_VERSION:
     type: string
-    default: dev
     gates: >
       Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and
-      the X-VERSION header. Unset, every response claims `dev-<crate version>` and a deployed build
-      cannot be identified.
+      the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and
+      uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately
+      declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec
+      default of plain `dev` would state a value the runtime never produces — a false declaration is
+      worse than an absent one.

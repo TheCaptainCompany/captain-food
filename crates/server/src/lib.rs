@@ -238,6 +238,12 @@ fn identity_service_impl() -> Arc<dyn application::generated::services::Identity
 }
 
 pub fn router() -> Router {
+    // The DECLARED configuration (specs/configuration.yaml), resolved once. Every value below comes
+    // from here rather than a local `env::var` + inline fallback: a default that is declared in the
+    // spec and then re-typed at the call site is two sources of truth, and the spec's copy is the one
+    // that turns out to be inert. `main` resolves it too — for the startup gate — and both resolutions
+    // read the same process env, so they agree by construction.
+    let (config, _) = generated::config::Config::resolve();
     let snap = Arc::new(Mutex::new(Snapshot::default()));
     // In-process appended-event bus: every event-store append in THIS process (GraphQL mutations,
     // Stripe/HubRise inbound facts) is broadcast after commit, feeding the GraphQL subscriptions.
@@ -419,7 +425,7 @@ pub fn router() -> Router {
                 });
 
                 // In-process projection worker (ADR-0040). RUN_PROJECTOR=false hands it to a dedicated worker.
-                if env_flag("RUN_PROJECTOR", true) {
+                if config.run_projector {
                     let worker = ProjectionWorker::new(pool.clone());
                     projector_status = Some(worker.status());
                     tokio::spawn(worker.run_loop());
@@ -438,7 +444,7 @@ pub fn router() -> Router {
                 // logged no-op stand-in (jobs stay open to independent riders; the bounded re-offer
                 // run row still terminates ACCEPTED/FAILED). The partner's answers always arrive
                 // asynchronously through the webhook inbox below, never this outbound call.
-                if env_flag("RUN_PROCESS_MANAGERS", true) {
+                if config.run_process_managers {
                     // Composite delivery gateway (#60): the saga offers a job on a strategy-resolved
                     // CHANNEL, so the single Avelo-vs-Noop choice becomes a registry of channel →
                     // adapter. `independent` is the rider POOL (a deliberate no-op — jobs stay open to
@@ -497,7 +503,7 @@ pub fn router() -> Router {
 
                     // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next
                     // ranked channel. Env-gated like the other in-process workers.
-                    if env_flag("RUN_DELIVERY_OFFER_TIMEOUT", true) {
+                    if config.run_delivery_offer_timeout {
                         let timeout_worker =
                             Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(pool.clone()));
                         tokio::spawn(timeout_worker.run_loop());
@@ -524,7 +530,7 @@ pub fn router() -> Router {
                     Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
                 ));
                 inbound_drain = Some(drain.clone());
-                if env_flag("RUN_INBOUND_DRAIN", true) {
+                if config.run_inbound_drain {
                     tokio::spawn(drain.clone().run_loop());
                     println!("inbound drain worker: running in-process (set RUN_INBOUND_DRAIN=false to disable)");
                 } else {
@@ -637,7 +643,7 @@ pub fn router() -> Router {
                 // sweep_retention() SQL function — journal/mirror retention windows live in the
                 // function, never here. Env-gated like the other workers; a pg_cron job calling
                 // the same function is the alternative where DB-side scheduling is preferred.
-                if env_flag("RUN_RETENTION_SWEEP", true) {
+                if config.run_retention_sweep {
                     let sweeper =
                         Arc::new(infrastructure::RetentionSweepWorker::new(pool.clone()));
                     tokio::spawn(sweeper.run_loop());
@@ -660,7 +666,7 @@ pub fn router() -> Router {
                 // It also cannot apply what it reads: no `UpdateRestaurant` exists here, so INSEE changes
                 // are swallowed by that same conflict. The CI half is paused in sirene-sync.yml.
                 // Re-enable BOTH halves together: `RUN_SIRENE_WORKER=true` + the workflow's cron.
-                if env_flag("RUN_SIRENE_WORKER", false) {
+                if config.run_sirene_worker {
                     tokio::spawn(worker.run_loop());
                     println!(
                         "sirene sync worker: running in-process (set RUN_SIRENE_WORKER=false to keep only the ping trigger)"
@@ -743,7 +749,7 @@ pub fn router() -> Router {
         .nest_service(
             "/assets",
             tower_http::services::ServeDir::new(
-                std::env::var("WEB_ASSETS_DIR").unwrap_or_else(|_| "/app/web-assets".into()),
+                config.web_assets_dir.clone(),
             ),
         )
         // Host-based serving (ADR-0036 + split 4/4 of #21): any path not matched above is dispatched by

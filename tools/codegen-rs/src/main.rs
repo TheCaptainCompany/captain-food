@@ -15298,6 +15298,141 @@ geocoding:
     /// Detection is deliberately the simple over-approximation "any line starting with a TAB":
     /// this Makefile does not set `.RECIPEPREFIX`, and treating a stray tab-indented non-recipe
     /// line as a recipe only tightens the guard, never loosens it.
+    /// `required` and `default` are MUTUALLY EXCLUSIVE — you must choose (product-owner directive,
+    /// 2026-07-29). A required key carrying a default can never be reported missing, because the
+    /// default always satisfies it: the requirement is silently inert, which is worse than not
+    /// declaring it, since the spec then states a guarantee the runtime does not make.
+    #[test]
+    fn a_required_key_may_not_also_declare_a_default() {
+        let spec = r#"
+keys:
+  BOTH:
+    type: string
+    required: [production]
+    default: "fallback"
+    gates: "Declares both, which cannot be honoured."
+"#;
+        let model = Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(spec).expect("parses"),
+            )]),
+        };
+        let mut issues = Vec::new();
+        validate_configuration(&model, &mut issues);
+        let hit = issues.iter().find(|i| i.rule == "config-required-with-default");
+        assert!(
+            hit.is_some(),
+            "a key declaring BOTH `required` and `default` must be rejected; got {:?}",
+            issues.iter().map(|i| i.rule).collect::<Vec<_>>()
+        );
+    }
+
+    /// The complement: each on its own is fine. A guard that also rejects the legal shapes would push
+    /// people to stop declaring defaults at all.
+    #[test]
+    fn required_alone_and_default_alone_are_both_accepted() {
+        for body in [
+            "    required: [production]\n",
+            "    default: \"fallback\"\n",
+        ] {
+            let spec = format!(
+                "keys:\n  ONE:\n    type: string\n{body}    gates: \"Fine on its own.\"\n"
+            );
+            let model = Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(&spec).expect("parses"),
+                )]),
+            };
+            let mut issues = Vec::new();
+            validate_configuration(&model, &mut issues);
+            assert!(
+                !issues.iter().any(|i| i.rule == "config-required-with-default"),
+                "{body:?} is a legal declaration"
+            );
+        }
+    }
+
+    /// A key with a DECLARED DEFAULT must be consumed through the generated `Config`, never re-read
+    /// from the environment at the call site.
+    ///
+    /// This is the gap the product owner caught: `WEB_ASSETS_DIR` declared `default: /app/web-assets`,
+    /// the generated reader resolved it correctly — and the composition root ignored it, doing its own
+    /// `env::var(..).unwrap_or_else(|_| "/app/web-assets")`. Two copies of one default, and the spec's
+    /// copy was the inert one. Declaring a default is only meaningful if the declaration is what runs.
+    #[test]
+    fn a_declared_default_is_not_re_implemented_at_the_call_site() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let spec = std::fs::read_to_string(root.join("specs/configuration.yaml"))
+            .expect("specs/configuration.yaml must exist");
+        let model = Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(&spec).expect("configuration.yaml parses"),
+            )]),
+        };
+        let defaulted: BTreeSet<String> = parse_config_keys(&model)
+            .into_iter()
+            .filter(|k| k.default.is_some() && k.consumer == "server")
+            .map(|k| k.name)
+            .collect();
+        assert!(!defaulted.is_empty(), "no defaulted keys parsed");
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name != "target" && name != "tests" {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates/server"), &mut files);
+        files.sort();
+
+        let mut offenders = Vec::new();
+        for f in &files {
+            if f.to_string_lossy().ends_with("generated/config.rs") {
+                continue; // the generated reader IS where the default is applied
+            }
+            let Ok(src) = std::fs::read_to_string(f) else { continue };
+            for (idx, line) in src.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for key in &defaulted {
+                    if line.contains(&format!("env::var(\"{key}\"")) 
+                        || line.contains(&format!("env_flag(\"{key}\""))
+                    {
+                        offenders.push(format!(
+                            "  {}:{}: {key}",
+                            f.strip_prefix(&root).unwrap_or(f).display(),
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+        }
+        offenders.sort();
+        assert!(
+            offenders.is_empty(),
+            "these keys declare a DEFAULT in specs/configuration.yaml but are re-read from the \
+             environment at the call site:\n{}\n\n\
+             Fix: read them from the resolved `Config` (`config.<field>`) instead. Why: a default \
+             declared in the spec and re-typed at the call site is TWO sources of truth, and the \
+             spec's copy is the one that turns out to be inert — the declaration then documents a \
+             behaviour nothing implements.",
+            offenders.join("\n")
+        );
+    }
+
     /// Every environment variable the crates READ must be DECLARED in `specs/configuration.yaml`
     /// (PROP-20260729-004500, issue #246).
     ///
