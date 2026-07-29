@@ -105,6 +105,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -353,6 +354,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -653,6 +655,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -1573,6 +1576,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -1815,7 +1819,9 @@ dependencies = [
  "sha2",
  "sirene_ingest",
  "sqlx",
+ "telemetry",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -3801,7 +3807,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "telemetry",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -4371,6 +4379,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

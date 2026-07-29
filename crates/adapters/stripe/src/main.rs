@@ -42,6 +42,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
-    println!("stripe-webhook adapter listening on {addr}");
+    tracing::info!(adapter = "stripe", %addr, "webhook adapter listening");
     axum::serve(listener, routes(Some(ingestor))).await.expect("server error");
 }

@@ -38,6 +38,7 @@ use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{CartId, CatalogId, CustomerId, OrderId, RestaurantId};
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
+use tracing::Instrument as _;
 
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
@@ -71,7 +72,26 @@ enum ReadModelProjector {
 }
 
 impl ReadModelProjector {
+    /// The read model this projector maintains — `business.projection_name` on the
+    /// `event.consume.projection` span, and the label a projection-lag alert is grouped by. Derived
+    /// from the variant via `Debug` so a new projector cannot be added without a name.
+    fn projection_name(&self) -> String {
+        format!("{self:?}")
+    }
+
+    /// `event.consume.projection` (CONSUMER) — the instrumentation boundary for one event applied to
+    /// one read model.
+    ///
+    /// The span sits HERE rather than around the whole drain batch: the contract declares
+    /// `multiplicity: ">= 1"` for this span, i.e. one per projection touched, and the group for an
+    /// `Order-` event fans out to several projectors. A batch-level span would collapse all of them
+    /// into one and lose which read model was slow or failing — the only thing the span is for.
     async fn apply(&self, pool: &PgPool, env: &Envelope) -> Result<(), DomainError> {
+        let span = telemetry::spans::event_consume_projection(&self.projection_name());
+        self.apply_inner(pool, env).instrument(span).await
+    }
+
+    async fn apply_inner(&self, pool: &PgPool, env: &Envelope) -> Result<(), DomainError> {
         match self {
             Self::Restaurant => {
                 let id = RestaurantId(aggregate_uuid_of(env, "Restaurant-", "restaurantId")?);
@@ -120,9 +140,11 @@ impl ReadModelProjector {
                     match payload_uuid_of(env, "orderId") {
                         Some(uuid) => uuid,
                         None => {
-                            eprintln!(
-                                "projection[Order]: no orderId in payload for stream {} at position {} — skipped",
-                                env.stream_name, env.position
+                            tracing::warn!(
+                                projection = "OrderTracking",
+                                stream = %env.stream_name,
+                                position = env.position,
+                                "no orderId in payload -- event skipped (not poison)"
                             );
                             return Ok(());
                         }
@@ -148,9 +170,11 @@ impl ReadModelProjector {
                     match payload_uuid_of(env, "orderId") {
                         Some(uuid) => uuid,
                         None => {
-                            eprintln!(
-                                "projection[OrderConversation]: no orderId in payload for stream {} at position {} — skipped",
-                                env.stream_name, env.position
+                            tracing::warn!(
+                                projection = "OrderConversation",
+                                stream = %env.stream_name,
+                                position = env.position,
+                                "no orderId in payload -- event skipped (not poison)"
                             );
                             return Ok(());
                         }
@@ -312,7 +336,7 @@ impl ProjectionWorker {
             // Errors are recorded on the status snapshot by run_once; the loop keeps polling.
             let w = Arc::clone(&worker);
             if let Err(join) = tokio::spawn(async move { let _ = w.run_once().await; }).await {
-                eprintln!("projection worker: tick panicked — resuming next tick: {join}");
+                tracing::error!(worker = "projection", error = %join, "tick panicked -- resuming next tick");
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -366,9 +390,15 @@ impl ProjectionWorker {
             // that's a transient DB error worth retrying next tick, not a poison record.
             if let Err(e) = self.apply_record(group, &record).await {
                 let event_type: String = record.try_get("event_type").unwrap_or_default();
-                eprintln!(
-                    "projection[{}]: skipped position {position} ({event_type}): {e}",
-                    group.checkpoint
+                // A skipped event means the read model is now permanently behind the log for this
+                // record until a full reprojection. That is a deliberate liveness choice, not a
+                // non-event -- so it is an ERROR, and it names the position needed to replay it.
+                tracing::error!(
+                    projection_group = group.checkpoint,
+                    position,
+                    event_type = %event_type,
+                    error = %e,
+                    "event skipped -- read model is behind the log at this position until reprojection"
                 );
             }
             self.commit_checkpoint(group.checkpoint, position).await?;

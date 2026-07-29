@@ -83,15 +83,18 @@ async fn avelo37_webhook(
         Ok(outcome) => {
             let status = match &outcome {
                 Avelo37IngestOutcome::Recorded { event_type } => {
-                    println!("avelo37 webhook: recorded {event_type} ({})", event.id);
+                    tracing::info!(adapter = "avelo37", %event_type, event_id = %event.id, "webhook fact recorded");
                     "recorded"
                 }
                 Avelo37IngestOutcome::Duplicate => "duplicate",
                 Avelo37IngestOutcome::Ignored { .. } => "ignored",
                 Avelo37IngestOutcome::Unmappable { reason } => {
-                    eprintln!(
-                        "avelo37 webhook: unmappable {} ({}): {reason}",
-                        event.event_type, event.id
+                    tracing::warn!(
+                        adapter = "avelo37",
+                        event_type = %event.event_type,
+                        event_id = %event.id,
+                        %reason,
+                        "webhook verified but unmappable -- a retry would carry the same payload"
                     );
                     "unmappable"
                 }
@@ -101,7 +104,7 @@ async fn avelo37_webhook(
         }
         // Infrastructure failure (staging unreachable): 5xx so the partner retries the delivery.
         Err(e) => {
-            eprintln!("avelo37 webhook: ingest failed for {}: {e}", event.id);
+            tracing::error!(adapter = "avelo37", event_id = %event.id, error = %e, "ingest failed -- 5xx so the partner retries");
             (StatusCode::INTERNAL_SERVER_ERROR, "failed to record event").into_response()
         }
     }

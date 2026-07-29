@@ -3140,7 +3140,7 @@ pub async fn verify_phone(
             expires_in: verified.expires_in,
         };
         if let Err(e) = sessions.park(parked).await {
-            eprintln!("auth session parking failed for {message_id}: {e} — verification stands, cookie pickup unavailable");
+            tracing::error!(%message_id, error = %e, "auth session parking failed -- verification stands, cookie pickup unavailable");
         }
     }
     let auth_ref = verified.auth_ref;

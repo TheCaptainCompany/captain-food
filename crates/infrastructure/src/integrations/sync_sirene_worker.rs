@@ -319,10 +319,10 @@ impl SireneSyncWorker {
         loop {
             match self.run_once().await {
                 Ok(summary) if summary.processed > 0 || summary.closed > 0 => {
-                    println!("sirene sync worker: {summary:?}");
+                    tracing::info!(worker = "sirene_sync", summary = ?summary, "sweep pass complete");
                 }
                 Ok(_) => {} // nothing pending — stay quiet
-                Err(e) => eprintln!("sirene sync worker: {e}"),
+                Err(e) => tracing::error!(worker = "sirene_sync", error = %e, "sweep pass failed"),
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -412,9 +412,11 @@ impl SireneSyncWorker {
         // worker on it forever. Mark it processed, keep nothing to clear, and say so loudly.
         let Some(payload) = payload else {
             summary.skipped += 1;
-            eprintln!(
-                "sirene sync worker: siret {siret}: pending row has NO payload — nothing to translate. \
-                 This should be impossible; the next ingestion refresh will re-pend it with one."
+            tracing::error!(
+                worker = "sirene_sync",
+                %siret,
+                "pending row has NO payload -- nothing to translate. This should be impossible; \
+                 the next ingestion refresh will re-pend it with one."
             );
             return self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await;
         };
@@ -426,7 +428,7 @@ impl SireneSyncWorker {
                 // refreshes it (which re-pends the row). The payload is KEPT: it is the evidence of
                 // what could not be parsed (#231 D3).
                 summary.skipped += 1;
-                eprintln!("sirene sync worker: siret {siret}: unparsable staged payload: {e}");
+                tracing::error!(worker = "sirene_sync", %siret, error = %e, "unparsable staged payload -- row marked Unmappable");
                 return self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await;
             }
         };
@@ -442,7 +444,7 @@ impl SireneSyncWorker {
                 Ok(()) => return self.mark_processed(siret, last_seen_at, RowOutcome::Synced).await,
                 Err(e) => {
                     summary.failed += 1; // left pending → retried next pass
-                    eprintln!("sirene sync worker: close failed for siret {siret}: {e}");
+                    tracing::error!(worker = "sirene_sync", %siret, error = %e, "close failed");
                     self.mark_failed(siret).await;
                     return Ok(());
                 }
@@ -503,7 +505,7 @@ impl SireneSyncWorker {
                     }
                     Err(e) => {
                         summary.failed += 1; // left pending → retried next pass
-                        eprintln!("sirene sync worker: staging failed for siret {siret}: {e}");
+                        tracing::error!(worker = "sirene_sync", %siret, error = %e, "staging failed");
                         self.mark_failed(siret).await;
                         Ok(())
                     }
@@ -516,7 +518,7 @@ impl SireneSyncWorker {
                 // why INSEE's record was unusable, and a silent unmappable row with no evidence is
                 // how a systematic mapping bug hides.
                 summary.skipped += 1;
-                eprintln!("sirene sync worker: skipped: {e}");
+                tracing::warn!(worker = "sirene_sync", error = %e, "row skipped");
                 self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await
             }
         }
@@ -602,16 +604,18 @@ impl SireneSyncWorker {
                 if status == "POISON" {
                     // Loud on the transition, because this is the moment the row stops being retried
                     // and starts needing a human (or a corrected record from INSEE).
-                    eprintln!(
-                        "sirene sync worker: siret {siret} QUARANTINED as POISON after {count} \
-                         consecutive failed attempts — it will be skipped until INSEE sends a changed \
-                         record. Its payload is retained as evidence."
+                    tracing::error!(
+                        worker = "sirene_sync",
+                        %siret,
+                        attempts = count,
+                        "QUARANTINED as POISON after consecutive failed attempts -- skipped until \
+                         INSEE sends a changed record. Payload retained as evidence."
                     );
                 }
             }
             Ok(None) => {}
             Err(e) => {
-                eprintln!("sirene sync worker: could not record the failed attempt for siret {siret}: {e}");
+                tracing::error!(worker = "sirene_sync", %siret, error = %e, "could not record the failed attempt");
             }
         }
     }
@@ -725,7 +729,7 @@ impl SireneSyncWorker {
                 .await
             {
                 summary.failed += 1;
-                eprintln!("sirene sync worker: absence close failed for siret {siret}: {e}");
+                tracing::error!(worker = "sirene_sync", %siret, error = %e, "absence close failed");
             }
         }
         Ok(())
@@ -789,21 +793,25 @@ impl SireneSyncWorker {
                 match outcome {
                     JournaledOutcome::Executed(Ok(())) => {
                         summary.closed += 1;
-                        println!("sirene sync worker: closed prospect {} (siret {siret})", state.display_name.0);
+                        tracing::info!(worker = "sirene_sync", %siret, prospect = %state.display_name.0, "closed prospect");
                     }
                     JournaledOutcome::Executed(Err(e)) => return Err(e),
                     // This exact closure signal (SIRET + staged version) was already consumed —
                     // e.g. closed, then manually reactivated: a spent signal never re-closes.
                     JournaledOutcome::Deduplicated(status) => {
-                        eprintln!(
-                            "sirene sync worker: close signal for siret {siret} already journaled \
-                             ({status:?}) — not re-sent"
+                        tracing::info!(
+                            worker = "sirene_sync",
+                            %siret,
+                            journaled = ?status,
+                            "close signal already journaled -- not re-sent (a spent signal never re-closes)"
                         );
                     }
                     JournaledOutcome::PayloadConflict { existing_status } => {
-                        eprintln!(
-                            "sirene sync worker: close payload conflict for siret {siret} \
-                             (journaled {existing_status:?}, same staged version): not re-sent"
+                        tracing::warn!(
+                            worker = "sirene_sync",
+                            %siret,
+                            journaled = ?existing_status,
+                            "close payload conflict at the same staged version -- not re-sent"
                         );
                     }
                 }
@@ -812,10 +820,12 @@ impl SireneSyncWorker {
                 // A live partner is NEVER auto-closed on a registry signal (bad SIRENE datum, SIRET
                 // change on relocation…) — surfaced for a human every time the signal re-pends.
                 summary.flagged_for_review += 1;
-                eprintln!(
-                    "sirene sync worker: MANUAL REVIEW — closure signal for partner '{}' \
-                     (siret {siret}, listing {:?}); not auto-closing",
-                    state.display_name.0, state.listing_status
+                tracing::warn!(
+                    worker = "sirene_sync",
+                    %siret,
+                    partner = %state.display_name.0,
+                    listing_status = ?state.listing_status,
+                    "MANUAL REVIEW -- closure signal for a live PARTNER; not auto-closing"
                 );
             }
         }

@@ -12216,7 +12216,7 @@ impl<'a> PmLegGen<'a> {
         );
         self.push(ind + 4, "}");
         self.push(ind + 4, "super::HookOutcome::Skip(reason) => {");
-        self.push(ind + 8, &format!("eprintln!(\"saga[{}]: call {}.{} skipped — {{reason}}\");", self.pm.name, port, operation));
+        self.push(ind + 8, &format!("tracing::warn!(saga = \"{}\", port = \"{}\", operation = \"{}\", %reason, \"service call skipped\");", self.pm.name, port, operation));
         self.push(ind + 4, "}");
         self.push(ind, "}");
         let sig = self.hook_sig();
@@ -12375,7 +12375,7 @@ impl<'a> PmLegGen<'a> {
             self.push(
                 body_ind + 8,
                 &format!(
-                    "eprintln!(\"saga[{}]: {} rejected ({{rejection}}) — skipped, the target aggregate's own invariants stand\");",
+                    "tracing::warn!(saga = \"{}\", command = \"{}\", %rejection, \"command rejected -- leg skipped, the target aggregate's own invariants stand\");",
                     self.pm.name, command
                 ),
             );
@@ -12387,7 +12387,7 @@ impl<'a> PmLegGen<'a> {
                     command
                 ),
             );
-            self.push(body_ind + 8, &format!("eprintln!(\"saga[{}]: {{reason}}\");", self.pm.name));
+            self.push(body_ind + 8, &format!("tracing::warn!(saga = \"{}\", %reason, \"leg skipped\");", self.pm.name));
             self.push(body_ind + 8, "leg_outcome = Outcome::Skipped(reason);");
         }
         self.push(body_ind + 4, "}");

@@ -159,9 +159,9 @@ impl DeliveryOfferTimeoutWorker {
     pub async fn run_loop(self: Arc<Self>) {
         loop {
             match self.run_once().await {
-                Ok(n) if n > 0 => println!("delivery offer timeout: escalated {n} stale offer(s)"),
+                Ok(n) if n > 0 => tracing::info!(worker = "delivery_offer_timeout", escalated = n, "escalated stale offer(s)"),
                 Ok(_) => {}
-                Err(e) => eprintln!("delivery offer timeout sweep failed: {e}"),
+                Err(e) => tracing::error!(worker = "delivery_offer_timeout", error = %e, "sweep pass failed -- an unanswered offer stays unexpired"),
             }
             tokio::time::sleep(SWEEP_INTERVAL).await;
         }

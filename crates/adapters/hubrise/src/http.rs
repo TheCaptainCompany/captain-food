@@ -182,18 +182,15 @@ async fn hubrise_oauth_callback(
 
     match connect.connect(code.trim()).await {
         Ok(summary) => {
-            println!(
-                "hubrise connect: account {} → RestaurantAccount {} ({} locations, {} catalogs created, {} imported){}",
-                summary.hubrise_account_id,
-                summary.restaurant_account_id,
-                summary.locations,
-                summary.catalogs_created,
-                summary.catalogs_imported,
-                if summary.warnings.is_empty() {
-                    String::new()
-                } else {
-                    format!("; warnings: {}", summary.warnings.join(" | "))
-                }
+            tracing::info!(
+                adapter = "hubrise",
+                hubrise_account_id = %summary.hubrise_account_id,
+                restaurant_account_id = %summary.restaurant_account_id,
+                locations = summary.locations,
+                catalogs_created = summary.catalogs_created,
+                catalogs_imported = summary.catalogs_imported,
+                warnings = ?summary.warnings,
+                "connect complete"
             );
             (
                 StatusCode::OK,
@@ -211,16 +208,16 @@ async fn hubrise_oauth_callback(
                 .into_response()
         }
         Err(e @ (ConnectError::Exchange(_) | ConnectError::NoAccountInScope)) => {
-            eprintln!("hubrise connect failed: {e}");
+            tracing::warn!(adapter = "hubrise", error = %e, "connect failed -- client error, not retryable as-is");
             (StatusCode::BAD_REQUEST, format!("hubrise connect failed: {e}")).into_response()
         }
         Err(e @ ConnectError::Pull(_)) => {
-            eprintln!("hubrise connect failed: {e}");
+            tracing::error!(adapter = "hubrise", error = %e, "connect failed on the HubRise pull -- retryable");
             (StatusCode::BAD_GATEWAY, format!("hubrise connect failed: {e} — retry the connect"))
                 .into_response()
         }
         Err(e @ ConnectError::Infra(_)) => {
-            eprintln!("hubrise connect failed: {e}");
+            tracing::error!(adapter = "hubrise", error = %e, "connect failed to record -- retryable");
             (StatusCode::INTERNAL_SERVER_ERROR, "hubrise connect failed to record — retry")
                 .into_response()
         }
@@ -303,7 +300,7 @@ async fn hubrise_webhook(
             Ok(_) => {}
             // Infra failure mirroring the receipt: 5xx so HubRise redelivers.
             Err(e) => {
-                eprintln!("hubrise webhook: raw mirror failed (cb {callback_key}): {e}");
+                tracing::error!(adapter = "hubrise", %callback_key, error = %e, "raw mirror failed -- 5xx so HubRise redelivers");
                 return (StatusCode::INTERNAL_SERVER_ERROR, "failed to mirror callback")
                     .into_response();
             }
@@ -312,12 +309,13 @@ async fn hubrise_webhook(
 
     // No enricher wired (or the callback carries no pullable resource): ingress-only ACK, as before.
     let Some(enricher) = enricher.filter(|_| callback.needs_pull()) else {
-        println!(
-            "hubrise webhook: verified {}.{} (id {}){}",
-            callback.resource_type,
-            callback.event_type,
-            callback.id,
-            if callback.needs_pull() { " [needs enricher — none wired]" } else { "" }
+        tracing::info!(
+            adapter = "hubrise",
+            resource_type = %callback.resource_type,
+            event_type = %callback.event_type,
+            callback_id = %callback.id,
+            needs_enricher = callback.needs_pull(),
+            "callback verified; ingress-only ACK (no enricher wired for it)"
         );
         return (
             StatusCode::ACCEPTED,
@@ -331,35 +329,38 @@ async fn hubrise_webhook(
         Ok(outcome) => {
             let status = match &outcome {
                 EnrichOutcome::CatalogImported { catalog_id } => {
-                    println!("hubrise webhook: imported catalog {} (cb {})", catalog_id.0, callback.id);
+                    tracing::info!(adapter = "hubrise", catalog_id = %catalog_id.0, callback_id = %callback.id, "catalog imported");
                     "catalog_imported"
                 }
                 EnrichOutcome::InventoryApplied { applied, skipped } => {
-                    println!(
-                        "hubrise webhook: inventory applied={applied} skipped={skipped} (cb {})",
-                        callback.id
+                    tracing::info!(
+                        adapter = "hubrise",
+                        applied,
+                        skipped,
+                        callback_id = %callback.id,
+                        "inventory sync applied"
                     );
                     "inventory_applied"
                 }
                 EnrichOutcome::Ignored { resource_type } => {
-                    println!("hubrise webhook: ignored {resource_type} (cb {})", callback.id);
+                    tracing::info!(adapter = "hubrise", %resource_type, callback_id = %callback.id, "resource type ignored");
                     "ignored"
                 }
                 EnrichOutcome::Skipped { reason } | EnrichOutcome::MapFailed { reason } => {
                     // Definitive: retrying the same payload would not help (logged, ACKed).
-                    eprintln!("hubrise webhook: skipped (cb {}): {reason}", callback.id);
+                    tracing::warn!(adapter = "hubrise", callback_id = %callback.id, %reason, "callback skipped -- definitive, retrying the same payload would not help");
                     "skipped"
                 }
                 EnrichOutcome::PullFailed { reason } => {
                     // The pull itself failed — ask HubRise to redeliver (mirror stays unprocessed).
-                    eprintln!("hubrise webhook: pull failed (cb {}): {reason}", callback.id);
+                    tracing::error!(adapter = "hubrise", callback_id = %callback.id, %reason, "HubRise API pull failed -- asking for redelivery, mirror stays unprocessed");
                     return (StatusCode::BAD_GATEWAY, "hubrise API pull failed").into_response();
                 }
             };
             // Every branch reaching here is definitive — stamp the enrichment high-water mark.
             if let Some(raw) = &raw {
                 if let Err(e) = raw.mark_processed(&callback_key).await {
-                    eprintln!("hubrise webhook: mark_processed failed (cb {callback_key}): {e}");
+                    tracing::error!(adapter = "hubrise", %callback_key, error = %e, "mark_processed failed -- the enrichment high-water mark was not stamped");
                 }
             }
             (StatusCode::OK, Json(serde_json::json!({ "received": true, "status": status })))
@@ -367,7 +368,7 @@ async fn hubrise_webhook(
         }
         // Infrastructure failure (event store unreachable): 5xx so HubRise redelivers the callback.
         Err(e) => {
-            eprintln!("hubrise webhook: enrichment append failed (cb {}): {e}", callback.id);
+            tracing::error!(adapter = "hubrise", callback_id = %callback.id, error = %e, "enrichment append failed -- 5xx so HubRise redelivers");
             (StatusCode::INTERNAL_SERVER_ERROR, "failed to record enrichment").into_response()
         }
     }

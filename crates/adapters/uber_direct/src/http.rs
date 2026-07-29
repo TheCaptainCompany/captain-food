@@ -72,15 +72,18 @@ async fn uber_direct_webhook(
         Ok(outcome) => {
             let status = match &outcome {
                 UberIngestOutcome::Recorded { event_type } => {
-                    println!("uber_direct webhook: recorded {event_type} ({})", event.event_id);
+                    tracing::info!(adapter = "uber_direct", %event_type, event_id = %event.event_id, "webhook fact recorded");
                     "recorded"
                 }
                 UberIngestOutcome::Duplicate => "duplicate",
                 UberIngestOutcome::Ignored { .. } => "ignored",
                 UberIngestOutcome::Unmappable { reason } => {
-                    eprintln!(
-                        "uber_direct webhook: unmappable {} ({}): {reason}",
-                        event.kind, event.event_id
+                    tracing::warn!(
+                        adapter = "uber_direct",
+                        kind = %event.kind,
+                        event_id = %event.event_id,
+                        %reason,
+                        "webhook verified but unmappable"
                     );
                     "unmappable"
                 }
@@ -89,7 +92,7 @@ async fn uber_direct_webhook(
                 .into_response()
         }
         Err(e) => {
-            eprintln!("uber_direct webhook: ingest failed for {}: {e}", event.event_id);
+            tracing::error!(adapter = "uber_direct", event_id = %event.event_id, error = %e, "ingest failed -- 5xx so Uber retries");
             (StatusCode::INTERNAL_SERVER_ERROR, "failed to record event").into_response()
         }
     }

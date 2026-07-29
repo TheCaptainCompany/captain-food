@@ -7,6 +7,8 @@ publish = false
 description = "HubRise partner adapter (ADR-20260718-213352): a self-contained vertical slice — the ingress ACL (X-HubRise-Hmac-SHA256 verification + callback envelope), the outbound OAuth2 API client (pull catalog/inventory), and the domain enrichment ACL (map pulled catalog/inventory → ImportCatalog / OfferStockUpdated via the application command handlers, with deterministic UUIDv5-of-HubRise-id ids reconciled with the Catalog aggregate). Exposes `routes()` and a standalone `hubrise-webhook` binary for independent deployment."
 
 [dependencies]
+# Structured logging (issue #191): the webhook shells are framework boundaries.
+tracing = "0.1"
 # Inner layers (dependency rule): the enrichment ACL maps HubRise shapes onto domain command structs and
 # drives the application command handlers via the EventStore port — no dependency on `infrastructure` for
 # its logic.

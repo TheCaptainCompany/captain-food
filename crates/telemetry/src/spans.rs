@@ -84,13 +84,23 @@ pub fn command_validate() -> Span {
 }
 
 /// `event.store.append` (INTERNAL) — appending to `domain_events`.
+///
+/// `event_count` is not in the contract; it is added because the contract's `business.event_type` is
+/// singular while an append is one transaction over possibly several events. Without the count, a span
+/// naming `OrderPlaced` reads as "one event was appended" when `CartCheckedOut` went with it.
 pub fn event_store_append(event_type: &str, stream_id: &str) -> Span {
     tracing::info_span!(
         "event.store.append",
         otel.kind = "internal",
         business.event_type = event_type,
         business.stream_id = stream_id,
+        event_count = Empty,
     )
+}
+
+/// Record how many events one `event.store.append` transaction carried.
+pub fn record_event_count(span: &Span, count: usize) {
+    span.record("event_count", count);
 }
 
 /// `event.publish` (PRODUCER) — publishing an appended event onto the bus.

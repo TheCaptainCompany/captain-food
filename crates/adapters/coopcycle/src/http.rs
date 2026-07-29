@@ -88,15 +88,19 @@ async fn coopcycle_webhook(
         Ok(outcome) => {
             let status = match &outcome {
                 CoopCycleIngestOutcome::Recorded { event_type } => {
-                    println!("coopcycle webhook[{instance}]: recorded {event_type} ({})", event.id);
+                    tracing::info!(adapter = "coopcycle", %instance, %event_type, event_id = %event.id, "webhook fact recorded");
                     "recorded"
                 }
                 CoopCycleIngestOutcome::Duplicate => "duplicate",
                 CoopCycleIngestOutcome::Ignored { .. } => "ignored",
                 CoopCycleIngestOutcome::Unmappable { reason } => {
-                    eprintln!(
-                        "coopcycle webhook[{instance}]: unmappable {} ({}): {reason}",
-                        event.event_type, event.id
+                    tracing::warn!(
+                        adapter = "coopcycle",
+                        %instance,
+                        event_type = %event.event_type,
+                        event_id = %event.id,
+                        %reason,
+                        "webhook verified but unmappable -- a retry would carry the same payload"
                     );
                     "unmappable"
                 }
@@ -105,7 +109,7 @@ async fn coopcycle_webhook(
                 .into_response()
         }
         Err(e) => {
-            eprintln!("coopcycle webhook[{instance}]: ingest failed for {}: {e}", event.id);
+            tracing::error!(adapter = "coopcycle", %instance, event_id = %event.id, error = %e, "ingest failed -- 5xx so the instance retries");
             (StatusCode::INTERNAL_SERVER_ERROR, "failed to record event").into_response()
         }
     }

@@ -112,7 +112,7 @@ pub async fn on_reclamation_resolved(
                 let reason = format!(
                     "PlaceReplacementOrder rejected: {rejection} — the Order aggregate's invariants stand; skipped"
                 );
-                eprintln!("saga[ReclamationProcess]: {reason}");
+                tracing::warn!(saga = "ReclamationProcess", %reason, "leg skipped");
                 Ok(Outcome::Skipped(reason))
             }
         };

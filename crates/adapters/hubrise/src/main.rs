@@ -57,9 +57,9 @@ async fn main() {
             )));
         }
         _ => {
-            eprintln!(
-                "hubrise-webhook: enrichment + connect disabled (DATABASE_URL unset); \
-                 verifying callbacks only"
+            tracing::warn!(
+                adapter = "hubrise",
+                "enrichment + connect disabled (DATABASE_URL unset) -- verifying callbacks only"
             );
         }
     };
@@ -68,6 +68,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
-    println!("hubrise-webhook adapter listening on {addr}");
+    tracing::info!(adapter = "hubrise", %addr, "webhook adapter listening");
     axum::serve(listener, routes(state)).await.expect("server error");
 }
