@@ -36,6 +36,8 @@ description: >
                   value is never printed — only the key name and the expected shape.
     - mode_of   : optional. Names a secret whose MODE is derivable from its value prefix and safe to
                   report (never the value itself) — e.g. Stripe `sk_test_` / `sk_live_`.
+    - deploy    : WHO SUPPLIES THE VALUE in each profile (PROP-20260729-014500, all five decisions
+                  approved 2026-07-29). Two forms, split by secrecy — see the block below.
 
   ENFORCEMENT is decided by the profile, not by a separate toggle (product-owner directive,
   2026-07-29 — "fast fail to avoid misconfiguration on production"):
@@ -51,6 +53,32 @@ description: >
   Profiles (`APP_PROFILE`, default `development`): development | staging | production. The profile is
   DECLARED, never inferred from the host or from a key's prefix — an inferred profile is wrong exactly
   when it matters most (during a mode switch-over).
+
+  HOW A VALUE REACHES THE APP (PROP-20260729-014500 D5). Render has no per-deploy environment override
+  — its deploy API takes only clearCache/commitId/imageUrl/deployMode, so a deploy always runs with the
+  SERVICE's stored variables. Attaching configuration to the deployment therefore means putting it in
+  the artifact. Three categories, and the split is forced by secrecy, not preference:
+
+    1. NON-SECRET, per profile -> `deploy: { production: "true", … }`
+       BAKED INTO THE BINARY by the codegen as a per-profile table. The digest then determines
+       behaviour: redeploying `sha-abc123` next month behaves exactly as it did today, and a rollback
+       restores the configuration that shipped with that build. This is why it is baked rather than
+       stored on the service — deploys here are digest-pinned precisely so production never runs an
+       ambiguous artifact, and mutable service state re-opens that ambiguity through the back door.
+
+    2. SECRET -> `deploy: { from_secret: { production: NAME_OF_GITHUB_SECRET, … } }`
+       Pushed by CI from GitHub repo secrets to the Render service env. NEVER baked: the GHCR package
+       is PUBLIC (it must be, so Render can pull it without credentials), and a baked `ENV` is readable
+       by anyone via `docker pull` + `docker history`.
+
+    3. THE PROFILE SELECTOR ITSELF (`APP_PROFILE`) -> service env, necessarily.
+       One image is promoted across environments by digest, so the thing that DISTINGUISHES those
+       environments cannot live inside it. Baking it per-profile would also be circular: the profile is
+       what selects the per-profile table.
+
+  PRECEDENCE, highest first: environment variable > baked profile value > `default`. The env var wins
+  so an operator keeps a seconds-fast override for an incident, while the reviewed, recorded value in
+  this file is what runs the rest of the time.
 
 # =====================================================================
 # Profile selector
@@ -78,6 +106,10 @@ keys:
     gates: >
       Postgres pool: the event store, every read model and every background worker. Unset, /health
       reports `not_configured` (503) and no worker is constructed at all.
+    deploy:
+      from_secret:
+        production: DATABASE_URL
+        staging: DATABASE_URL
 
   # ===================================================================
   # Identity (Supabase, ADR-0015) — without these, auth is anonymous-only
@@ -91,6 +123,10 @@ keys:
     gates: >
       Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is
       the fail-closed stand-in and every login is refused.
+    deploy:
+      from_secret:
+        production: SUPABASE_URL
+        staging: SUPABASE_URL
 
   SUPABASE_PUBLISHABLE_KEY:
     type: string
@@ -98,6 +134,10 @@ keys:
     gates: >
       Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed
       (auth stays anonymous-only).
+    deploy:
+      from_secret:
+        production: SUPABASE_PUBLISHABLE_KEY
+        staging: SUPABASE_PUBLISHABLE_KEY
 
   SUPABASE_JWKS_URL:
     type: string
@@ -107,6 +147,10 @@ keys:
     gates: >
       JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every
       authenticated request falls back to anonymous.
+    deploy:
+      from_secret:
+        production: SUPABASE_JWKS_URL
+        staging: SUPABASE_JWKS_URL
 
   AUTH_SESSION_KEY:
     type: string
@@ -118,12 +162,20 @@ keys:
       AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest.
       Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login
       SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login.
+    deploy:
+      from_secret:
+        production: AUTH_SESSION_KEY
+        staging: AUTH_SESSION_KEY
 
   SUPABASE_SMS_HOOK_SECRET:
     type: string
     secret: true
     gates: >
       Shared secret verifying Supabase's SMS send-hook callbacks. Unset, the hook endpoint fails closed.
+    deploy:
+      from_secret:
+        production: SUPABASE_SMS_HOOK_SECRET
+        staging: SUPABASE_SMS_HOOK_SECRET
 
   # ===================================================================
   # Payments (Stripe) — the money path
@@ -140,6 +192,10 @@ keys:
       Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no
       checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported
       (never the key) so "is production actually live?" is answerable.
+    deploy:
+      from_secret:
+        production: STRIPE_SECRET_KEY_PROD
+        staging: STRIPE_SECRET_KEY_TEST
 
   STRIPE_WEBHOOK_SECRET:
     type: string
@@ -152,6 +208,10 @@ keys:
       closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the
       restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched
       together with STRIPE_SECRET_KEY.
+    deploy:
+      from_secret:
+        production: STRIPE_WEBHOOK_SECRET_PROD
+        staging: STRIPE_WEBHOOK_SECRET_TEST
 
   # ===================================================================
   # Integrations — feature-scoped, degrade to "unavailable", not "broken"
@@ -162,12 +222,20 @@ keys:
     gates: >
       HubRise app client id for the OAuth connect flow. Unset, restaurants cannot connect a HubRise
       location (existing connections are unaffected).
+    deploy:
+      from_secret:
+        production: HUBRISE_CLIENT_ID
+        staging: HUBRISE_CLIENT_ID
 
   HUBRISE_WEBHOOK_SECRET:
     type: string
     secret: true
     gates: >
       HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
+    deploy:
+      from_secret:
+        production: HUBRISE_WEBHOOK_SECRET
+        staging: HUBRISE_WEBHOOK_SECRET
 
   EXTERNAL_API_TOKENS:
     type: string
@@ -175,6 +243,10 @@ keys:
     gates: >
       Comma-separated pre-shared tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047).
       Unset, only a Supabase JWT with captain_role EXTERNAL reaches /external.
+    deploy:
+      from_secret:
+        production: EXTERNAL_API_TOKENS
+        staging: EXTERNAL_API_TOKENS
 
   INTERNAL_TRIGGER_TOKEN:
     type: string
@@ -183,6 +255,10 @@ keys:
       Shared secret for `POST /internal/sirene/drain` and `/internal/inbound/drain` (`x-internal-token`).
       Unset, both fail closed (503) and the CI sweep cannot wake the worker — the drain then waits for
       its hourly poll instead of starting in seconds.
+    deploy:
+      from_secret:
+        production: INTERNAL_TRIGGER_TOKEN
+        staging: INTERNAL_TRIGGER_TOKEN
 
   # ===================================================================
   # Worker toggles — each pauses a pipeline (ADR-20260728-224500)
@@ -196,6 +272,9 @@ keys:
     gates: >
       In-process projection worker (ADR-0040). OFF, no read model advances — queries serve stale data
       indefinitely. Readiness at GET /projector.
+    deploy:
+      production: "true"
+      staging: "true"
 
   RUN_PROCESS_MANAGERS:
     type: bool
@@ -205,6 +284,9 @@ keys:
     gates: >
       In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires.
       Readiness at GET /saga.
+    deploy:
+      production: "true"
+      staging: "true"
 
   RUN_INBOUND_DRAIN:
     type: bool
@@ -214,6 +296,9 @@ keys:
     gates: >
       Inbound-events drain (ADR-20260720-015400) delivering adapter-staged facts through the write path,
       plus the command_journal stale sweep. OFF, every webhook-staged fact accumulates undelivered.
+    deploy:
+      production: "true"
+      staging: "true"
 
   RUN_RETENTION_SWEEP:
     type: bool
@@ -223,6 +308,9 @@ keys:
     gates: >
       Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without
       bound.
+    deploy:
+      production: "true"
+      staging: "true"
 
   RUN_SIRENE_WORKER:
     type: bool
@@ -234,6 +322,9 @@ keys:
       releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF,
       staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen.
       Readiness at GET /sirene.
+    deploy:
+      production: "true"
+      staging: "true"
 
   RUN_DELIVERY_OFFER_TIMEOUT:
     type: bool
@@ -243,6 +334,9 @@ keys:
     gates: >
       Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on
       a rider who is not coming.
+    deploy:
+      production: "true"
+      staging: "true"
 
   # ===================================================================
   # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
