@@ -215,6 +215,26 @@ why `RUN_SIRENE_WORKER` had no home, `API_SECRET` is configured and read by noth
 
 ---
 
+## 10. CI owns the Render service configuration — PROP-20260729-014500
+
+Tracking issue: [#248 "CI owns the Render service configuration: sync specs/configuration.yaml + repo secrets to the service, never the dashboard"](https://github.com/TheCaptainCompany/captain-food/issues/248).
+Product-owner directive of 2026-07-29 (*"the settings must be done by the CI itself not by my manual
+configuration on render"*) — the *what* is decided; these are the *how*.
+
+[#246](https://github.com/TheCaptainCompany/captain-food/issues/246) gave configuration a declaration;
+this gives it an owner. Until it lands, `RUN_SIRENE_WORKER=true` remains a dashboard field nobody can
+see from the repo — and the production boot log confirms it was never set, which is why 6,649
+department-37 rows are still `PENDING`.
+
+| Decision | Question | Recommendation |
+|---|---|---|
+| PROP-014500 D1 | Write mode | **Upsert only** to start (never deletes); revisit replace-all once the drift report has been empty for several deploys |
+| PROP-014500 D2 | Dry-run first? | **Yes** — the workflow cannot be tested outside CI (no local `RENDER_API_KEY`), so its first real run would otherwise rewrite production config untested |
+| PROP-014500 D3 | Secret bootstrap ordering | **Non-secrets first** — unblocks `RUN_SIRENE_WORKER` immediately with zero secret-handling risk |
+| PROP-014500 D4 | `RENDER_API_KEY` as a write credential | **Reuse the existing account key** — the exposure already exists; Render issues no narrower token |
+
+---
+
 ## Maintenance
 
 The `architect` reconciles this file on each daily run: new proposals add rows, answered decisions
