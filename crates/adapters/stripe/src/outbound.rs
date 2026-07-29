@@ -23,6 +23,7 @@ use application::generated::services::{
 use async_trait::async_trait;
 use domain::generated::scalars::PaymentIntentId;
 use domain::shared::errors::DomainError;
+use tracing::Instrument as _;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.stripe.com";
 
@@ -77,9 +78,36 @@ impl PaymentService for StripePaymentGateway {
         input: PaymentRequestInput,
         meta: &ServiceCallMeta,
     ) -> Result<PaymentRequestOutput, DomainError> {
-        let form = encode_create_intent_form(&input, meta);
-        let (status, body) = self.post_form("/v1/payment_intents", &form).await?;
-        decode_create_intent_response(status, &body)
+        // payment.intent.create (CLIENT) — the `place-order` contract's riskiest span, and the one its
+        // success condition is written against (`business.result == 'captured'`). PROP-170500's worked
+        // example of a Friday-night investigation is a 3.9s timeout on exactly this leg.
+        //
+        // `result` here is the intent CREATION outcome, not the capture: capture arrives later as an
+        // inbound Stripe webhook fact. `created` therefore means "Stripe accepted the intent", and the
+        // contract's `captured` value is recorded by the webhook path, not here — conflating the two
+        // would make a created-but-never-captured payment look successful, which is the precise shape
+        // of "a paid order nobody was told about".
+        let span = telemetry::spans::payment_intent_create();
+        let result = async {
+            let form = encode_create_intent_form(&input, meta);
+            let (status, body) = self.post_form("/v1/payment_intents", &form).await?;
+            decode_create_intent_response(status, &body)
+        }
+        .instrument(span.clone())
+        .await;
+        telemetry::spans::record_payment_result(
+            &span,
+            match &result {
+                Ok(_) => "created",
+                Err(_) => "failed",
+            },
+        );
+        if result.is_err() {
+            // BUSINESS metric: the checkout-failure counter is what answers "are customers unable to
+            // pay right now" without reading a single trace.
+            telemetry::meters::place_order::payment_failure("intent_create_failed");
+        }
+        result
     }
 
     async fn refund(&self, input: PaymentRefundInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {

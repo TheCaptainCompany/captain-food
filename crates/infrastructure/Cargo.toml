@@ -9,6 +9,11 @@ description = "Captain.Food infrastructure: adapters implementing the applicatio
 [dependencies]
 domain = { path = "../domain" }
 application = { path = "../application" }
+# Instrumentation (issue #191). This is a FRAMEWORK layer -- the event store, publisher, projectors and
+# saga runner are all `instrumented: true` in c4-l3.yaml -- so the telemetry SDK belongs here. It must
+# never appear in `domain` or `application`; a workspace test enforces that.
+telemetry = { path = "../telemetry" }
+tracing = "0.1"
 # SIRENE HTTP client + wire DTOs (ADR-0045): shared with the thin CI ingestion binary; the ACL here
 # maps those wire types onto domain commands, and the sync worker drains the staging table they fill.
 sirene_ingest = { path = "../sirene_ingest" }

@@ -11,6 +11,8 @@ name = "coopcycle-webhook"
 path = "src/main.rs"
 
 [dependencies]
+# Structured logging (issue #191): the webhook shells are framework boundaries.
+tracing = "0.1"
 # Inner layers only (dependency rule): the ACL maps CoopCycle shapes onto domain events via the
 # application inbox port — it does NOT depend on `infrastructure` for its logic.
 application = { path = "../../application" }

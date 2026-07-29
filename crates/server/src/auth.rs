@@ -126,7 +126,7 @@ impl AuthContext {
             .filter(|s| !s.is_empty())
             .map(|u| format!("{}/auth/v1", u.trim_end_matches('/')));
         if jwks_url.is_none() {
-            eprintln!("SUPABASE_JWKS_URL not set — non-public GraphQL paths will return 503 (fail closed)");
+            tracing::warn!("SUPABASE_JWKS_URL not set -- non-public GraphQL paths will return 503 (fail closed)");
         }
         let external_tokens: Vec<String> = std::env::var("EXTERNAL_API_TOKENS")
             .ok()

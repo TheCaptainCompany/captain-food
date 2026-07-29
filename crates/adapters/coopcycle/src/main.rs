@@ -50,6 +50,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
-    println!("coopcycle-webhook adapter listening on {addr}");
+    tracing::info!(adapter = "coopcycle", %addr, "webhook adapter listening");
     axum::serve(listener, routes(state)).await.expect("server error");
 }

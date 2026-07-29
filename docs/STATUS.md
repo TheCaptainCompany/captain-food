@@ -3,6 +3,43 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-29. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-29 — the observability contracts finally leave the repo: OpenTelemetry to Honeycomb EU
+> ([#191](https://github.com/TheCaptainCompany/captain-food/issues/191), PROP-20260726-170500 D1+D2,
+> ADR-20260729-183000).**
+> `specs/observability.yaml` had reached 898 lines of contracts — required spans, run identities,
+> attributes, metrics and SLOs across eleven workflows — and **none of it was emitted**: no
+> `opentelemetry`/`tracing` dependency, no subscriber, and 69 `println!` calls. `correlation_id` and
+> `trace_id` are *mandatory* in every contract's `run_identity` and neither existed at runtime, so on the
+> acceptance-first write path the whole async half of a command (handler, event append, Stripe call,
+> projection) ran with nothing tying it to the request that caused it.
+> Now: **`crates/telemetry`** (a new leaf crate) exports OTLP/HTTP to **Honeycomb, pinned to `eu1`** —
+> a **GDPR constraint, not a default**, since spans carry `customerId`/`orderId` and ADR-0042 pinned data
+> to Frankfurt. The `command-acceptance` contract's three spans + four metrics are emitted from **every**
+> generated mutation resolver (via the codegen, not hand-written), and the `place-order` boundaries are
+> instrumented: `event.store.append`, `event.publish` (per envelope), `event.consume.projection` (per
+> projector) and `payment.intent.create`. Logging is structured/levelled/correlated throughout.
+> **Telemetry degrades, never gates**: no telemetry key is `required:`, so a missing ingest key drops the
+> exporter and keeps logs rather than refusing to serve orders — the deliberate opposite of a missing
+> payment secret, which must stop the boot. The boot report distinguishes `exporting` / `logs-only` /
+> `exporter-unavailable`, because an operator who thinks traces are flowing when they are not loses the
+> first ten minutes of an incident.
+> **D2 answered but NARROWED, against the recommendation**: parent-based **head** sampling at `1.0`, not
+> tail-based — tail sampling needs Refinery (a service to run and pay for), contradicting ADR-0042's
+> minimal-ops-pre-PMF stance, and D2's own reasoning says the volume is not there yet.
+> Layer rule, now **enforced by a dependency test**: `domain` gets neither the OTel SDK nor the `tracing`
+> facade; `application` gets the facade only. *It may say things; only boundaries may measure them.*
+> A second test reads `observability.yaml` and asserts every required span/attribute/metric of the two
+> named contracts is really constructed. **Both guards were validated by breaking them**, which caught two
+> vacuous passes (a span rename satisfied by a `#[cfg(test)]` literal; an attribute rename satisfied by a
+> substring prefix) — a guard is finished when it has been seen to fail, not when it passes.
+> **Known remaining**: the other **nine** contracts are still unemitted; `payment.intent.create` records
+> `created`, not the contract's `captured` (capture is an inbound webhook fact, and conflating them would
+> make a created-but-never-captured payment look successful); and trace **retention / GDPR erasure reaching
+> Honeycomb** is unresolved, belonging with PROP-170000's erasure work.
+> [#179](https://github.com/TheCaptainCompany/captain-food/issues/179) (GraphQL hardening) and
+> [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) (advisory locks + the missing index)
+> are untouched, so PROP-170500 **D3/D4/D5 remain open**.
+
 > ✅ **2026-07-29 — watchdog: `render-config-sync` dry-run fixed at the source (`limit=200 -> 100`).**
 > [#252](https://github.com/TheCaptainCompany/captain-food/issues/252) hardened the env-vars parser to be
 > shape-agnostic and to fail loud, but kept `?limit=200` — which is the actual cause. Render's env-vars

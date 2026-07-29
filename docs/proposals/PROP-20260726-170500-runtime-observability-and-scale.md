@@ -1,9 +1,9 @@
 # PROP-20260726-170500 — Runtime observability and scale readiness
 
-- **Status**: Proposed
+- **Status**: Partially realized — D1 and D2 answered; D3, D4 and D5 still open
 - **Date**: 2026-07-26
 - **Tracking issue**: [#202 "Epic: runtime observability and scale readiness"](https://github.com/TheCaptainCompany/captain-food/issues/202)
-- **Realized by**: _(filled at completion)_
+- **Realized by**: [#191 "Observability contracts are 100% unimplemented"](https://github.com/TheCaptainCompany/captain-food/issues/191) → [ADR-20260729-183000](../adr/ADR-20260729-183000-telemetry-is-honeycomb-eu-and-degrades-never-gates.md). **D1** answered as recommended (hosted OTLP, EU-pinned) with the vendor settled: **Honeycomb `eu1`**. **D2** answered but **narrowed against the recommendation** — parent-based *head* sampling at `1.0`, not tail-based, because tail sampling needs Refinery (a service to run and pay for) and D2's own reasoning says the volume is not there yet. [#179](https://github.com/TheCaptainCompany/captain-food/issues/179) (GraphQL hardening) and [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) (advisory locks + the missing index) are untouched, so **D3/D4/D5 remain open**.
 
 ---
 

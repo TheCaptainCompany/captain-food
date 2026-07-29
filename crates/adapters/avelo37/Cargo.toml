@@ -7,6 +7,8 @@ publish = false
 description = "Avelo37 delivery-partner adapter (ADR-20260718-213352, issue #28): a self-contained vertical slice — the ACL (Avelo37-Signature verification + partner-event mapping + idempotent two-layer-inbox ingestor, ADR-20260720-015400) and its HTTP shell (POST /adapters/avelo37/webhooks), plus the OUTBOUND DeliveryService client (offer_job). Exposes `routes()` for the monolith to mount, and a standalone `avelo37-webhook` binary so it can deploy as its own web service, isolated from other partners."
 
 [dependencies]
+# Structured logging (issue #191): the webhook shells are framework boundaries.
+tracing = "0.1"
 # Inner layers only (dependency rule): the ACL maps Avelo37 shapes onto domain events via the
 # application inbox port — it does NOT depend on `infrastructure` for its logic.
 application = { path = "../../application" }

@@ -193,6 +193,16 @@ pub struct Config {
     pub stripe_secret_key: String,
     /// HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY.
     pub stripe_webhook_secret: String,
+    /// Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is not constructed at all and the app runs with local structured logs only — every span is built and dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation. This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and Query API use) has a different shape and is rejected at startup rather than failing as an opaque 401 on the first export.
+    pub honeycomb_api_key: Option<String>,
+    /// OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an account that does not hold the key and telemetry is silently absent.
+    pub honeycomb_api_endpoint: String,
+    /// The Honeycomb service/dataset traces land in, also reported as the OTel `service.name` resource attribute. Baked per profile so staging traffic can never be read as production: sharing one dataset makes a staging load test look like a Friday-night peak and corrupts every SLO computed from it.
+    pub honeycomb_dataset: String,
+    /// Head-sampling probability, parent-respecting. Baked at `1.0` (keep everything) because PROP-170500 D2's reasoning holds at V0 volume: "head-sampling would mostly discard the interesting traces". This is the dial to turn DOWN if ingest cost becomes real — turning it down before there is volume buys nothing and loses the traces that explain the incidents. Set to 0 and traces stop; the metrics and logs continue, so the app looks healthy while being undiagnosable.
+    pub otel_traces_sample_ratio: String,
+    /// Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default.
+    pub log_level: String,
     /// HubRise app client id for the OAuth connect flow. OPTIONAL in every profile and CURRENTLY UNSET — we do not have one yet (2026-07-29). Unset, restaurants cannot START a HubRise connection; already connected locations are unaffected, since the worker uses their per-connection tokens. When a client id is obtained it is NOT a secret (an OAuth client id is public by construction), so it gets literal per-profile `deploy` values here rather than a repo secret.
     pub hubrise_client_id: Option<String>,
     /// HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
@@ -297,6 +307,15 @@ impl Config {
             problems.missing.push(MissingKey { name: "STRIPE_WEBHOOK_SECRET", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
         }
         let stripe_webhook_secret = stripe_webhook_secret.unwrap_or_default();
+        let honeycomb_api_key = raw("HONEYCOMB_API_KEY");
+        let honeycomb_api_endpoint = raw("HONEYCOMB_API_ENDPOINT").or_else(|| baked("HONEYCOMB_API_ENDPOINT", profile).map(str::to_string));
+        let honeycomb_api_endpoint = honeycomb_api_endpoint.unwrap_or_else(|| "https://api.eu1.honeycomb.io".to_string());
+        let honeycomb_dataset = raw("HONEYCOMB_DATASET").or_else(|| baked("HONEYCOMB_DATASET", profile).map(str::to_string));
+        let honeycomb_dataset = honeycomb_dataset.unwrap_or_else(|| "captain-food-dev".to_string());
+        let otel_traces_sample_ratio = raw("OTEL_TRACES_SAMPLE_RATIO").or_else(|| baked("OTEL_TRACES_SAMPLE_RATIO", profile).map(str::to_string));
+        let otel_traces_sample_ratio = otel_traces_sample_ratio.unwrap_or_else(|| "1.0".to_string());
+        let log_level = raw("LOG_LEVEL").or_else(|| baked("LOG_LEVEL", profile).map(str::to_string));
+        let log_level = log_level.unwrap_or_else(|| "info".to_string());
         let hubrise_client_id = raw("HUBRISE_CLIENT_ID");
         let hubrise_webhook_secret = raw("HUBRISE_WEBHOOK_SECRET");
         let external_api_tokens = raw("EXTERNAL_API_TOKENS");
@@ -359,6 +378,26 @@ impl Config {
                 problems.invalid.push(InvalidKey { name: "STRIPE_WEBHOOK_SECRET", scalar: "StripeWebhookSecret", pattern: r"^whsec_[A-Za-z0-9_-]+$", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
             }
         }
+        if let Some(v) = honeycomb_api_key.as_deref() {
+            if !v.is_empty() && !matches_pattern(r"^[A-Za-z0-9_]{20,120}$", v) {
+                problems.invalid.push(InvalidKey { name: "HONEYCOMB_API_KEY", scalar: "HoneycombIngestKey", pattern: r"^[A-Za-z0-9_]{20,120}$", gates: "Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is not constructed at all and the app runs with local structured logs only — every span is built and dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation. This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and Query API use) has a different shape and is rejected at startup rather than failing as an opaque 401 on the first export." });
+            }
+        }
+        if let Some(v) = Some(honeycomb_api_endpoint.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "HONEYCOMB_API_ENDPOINT", scalar: "HttpsUrl", pattern: r"^https?://", gates: "OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an account that does not hold the key and telemetry is silently absent." });
+            }
+        }
+        if let Some(v) = Some(otel_traces_sample_ratio.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^(0(\\.[0-9]+)?|1(\\.0+)?)$", v) {
+                problems.invalid.push(InvalidKey { name: "OTEL_TRACES_SAMPLE_RATIO", scalar: "TraceSampleRatio", pattern: r"^(0(\\.[0-9]+)?|1(\\.0+)?)$", gates: "Head-sampling probability, parent-respecting. Baked at `1.0` (keep everything) because PROP-170500 D2's reasoning holds at V0 volume: \"head-sampling would mostly discard the interesting traces\". This is the dial to turn DOWN if ingest cost becomes real — turning it down before there is volume buys nothing and loses the traces that explain the incidents. Set to 0 and traces stop; the metrics and logs continue, so the app looks healthy while being undiagnosable." });
+            }
+        }
+        if let Some(v) = Some(log_level.as_str()) {
+            if !v.is_empty() && !matches_pattern(r"^(?i)(trace|debug|info|warn|error)$", v) {
+                problems.invalid.push(InvalidKey { name: "LOG_LEVEL", scalar: "LogLevel", pattern: r"^(?i)(trace|debug|info|warn|error)$", gates: "Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default." });
+            }
+        }
         (
             Self {
                 profile,
@@ -370,6 +409,11 @@ impl Config {
                 supabase_sms_hook_secret,
                 stripe_secret_key,
                 stripe_webhook_secret,
+                honeycomb_api_key,
+                honeycomb_api_endpoint,
+                honeycomb_dataset,
+                otel_traces_sample_ratio,
+                log_level,
                 hubrise_client_id,
                 hubrise_webhook_secret,
                 external_api_tokens,
@@ -401,6 +445,11 @@ impl Config {
         out.push_str(&format!("  SUPABASE_SMS_HOOK_SECRET   = {}\n", if self.supabase_sms_hook_secret.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  STRIPE_SECRET_KEY          = {}\n", if self.stripe_secret_key.is_empty() { "unset".to_string() } else { format!("set [{} mode]", stripe_mode(&self.stripe_secret_key)) }));
         out.push_str(&format!("  STRIPE_WEBHOOK_SECRET      = {}\n", if self.stripe_webhook_secret.is_empty() { "unset" } else { "set" }));
+        out.push_str(&format!("  HONEYCOMB_API_KEY          = {}\n", if self.honeycomb_api_key.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  HONEYCOMB_API_ENDPOINT     = {}\n", self.honeycomb_api_endpoint));
+        out.push_str(&format!("  HONEYCOMB_DATASET          = {}\n", self.honeycomb_dataset));
+        out.push_str(&format!("  OTEL_TRACES_SAMPLE_RATIO   = {}\n", self.otel_traces_sample_ratio));
+        out.push_str(&format!("  LOG_LEVEL                  = {}\n", self.log_level));
         out.push_str(&format!("  HUBRISE_CLIENT_ID          = {}\n", self.hubrise_client_id.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  HUBRISE_WEBHOOK_SECRET     = {}\n", if self.hubrise_webhook_secret.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  EXTERNAL_API_TOKENS        = {}\n", if self.external_api_tokens.is_some() { "set" } else { "unset" }));
@@ -419,7 +468,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 21;
+pub const KEY_COUNT: usize = 26;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -432,6 +481,11 @@ pub const DECLARED_KEYS: &[&str] = &[
     "SUPABASE_SMS_HOOK_SECRET",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
+    "HONEYCOMB_API_KEY",
+    "HONEYCOMB_API_ENDPOINT",
+    "HONEYCOMB_DATASET",
+    "OTEL_TRACES_SAMPLE_RATIO",
+    "LOG_LEVEL",
     "HUBRISE_CLIENT_ID",
     "HUBRISE_WEBHOOK_SECRET",
     "EXTERNAL_API_TOKENS",
@@ -456,6 +510,14 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("SUPABASE_PUBLISHABLE_KEY", "staging", "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"),
     ("SUPABASE_JWKS_URL", "production", "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"),
     ("SUPABASE_JWKS_URL", "staging", "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"),
+    ("HONEYCOMB_API_ENDPOINT", "production", "https://api.eu1.honeycomb.io"),
+    ("HONEYCOMB_API_ENDPOINT", "staging", "https://api.eu1.honeycomb.io"),
+    ("HONEYCOMB_DATASET", "production", "captain-food"),
+    ("HONEYCOMB_DATASET", "staging", "captain-food-staging"),
+    ("OTEL_TRACES_SAMPLE_RATIO", "production", "1.0"),
+    ("OTEL_TRACES_SAMPLE_RATIO", "staging", "1.0"),
+    ("LOG_LEVEL", "production", "info"),
+    ("LOG_LEVEL", "staging", "info"),
     ("RUN_PROJECTOR", "production", "true"),
     ("RUN_PROJECTOR", "staging", "true"),
     ("RUN_PROCESS_MANAGERS", "production", "true"),

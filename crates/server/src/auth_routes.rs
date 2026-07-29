@@ -142,7 +142,7 @@ async fn sms_hook(State(state): State<AuthRoutesState>, headers: HeaderMap, body
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         // Supabase treats a non-2xx as delivery failure and surfaces an error to the client.
         Err(e) => {
-            eprintln!("sms-hook: OVH send failed: {e}");
+            tracing::error!(error = %e, "sms-hook: OVH send failed -- the customer receives no OTP");
             (StatusCode::BAD_GATEWAY, "sms delivery failed").into_response()
         }
     }

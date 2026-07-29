@@ -29,4 +29,7 @@ hex = "0.4"
 async-trait = { workspace = true }
 # Outbound Stripe API client (create PaymentIntent / request refund). Same crate + features as the
 # HubRise outbound client: default-features off + native-tls to match the workspace TLS choice.
+# Instrumentation (issue #191): the `payment.intent.create` CLIENT span of the place-order contract.
+telemetry = { path = "../../telemetry" }
+tracing = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
