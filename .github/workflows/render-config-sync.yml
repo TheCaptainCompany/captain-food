@@ -64,21 +64,26 @@ jobs:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           PROFILE: ${{ inputs.profile }}
           APPLY: ${{ inputs.apply }}
-          # Every SECRET the manifest can name. Non-secrets are deliberately absent: they carry literal
-          # per-profile values in specs/configuration.yaml and are baked into the image, because a
-          # non-secret hidden in Actions secrets is as opaque as one typed into the dashboard — you
-          # still could not read the repo and know what production runs (directive, 2026-07-29).
-          # Absent secrets are reported and skipped, never written empty: a key that LOOKS configured
-          # but is not is worse than one plainly missing.
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          AUTH_SESSION_KEY: ${{ secrets.AUTH_SESSION_KEY }}
-          SUPABASE_SMS_HOOK_SECRET: ${{ secrets.SUPABASE_SMS_HOOK_SECRET }}
-          STRIPE_SECRET_KEY_TEST: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
-          STRIPE_SECRET_KEY_PROD: ${{ secrets.STRIPE_SECRET_KEY_PROD }}
-          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-          HUBRISE_WEBHOOK_SECRET: ${{ secrets.HUBRISE_WEBHOOK_SECRET }}
-          EXTERNAL_API_TOKENS: ${{ secrets.EXTERNAL_API_TOKENS }}
-          INTERNAL_TRIGGER_TOKEN: ${{ secrets.INTERNAL_TRIGGER_TOKEN }}
+          # EVERY repo secret, as one JSON object, so the manifest is the ONLY list of names.
+          #
+          # This was a hand-written `NAME: ${{ secrets.NAME }}` line per key, and it drifted the first
+          # time it was tested: HONEYCOMB_API_KEY and the four OVH_* credentials were declared in the
+          # spec and configured as repo secrets, but absent from this block — so the sync reported them
+          # as "repo secret is not set". That message is a lie in the most expensive direction: it tells
+          # an operator who just configured the secret correctly that they did not, and the fix is in a
+          # file they were not looking at. A second list of key names is exactly the drift
+          # specs/configuration.yaml exists to abolish; it does not get to survive here.
+          #
+          # `toJSON(secrets)` is resolved by the runner and still masked in logs. Only names the manifest
+          # declares are ever looked up, and no value is printed either way — the script reports
+          # set/unset/unchanged, never content.
+          #
+          # Non-secrets are deliberately NOT sourced here: they carry literal per-profile values in
+          # specs/configuration.yaml and are baked into the image, because a non-secret hidden in Actions
+          # secrets is as opaque as one typed into the dashboard — you still could not read the repo and
+          # know what production runs (directive, 2026-07-29). Absent secrets are reported and skipped,
+          # never written empty: a key that LOOKS configured but is not is worse than one plainly missing.
+          ALL_REPO_SECRETS: ${{ toJSON(secrets) }}
         run: |
           set -euo pipefail
           if [ -z "${RENDER_API_KEY}" ]; then
@@ -121,7 +126,9 @@ jobs:
             KEY=$(jq -r '.env_key' <<<"$row")
             FROM=$(jq -r '.from_secret' <<<"$row")
             declared="$declared $KEY"
-            VALUE="${!FROM:-}"
+            # Looked up BY NAME out of the secrets object, so adding a key to configuration.yaml is the
+            # only step there is. `// empty` covers both "no such secret" and one set to the empty string.
+            VALUE=$(jq -r --arg n "$FROM" '.[$n] // empty' <<<"$ALL_REPO_SECRETS")
             if [ -z "$VALUE" ]; then
               echo "  SKIP       $KEY  <- repo secret '$FROM' is not set"
               skipped=$((skipped+1)); continue

@@ -15591,6 +15591,51 @@ keys:
         );
     }
 
+    /// The Render sync must resolve repo secrets from the manifest ALONE — never from a second list of
+    /// key names maintained by hand in the workflow.
+    ///
+    /// It did, and the list drifted on its first real run: `HONEYCOMB_API_KEY` and the four `OVH_*`
+    /// credentials were declared in `specs/configuration.yaml` AND configured as repo secrets, but
+    /// missing from the workflow's `env:` block, so the sync reported "repo secret is not set". That is
+    /// the most expensive shape of wrong: it tells an operator who configured the secret correctly that
+    /// they did not, and points them at the wrong file. Two lists of the same names is precisely the
+    /// drift configuration.yaml exists to abolish.
+    #[test]
+    fn the_render_sync_takes_its_secret_names_only_from_the_manifest() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let wf = std::fs::read_to_string(root.join(".github/workflows/render-config-sync.yml"))
+            .expect("the render-config-sync workflow must exist");
+        assert!(
+            wf.contains("toJSON(secrets)"),
+            "the workflow must source every repo secret as one object, so the manifest is the only \
+             list of names"
+        );
+        // RENDER_API_KEY is the one legitimate direct reference: it is the workflow's own credential
+        // for reaching Render, not a value the manifest ever names.
+        //
+        // Comment lines are skipped, because the comment above this very block quotes the
+        // `secrets.NAME` shape it warns against — a rule that cannot survive being explained is a rule
+        // people work around by deleting the explanation.
+        let direct: Vec<&str> = wf
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .flat_map(|l| {
+                l.match_indices("secrets.").map(move |(at, _)| {
+                    let tail = &l[at + "secrets.".len()..];
+                    let end = tail.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'));
+                    &tail[..end.unwrap_or(tail.len())]
+                })
+            })
+            .filter(|n| !n.is_empty())
+            .collect();
+        assert_eq!(
+            direct,
+            ["RENDER_API_KEY"],
+            "only RENDER_API_KEY may be referenced by name; every other secret is looked up from the \
+             manifest. Naming one here recreates the list that drifted."
+        );
+    }
+
     /// A key with a DECLARED DEFAULT must be consumed through the generated `Config`, never re-read
     /// from the environment at the call site.
     ///
