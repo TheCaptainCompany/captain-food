@@ -32,7 +32,7 @@ pushes it to the service before the existing digest-pinned deploy.
 
 | | where the value lives | why |
 |---|---|---|
-| **Non-secret** (`RUN_*`, `APP_PROFILE`, `PORT`, `WEB_ASSETS_DIR`) | the spec, per profile | reviewed in a PR; git history explains *why* a pipeline was paused |
+| **Non-secret** (`RUN_*`, `APP_PROFILE`, `PORT`, `WEB_ASSETS_DIR`) | the spec, per profile — **baked into the image** if D5 is taken | reviewed in a PR; git history explains *why* a pipeline was paused, and baking makes the digest determine behaviour |
 | **Secret** (DB, Stripe, Supabase, HubRise, tokens) | GitHub repo secrets; the spec names only the KEY to read | never in the repo, never in the image (the GHCR package is public) |
 
 A `deploy:` block per key, so the manifest is part of the same declaration the reader is generated from:
@@ -149,12 +149,44 @@ deploys.** The safe ordering is the same one #238 taught: never remove what CI d
 | **Reuse the existing account key** ✅ **recommended** | Already present and already account-scoped, so the exposure exists today; nothing new to store | CI can now rewrite production config — a real escalation, mitigated by main-only runs and the post-deploy `/health` + `prod-smoke` gates |
 | A second, service-scoped key | Least privilege | Render API keys are account-scoped; there is no narrower token to issue |
 
+### D5 — Where non-secret values live: baked into the image, or service env?
+
+Raised by the product owner (2026-07-29): *"Is it possible to configure the deployment not the render
+service?"* — the more principled instinct, and one the recommendation above had quietly skipped.
+
+**What the platform allows.** Render's deploy API accepts only `clearCache`, `commitId`, `imageUrl`
+and `deployMode` — **no env field**. A deploy always runs with the *service's* stored environment
+variables, so there is no per-deploy override. The only way to attach configuration to the deployment
+itself is to **bake it into the image** (`ARG`/`ENV`), which the build already does for
+`CAPTAIN_BUILD_VERSION`.
+
+**The hard constraint.** The GHCR package is **public** (it must be, so Render can pull it without
+credentials — `render.yaml`). A baked `ENV` is world-readable via `docker pull` + `docker history`.
+So secrets can never be baked, whatever the merits. This decision is only about the NON-secret values.
+
+| option | pros | cons |
+|---|---|---|
+| **Hybrid: bake non-secrets, sync secrets** ✅ **recommended** | Config becomes part of the immutable artifact: content-addressed with the digest, so a rollback restores the exact config that shipped with that build. No mutable service state for toggles, therefore no drift to detect. Runtime env still overrides image `ENV`, so a dashboard var remains an emergency lever | Flipping a toggle needs a rebuild + redeploy (minutes) rather than an edit. Two mechanisms to understand instead of one |
+| Everything through service env (as originally proposed) | One mechanism; a toggle flip is seconds | Config is mutable state *outside* the artifact: a rollback restores the old code with the NEW config, which is precisely the combination nobody tested |
+| Everything baked | Fully immutable, one mechanism | **Impossible** — public image, so secrets would be published |
+
+**Why the rollback argument decides it.** Deploys here are digest-pinned specifically so production never
+runs an ambiguous artifact. Leaving toggles in mutable service state re-opens that ambiguity by the back
+door: `sha-abc123` deployed today and re-deployed next month can behave differently, and nothing records
+why. Baking the non-secrets closes it — the digest then determines behaviour completely, except for
+secrets, which cannot change behaviour, only enable it.
+
+**Cost, stated plainly**: pausing a pipeline becomes a PR + build (~minutes) instead of a dashboard edit.
+For a flag whose entire job is to stop a production pipeline, being reviewed and recorded is the
+feature — and the runtime override survives for the case where minutes are too slow.
+
 ## Verification plan
 
 1. Dry-run on `main` → the report names `RUN_SIRENE_WORKER` as `WOULD SET` and `API_SECRET` as
    `UNDECLARED`. That output alone is the first repo-visible answer to "what is production configured with".
-2. Flip to authoritative for **non-secrets only**; confirm the boot log shows
-   `sirene sync worker: running in-process` and `/sirene` returns `200`.
+2. Land the non-secrets — by baking them into the image if D5 is taken, else by flipping the sync to
+   authoritative for those keys — and confirm the boot log shows `sirene sync worker: running
+   in-process` and `/sirene` returns `200`.
 3. Confirm the department-37 rows drain (`SYNCED`, payloads released) — the end-to-end proof.
 4. Bootstrap secrets into GitHub, extend the sync, confirm `/health` stays green across a deploy.
 5. Only then consider replace-all (D1).
@@ -164,6 +196,6 @@ deploys.** The safe ordering is the same one #238 taught: never remove what CI d
 | alternative | why it lost |
 |---|---|
 | **Re-adopt the Render Blueprint** (`render.yaml` as real IaC) | It was retired on 2026-07-21 because Blueprint sync fought the digest-pinned hook deploys and kept resetting `image.url`. Re-adopting reopens that conflict. |
-| **Bake everything into the Docker image** | The GHCR package is **public** — a baked `ENV` secret is world-readable via `docker history`. Viable for non-secret toggles only, and it makes an emergency toggle flip require a full rebuild. |
+| **Bake everything into the Docker image** | The GHCR package is **public** — a baked `ENV` secret is world-readable via `docker history`. Viable for non-secret toggles only, which is no longer an aside: it is **D5**, raised by the product owner and recommended as a hybrid. |
 | **Keep the dashboard, add a CI drift *check*** | Detects the problem without fixing it: someone still has to hand-edit, and the check goes red until they do. |
 | **A `.env` file committed and read at boot** | Secrets in the repo. Non-starter. |
