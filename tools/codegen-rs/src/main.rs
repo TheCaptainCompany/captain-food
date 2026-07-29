@@ -15699,6 +15699,205 @@ keys:
         );
     }
 
+    /// The `domain` and `application` layers must never reach the telemetry SDK (issue #191's
+    /// Definition of Done: "No business/domain crate depends on the telemetry SDK").
+    ///
+    /// Two different rules, because the layers are not equivalent:
+    ///
+    /// - `domain` gets NEITHER the SDK nor the `tracing` facade. It is pure DDD; an aggregate that can
+    ///   log is an aggregate whose decisions start being shaped by what is convenient to trace.
+    /// - `application` may have the `tracing` FACADE (so a saga leg's diagnostics are structured and
+    ///   correlated) but never `opentelemetry*` and never `crates/telemetry`. **It may say things; only
+    ///   boundaries may measure them.** `c4-l3.yaml` marks `command-handlers` `instrumented: false`, and
+    ///   this is what makes that flag true rather than aspirational.
+    ///
+    /// Enforced as a dependency test rather than left to review, because the failure is silent: adding
+    /// `telemetry` to `application` compiles, passes every other test, and quietly moves instrumentation
+    /// into the layer the whole architecture exists to keep clean.
+    #[test]
+    fn domain_and_application_never_depend_on_the_telemetry_sdk() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        // A guard that cannot find its target must FAIL, never silently pass.
+        let read = |crate_name: &str| -> String {
+            let path = root.join("crates").join(crate_name).join("Cargo.toml");
+            std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "cannot read {} ({e}) -- if the crate moved, fix this guard; do NOT let it pass",
+                    path.display()
+                )
+            })
+        };
+
+        // Dependency lines only: a `#`-comment or a doc sentence mentioning opentelemetry is prose,
+        // not an edge in the graph, and failing on it would train people to reword comments.
+        let dep_names = |manifest: &str| -> Vec<String> {
+            manifest
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.starts_with('#') && l.contains('='))
+                .filter_map(|l| l.split('=').next())
+                .map(|n| n.trim().trim_matches('"').to_string())
+                .filter(|n| !n.is_empty())
+                .collect()
+        };
+
+        let forbidden_everywhere = ["telemetry", "opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry", "tracing-subscriber"];
+
+        for (crate_name, facade_allowed) in [("domain", false), ("application", true)] {
+            let manifest = read(crate_name);
+            let deps = dep_names(&manifest);
+            for bad in forbidden_everywhere {
+                assert!(
+                    !deps.iter().any(|d| d == bad),
+                    "crates/{crate_name}/Cargo.toml depends on `{bad}`.\n\
+                     Fix: move the instrumentation to a FRAMEWORK boundary -- the command bus, event \
+                     store, publisher, projectors, saga runner, GraphQL gateway or middleware (the \
+                     components marked `instrumented: true` in specs/architecture/c4-l3.yaml).\n\
+                     Why: docs/claude/observability.md and issue #191's Definition of Done both require \
+                     the business layers to stay free of the telemetry SDK. Beyond architecture, an \
+                     aggregate that needs a subscriber to run is an aggregate that cannot be unit-tested."
+                );
+            }
+            let has_facade = deps.iter().any(|d| d == "tracing");
+            if !facade_allowed {
+                assert!(
+                    !has_facade,
+                    "crates/{crate_name}/Cargo.toml depends on `tracing`.\n\
+                     Fix: remove it. `domain` is pure DDD and logs nothing -- not even through a facade.\n\
+                     Why: the domain must be reasonable about entirely on its own terms. `application` \
+                     is the innermost layer permitted the facade, and only for events, never spans."
+                );
+            }
+        }
+    }
+
+    /// Every span and attribute the `command-acceptance` and `place-order` contracts declare REQUIRED
+    /// must actually be constructed somewhere in `crates/telemetry/src/spans.rs`, and every metric they
+    /// name must exist in `contract.rs`.
+    ///
+    /// This is the test that makes issue #191's Definition of Done checkable rather than a claim. The
+    /// failure it exists to catch is silent in both directions: a contract can gain a required span that
+    /// nothing emits (the observability-agent then reports a violation that looks like broken
+    /// instrumentation), and a span name can be typo'd at the call site (the span is still emitted, it
+    /// just no longer satisfies the contract naming it). Neither shows up in a compile or a normal test.
+    ///
+    /// Scoped to those two contracts deliberately: they are the ones the DoD names. The other nine
+    /// contracts are not yet emitted, and asserting them here would fail for work this issue does not
+    /// claim to have done.
+    #[test]
+    fn the_required_observability_contracts_are_actually_emitted() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let read = |rel: &str| -> String {
+            let path = root.join(rel);
+            std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!("cannot read {} ({e}) -- fix this guard rather than letting it pass", path.display())
+            })
+        };
+
+        let obs: serde_yaml::Value = serde_yaml::from_str(&read("specs/observability.yaml"))
+            .expect("specs/observability.yaml parses");
+        let contract_rs = read("crates/telemetry/src/contract.rs");
+
+        // Only the PRODUCTION half of spans.rs counts. Cutting the test module is not tidiness: the
+        // first version of this guard searched the whole file and passed when `command.journal` was
+        // renamed to `command.journalx`, because a `#[cfg(test)]` assertion still contained the old
+        // literal. A guard satisfied by a test asserting the thing it is meant to verify is worse than
+        // no guard at all.
+        let spans_all = read("crates/telemetry/src/spans.rs");
+        let spans_rs = spans_all.split("#[cfg(test)]").next().unwrap_or(&spans_all).to_string();
+
+        // The span names ACTUALLY CONSTRUCTED: the first string literal of each `info_span!` call.
+        // Matching construction sites rather than "the name appears somewhere in the file" is what makes
+        // a typo'd or renamed span fail here instead of silently violating its contract at runtime.
+        let constructed: std::collections::BTreeSet<String> = {
+            let mut out = std::collections::BTreeSet::new();
+            let mut rest = spans_rs.as_str();
+            while let Some(at) = rest.find("info_span!(") {
+                let tail = &rest[at + "info_span!(".len()..];
+                if let Some(open) = tail.find('"') {
+                    let after = &tail[open + 1..];
+                    if let Some(close) = after.find('"') {
+                        out.insert(after[..close].to_string());
+                    }
+                }
+                rest = tail;
+            }
+            out
+        };
+        assert!(
+            !constructed.is_empty(),
+            "parsed no info_span! call sites out of crates/telemetry/src/spans.rs -- the guard is \
+             broken, not the code. Fix the parser rather than deleting the test."
+        );
+
+        let mut missing: Vec<String> = Vec::new();
+        for feature in ["command-acceptance", "place-order"] {
+            let node = obs.get(feature).unwrap_or_else(|| {
+                panic!("specs/observability.yaml no longer declares the '{feature}' contract")
+            });
+
+            // Required spans: the span NAME must be built in spans.rs, and each of its required
+            // attribute KEYS must appear there too (as a declared field or a `record` target).
+            let spans = node.get("spans").and_then(|s| s.as_sequence()).unwrap_or_else(|| {
+                panic!("'{feature}' declares no spans")
+            });
+            for sp in spans {
+                let required = sp.get("required").and_then(|r| r.as_bool()).unwrap_or(false);
+                if !required {
+                    continue;
+                }
+                let name = sp.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+                if !constructed.contains(name) {
+                    missing.push(format!("  {feature}: span '{name}' is required but never constructed"));
+                    continue;
+                }
+                for at in sp.get("attributes").and_then(|a| a.as_sequence()).map(|s| s.as_slice()).unwrap_or(&[]) {
+                    if !at.get("required").and_then(|r| r.as_bool()).unwrap_or(false) {
+                        continue;
+                    }
+                    let key = at.get("key").and_then(|k| k.as_str()).unwrap_or_default();
+                    // Match a real tracing FIELD ASSIGNMENT (`business.foo = ...`) or an exactly-quoted
+                    // constant in contract.rs. Both need the delimiter: a bare `contains(key)` is
+                    // satisfied by any longer name that merely starts with it, so renaming
+                    // `business.dispatch_outcome` to `business.dispatch_outcomeX` slipped past the first
+                    // version of this check. Prefix matching is not name matching.
+                    let as_field = format!("{key} = ");
+                    if !spans_rs.contains(&as_field) && !contract_rs.contains(&format!("\"{key}\"")) {
+                        missing.push(format!(
+                            "  {feature}: span '{name}' requires attribute '{key}', which is set nowhere"
+                        ));
+                    }
+                }
+            }
+
+            // Metrics AND business_metrics: both blocks are part of the contract, and the split between
+            // them is itself required (technical vs BAM), so neither may be skipped.
+            for block in ["metrics", "business_metrics"] {
+                for m in node.get(block).and_then(|m| m.as_sequence()).map(|s| s.as_slice()).unwrap_or(&[]) {
+                    let name = m.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+                    if !contract_rs.contains(&format!("\"{name}\"")) {
+                        missing.push(format!(
+                            "  {feature}: {block} '{name}' has no constant in contract.rs"
+                        ));
+                    }
+                }
+            }
+        }
+
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "specs/observability.yaml requires telemetry that the code does not emit:\n{}\n\n\
+             Fix: add the span/attribute/metric in crates/telemetry (spans.rs + contract.rs) and emit it \
+             from the FRAMEWORK boundary that owns it.\n\
+             Why: an unemitted required span makes the observability-agent report a contract violation \
+             that reads as broken instrumentation, and a contract nothing satisfies is the state issue \
+             #191 was filed to end -- 898 lines of guarantees, none of them true.",
+            missing.join("\n")
+        );
+    }
+
     #[test]
     fn makefile_recipe_lines_are_ascii() {
         // CARGO_MANIFEST_DIR (= tools/codegen-rs) is the one anchor that holds both locally and
