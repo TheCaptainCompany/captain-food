@@ -378,6 +378,16 @@ keys:
         production: INTERNAL_TRIGGER_TOKEN
         staging: INTERNAL_TRIGGER_TOKEN
 
+  DELIVERY_OFFER_MAX_TTL_SECONDS:
+    type: int
+    gates: >
+      Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout
+      worker escalates to the next ranked channel. Set it too high and a channel that never answers
+      holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner
+      that would have accepted gets pulled off the job. Declares NO `default` deliberately: the
+      fallback (900s) and the `> 0` guard live in `DeliveryOfferTimeoutWorker::new`, which builds
+      without a Config in hand — one owner for the number, as with OVH_SMS_SENDER below.
+
   # ===================================================================
   # Worker toggles — each pauses a pipeline (ADR-20260728-224500)
   # ===================================================================
@@ -546,6 +556,27 @@ keys:
   # ignores is noise that trains people to skim it.
   # ===================================================================
 
+  INSEE_API_TOKEN:
+    type: string
+    secret: true
+    consumer: sirene_ingest
+    gates: >
+      INSEE portal API key, sent as `X-INSEE-Api-Key-Integration` (no OAuth2 on the 2024+ portal).
+      `SireneClient::from_env` FAILS when it is unset, so a sweep with no token does not silently ingest
+      zero établissements — it refuses. No `deploy` block: this consumer runs in GitHub Actions, which
+      injects the repo secret of the same name directly; the Render sync (which only carries the server
+      service) has nothing to do with it.
+
+  INSEE_API_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: sirene_ingest
+    gates: >
+      Override of the version-pinned Sirene base URL. Exists because the version is IN the path
+      (`/api-sirene/3.11`): when INSEE bumps it, a sweep can be redirected without a release. Unset, the
+      client uses its own pinned constant -- so no `default` here, which would be a second copy of it.
+
   SIRENE_DEPARTMENTS:
     type: string
     scalar:
@@ -571,6 +602,143 @@ keys:
       The deployed server's drain endpoint, pinged at the end of a sweep so the worker starts in seconds
       instead of waiting for its hourly poll. Unset, the sweep logs that it skipped the ping — which is
       how department 37's 6,649 rows stayed PENDING after a successful ingestion.
+
+  # ===================================================================
+  # Integration adapters — SEPARATE deployables, none of them deployed yet
+  #
+  # Each `crates/adapters/*` binary is its own service, so `consumer` keeps these out of the server's
+  # typed Config, its boot report and the Render sync manifest: the server never reads them, and a
+  # report listing settings the process ignores trains people to skim the report.
+  #
+  # They are declared for the same reason the SIRENE keys are — the drift gate and the generated docs
+  # have to see every key the tree reads. All 17 of these were invisible until the gate learned to
+  # follow a `*_ENV` const and a closure-wrapped read; that is a third of the inventory that no boot
+  # report, no manifest and no document would have mentioned.
+  #
+  # None is `required:`, in any profile: each adapter is fail-closed by construction. Unconfigured, the
+  # composition root keeps the no-op stand-in and delivery jobs stay open to the next ranked channel —
+  # which is the correct posture for a channel we have not signed. A PARTIAL config is the dangerous
+  # case, and the adapters already reject it (`UberDirectConfig::from_env` returns `Err`, not a silent
+  # no-op) rather than half-wiring a send path.
+  # ===================================================================
+
+  AVELO37_API_KEY:
+    type: string
+    secret: true
+    consumer: avelo37_adapter
+    gates: >
+      Static bearer key for the Avelo37 partner API. Unset, the outbound gateway is not built and jobs
+      reach independent riders only — no delivery is lost, but the partner channel is silently absent,
+      so an operator expecting Avelo37 coverage sees none.
+
+  AVELO37_API_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: avelo37_adapter
+    gates: >
+      Base-URL override pointing the client at a staging or mock Avelo37. Unset, the client uses its own
+      production constant -- hence no `default` here, which would duplicate it.
+
+  AVELO37_WEBHOOK_SECRET:
+    type: string
+    secret: true
+    consumer: avelo37_adapter
+    gates: >
+      HMAC key verifying inbound Avelo37 delivery-status callbacks. Unset, the webhook route fails
+      closed: `DeliveryStatusUpdated` facts stop arriving and a delivery's tracking freezes at its last
+      known state while the courier is in fact moving.
+
+  UBER_DIRECT_CUSTOMER_ID:
+    type: string
+    consumer: uber_direct_adapter
+    gates: >
+      Uber Direct customer/organization id — the `{customer_id}` path segment on every API call. One of
+      the four the adapter requires together; missing any one of them is reported as a misconfiguration
+      rather than downgraded to a no-op.
+
+  UBER_DIRECT_CLIENT_ID:
+    type: string
+    consumer: uber_direct_adapter
+    gates: >
+      OAuth2 client-credentials client id. Required with the other three; unset, no Uber Direct channel.
+
+  UBER_DIRECT_CLIENT_SECRET:
+    type: string
+    secret: true
+    consumer: uber_direct_adapter
+    gates: >
+      OAuth2 client-credentials client secret — the token manager cannot mint an access token without
+      it, so every create-delivery call fails at authentication.
+
+  UBER_DIRECT_WEBHOOK_SECRET:
+    type: string
+    secret: true
+    consumer: uber_direct_adapter
+    gates: >
+      Raw-body HMAC-SHA256 key verifying `X-Uber-Signature` on inbound callbacks. Unset, the webhook
+      fails closed and delivery progress stops updating mid-delivery.
+
+  UBER_DIRECT_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: uber_direct_adapter
+    gates: >
+      API base-URL override (tests point this at a local mock). Unset, the adapter's own production
+      constant applies -- no `default` here for the same reason.
+
+  UBER_DIRECT_TOKEN_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: uber_direct_adapter
+    gates: >
+      OAuth2 token-endpoint override. Unset, the adapter's own constant applies.
+
+  UBER_DIRECT_SCOPE:
+    type: string
+    consumer: uber_direct_adapter
+    gates: >
+      OAuth2 scope override. Unset, the adapter requests its default delivery scope; too narrow a scope
+      here surfaces as an authorization failure on create-delivery, not at startup.
+
+  COOPCYCLE_INSTANCES:
+    type: string
+    consumer: coopcycle_adapter
+    gates: >
+      JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a
+      federation registry rather than one endpoint, which is why it is a JSON document and not a set of
+      scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the
+      operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop
+      a whole delivery channel.
+
+  HUBRISE_API_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: hubrise_adapter
+    gates: >
+      HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies.
+
+  HUBRISE_CONNECT_REDIRECT_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: hubrise_adapter
+    gates: >
+      Public URL HubRise redirects back to after consent (this deployable's
+      `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an
+      OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app
+      EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent.
+
+  HUBRISE_OAUTH_SCOPE:
+    type: string
+    consumer: hubrise_adapter
+    gates: >
+      Scope requested on connect. Unset, the adapter asks for account-wide catalog + inventory read, so
+      one token covers every location of the account. Narrowing it means a connected restaurant's
+      catalog or stock silently stops syncing for the locations the scope no longer covers.
 
   # ===================================================================
   # Runtime / build identity

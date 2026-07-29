@@ -211,6 +211,8 @@ pub struct Config {
     pub external_api_tokens: Option<String>,
     /// Shared secret for `POST /internal/sirene/drain` and `/internal/inbound/drain` (`x-internal-token`). Unset, both fail closed (503) and the CI sweep cannot wake the worker — the drain then waits for its hourly poll instead of starting in seconds.
     pub internal_trigger_token: Option<String>,
+    /// Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout worker escalates to the next ranked channel. Set it too high and a channel that never answers holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner that would have accepted gets pulled off the job. Declares NO `default` deliberately: the fallback (900s) and the `> 0` guard live in `DeliveryOfferTimeoutWorker::new`, which builds without a Config in hand — one owner for the number, as with OVH_SMS_SENDER below.
+    pub delivery_offer_max_ttl_seconds: Option<i64>,
     /// In-process projection worker (ADR-0040). OFF, no read model advances — queries serve stale data indefinitely. Readiness at GET /projector.
     pub run_projector: bool,
     /// In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires. Readiness at GET /saga.
@@ -332,6 +334,7 @@ impl Config {
         let hubrise_webhook_secret = raw("HUBRISE_WEBHOOK_SECRET");
         let external_api_tokens = raw("EXTERNAL_API_TOKENS");
         let internal_trigger_token = raw("INTERNAL_TRIGGER_TOKEN");
+        let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok());
         let run_projector = raw("RUN_PROJECTOR")
             .or_else(|| baked("RUN_PROJECTOR", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_PROJECTOR", &v, true))
@@ -436,6 +439,7 @@ impl Config {
                 hubrise_webhook_secret,
                 external_api_tokens,
                 internal_trigger_token,
+                delivery_offer_max_ttl_seconds,
                 run_projector,
                 run_process_managers,
                 run_inbound_drain,
@@ -478,6 +482,7 @@ impl Config {
         out.push_str(&format!("  HUBRISE_WEBHOOK_SECRET     = {}\n", if self.hubrise_webhook_secret.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  EXTERNAL_API_TOKENS        = {}\n", if self.external_api_tokens.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INTERNAL_TRIGGER_TOKEN     = {}\n", if self.internal_trigger_token.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds.map_or_else(|| "unset".to_string(), |v| v.to_string())));
         out.push_str(&format!("  RUN_PROJECTOR              = {}\n", self.run_projector));
         out.push_str(&format!("  RUN_PROCESS_MANAGERS       = {}\n", self.run_process_managers));
         out.push_str(&format!("  RUN_INBOUND_DRAIN          = {}\n", self.run_inbound_drain));
@@ -498,7 +503,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 32;
+pub const KEY_COUNT: usize = 33;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -520,6 +525,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "HUBRISE_WEBHOOK_SECRET",
     "EXTERNAL_API_TOKENS",
     "INTERNAL_TRIGGER_TOKEN",
+    "DELIVERY_OFFER_MAX_TTL_SECONDS",
     "RUN_PROJECTOR",
     "RUN_PROCESS_MANAGERS",
     "RUN_INBOUND_DRAIN",
