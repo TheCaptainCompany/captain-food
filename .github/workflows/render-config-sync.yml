@@ -96,8 +96,21 @@ jobs:
           echo "service: captain-food ($SID) | profile: $PROFILE | apply: $APPLY"
           echo
 
-          CURRENT=$(curl -sS -m 20 -H "Authorization: Bearer $RENDER_API_KEY" \
+          RAW=$(curl -sS -m 20 -H "Authorization: Bearer $RENDER_API_KEY" \
             "https://api.render.com/v1/services/$SID/env-vars?limit=200")
+          # SHAPE-AGNOSTIC. Render has returned both `[{envVar:{key,value}}, …]` and an object wrapper
+          # over the same records; the docs publish neither. Rather than encode a guess that breaks
+          # silently on the other shape, pull every object that HAS key+value, wherever it sits. The
+          # first attempt assumed the array form and died on `Cannot index string with string "envVar"`.
+          CURRENT=$(jq -c '[.. | objects | select(has("key") and has("value"))]' <<<"$RAW")
+          COUNT=$(jq 'length' <<<"$CURRENT")
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::could not read env vars from the Render API (parsed 0 of them)."
+            echo "Response shape was: $(jq -r 'if type=="array" then "array" else (keys|join(",")) end' <<<"$RAW" 2>/dev/null || echo 'not JSON')"
+            exit 1
+          fi
+          echo "read $COUNT env var(s) currently on the service"
+          echo
 
           changed=0; unchanged=0; skipped=0; failed=0
           declared=""
@@ -110,7 +123,7 @@ jobs:
               echo "  SKIP       $KEY  <- repo secret '$FROM' is not set"
               skipped=$((skipped+1)); continue
             fi
-            HAVE=$(jq -r --arg k "$KEY" '.[].envVar | select(.key==$k) | .value' <<<"$CURRENT")
+            HAVE=$(jq -r --arg k "$KEY" 'map(select(.key==$k)) | .[0].value // empty' <<<"$CURRENT")
             if [ "$HAVE" = "$VALUE" ]; then
               echo "  unchanged  $KEY"
               unchanged=$((unchanged+1)); continue
@@ -136,7 +149,7 @@ jobs:
           # Anything on the service the spec does not declare. Reported, never deleted (D1) -- this list
           # is the removal-candidate set a human reviews, not something CI acts on.
           echo
-          for k in $(jq -r '.[].envVar.key' <<<"$CURRENT" | sort); do
+          for k in $(jq -r '.[].key' <<<"$CURRENT" | sort); do
             case " $declared " in
               *" $k "*) ;;
               *) echo "  UNDECLARED $k  [on the service, in no spec]" ;;

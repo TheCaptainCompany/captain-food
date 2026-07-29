@@ -193,7 +193,7 @@ pub struct Config {
     pub stripe_secret_key: String,
     /// HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY.
     pub stripe_webhook_secret: String,
-    /// HubRise app client id for the OAuth connect flow. Unset, restaurants cannot connect a HubRise location (existing connections are unaffected).
+    /// HubRise app client id for the OAuth connect flow. OPTIONAL in every profile and CURRENTLY UNSET — we do not have one yet (2026-07-29). Unset, restaurants cannot START a HubRise connection; already connected locations are unaffected, since the worker uses their per-connection tokens. When a client id is obtained it is NOT a secret (an OAuth client id is public by construction), so it gets literal per-profile `deploy` values here rather than a repo secret.
     pub hubrise_client_id: Option<String>,
     /// HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
     pub hubrise_webhook_secret: Option<String>,
