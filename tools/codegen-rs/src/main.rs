@@ -8789,6 +8789,11 @@ struct ConfigKey {
     /// "present" is not "usable" (a live key in the test slot, a 31-byte session key, a pasted newline).
     scalar: Option<String>,
     pattern: Option<String>,
+    /// Non-secret per-profile values, BAKED into the binary (PROP-20260729-014500 D5): profile -> value.
+    deploy: BTreeMap<String, String>,
+    /// Secret sources, SYNCED by CI from GitHub repo secrets: profile -> repo-secret name. Never baked
+    /// — the GHCR package is public, so a baked ENV would be world-readable.
+    from_secret: BTreeMap<String, String>,
 }
 
 /// The profiles a key may be required in — also the `APP_PROFILE` enum.
@@ -8834,6 +8839,31 @@ fn parse_config_keys(model: &Model) -> Vec<ConfigKey> {
             gates: str_at("gates").unwrap_or_default(),
             mode_of: str_at("mode_of"),
             consumer: str_at("consumer").unwrap_or_else(|| "server".to_string()),
+            deploy: node
+                .get("deploy")
+                .and_then(|d| d.as_mapping())
+                .map(|m| {
+                    m.iter()
+                        .filter(|(k, _)| k.as_str() != Some("from_secret"))
+                        .filter_map(|(k, v)| match (k.as_str(), v) {
+                            (Some(k), Value::String(v)) => Some((k.to_string(), v.clone())),
+                            (Some(k), Value::Bool(v)) => Some((k.to_string(), v.to_string())),
+                            (Some(k), Value::Number(v)) => Some((k.to_string(), v.to_string())),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            from_secret: node
+                .get("deploy")
+                .and_then(|d| d.get("from_secret"))
+                .and_then(|f| f.as_mapping())
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(k, v)| Some((k.as_str()?.to_string(), v.as_str()?.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default(),
             scalar: scalar_ref.clone(),
             pattern: scalar_ref.as_deref().and_then(|name| {
                 model
@@ -8958,6 +8988,67 @@ fn validate_configuration(model: &Model, issues: &mut Vec<Issue>) {
                 }
             }
         }
+        // --- deploy block (PROP-20260729-014500) -------------------------------------------------
+        for profile in k.deploy.keys().chain(k.from_secret.keys()) {
+            if !CONFIG_PROFILES.contains(&profile.as_str()) {
+                issues.push(err(
+                    "config-deploy-profile-unknown",
+                    at.clone(),
+                    format!("deploy declares unknown profile '{profile}' (expected {CONFIG_PROFILES:?})"),
+                ));
+            }
+        }
+        // A secret must never be BAKED: the GHCR package is public, so a baked value is world-readable
+        // via `docker pull` + `docker history`. This is the rule that keeps D5's split honest.
+        if k.secret && !k.deploy.is_empty() {
+            issues.push(err(
+                "config-secret-baked",
+                at.clone(),
+                "a secret declares literal `deploy` values — the image is PUBLIC, so those would be                  world-readable. Use `deploy.from_secret` instead".into(),
+            ));
+        }
+        // A non-secret sourced from a repo secret is a PREFERENCE violation, not a safety one — hence a
+        // warning. Baking is better (the value rides the image digest, so a rollback restores it), but
+        // `from_secret` is legitimate for a value that is not secret yet is environment-specific and
+        // that we would rather not commit — a Supabase project URL, an OAuth client id. The HARD rule is
+        // the converse one above: a SECRET must never be baked, because the image is public.
+        if !k.secret && !k.from_secret.is_empty() {
+            issues.push(warn(
+                "config-nonsecret-from-secret",
+                at.clone(),
+                "non-secret sourced from a repo secret: it will be SYNCED to the service (mutable \
+                 state) rather than baked into the image (carried by the digest). Prefer literal \
+                 per-profile `deploy` values unless the value must stay out of the repo"
+                    .into(),
+            ));
+        }
+        // The profile selector cannot be baked: one image is promoted across environments by digest, so
+        // the thing that DISTINGUISHES them cannot live inside it (and selecting the per-profile table
+        // by a baked profile would be circular).
+        if k.name == "APP_PROFILE" && !k.deploy.is_empty() {
+            issues.push(err(
+                "config-profile-baked",
+                at.clone(),
+                "APP_PROFILE must come from the service environment — baking it is circular (it is what                  selects the baked table) and one image serves every profile".into(),
+            ));
+        }
+        // A baked value must satisfy its own scalar, or the artifact ships a value the reader rejects.
+        if let Some(pat) = &k.pattern {
+            if let Ok(re) = regex::Regex::new(pat) {
+                for (profile, value) in &k.deploy {
+                    if !re.is_match(value) {
+                        issues.push(err(
+                            "config-deploy-value-invalid",
+                            at.clone(),
+                            format!(
+                                "baked value '{value}' for profile '{profile}' does not match scalar {:?} ({pat})",
+                                k.scalar
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
         for p in &k.required {
             if !CONFIG_PROFILES.contains(&p.as_str()) {
                 issues.push(err(
@@ -9055,6 +9146,16 @@ fn emit_config(model: &Model) -> String {
          \x20       regex::Regex::new(pattern).expect(\"configuration pattern compiles (checked by codegen)\")\n\
          \x20   });\n\
          \x20   re.is_match(value)\n}\n\n\
+         /// The non-secret values DECLARED per profile (`deploy:` in configuration.yaml), baked into the\n\
+         /// binary (PROP-20260729-014500 D5). Render has no per-deploy env override, so this is the only\n\
+         /// way to make configuration part of the ARTIFACT: the digest then determines behaviour, and a\n\
+         /// rollback restores the configuration that shipped with that build. Secrets are never here —\n\
+         /// the GHCR package is public, so a baked value is world-readable.\n\
+         fn baked(name: &str, profile: Profile) -> Option<&'static str> {\n\
+         \x20   BAKED\n\
+         \x20       .iter()\n\
+         \x20       .find(|(k, p, _)| *k == name && *p == profile.as_str())\n\
+         \x20       .map(|(_, _, v)| *v)\n}\n\n\
          /// Stripe mode from the key prefix — reportable where the key itself never is.\n\
          fn stripe_mode(value: &str) -> &'static str {\n\
          \x20   if value.starts_with(\"sk_live_\") {\n        \"live\"\n    } else if value.starts_with(\"sk_test_\") {\n        \"test\"\n    } else {\n        \"unknown\"\n    }\n}\n\n",
@@ -9151,7 +9252,7 @@ fn emit_config(model: &Model) -> String {
             "bool" => {
                 let d = k.default.clone().unwrap_or_else(|| "false".into());
                 out.push_str(&format!(
-                    "        let {f} = raw(\"{n}\").map(|v| parse_bool(\"{n}\", &v, {d})).unwrap_or({d});\n",
+                    "        let {f} = raw(\"{n}\")\n            .or_else(|| baked(\"{n}\", profile).map(str::to_string))\n            .map(|v| parse_bool(\"{n}\", &v, {d}))\n            .unwrap_or({d});\n",
                     n = k.name
                 ));
             }
@@ -9163,7 +9264,16 @@ fn emit_config(model: &Model) -> String {
                 ));
             }
             _ => {
-                out.push_str(&format!("        let {f} = raw(\"{n}\");\n", n = k.name));
+                // PRECEDENCE: env var > baked profile value > default. The env var wins so an operator
+                // keeps a seconds-fast override in an incident; the baked value is what runs otherwise.
+                if k.deploy.is_empty() {
+                    out.push_str(&format!("        let {f} = raw(\"{n}\");\n", n = k.name));
+                } else {
+                    out.push_str(&format!(
+                        "        let {f} = raw(\"{n}\").or_else(|| baked(\"{n}\", profile).map(str::to_string));\n",
+                        n = k.name
+                    ));
+                }
                 if !k.required.is_empty() {
                     out.push_str(&format!(
                         "        if {f}.is_none() && {required_expr} {{\n            problems.missing.push(MissingKey {{ name: \"{n}\", gates: \"{g}\" }});\n        }}\n",
@@ -9258,7 +9368,62 @@ fn emit_config(model: &Model) -> String {
     for k in &keys {
         out.push_str(&format!("    \"{}\",\n", k.name));
     }
+    out.push_str("];\n\n");
+    out.push_str(
+        "/// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR\n\
+         /// and carried by the image digest, so redeploying a digest reproduces its behaviour exactly.\n\
+         const BAKED: &[(&str, &str, &str)] = &[\n",
+    );
+    for k in &keys {
+        for (profile, value) in &k.deploy {
+            out.push_str(&format!(
+                "    (\"{}\", \"{}\", \"{}\"),\n",
+                k.name,
+                profile,
+                value.replace('\\', "\\\\").replace('"', "\\\"")
+            ));
+        }
+    }
     out.push_str("];\n");
+    out
+}
+
+/// Emit `specs/generated/render-config-sync.json` — the manifest the CI sync step consumes
+/// (PROP-20260729-014500, D1–D4).
+///
+/// Only the keys CI must push to the Render service appear here: the secrets, plus the non-secrets a
+/// key chose to source from a repo secret. Baked values are deliberately absent — they travel in the
+/// image (D5), so pushing them to the service as well would recreate the mutable state the baking was
+/// meant to remove, and the two copies would be free to disagree.
+fn emit_render_sync_manifest(model: &Model) -> String {
+    let keys = parse_config_keys(model);
+    let mut out = String::from(
+        "{\n  \"_generated\": \"by the Captain.Food codegen from specs/configuration.yaml — do not edit by hand\",\n\
+         \x20 \"_contract\": \"env_key <- the named GitHub repo secret, per profile. Upsert only (D1): this manifest never expresses a deletion.\",\n\
+         \x20 \"profiles\": {\n",
+    );
+    let profiles: Vec<&str> = CONFIG_PROFILES.to_vec();
+    for (pi, profile) in profiles.iter().enumerate() {
+        out.push_str(&format!("    \"{profile}\": [\n"));
+        let mut rows: Vec<String> = Vec::new();
+        for k in &keys {
+            if k.consumer != "server" {
+                continue;
+            }
+            if let Some(secret_name) = k.from_secret.get(*profile) {
+                rows.push(format!(
+                    "      {{ \"env_key\": \"{}\", \"from_secret\": \"{}\", \"secret\": {} }}",
+                    k.name, secret_name, k.secret
+                ));
+            }
+        }
+        out.push_str(&rows.join(",\n"));
+        if !rows.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(if pi + 1 == profiles.len() { "    ]\n" } else { "    ],\n" });
+    }
+    out.push_str("  }\n}\n");
     out
 }
 
@@ -13363,7 +13528,10 @@ fn main() {
         eprintln!("✗ create {}: {}", out_dir.display(), e);
         std::process::exit(1);
     }
-    let artifacts: [(&str, String); 8] = [
+    let artifacts: [(&str, String); 9] = [
+        // The CI env-sync manifest (PROP-20260729-014500): which repo secret supplies which service
+        // env key, per profile. Baked values are NOT here — they ride the image (D5).
+        ("render-config-sync.json", emit_render_sync_manifest(&model)),
         ("translations.generated.json", emit_translations_json(&model)),
         ("views.generated.sql", emit_views_sql(&model)),
         ("schema.generated.sql", emit_schema_sql(&model, &specs)),

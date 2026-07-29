@@ -1,0 +1,156 @@
+# Push the DECLARED configuration to the Render service (PROP-20260729-014500, issue #248).
+#
+# WHY THIS EXISTS. Configuration used to be typed by hand into the Render dashboard, which is invisible
+# from the repository. That is how `RUN_SIRENE_WORKER` came to gate a paused production pipeline while
+# being written down nowhere (6,649 SIRENE rows sat PENDING for four hours), and how `API_SECRET` came
+# to sit on the service read by nothing. A declaration nothing enforces is documentation; this is what
+# makes specs/configuration.yaml true.
+#
+# WHAT IT DOES **NOT** DO — and this is the important half:
+#
+#   * It does not push NON-SECRET values. Those are BAKED into the binary by the codegen (D5), so they
+#     travel with the image digest: redeploying `sha-abc123` next month reproduces its behaviour, and a
+#     rollback restores the configuration that shipped with that build. Pushing them here as well would
+#     recreate the mutable state the baking removed, and the two copies could disagree.
+#   * It never DELETES (D1, upsert only). A key on the service that the spec does not declare is
+#     REPORTED, never removed — the safe ordering #238 taught: never remove what CI does not yet write.
+#
+# So the only keys it writes are the SECRETS (plus non-secrets a key chose to source from a repo
+# secret): exactly the values that cannot be baked, because the GHCR package is PUBLIC and a baked ENV
+# is readable by anyone via `docker pull` + `docker history`.
+#
+# DRY-RUN IS THE DEFAULT (D2). This workflow cannot be tested anywhere but here — there is no local
+# `RENDER_API_KEY` — so its first real execution would otherwise be an untested write against live
+# production config. Dry-run prints the exact diff and writes nothing. Flip `apply: true` once the
+# report reads the way you expect.
+#
+# Requires: RENDER_API_KEY (already used read-only by render-status.yml and prod-smoke.sh, D4), plus a
+# repo secret for each `from_secret` name in specs/generated/render-config-sync.json. A declared secret
+# with no corresponding repo secret is REPORTED and skipped — never written as empty, which would look
+# configured while being useless.
+name: render-config-sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Which profile's declaration to sync."
+        type: choice
+        required: true
+        default: production
+        options: [production, staging]
+      apply:
+        description: "false = dry-run (print the diff, write nothing). true = upsert the changed keys."
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-config-sync
+  cancel-in-progress: false # never interrupt a half-applied sync
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sync the declared configuration
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          PROFILE: ${{ inputs.profile }}
+          APPLY: ${{ inputs.apply }}
+          # Every secret the manifest can name. Absent ones are reported and skipped, never written
+          # empty — a key that looks configured but is not is worse than one that is plainly missing.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AUTH_SESSION_KEY: ${{ secrets.AUTH_SESSION_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_JWKS_URL: ${{ secrets.SUPABASE_JWKS_URL }}
+          SUPABASE_SMS_HOOK_SECRET: ${{ secrets.SUPABASE_SMS_HOOK_SECRET }}
+          STRIPE_SECRET_KEY_TEST: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
+          STRIPE_SECRET_KEY_PROD: ${{ secrets.STRIPE_SECRET_KEY_PROD }}
+          STRIPE_WEBHOOK_SECRET_TEST: ${{ secrets.STRIPE_WEBHOOK_SECRET_TEST }}
+          STRIPE_WEBHOOK_SECRET_PROD: ${{ secrets.STRIPE_WEBHOOK_SECRET_PROD }}
+          HUBRISE_CLIENT_ID: ${{ secrets.HUBRISE_CLIENT_ID }}
+          HUBRISE_WEBHOOK_SECRET: ${{ secrets.HUBRISE_WEBHOOK_SECRET }}
+          EXTERNAL_API_TOKENS: ${{ secrets.EXTERNAL_API_TOKENS }}
+          INTERNAL_TRIGGER_TOKEN: ${{ secrets.INTERNAL_TRIGGER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_API_KEY}" ]; then
+            echo "::error::repo secret RENDER_API_KEY is not set -- cannot reach the Render API"
+            exit 1
+          fi
+          MANIFEST=specs/generated/render-config-sync.json
+          [ -f "$MANIFEST" ] || { echo "::error::$MANIFEST missing -- run 'make generate'"; exit 1; }
+
+          # Resolve the service by NAME, exactly as render-status.yml and prod-smoke.sh already do.
+          SID=$(curl -sS -m 20 -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services?name=captain-food&limit=1" | jq -r '.[0].service.id // empty')
+          [ -n "$SID" ] || { echo "::error::Render service 'captain-food' not found (is RENDER_API_KEY an ACCOUNT key?)"; exit 1; }
+          echo "service: captain-food ($SID) | profile: $PROFILE | apply: $APPLY"
+          echo
+
+          CURRENT=$(curl -sS -m 20 -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$SID/env-vars?limit=200")
+
+          changed=0; unchanged=0; skipped=0; failed=0
+          declared=""
+          while read -r row; do
+            KEY=$(jq -r '.env_key' <<<"$row")
+            FROM=$(jq -r '.from_secret' <<<"$row")
+            declared="$declared $KEY"
+            VALUE="${!FROM:-}"
+            if [ -z "$VALUE" ]; then
+              echo "  SKIP       $KEY  <- repo secret '$FROM' is not set"
+              skipped=$((skipped+1)); continue
+            fi
+            HAVE=$(jq -r --arg k "$KEY" '.[].envVar | select(.key==$k) | .value' <<<"$CURRENT")
+            if [ "$HAVE" = "$VALUE" ]; then
+              echo "  unchanged  $KEY"
+              unchanged=$((unchanged+1)); continue
+            fi
+            changed=$((changed+1))
+            if [ "$APPLY" != "true" ]; then
+              echo "  WOULD SET  $KEY  <- $FROM"
+              continue
+            fi
+            # Upsert ONE key (D1). This endpoint cannot delete, so a bad manifest can never wipe config.
+            code=$(curl -sS -m 20 -o /tmp/put.json -w "%{http_code}" -X PUT \
+              -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+              --data "$(jq -nc --arg v "$VALUE" '{value:$v}')" \
+              "https://api.render.com/v1/services/$SID/env-vars/$KEY")
+            if [ "$code" = "200" ] || [ "$code" = "201" ]; then
+              echo "  SET        $KEY  <- $FROM"
+            else
+              echo "::error::failed to set $KEY (HTTP $code)"
+              failed=$((failed+1))
+            fi
+          done < <(jq -c --arg p "$PROFILE" '.profiles[$p][]' "$MANIFEST")
+
+          # Anything on the service the spec does not declare. Reported, never deleted (D1) -- this list
+          # is the removal-candidate set a human reviews, not something CI acts on.
+          echo
+          for k in $(jq -r '.[].envVar.key' <<<"$CURRENT" | sort); do
+            case " $declared " in
+              *" $k "*) ;;
+              *) echo "  UNDECLARED $k  [on the service, in no spec]" ;;
+            esac
+          done
+
+          echo
+          echo "$changed change(s), $unchanged unchanged, $skipped skipped, $failed failed."
+          [ "$failed" -eq 0 ] || exit 1
+          if [ "$APPLY" != "true" ]; then
+            echo "Dry-run: nothing was written. Re-run with apply=true to upsert the changes above."
+          else
+            # Render does NOT deploy on an env change ("you must call the deploy API, irrespective of
+            # the autoDeploy option"), so the new values reach the app only on the next deploy -- which
+            # build-image triggers with a digest-pinned hook. Nothing here races that.
+            echo "Applied. The service picks these up on its NEXT deploy (env changes never auto-deploy)."
+          fi

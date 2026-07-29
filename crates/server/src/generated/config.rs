@@ -73,6 +73,18 @@ fn matches_pattern(pattern: &str, value: &str) -> bool {
     re.is_match(value)
 }
 
+/// The non-secret values DECLARED per profile (`deploy:` in configuration.yaml), baked into the
+/// binary (PROP-20260729-014500 D5). Render has no per-deploy env override, so this is the only
+/// way to make configuration part of the ARTIFACT: the digest then determines behaviour, and a
+/// rollback restores the configuration that shipped with that build. Secrets are never here —
+/// the GHCR package is public, so a baked value is world-readable.
+fn baked(name: &str, profile: Profile) -> Option<&'static str> {
+    BAKED
+        .iter()
+        .find(|(k, p, _)| *k == name && *p == profile.as_str())
+        .map(|(_, _, v)| *v)
+}
+
 /// Stripe mode from the key prefix — reportable where the key itself never is.
 fn stripe_mode(value: &str) -> &'static str {
     if value.starts_with("sk_live_") {
@@ -289,12 +301,30 @@ impl Config {
         let hubrise_webhook_secret = raw("HUBRISE_WEBHOOK_SECRET");
         let external_api_tokens = raw("EXTERNAL_API_TOKENS");
         let internal_trigger_token = raw("INTERNAL_TRIGGER_TOKEN");
-        let run_projector = raw("RUN_PROJECTOR").map(|v| parse_bool("RUN_PROJECTOR", &v, true)).unwrap_or(true);
-        let run_process_managers = raw("RUN_PROCESS_MANAGERS").map(|v| parse_bool("RUN_PROCESS_MANAGERS", &v, true)).unwrap_or(true);
-        let run_inbound_drain = raw("RUN_INBOUND_DRAIN").map(|v| parse_bool("RUN_INBOUND_DRAIN", &v, true)).unwrap_or(true);
-        let run_retention_sweep = raw("RUN_RETENTION_SWEEP").map(|v| parse_bool("RUN_RETENTION_SWEEP", &v, true)).unwrap_or(true);
-        let run_sirene_worker = raw("RUN_SIRENE_WORKER").map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false)).unwrap_or(false);
-        let run_delivery_offer_timeout = raw("RUN_DELIVERY_OFFER_TIMEOUT").map(|v| parse_bool("RUN_DELIVERY_OFFER_TIMEOUT", &v, true)).unwrap_or(true);
+        let run_projector = raw("RUN_PROJECTOR")
+            .or_else(|| baked("RUN_PROJECTOR", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_PROJECTOR", &v, true))
+            .unwrap_or(true);
+        let run_process_managers = raw("RUN_PROCESS_MANAGERS")
+            .or_else(|| baked("RUN_PROCESS_MANAGERS", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_PROCESS_MANAGERS", &v, true))
+            .unwrap_or(true);
+        let run_inbound_drain = raw("RUN_INBOUND_DRAIN")
+            .or_else(|| baked("RUN_INBOUND_DRAIN", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_INBOUND_DRAIN", &v, true))
+            .unwrap_or(true);
+        let run_retention_sweep = raw("RUN_RETENTION_SWEEP")
+            .or_else(|| baked("RUN_RETENTION_SWEEP", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_RETENTION_SWEEP", &v, true))
+            .unwrap_or(true);
+        let run_sirene_worker = raw("RUN_SIRENE_WORKER")
+            .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
+            .unwrap_or(false);
+        let run_delivery_offer_timeout = raw("RUN_DELIVERY_OFFER_TIMEOUT")
+            .or_else(|| baked("RUN_DELIVERY_OFFER_TIMEOUT", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_DELIVERY_OFFER_TIMEOUT", &v, true))
+            .unwrap_or(true);
         let port = raw("PORT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(8080);
         let web_assets_dir = raw("WEB_ASSETS_DIR");
         let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
@@ -415,4 +445,21 @@ pub const DECLARED_KEYS: &[&str] = &[
     "PORT",
     "WEB_ASSETS_DIR",
     "CAPTAIN_BUILD_VERSION",
+];
+
+/// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR
+/// and carried by the image digest, so redeploying a digest reproduces its behaviour exactly.
+const BAKED: &[(&str, &str, &str)] = &[
+    ("RUN_PROJECTOR", "production", "true"),
+    ("RUN_PROJECTOR", "staging", "true"),
+    ("RUN_PROCESS_MANAGERS", "production", "true"),
+    ("RUN_PROCESS_MANAGERS", "staging", "true"),
+    ("RUN_INBOUND_DRAIN", "production", "true"),
+    ("RUN_INBOUND_DRAIN", "staging", "true"),
+    ("RUN_RETENTION_SWEEP", "production", "true"),
+    ("RUN_RETENTION_SWEEP", "staging", "true"),
+    ("RUN_SIRENE_WORKER", "production", "true"),
+    ("RUN_SIRENE_WORKER", "staging", "true"),
+    ("RUN_DELIVERY_OFFER_TIMEOUT", "production", "true"),
+    ("RUN_DELIVERY_OFFER_TIMEOUT", "staging", "true"),
 ];

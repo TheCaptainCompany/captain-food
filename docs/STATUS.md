@@ -3,6 +3,30 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-29. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-29 — configuration RIDES THE ARTIFACT; secrets ride CI; the dashboard owns nothing
+> ([#248](https://github.com/TheCaptainCompany/captain-food/issues/248), PROP-20260729-014500,
+> ADR-20260729-020000).** All five decisions approved in-session.
+> #246 declared configuration; it did not give it an OWNER — values were still typed into the Render
+> dashboard, which is how `RUN_SIRENE_WORKER` gated a paused pipeline while written down nowhere and
+> `API_SECRET` sat on the service read by nothing. The product owner's question — *"is it possible to
+> configure the deployment, not the Render service?"* — reframed it. Render has **no per-deploy env
+> override** (its deploy API takes only clearCache/commitId/imageUrl/deployMode), so attaching config to
+> the deployment means putting it **inside the artifact**. Now: **non-secret values are BAKED** into the
+> binary per profile by the codegen — the digest determines behaviour, and a rollback restores the
+> configuration that shipped with that build; **secrets are pushed by CI** from GitHub repo secrets to
+> the service env (never baked — the GHCR package is PUBLIC, so a baked `ENV` is world-readable); and
+> **`APP_PROFILE` stays service env**, since one image is promoted across environments by digest and
+> baking the selector would be circular. Precedence: env var > baked > default, so an operator keeps a
+> seconds-fast override for incidents.
+> The sync workflow (`render-config-sync.yml`) is **upsert-only** (it cannot delete, so a bad manifest
+> can never wipe config; undeclared keys are REPORTED) and **dry-run by default** (it cannot be tested
+> outside CI, so its first real run would otherwise be an untested write against live production).
+> Validator-enforced: a secret may never declare baked values; a baked value must satisfy its scalar;
+> `APP_PROFILE` may not be baked. **Consequence to know**: pausing a pipeline is now a PR + build
+> (~minutes), not a dashboard edit — for a flag that stops a production pipeline, reviewed and recorded
+> is the point. **Still manual by design**: the first `apply: true` run, and setting
+> `APP_PROFILE=production`, which is what arms fail-fast.
+
 > ✅ **2026-07-29 — configuration is DECLARED in the DSL and validated at startup
 > ([#246](https://github.com/TheCaptainCompany/captain-food/issues/246), PROP-20260729-004500,
 > ADR-20260729-010500).**
