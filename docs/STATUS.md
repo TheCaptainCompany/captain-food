@@ -3,6 +3,16 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-29. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-07-29 — watchdog: `render-config-sync` dry-run fixed at the source (`limit=200 -> 100`).**
+> [#252](https://github.com/TheCaptainCompany/captain-food/issues/252) hardened the env-vars parser to be
+> shape-agnostic and to fail loud, but kept `?limit=200` — which is the actual cause. Render's env-vars
+> endpoint caps page size at 100 and rejects `limit=200` with **HTTP 400** `{"message":"invalid limit:
+> too large"}`; that error object (not a real env-vars shape) is what the parser then read as "an object
+> wrapper", finding 0 vars and exiting 1. So `main` was still failing the dry-run. Fix: `limit=200 -> 100`
+> (the service has ~10 keys, one page covers all), verified against the live Render API — the read now
+> returns all 10 vars and the whole dry-run loop runs with zero jq errors, exit 0. `prod-smoke.sh` already
+> used `limit=100`, so no other reader was affected. CI-config only; no `specs/**` or generated files touched.
+
 > ✅ **2026-07-29 — configuration RIDES THE ARTIFACT; secrets ride CI; the dashboard owns nothing
 > ([#248](https://github.com/TheCaptainCompany/captain-food/issues/248), PROP-20260729-014500,
 > ADR-20260729-020000).** All five decisions approved in-session.

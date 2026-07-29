@@ -96,10 +96,14 @@ jobs:
           echo "service: captain-food ($SID) | profile: $PROFILE | apply: $APPLY"
           echo
 
+          # 100 is the Render API's maximum page size; limit=200 is rejected HTTP 400 with
+          # {"message":"invalid limit: too large"}. That error object -- NOT a real env-vars shape --
+          # is what the parser below then saw as "an object wrapper": it read 0 vars and failed loud.
+          # The service has ~10 keys, so one page of 100 covers all of them.
           RAW=$(curl -sS -m 20 -H "Authorization: Bearer $RENDER_API_KEY" \
-            "https://api.render.com/v1/services/$SID/env-vars?limit=200")
-          # SHAPE-AGNOSTIC. Render has returned both `[{envVar:{key,value}}, …]` and an object wrapper
-          # over the same records; the docs publish neither. Rather than encode a guess that breaks
+            "https://api.render.com/v1/services/$SID/env-vars?limit=100")
+          # SHAPE-AGNOSTIC. The Render docs do not pin the env-vars record shape (array of
+          # `{envVar:{key,value}}` vs a bare `{key,value}`). Rather than encode a guess that breaks
           # silently on the other shape, pull every object that HAS key+value, wherever it sits. The
           # first attempt assumed the array form and died on `Cannot index string with string "envVar"`.
           CURRENT=$(jq -c '[.. | objects | select(has("key") and has("value"))]' <<<"$RAW")
