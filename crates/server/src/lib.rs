@@ -535,8 +535,13 @@ pub fn router() -> Router {
                     // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next
                     // ranked channel. Env-gated like the other in-process workers.
                     if config.run_delivery_offer_timeout {
-                        let timeout_worker =
-                            Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(pool.clone()));
+                        // The ceiling comes from the DECLARED configuration, resolved once above --
+                        // `infrastructure` is an inner layer and cannot read `Config` itself, so the
+                        // composition root is the only place the two can meet.
+                        let timeout_worker = Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(
+                            pool.clone(),
+                            config.delivery_offer_max_ttl_seconds,
+                        ));
                         tokio::spawn(timeout_worker.run_loop());
                         tracing::info!(worker = "delivery_offer_timeout", running = true, toggle = "RUN_DELIVERY_OFFER_TIMEOUT", "worker running in-process");
                     } else {
