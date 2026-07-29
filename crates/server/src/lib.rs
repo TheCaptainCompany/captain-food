@@ -142,6 +142,30 @@ pub fn build_version() -> &'static str {
     })
 }
 
+/// Install telemetry from the declared configuration (issue #191).
+///
+/// The translation layer between the generated config reader and `crates/telemetry`: the telemetry
+/// crate sits below `server` and must not know `Config` exists, so the mapping happens here rather than
+/// by handing it the whole struct.
+///
+/// A malformed sample ratio cannot reach this point — the `TraceSampleRatio` scalar is validated at
+/// startup and a bad value is reported as a configuration problem — so the parse fallback is a belt-and-
+/// braces `1.0` (keep everything) rather than `0.0`. Defaulting to zero here would turn one unexpected
+/// value into total, silent trace loss, which is the failure this whole issue exists to end.
+pub fn init_telemetry(config: &generated::config::Config) -> telemetry::TelemetryGuard {
+    let cfg = telemetry::TelemetryConfig {
+        api_key: config.honeycomb_api_key.clone(),
+        endpoint: config.honeycomb_api_endpoint.clone(),
+        dataset: config.honeycomb_dataset.clone(),
+        sample_ratio: config.otel_traces_sample_ratio.parse().unwrap_or(1.0),
+        log_level: config.log_level.clone(),
+        service_version: build_version().to_string(),
+        profile: config.profile.to_string(),
+    };
+    let (guard, _emission) = telemetry::init(&cfg);
+    guard
+}
+
 /// Read a `RUN_*` worker toggle, leniently and uniformly (issue #244).
 ///
 /// The gates used to be written inline, and inconsistently: `RUN_SIRENE_WORKER` was an exact
@@ -170,8 +194,11 @@ fn parse_flag(raw: Option<&str>, name: &str, default: bool) -> bool {
         "false" | "0" | "no" | "off" => false,
         "" => default,
         other => {
-            println!(
-                "{name}: unrecognised value {other:?} -- using the default ({default}). \
+            tracing::warn!(
+                flag = name,
+                value = other,
+                default,
+                "unrecognised worker-toggle value -- using the default. \
                  Accepted: true/1/yes/on, false/0/no/off."
             );
             default
@@ -227,11 +254,11 @@ pub struct AppState {
 fn identity_service_impl() -> Arc<dyn application::generated::services::IdentityService> {
     match infrastructure::SupabaseIdentityService::from_env() {
         Some(adapter) => {
-            println!("identity service: SupabaseIdentityService (SUPABASE_URL set)");
+            tracing::info!(binding = "identity", impl_ = "SupabaseIdentityService", "identity service wired (SUPABASE_URL set)");
             Arc::new(adapter)
         }
         None => {
-            eprintln!("SUPABASE_URL/PUBLISHABLE_KEY unset — identity fail-closed (auth anonymous-only)");
+            tracing::warn!(binding = "identity", impl_ = "FailClosedIdentityService", "SUPABASE_URL/PUBLISHABLE_KEY unset -- identity fails closed, auth stays anonymous-only");
             Arc::new(FailClosedIdentityService)
         }
     }
@@ -273,7 +300,7 @@ pub fn router() -> Router {
     // URL + OAuth per instance) and the inbound webhook route (per-instance secret). Empty ⇒ no-op.
     let coopcycle_registry = coopcycle_adapter::CoopCycleRegistry::from_env()
         .unwrap_or_else(|e| {
-            eprintln!("COOPCYCLE_INSTANCES misconfigured, treating as unset: {e}");
+            tracing::warn!(error = %e, key = "COOPCYCLE_INSTANCES", "misconfigured, treating as unset");
             None
         })
         .unwrap_or_default();
@@ -281,7 +308,7 @@ pub fn router() -> Router {
     // The Uber Direct config (UBER_DIRECT_*) — shared by the outbound gateway (OAuth2 + create
     // delivery) and the inbound webhook route (signing secret). None ⇒ unconfigured (no-op stand-in).
     let uber_direct_config = uber_direct_adapter::UberDirectConfig::from_env().unwrap_or_else(|e| {
-        eprintln!("UBER_DIRECT_* misconfigured, treating as unset: {e}");
+        tracing::warn!(error = %e, key = "UBER_DIRECT_*", "misconfigured, treating as unset");
         None
     });
     let mut hubrise_state = hubrise_adapter::HubRiseWebhookState::default();
@@ -379,12 +406,14 @@ pub fn router() -> Router {
                     payments: infrastructure::generated::service_bindings::payment_service(|| {
                         match std::env::var("STRIPE_SECRET_KEY") {
                             Ok(key) if !key.is_empty() => {
-                                println!("payment service: StripePaymentGateway (STRIPE_SECRET_KEY set)");
+                                tracing::info!(binding = "payments", impl_ = "StripePaymentGateway", "payment service wired (STRIPE_SECRET_KEY set)");
                                 Arc::new(stripe_adapter::StripePaymentGateway::new(key))
                             }
                             _ => {
-                                println!(
-                                    "payment service: FailClosedPaymentGateway (STRIPE_SECRET_KEY unset — every checkout declines)"
+                                tracing::warn!(
+                                    binding = "payments",
+                                    impl_ = "FailClosedPaymentGateway",
+                                    "STRIPE_SECRET_KEY unset -- EVERY checkout declines"
                                 );
                                 Arc::new(FailClosedPaymentGateway)
                             }
@@ -413,11 +442,11 @@ pub fn router() -> Router {
                         match infrastructure::PgAuthSessionStore::from_env(pool.clone()) {
                             Some(store) => {
                                 auth_sessions = Arc::new(store);
-                                println!("auth sessions: encrypted Pg store (AUTH_SESSION_KEY set)");
+                                tracing::info!(binding = "auth_sessions", impl_ = "encrypted Pg store", "auth session store wired (AUTH_SESSION_KEY set)");
                                 auth_sessions.clone()
                             }
                             None => {
-                                eprintln!("AUTH_SESSION_KEY not set — session cookies unavailable (auth stays anonymous-only)");
+                                tracing::warn!(binding = "auth_sessions", "AUTH_SESSION_KEY unset -- session cookies unavailable, auth stays anonymous-only");
                                 auth_sessions.clone()
                             }
                         }
@@ -429,9 +458,9 @@ pub fn router() -> Router {
                     let worker = ProjectionWorker::new(pool.clone());
                     projector_status = Some(worker.status());
                     tokio::spawn(worker.run_loop());
-                    println!("projection worker: running in-process (set RUN_PROJECTOR=false to disable)");
+                    tracing::info!(worker = "projection", running = true, toggle = "RUN_PROJECTOR", "worker running in-process");
                 } else {
-                    println!("RUN_PROJECTOR=false — projection worker not started in-process");
+                    tracing::warn!(worker = "projection", running = false, toggle = "RUN_PROJECTOR", "worker NOT started -- no read model advances, queries serve stale data");
                 }
 
                 // In-process saga runner (the state-table process managers of
@@ -474,9 +503,11 @@ pub fn router() -> Router {
                                 Arc::new(uber_direct_adapter::UberDirectDeliveryGateway::new(config)),
                             );
                         }
-                        println!(
-                            "delivery gateway: composite — wired channels {:?} (unwired channels fall through via offer timeout)",
-                            gateway.wired_channels()
+                        tracing::info!(
+                            binding = "delivery",
+                            impl_ = "composite",
+                            wired_channels = ?gateway.wired_channels(),
+                            "delivery gateway wired (unwired channels fall through via offer timeout)"
                         );
                         Arc::new(gateway)
                     })
@@ -499,7 +530,7 @@ pub fn router() -> Router {
                         .with_payments(saga_payments);
                     saga_status = Some(runner.status());
                     tokio::spawn(runner.run_loop());
-                    println!("saga runner: running in-process (set RUN_PROCESS_MANAGERS=false to disable)");
+                    tracing::info!(worker = "saga_runner", running = true, toggle = "RUN_PROCESS_MANAGERS", "worker running in-process");
 
                     // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next
                     // ranked channel. Env-gated like the other in-process workers.
@@ -507,12 +538,12 @@ pub fn router() -> Router {
                         let timeout_worker =
                             Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(pool.clone()));
                         tokio::spawn(timeout_worker.run_loop());
-                        println!("delivery offer-timeout worker: running in-process (set RUN_DELIVERY_OFFER_TIMEOUT=false to disable)");
+                        tracing::info!(worker = "delivery_offer_timeout", running = true, toggle = "RUN_DELIVERY_OFFER_TIMEOUT", "worker running in-process");
                     } else {
-                        println!("RUN_DELIVERY_OFFER_TIMEOUT=false — delivery offer-timeout worker not started");
+                        tracing::warn!(worker = "delivery_offer_timeout", running = false, toggle = "RUN_DELIVERY_OFFER_TIMEOUT", "worker NOT started -- an unanswered offer is never expired");
                     }
                 } else {
-                    println!("RUN_PROCESS_MANAGERS=false — saga runner not started in-process");
+                    tracing::warn!(worker = "saga_runner", running = false, toggle = "RUN_PROCESS_MANAGERS", "worker NOT started -- no cross-aggregate reaction fires");
                 }
 
                 // SIRENE sync worker (ADR-0045): drains the `external_sirene_restaurants` staging
@@ -532,9 +563,9 @@ pub fn router() -> Router {
                 inbound_drain = Some(drain.clone());
                 if config.run_inbound_drain {
                     tokio::spawn(drain.clone().run_loop());
-                    println!("inbound drain worker: running in-process (set RUN_INBOUND_DRAIN=false to disable)");
+                    tracing::info!(worker = "inbound_drain", running = true, toggle = "RUN_INBOUND_DRAIN", "worker running in-process");
                 } else {
-                    println!("RUN_INBOUND_DRAIN=false — inbound drain poll loop not started (nudge trigger stays active)");
+                    tracing::warn!(worker = "inbound_drain", running = false, toggle = "RUN_INBOUND_DRAIN", "poll loop NOT started -- webhook-staged facts accumulate undelivered (nudge trigger stays active)");
                 }
 
                 // Stripe webhook ingestor (ADR-20260720-015400 inbound event sourcing): verify →
@@ -647,9 +678,9 @@ pub fn router() -> Router {
                     let sweeper =
                         Arc::new(infrastructure::RetentionSweepWorker::new(pool.clone()));
                     tokio::spawn(sweeper.run_loop());
-                    println!("retention sweep worker: running in-process (set RUN_RETENTION_SWEEP=false to disable)");
+                    tracing::info!(worker = "retention_sweep", running = true, toggle = "RUN_RETENTION_SWEEP", "worker running in-process");
                 } else {
-                    println!("RUN_RETENTION_SWEEP=false — retention sweep worker not started");
+                    tracing::warn!(worker = "retention_sweep", running = false, toggle = "RUN_RETENTION_SWEEP", "worker NOT started -- nothing expires and storage grows without bound");
                 }
 
                 let worker = Arc::new(SireneSyncWorker::new(pool.clone()));
@@ -668,16 +699,19 @@ pub fn router() -> Router {
                 // Re-enable BOTH halves together: `RUN_SIRENE_WORKER=true` + the workflow's cron.
                 if config.run_sirene_worker {
                     tokio::spawn(worker.run_loop());
-                    println!(
-                        "sirene sync worker: running in-process (set RUN_SIRENE_WORKER=false to keep only the ping trigger)"
+                    tracing::info!(
+                        worker = "sirene_sync",
+                        running = true,
+                        toggle = "RUN_SIRENE_WORKER",
+                        "worker running in-process"
                     );
                 } else {
-                    println!("sirene sync worker: PAUSED (issue #220) — poll loop not started; set RUN_SIRENE_WORKER=true to resume");
+                    tracing::warn!(worker = "sirene_sync", running = false, toggle = "RUN_SIRENE_WORKER", "worker PAUSED (issue #220) -- staged rows stay PENDING; set RUN_SIRENE_WORKER=true to resume");
                 }
             }
-            Err(e) => eprintln!("DATABASE_URL set but pool init failed: {e}"),
+            Err(e) => tracing::error!(error = %e, "DATABASE_URL set but pool init failed -- /health will report degraded"),
         },
-        _ => eprintln!("DATABASE_URL not set — /health will report not_configured (503)"),
+        _ => tracing::warn!("DATABASE_URL not set -- /health will report not_configured (503)"),
     }
 
     let base = Router::new()
@@ -701,7 +735,7 @@ pub fn router() -> Router {
         // The Supabase Send-SMS hook → OVH delivery (#118): both the OVH client and the hook secret
         // must be configured, else the hook 503s (SMS-less, never half-open).
         sms: infrastructure::OvhSmsClient::from_env().map(|c| {
-            println!("sms delivery: OvhSmsClient (OVH_* set)");
+            tracing::info!(binding = "sms", impl_ = "OvhSmsClient", "sms delivery wired (OVH_* set)");
             Arc::new(c)
         }),
         sms_hook_secret: std::env::var("SUPABASE_SMS_HOOK_SECRET")

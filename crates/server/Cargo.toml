@@ -14,6 +14,10 @@ application = { path = "../application" }
 domain = { path = "../domain" }
 infrastructure = { path = "../infrastructure" }
 shared_types = { path = "../shared_types" }
+# OTel emission + structured logging (issue #191). The composition root installs the subscriber and owns
+# the flush guard; the GraphQL gateway and middleware are the boundaries that open spans.
+telemetry = { path = "../telemetry" }
+tracing = "0.1"
 # Partner webhook adapters (ADR-20260718-213352) — self-contained crates the monolith mounts via
 # `<crate>::routes(...)`; each also ships a standalone binary for independent deployment.
 stripe-adapter = { path = "../adapters/stripe" }
