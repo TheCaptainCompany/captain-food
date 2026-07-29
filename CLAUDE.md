@@ -118,6 +118,37 @@ validation. In the story map, inbound events are marked 📥.
   `$(shell ...)` are unaffected — only the tab-indented recipe text. Enforced by the
   `makefile_recipe_lines_are_ascii` codegen test, so it cannot silently come back.
 
+## Reading production telemetry (Honeycomb MCP)
+
+Traces and metrics go to **Honeycomb EU (`eu1`)** — a GDPR constraint, not a default
+(ADR-20260729-183000: spans carry `customerId`/`orderId`, and ADR-0042 pinned data to Frankfurt).
+The MCP server used to read them back is declared in [`.mcp.json`](.mcp.json), pinned to the **EU**
+host `https://mcp.eu1.honeycomb.io/mcp`.
+
+**The region is the trap.** The `honeycomb` plugin ships the **US** default (`mcp.honeycomb.io`), and
+US/EU are separate tenancies — authorizing the US host *succeeds* and then returns an empty environment
+list, which reads as a broken integration rather than a wrong region. The project-scoped `.mcp.json`
+exists to override that default for everyone, so do not "fix" it back to the documented default.
+
+Auth is per-user OAuth on first use, so **no secret lives in the repo**. It needs an **interactive**
+session (the browser flow cannot complete in a remote/non-interactive one) and **Honeycomb Intelligence**
+enabled on the team — an empty tool list after a clean auth is usually that add-on, not the config. The
+headless alternative is a **Management** API key (`<Key ID>:<Secret Key>`; scopes `Model Context Protocol`
++ `Environments`, read). Note the two key kinds are not interchangeable: the **ingest** key the app uses
+to *send* telemetry cannot read it back.
+
+When querying:
+
+- Call `get_workspace_context` **first** — it establishes which environments and datasets exist.
+- Discover fields with `find_columns` / `get_dataset_columns` before querying them.
+- Use human-readable time ranges (`"last 2 hours"`, `"24h"`), not epoch timestamps.
+- Name the environment and dataset explicitly in every query.
+- Prefer percentiles and `HEATMAP` over `AVG`. An average hides exactly the tail that matters at peak
+  (Friday/Saturday 19:00-21:30) — a P99 checkout regression is invisible in a flat mean.
+- Correlate by `correlation_id` / `trace_id`: the write path is acceptance-first
+  (ADR-20260720-015500), so a command's interesting half runs on a spawned task **after** the mutation
+  has already answered `PENDING`. Filtering to the GraphQL span alone shows the accept, not the outcome.
+
 ## Operating model (read [docs/PLAYBOOK.md](docs/PLAYBOOK.md))
 
 The project runs on a strict operating model: the **YAML DSL is the source of truth**, everything else
