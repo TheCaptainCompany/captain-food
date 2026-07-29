@@ -66,6 +66,11 @@ description: >
        stored on the service — deploys here are digest-pinned precisely so production never runs an
        ambiguous artifact, and mutable service state re-opens that ambiguity through the back door.
 
+       A non-secret may NOT be sourced from a repo secret (directive, 2026-07-29). The point of
+       declaring configuration is that it is VISIBLE: a non-secret hidden in Actions secrets is as
+       opaque as one typed into the dashboard — you still cannot read the repo and know what production
+       runs. Validator-enforced (`config-nonsecret-from-secret`).
+
     2. SECRET -> `deploy: { from_secret: { production: NAME_OF_GITHUB_SECRET, … } }`
        Pushed by CI from GitHub repo secrets to the Render service env. NEVER baked: the GHCR package
        is PUBLIC (it must be, so Render can pull it without credentials), and a baked `ENV` is readable
@@ -113,6 +118,18 @@ keys:
 
   # ===================================================================
   # Identity (Supabase, ADR-0015) — without these, auth is anonymous-only
+  #
+  # ⚠️ AWAITING LITERAL VALUES. These four are NOT secrets, so per the 2026-07-29 directive they must
+  # carry literal per-profile `deploy` values here rather than hide in Actions secrets. Their values
+  # are not in this repository and could not be invented, so they are declared but NOT yet deployed by
+  # us: until each gains a `deploy:` block they remain whatever the Render dashboard holds, and the
+  # sync report lists them as UNDECLARED — which is the visible signal that the work is unfinished.
+  #
+  # One deserves a deliberate decision rather than a reflex: SUPABASE_PUBLISHABLE_KEY. Supabase treats
+  # the anon key as safe to publish WHEN row-level security is enforced, and in this architecture it
+  # never reaches a browser at all — identity is wrapped behind our GraphQL (ADR-0015). Committing it
+  # to a PUBLIC repo would therefore expose something currently unexposed. If RLS is not fully enforced
+  # on this project, mark it `secret: true` instead and let CI sync it.
   # ===================================================================
 
   SUPABASE_URL:
@@ -123,10 +140,6 @@ keys:
     gates: >
       Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is
       the fail-closed stand-in and every login is refused.
-    deploy:
-      from_secret:
-        production: SUPABASE_URL
-        staging: SUPABASE_URL
 
   SUPABASE_PUBLISHABLE_KEY:
     type: string
@@ -134,10 +147,6 @@ keys:
     gates: >
       Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed
       (auth stays anonymous-only).
-    deploy:
-      from_secret:
-        production: SUPABASE_PUBLISHABLE_KEY
-        staging: SUPABASE_PUBLISHABLE_KEY
 
   SUPABASE_JWKS_URL:
     type: string
@@ -147,10 +156,6 @@ keys:
     gates: >
       JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every
       authenticated request falls back to anonymous.
-    deploy:
-      from_secret:
-        production: SUPABASE_JWKS_URL
-        staging: SUPABASE_JWKS_URL
 
   AUTH_SESSION_KEY:
     type: string
@@ -222,10 +227,6 @@ keys:
     gates: >
       HubRise app client id for the OAuth connect flow. Unset, restaurants cannot connect a HubRise
       location (existing connections are unaffected).
-    deploy:
-      from_secret:
-        production: HUBRISE_CLIENT_ID
-        staging: HUBRISE_CLIENT_ID
 
   HUBRISE_WEBHOOK_SECRET:
     type: string

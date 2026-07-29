@@ -9007,18 +9007,18 @@ fn validate_configuration(model: &Model, issues: &mut Vec<Issue>) {
                 "a secret declares literal `deploy` values — the image is PUBLIC, so those would be                  world-readable. Use `deploy.from_secret` instead".into(),
             ));
         }
-        // A non-secret sourced from a repo secret is a PREFERENCE violation, not a safety one — hence a
-        // warning. Baking is better (the value rides the image digest, so a rollback restores it), but
-        // `from_secret` is legitimate for a value that is not secret yet is environment-specific and
-        // that we would rather not commit — a Supabase project URL, an OAuth client id. The HARD rule is
-        // the converse one above: a SECRET must never be baked, because the image is public.
+        // A non-secret may NOT be sourced from a repo secret (product-owner directive, 2026-07-29:
+        // "the non secret keys should not be put in the repo actions secrets"). The point of declaring
+        // configuration is that the configuration is VISIBLE: a non-secret hidden in Actions secrets is
+        // as opaque as one typed into the dashboard — you still cannot read the repo and know what
+        // production runs. Non-secrets carry literal per-profile `deploy` values and are baked.
         if !k.secret && !k.from_secret.is_empty() {
-            issues.push(warn(
+            issues.push(err(
                 "config-nonsecret-from-secret",
                 at.clone(),
-                "non-secret sourced from a repo secret: it will be SYNCED to the service (mutable \
-                 state) rather than baked into the image (carried by the digest). Prefer literal \
-                 per-profile `deploy` values unless the value must stay out of the repo"
+                "non-secret declares `deploy.from_secret`: give it literal per-profile `deploy` values \
+                 so the configuration is readable in the repo and baked into the image, or mark it \
+                 `secret: true` if it genuinely must not be committed"
                     .into(),
             ));
         }
