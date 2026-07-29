@@ -633,7 +633,7 @@ pub fn router() -> Router {
                         hubrise_connections,
                         hubrise_adapter::connect::HttpHubRiseConnectGateway {
                             api: hubrise_adapter::api::HubRiseApi::from_env(),
-                            client_id: std::env::var("HUBRISE_CLIENT_ID").unwrap_or_default(),
+                            client_id: config.hubrise_client_id.clone().unwrap_or_default(),
                             client_secret: std::env::var("HUBRISE_WEBHOOK_SECRET").unwrap_or_default(),
                         },
                     )));
