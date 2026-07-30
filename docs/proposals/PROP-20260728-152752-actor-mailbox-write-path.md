@@ -526,6 +526,56 @@ nothing follows, row completes `SUCCEEDED` with no event — or still not ready 
 `OrderPreparationDelayed` appended (the operator alert the ETA promise needs), same one-transaction
 completion as any message.
 
+### 3.5 Activations — reusing the actor instance and its state (virtual actors; product-owner directive, 2026-07-30)
+
+The optimization the whole §3 machinery makes safe: **an actor, once rehydrated, stays in memory
+with its state** — an *activation* — and subsequent messages reuse it instead of re-folding from
+`domain_events`. When the actor's decision commits, the activation **applies the new events to
+its own held state** (`apply(state, event)` — the same generated methods from the companion
+proposal, §2.3 there) and bumps its held version. Fold-on-every-message becomes fold-on-first-message.
+
+**Why the same actor is never *usefully* instantiated twice — layered, none of it new:**
+
+1. **Within a worker**: the partition lane is single-threaded, and the worker holds one
+   **activation dictionary per owned partition** (`actor_id → {state, version, pending reminders
+   view}`). Two messages for one actor in one lane hit the same entry by construction.
+2. **Across workers**: an actor's partition has exactly ONE leased owner
+   (`mailbox_partitions.claimed_by` + `ownership_version`) — no other node processes messages for
+   that `actor_id` at all, so no other node has a reason to activate it. **A global dictionary is
+   unnecessary because placement is already exclusive**; the registry IS the global dictionary,
+   at partition granularity.
+3. **The residual case** (steal window, §3.1): a stale node may briefly hold a stale activation.
+   Harmless: its commits are fenced (`ownership_version` guard) and, beneath that,
+   `UNIQUE(stream_name, version)` rejects any write from a stale fold. **Correctness never
+   depends on the cache** — a duplicate activation can waste memory for seconds; it cannot write.
+
+**Cache discipline** (each rule earns its place):
+
+- **Apply-after-commit**: the activation mutates its held state ONLY after the §3.4
+  four-effect transaction commits — decide on the held state, commit, then `apply` the decided
+  events and advance the held version. A rollback (fence, conflict, crash) leaves the activation
+  untouched or evicted, never half-applied.
+- **Eviction**: version conflict on append → evict and refold (the state was stale — the one
+  signal that is never wrong); lease lost / `ownership_version` bump observed → drop ALL
+  activations of that partition; idle timeout + LRU bound → passivate (the Proto.Actor
+  `ReceiveTimeout` pattern, D2.1 — a timer, nothing more).
+- **The `Reminders` view rides along**: the activation carries the pending-reminders view (§3.4)
+  under the same rules — loaded once, mutated on commit, dropped on eviction.
+
+**Reading an actor's state directly (the gRPC idea)**: placement makes an activation *addressable*
+— `mailbox_partitions.claimed_by` names the owner of any `actor_id`'s partition, so an internal
+RPC ("what is your current state?") can route to the live activation and answer with
+strong consistency and no fold. Two boundaries keep this honest: it is **INTERNAL only** — the
+public read path stays CQRS (`api.yaml` queries → `View_*` read models, never the write model;
+the repo rule stands) — and it is **advisory until needed**: V0 runs one instance, where "route
+to the owner" is an in-process map lookup and gRPC machinery would be ceremony. The door is
+designed (registry-routed, `claimed_by` carrying a reachable address when multi-instance
+arrives); opening it is a later, separate decision.
+
+Sequencing: this is an optimization with zero correctness weight, switchable per actor type
+(`mailbox.activations: true`?) — it can land any time after the lanes work, and the D2 revisit
+trigger (rehydration p99 at peak) tells us when it *must*.
+
 ## 4. Decisions surfaced
 
 ### D1 — One table vs two journals + union view
@@ -547,7 +597,7 @@ sub-millisecond dispatch* — which matter at thousands of messages/second, whil
 
 | Option | Pros | Cons |
 |---|---|---|
-| **Postgres-native mailbox + partitioned workers ("the actor model as a schema, not a framework")** ✅ recommended | Zero new infrastructure (Supabase already there); durable mailbox for free — most actor frameworks bolt persistence ON, here it is the foundation; at-least-once + idempotency already built; scales by adding worker replicas and raising N partitions (Kafka-consumer-group semantics without Kafka); everything observable with SQL; domain stays pure (Evans); the serializer is the version check (Young) | Every message pays a rehydration fold (mitigable later: an in-worker hot-aggregate cache keyed by `actor_id`, invalidated on version conflict — virtual-actor behaviour without a framework); dispatch latency is queue-poll latency (the existing nudge pattern keeps it near-zero) |
+| **Postgres-native mailbox + partitioned workers ("the actor model as a schema, not a framework")** ✅ recommended | Zero new infrastructure (Supabase already there); durable mailbox for free — most actor frameworks bolt persistence ON, here it is the foundation; at-least-once + idempotency already built; scales by adding worker replicas and raising N partitions (Kafka-consumer-group semantics without Kafka); everything observable with SQL; domain stays pure (Evans); the serializer is the version check (Young) | Every message pays a rehydration fold (mitigated by design: the §3.5 activations — virtual-actor behaviour without a framework); dispatch latency is queue-poll latency (the existing nudge pattern keeps it near-zero) |
 | Rust actor framework with clustering — `ractor`(+cluster), `coerce`, `kameo` | True in-memory actors; sharding/location transparency; Vernon-style supervision trees | The Rust distributed-actor ecosystem is **young and thin**: cluster features experimental or single-maintainer; betting the money path on a niche runtime; brings cluster membership/split-brain ops to a team that today runs one container; persistence still ends in Postgres — the mailbox table gets built anyway |
 | External actor platform — Orleans (virtual actors), Akka/Pekko, Dapr sidecar actors, Cloudflare Durable Objects | Orleans is the gold standard of virtual actors; Dapr is language-neutral (works from Rust over gRPC) | Polyglot or sidecar ops against ADR-0034's full-stack-Rust posture; a second runtime to deploy, monitor, upgrade; V0 hosting (one Render image + Supabase) has no room for it; Durable Objects couples the write path to one edge vendor |
 | Durable-execution engines — Temporal, Restate (virtual objects ARE keyed single-writers, decent Rust SDK) | Restate's model matches this design closely; retries/timers built in | Another stateful service to run (or a SaaS dependency on the order path); the journal/event-store split blurs — two logs of truth; migration lock-in at the layer hardest to leave |
