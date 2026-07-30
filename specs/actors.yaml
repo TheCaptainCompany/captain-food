@@ -783,6 +783,47 @@ Conversation:
   identity: orderId          # a conversation's identity IS its order (ADR-20260725-015921)
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  # PILOT of the declared-state DSL (PROP-20260728-135632 §2.1, Approved — validation-only in
+  # #242 slice 1; generation of apply/fold + requires enforcement is slice 2). Each field mirrors
+  # the hand-written ConversationState in crates/domain/src/conversation.rs; parity is asserted
+  # when states.rs generation lands.
+  state:
+    customerId:
+      type: { $ref: 'scalars.yaml#/CustomerId' }
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/customerId' }]
+      nullable: true
+      note: "The participant requires.acting.CUSTOMER authorizes against (#235); null = guest order, CUSTOMER denied."
+    restaurantId:
+      type: { $ref: 'scalars.yaml#/RestaurantId' }
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/restaurantId' }]
+      note: "The participant requires.acting.RESTAURANT authorizes against (#235)."
+    customerChatEnabled:
+      type: boolean
+      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/customerChatEnabled' }]
+      note: "CustomerChatDisabled gate."
+    messageIds:
+      mode: set
+      of: { $ref: 'scalars.yaml#/ConversationMessageId' }
+      from: [{ $ref: 'events.yaml#/MessagePosted/properties/messageId' }]
+      note: "MessageAlreadyPosted idempotency guard."
+    adminInvited:
+      type: boolean
+      mode: flag
+      from: [{ $ref: 'events.yaml#/AdminInvitedToConversation' }]
+      note: "Set by a reasoned escalation (#129)."
+    mutedRoles:
+      mode: set
+      of: { $ref: 'scalars.yaml#/ConversationAuthorRole' }
+      from: [{ $ref: 'events.yaml#/ParticipantMuted/properties/mutedRole' }]
+      removedBy: [{ $ref: 'events.yaml#/ParticipantUnmuted/properties/mutedRole' }]
+      note: "ParticipantNotMuted guard."
+    translations:
+      mode: set
+      of:
+        messageId: { $ref: 'scalars.yaml#/ConversationMessageId' }
+        locale: { $ref: 'scalars.yaml#/Locale' }
+      from: [{ $ref: 'events.yaml#/MessageTranslationAdded' }]
+      note: "TranslationAlreadyRecorded idempotency guard (composite element, keys read off the payload by name)."
   description: >
     Per-order in-app message thread; id = orderId (a conversation's identity IS its order,
     ADR-20260725-015921). OpenConversation is its birth (snapshots customerChatEnabled, default true);
@@ -793,6 +834,16 @@ Conversation:
       emits: [{ $ref: 'events.yaml#/ConversationOpened' }]
       throws: [{ $ref: 'errors.yaml#/ConversationAlreadyOpen' }]
     - message: { $ref: 'commands.yaml#/PostMessage' }
+      # Write-side per-instance authorization (#235, PROP-20260728-135632 §2.2) — DECLARED here,
+      # validated by req-*; ENFORCED (and its NotAParticipant/RoleMismatch errors + negative tests
+      # added) when slice 2 generates the precondition. RIDER deliberately absent = denied.
+      requires:
+        acting:
+          CUSTOMER:   state.customerId
+          RESTAURANT: state.restaurantId
+          ADMIN:      any
+        claims:
+          authorRole: actor.role
       emits: [{ $ref: 'events.yaml#/MessagePosted' }]
       throws:
         - { $ref: 'errors.yaml#/ConversationNotFound' }
