@@ -396,6 +396,69 @@ keys:
       Everything a repo secret would have given, minus the opacity.
 
   # ===================================================================
+  # Actor mailbox + projection runtime (ADR-20260730-231500; PROP-20260728-152752 /
+  # PROP-20260730-230803). Declared AHEAD of their readers — the drift gate is one-directional
+  # (a read must be declared; a declaration may precede its read): the mailbox worker (#242
+  # slice 3) and the batched projector (#267) land against keys that already exist, instead of
+  # smuggling constants in with the code.
+  # ===================================================================
+
+  MAILBOX_LEASE_SECONDS:
+    type: int
+    default: 30
+    gates: >
+      How long a mailbox partition lease lives without renewal (PROP-20260728-152752 §3.1). Too
+      short and healthy workers flap ownership; too long and a crashed worker's partitions sit
+      unserved for that many seconds before takeover — at peak that is paid-order latency. Reader
+      lands with the #242 slice-3 worker.
+
+  MAILBOX_HEARTBEAT_SECONDS:
+    type: int
+    default: 10
+    gates: >
+      Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper
+      bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat,
+      authority never — the ownership_version fence is commit-time). Keep at roughly a third of
+      MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
+
+  ACTOR_ACTIVATION_IDLE_SECONDS:
+    type: int
+    default: 300
+    gates: >
+      Global default for activation passivation (PROP-20260728-152752 §3.5): an in-memory actor
+      unsolicited for this long is dropped, its next message paying one rehydration fold.
+      Per-actor overrides live in actors.yaml (mailbox.activations.idle_seconds). Zero would
+      disable the cache; too high and idle aggregates hold memory the LRU bound must then evict.
+      Reader lands with the #242 slice-4 activations.
+
+  PROJECTION_BATCH_SIZE:
+    type: int
+    default: 500
+    gates: >
+      Events per projection unit-of-work flush (PROP-20260730-230803 §2, 100–1000): one
+      transaction per THIS MANY events instead of one per event. Higher = fewer fsyncs but a
+      larger replay window after a crash and a bigger in-memory identity map. Reader lands with
+      the #267 batched projector.
+
+  PROJECTION_BATCH_MEMORY_MB:
+    type: int
+    default: 64
+    gates: >
+      Early-flush bound on the projection identity map (PROP-20260730-230803 §4): a batch whose
+      loaded row states outgrow this flushes before reaching PROJECTION_BATCH_SIZE, keeping wide
+      rows (catalog imports) from ballooning the projector. Reader lands with the #267 batched
+      projector.
+
+  PROJECTION_PARTITIONS:
+    type: int
+    default: 16
+    gates: >
+      Projection lane keyspace width — hash(business_key) mod THIS routes events to lanes with
+      per-key order preserved (PROP-20260730-230803 §3). Fixed-wide like the mailbox width:
+      changing it re-maps lanes (a drain-then-resize operation), while worker scaling only
+      re-divides lane ownership. Reader lands with the #267 batched projector.
+
+  # ===================================================================
   # Worker toggles — each pauses a pipeline (ADR-20260728-224500)
   # ===================================================================
 

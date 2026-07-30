@@ -213,6 +213,18 @@ pub struct Config {
     pub internal_trigger_token: Option<String>,
     /// Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout worker escalates to the next ranked channel. Set it too high and a channel that never answers holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner that would have accepted gets pulled off the job. NOT a repo secret, deliberately, though it was asked for as one (2026-07-29). It is a NON-SECRET tuning number, and a non-secret in Actions secrets is unreadable configuration — you could not open this repo and learn what ceiling production applies, which is the whole failure this file exists to end (and `config-nonsecret-from-secret` rejects it). The `default` here IS the CI-supplied value: it is baked into the artifact, printed in the boot report, and overridable per profile by adding a `deploy:` block, or in seconds during an incident by setting the env var. Everything a repo secret would have given, minus the opacity.
     pub delivery_offer_max_ttl_seconds: i64,
+    /// How long a mailbox partition lease lives without renewal (PROP-20260728-152752 §3.1). Too short and healthy workers flap ownership; too long and a crashed worker's partitions sit unserved for that many seconds before takeover — at peak that is paid-order latency. Reader lands with the #242 slice-3 worker.
+    pub mailbox_lease_seconds: i64,
+    /// Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
+    pub mailbox_heartbeat_seconds: i64,
+    /// Global default for activation passivation (PROP-20260728-152752 §3.5): an in-memory actor unsolicited for this long is dropped, its next message paying one rehydration fold. Per-actor overrides live in actors.yaml (mailbox.activations.idle_seconds). Zero would disable the cache; too high and idle aggregates hold memory the LRU bound must then evict. Reader lands with the #242 slice-4 activations.
+    pub actor_activation_idle_seconds: i64,
+    /// Events per projection unit-of-work flush (PROP-20260730-230803 §2, 100–1000): one transaction per THIS MANY events instead of one per event. Higher = fewer fsyncs but a larger replay window after a crash and a bigger in-memory identity map. Reader lands with the #267 batched projector.
+    pub projection_batch_size: i64,
+    /// Early-flush bound on the projection identity map (PROP-20260730-230803 §4): a batch whose loaded row states outgrow this flushes before reaching PROJECTION_BATCH_SIZE, keeping wide rows (catalog imports) from ballooning the projector. Reader lands with the #267 batched projector.
+    pub projection_batch_memory_mb: i64,
+    /// Projection lane keyspace width — hash(business_key) mod THIS routes events to lanes with per-key order preserved (PROP-20260730-230803 §3). Fixed-wide like the mailbox width: changing it re-maps lanes (a drain-then-resize operation), while worker scaling only re-divides lane ownership. Reader lands with the #267 batched projector.
+    pub projection_partitions: i64,
     /// In-process projection worker (ADR-0040). OFF, no read model advances — queries serve stale data indefinitely. Readiness at GET /projector.
     pub run_projector: bool,
     /// In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires. Readiness at GET /saga.
@@ -363,6 +375,12 @@ impl Config {
         let external_api_tokens = raw("EXTERNAL_API_TOKENS");
         let internal_trigger_token = raw("INTERNAL_TRIGGER_TOKEN");
         let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
+        let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
+        let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
+        let actor_activation_idle_seconds = raw("ACTOR_ACTIVATION_IDLE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(300);
+        let projection_batch_size = raw("PROJECTION_BATCH_SIZE").and_then(|v| v.parse::<i64>().ok()).unwrap_or(500);
+        let projection_batch_memory_mb = raw("PROJECTION_BATCH_MEMORY_MB").and_then(|v| v.parse::<i64>().ok()).unwrap_or(64);
+        let projection_partitions = raw("PROJECTION_PARTITIONS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(16);
         let run_projector = raw("RUN_PROJECTOR")
             .or_else(|| baked("RUN_PROJECTOR", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_PROJECTOR", &v, true))
@@ -507,6 +525,12 @@ impl Config {
                 external_api_tokens,
                 internal_trigger_token,
                 delivery_offer_max_ttl_seconds,
+                mailbox_lease_seconds,
+                mailbox_heartbeat_seconds,
+                actor_activation_idle_seconds,
+                projection_batch_size,
+                projection_batch_memory_mb,
+                projection_partitions,
                 run_projector,
                 run_process_managers,
                 run_inbound_drain,
@@ -564,6 +588,12 @@ impl Config {
         out.push_str(&format!("  EXTERNAL_API_TOKENS        = {}\n", if self.external_api_tokens.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INTERNAL_TRIGGER_TOKEN     = {}\n", if self.internal_trigger_token.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds));
+        out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
+        out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
+        out.push_str(&format!("  ACTOR_ACTIVATION_IDLE_SECONDS = {}\n", self.actor_activation_idle_seconds));
+        out.push_str(&format!("  PROJECTION_BATCH_SIZE      = {}\n", self.projection_batch_size));
+        out.push_str(&format!("  PROJECTION_BATCH_MEMORY_MB = {}\n", self.projection_batch_memory_mb));
+        out.push_str(&format!("  PROJECTION_PARTITIONS      = {}\n", self.projection_partitions));
         out.push_str(&format!("  RUN_PROJECTOR              = {}\n", self.run_projector));
         out.push_str(&format!("  RUN_PROCESS_MANAGERS       = {}\n", self.run_process_managers));
         out.push_str(&format!("  RUN_INBOUND_DRAIN          = {}\n", self.run_inbound_drain));
@@ -598,7 +628,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 47;
+pub const KEY_COUNT: usize = 53;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -621,6 +651,12 @@ pub const DECLARED_KEYS: &[&str] = &[
     "EXTERNAL_API_TOKENS",
     "INTERNAL_TRIGGER_TOKEN",
     "DELIVERY_OFFER_MAX_TTL_SECONDS",
+    "MAILBOX_LEASE_SECONDS",
+    "MAILBOX_HEARTBEAT_SECONDS",
+    "ACTOR_ACTIVATION_IDLE_SECONDS",
+    "PROJECTION_BATCH_SIZE",
+    "PROJECTION_BATCH_MEMORY_MB",
+    "PROJECTION_PARTITIONS",
     "RUN_PROJECTOR",
     "RUN_PROCESS_MANAGERS",
     "RUN_INBOUND_DRAIN",
