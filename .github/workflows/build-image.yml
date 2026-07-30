@@ -1,21 +1,28 @@
-# Build the server image in CI, then hand Render a PRE-BUILT image to run (ADR-20260721-175411).
+# Build the server image in CI and push it to GHCR (ADR-20260721-175411) — BUILD ONLY.
 #
-# WHY: Render meters "build-pipeline minutes". Compiling the Rust workspace on Render repeatedly blew the
-# account's build-pipeline spend cap ($0.00) and failed deploys — every merge to `main` triggered a full
-# cargo build. GitHub Actions is free and unlimited on standard runners for this PUBLIC repo, so we build
-# the Docker image HERE (the same cargo-chef Dockerfile, with a buildx layer cache), push it to GHCR, and
-# then trigger Render to PULL and run it. Render never compiles Rust again — it only pulls an image.
+# WHY built here: Render meters "build-pipeline minutes". Compiling the Rust workspace on Render
+# repeatedly blew the account's build-pipeline spend cap ($0.00) and failed deploys — every merge to
+# `main` triggered a full cargo build. GitHub Actions is free and unlimited on standard runners for
+# this PUBLIC repo, so we build the Docker image HERE (the same cargo-chef Dockerfile, with a buildx
+# layer cache) and push it to GHCR. Render never compiles Rust — it only pulls an image.
 #
-# Gated exactly like db-migrate.yml (ADR-0043): runs ONLY after the `ci` workflow succeeds on `main`, so we
-# never publish an image for a commit that fails build / tests / spec-validation. Ordering vs migrations is
-# self-correcting: the app's /health schema-version gate holds the new deploy (503) until db-migrate has
-# applied pending migrations.
+# WHY build only (ADR-20260730-051500): this workflow used to also trigger the Render deploy, and
+# db-migrate ran in parallel straight off a green `ci` — so a paused/broken Render (e.g. outbound
+# bandwidth exhausted) could leave the DATABASE migrated ahead of a binary that could never arrive.
+# Publishing an image is always safe; RUNNING it and MIGRATING the database are not, so they moved to
+# the manual `deploy` workflow (deploy.yml), which db-migrate.yml then follows. Sequence:
+#   ci (green) → build-image (GHCR push, here) → deploy (manual dispatch) → db-migrate (auto, after)
+# The app's /health schema-version gate holds the new instance (503) until the migration lands, so
+# "deploy then migrate" never serves a new binary against an old schema.
 #
-# Docs-only skip: a merge that touches only specs/docs/ADRs/tooling does not change the deployed binary, so
-# the "Decide whether the deployable image changed" step below diffs the merge and SKIPS the build+deploy
-# for those (fail-safe: builds if the diff can't be computed). `workflow_run` can't use `paths:`, hence the
-# in-job diff. Consequence: the live `X-VERSION` reflects the last CODE commit, not every docs merge — which
-# is correct, since the running binary genuinely didn't change.
+# Gated exactly like before (ADR-0043): runs ONLY after the `ci` workflow succeeds on `main`, so we
+# never publish an image for a commit that fails build / tests / spec-validation.
+#
+# Docs-only skip: a merge that touches only specs/docs/ADRs/tooling does not change the deployed binary,
+# so the "Decide whether the deployable image changed" step below diffs the merge and SKIPS the build
+# for those (fail-safe: builds if the diff can't be computed). `workflow_run` can't use `paths:`, hence
+# the in-job diff. Consequence: the live `X-VERSION` reflects the last CODE commit, not every docs merge
+# — which is correct, since the running binary genuinely didn't change.
 name: build-image
 
 on:
@@ -37,7 +44,7 @@ env:
   IMAGE: ghcr.io/thecaptaincompany/captain-food
 
 jobs:
-  build-and-deploy:
+  build:
     # Only proceed when the gating CI run actually passed.
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
@@ -48,10 +55,11 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }} # the exact commit that passed CI
           fetch-depth: 2 # need HEAD^ to diff the merge and decide if the image actually changed
 
-      # Skip the rebuild+deploy when a merge only touched specs/docs/ADRs/tooling — none of that changes the
-      # deployed `server` binary, so redeploying would just churn an identical image. `workflow_run` triggers
-      # can't use `paths:`, so we diff in-job. Fail-safe: if the diff can't be computed, we BUILD (never skip
-      # a deploy we're unsure about). Deploy-relevant paths = the `server` binary's inputs + the image build.
+      # Skip the rebuild when a merge only touched specs/docs/ADRs/tooling — none of that changes the
+      # deployed `server` binary, so rebuilding would just churn an identical image. `workflow_run`
+      # triggers can't use `paths:`, so we diff in-job. Fail-safe: if the diff can't be computed, we
+      # BUILD (never skip a build we're unsure about). Deploy-relevant paths = the `server` binary's
+      # inputs + the image build.
       - name: Decide whether the deployable image changed
         id: filter
         env:
@@ -66,7 +74,7 @@ jobs:
           if echo "$changed" | grep -qE '^(crates/|Cargo\.toml$|Cargo\.lock$|Dockerfile$|\.dockerignore$|rust-toolchain\.toml$)'; then
             echo "→ deploy-relevant change: BUILD"; echo "build=true" >> "$GITHUB_OUTPUT"
           else
-            echo "→ docs/spec/tooling-only change: SKIP build+deploy"; echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "→ docs/spec/tooling-only change: SKIP build"; echo "build=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: docker/setup-buildx-action@v3
@@ -97,8 +105,8 @@ jobs:
           push: true
           # `sha-<short>` = a human/git-readable tag (correlates the image to a commit, matches the SHA
           # GitHub shows); `latest` is ONLY the blueprint bootstrap seed — deploys never resolve either
-          # (they pin the digest below). The digest (steps.build.outputs.digest) is the reference each
-          # deploy actually runs, so the short tag being human-friendly costs nothing in precision.
+          # (the `deploy` workflow pins the digest it resolves from the sha tag). The digest remains the
+          # reference each deploy actually runs.
           tags: |
             ${{ env.IMAGE }}:sha-${{ steps.vars.outputs.short }}
             ${{ env.IMAGE }}:latest
@@ -111,24 +119,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trigger Render to deploy the pinned image (by immutable digest)
+      - name: Image published — deployment is a separate, deliberate step
         if: steps.filter.outputs.build == 'true'
-        env:
-          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          if [ -z "$HOOK" ]; then
-            echo "::error::repo secret RENDER_DEPLOY_HOOK_URL is not set — image pushed but Render was not told to deploy it"
-            exit 1
-          fi
-          if [ -z "$DIGEST" ]; then
-            echo "::error::no image digest from the build step — refusing to deploy an unpinned reference"
-            exit 1
-          fi
-          # Deploy by DIGEST — content-addressed, so the reference is cryptographically immutable and can
-          # never be repointed (stronger than a tag, which can be moved). The `imgURL` query param tells the
-          # Render image-backed deploy hook the EXACT image to run (Render docs: "Deploy hooks for
-          # image-backed services"). `latest` is never what production resolves.
-          REF="${IMAGE}@${DIGEST}"
-          curl -fsS -X POST "${HOOK}&imgURL=${REF}" >/dev/null
-          echo "✓ triggered Render deploy of ${REF} (sha-${{ steps.vars.outputs.short }})"
+          echo "✓ pushed ${IMAGE}:sha-${{ steps.vars.outputs.short }} (${{ steps.build.outputs.digest }})"
+          echo "To put it in production: run the 'deploy' workflow (Actions → deploy → Run workflow)."
+          echo "db-migrate follows the deploy automatically (ADR-20260730-051500)."

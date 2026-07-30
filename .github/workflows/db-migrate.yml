@@ -1,19 +1,23 @@
-# Apply database migrations with sqlx-cli (ADR-0043) — GATED on a green CI run.
+# Apply database migrations with sqlx-cli (ADR-0043) — AFTER a deploy, never before one
+# (ADR-20260730-051500; previously this ran straight off a green `ci` on main).
 #
-# Runs ONLY after the `ci` workflow succeeds on main (build + tests + spec validation + no drift), so we
-# never deploy SQL to Supabase for a commit that doesn't compile, fails tests, or is out of sync with the
-# specs. `sqlx migrate run` is idempotent (applies only pending migrations), so running it after every green
-# build is safe. Requires repo secret DATABASE_URL = the Supabase Session-pooler string (5432, ?sslmode=require).
+# WHY after the deploy: migrating first proved dangerous the day Render was paused (outbound
+# bandwidth exhausted) — the schema would have converted underneath an OLD binary that a replacement
+# could never reach, breaking production with no rollout to fix it. So this now follows the manual
+# `deploy` workflow: the schema only ever moves once a new binary has actually been sent to Render.
+# The app's /health schema-version gate holds the new instance (503) until this lands, so the rollout
+# converges whichever of the two finishes first.
 #
-# Ordering vs Render: Render auto-deploys in parallel; the app's /health version gate holds a new deploy back
-# (503) until this job has applied pending migrations, so ordering is self-correcting.
+# `sqlx migrate run` is idempotent (applies only pending migrations), so running it after every deploy
+# is safe. The manual dispatch stays for exceptional runs (e.g. re-running after a space failure).
+# Requires repo secret DATABASE_URL = the Supabase Session-pooler string (5432, ?sslmode=require).
 name: db-migrate
 
 on:
   workflow_run:
-    workflows: ["ci"]
+    workflows: ["deploy"]
     types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,13 +28,14 @@ concurrency:
 
 jobs:
   migrate:
-    # Only proceed when the gating CI run passed.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only proceed when the gating deploy succeeded (or a human dispatched this directly).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }} # the exact commit that passed CI
+          # The deploy's exact commit; on manual dispatch, the ref the run was dispatched on.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: taiki-e/install-action@v2 # Node 24; installs a prebuilt sqlx-cli in seconds (no toolchain/cargo-install)
         with:
           tool: sqlx-cli
