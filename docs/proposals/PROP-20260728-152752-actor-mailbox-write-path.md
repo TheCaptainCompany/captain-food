@@ -290,6 +290,56 @@ ever demands a framework or Restate-class runtime, it replaces the *transport be
 the domain (`fold`/`requires`/`decide`) and the DSL do not move. Revisit trigger, measurable:
 rehydration p99 or acceptance→execution lag breaching the checkout SLO at peak (#16's metrics).
 
+#### D2.1 Field study — Proto.Actor, read at source (2026-07-30, product-owner request)
+
+Both repos (asynkron/protoactor-dotnet, protoactor-go) were cloned and their cluster code read.
+The study **confirms D2** and contributed three refinements now folded into §3/§3.1.
+
+What Proto.Actor does: virtual actors placed by **hashing identities over the live member set**
+(.NET partition mode: consistent-hash ring, 50 vnodes/member; Go and .NET activator mode:
+rendezvous/HRW), membership from external providers (k8s/Consul/etcd/seed) + 300ms gossip,
+**in-memory mailboxes only**, at-most-once transport with request-level retry and an opt-in
+in-memory dedup window.
+
+What it lacks — and concedes in its own code — on exactly the properties a paid-order path needs:
+
+- **No durable mailbox anywhere** in either repo (grep for inbox/outbox/at-least-once: zero hits);
+  a dead member's queued messages are silently lost (`endpoint_writer` dead-letters on a nil
+  stream). Durability is our foundation, their non-goal.
+- **No identity-level fencing.** Go has none at all — the `StorageLookup`/`SpawnLock` interface is
+  dead code with no implementation; double activation is structurally possible and the cluster
+  README says "alpha, not production ready". .NET partition mode *repairs* duplicates after the
+  fact (`ResolveDuplicateActivations`: "this kind of double-activation should not happen in normal
+  operations"); its test harness comments that duplicated activation "is by design". The DB-backed
+  mode (Redis/Mongo) is closest to us — CAS + TTL lock + commit-time lock re-check then poison —
+  but uses a GUID lock, not a monotonic epoch.
+- **No concurrency guard in persistence**: `PersistEvent` has no version check at all — the exact
+  place our `UNIQUE(stream_name, version)` turns a double-activation into a loud conflict, theirs
+  lets two grains silently diverge.
+
+What we adopted from it (the parts they got right):
+
+1. **The epoch must cancel in-flight work in-process, not only fence at commit.** .NET's
+   `ClusterTopology.TopologyValidityToken` is a cancellation token minted per topology change;
+   every rebalance loop is linked to it. Ours: a failed lease renewal / observed epoch bump aborts
+   the worker's dequeue/processing loops immediately — the commit-time fence stays the guarantee,
+   the cancellation keeps the stale worker from wasting a full batch to find out.
+2. **Rebalance = pause only NEW claims, keep draining what you hold, readiness keys + timeout,
+   then proceed anyway.** .NET parks only unknown identities during handover, gossips
+   `reb:ready`/`reb:done` per topology hash, and proceeds after 10s without consensus. Same shape
+   for lease handoff — with the difference that our proceed-anyway is *actually safe*, because the
+   old owner's writes are epoch-fenced; theirs is not.
+3. **The routing function is a frozen compatibility contract, separate from placement policy.**
+   Their `RendezvousFast` header warns that any modification "would result in duplicate parallel
+   activations". Ours: `hash(actor_id) mod N` is pinned and versioned (§2), while *which worker
+   claims which lease* stays a swappable policy (capacity now; locality/load-aware/drain-mode
+   later) — their `IMemberStrategy` split, kept.
+
+Also noted for the hot-aggregate cache (evolution valve): their passivation is nothing more than
+a `ReceiveTimeout` → stop decorator per kind — idle eviction by timer, no cluster machinery; and
+their dedup rule "the deduplication window has to be longer than the retry window" is what our
+durable `message_id` uniqueness gives unconditionally.
+
 ### D3 — Parallelism shape
 
 | Option | Pros | Cons |
