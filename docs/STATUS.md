@@ -176,10 +176,13 @@
 > self-describing and declaration order is no longer a frozen storage contract. The codegen emits TEXT
 > DDL, no ref tables, and text fold-views; `enum_sql` is now `EnumText` (enum ↔ variant-name string);
 > the envelope's `user_type` travels as text end to end; hand-written SQL and the DB test suites
-> compare values (`status = 'FAILED'`). Migration `20260728170000_enum_text_storage.sql` converts every
-> column with a CASE frozen from the retired ref seeds, swaps `sweep_retention()` to text predicates,
-> drops all `ref_*` tables and recreates the fold views — verified locally end to end (all migrations
-> from scratch + the full DB-gated suites green on Postgres 16).
+> compare values (`status = 'FAILED'`). The conversion ships as the split `20260730043000`–`0436` set:
+> `VACUUM FULL` the SIRENE mirror first (its transient-payload dead space was most of the 2 GB disk),
+> then one transaction per table group with the CASE folded into `ALTER … USING` (single rewrite, no
+> UPDATE pass) and the big tables each alone — the original one-transaction migration rewrote every
+> table at once and died on production's disk ("no space left on device", clean rollback). Verified
+> locally end to end (old-schema + ordinal data → split set → correct text values; fresh-DB run + the
+> full DB-gated suites green on Postgres 16).
 
 > ✅ **2026-07-28 — the pre-#227 syncs were journaled, so compaction can now CONFIRM them; CI runs the
 > DB suites; the SIRENE worker tests assert the real contract

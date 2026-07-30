@@ -1,0 +1,164 @@
+-- Enum storage: INTEGER declaration-order ordinals -> the enum's TEXT value, verbatim
+-- (ADR-20260728-170000). Replaces the retired single-file 20260728170000_enum_text_storage.sql,
+-- whose one-transaction rewrite of every table at once blew the 2 GB disk on production
+-- ("could not extend file: no space left on device") and rolled back cleanly.
+-- Split: one transaction per table group, conversion folded into ALTER ... USING (a single
+-- table rewrite, no separate UPDATE pass), biggest tables alone, views recreated last.
+
+-- Fold views, regenerated (specs/generated/views.generated.sql) -- text CASEs throughout.
+-- Read models realized as SQL VIEWS: a `CREATE OR REPLACE VIEW` state-fold over domain_events, generated
+-- from each column's `from` lineage (ADR-0039). Read models whose columns are COMPUTED are materialized
+-- tables in tables/projection_tables.yaml (emitted into schema.generated.sql) instead.
+
+CREATE OR REPLACE VIEW View_RestaurantAccount AS
+SELECT
+  (c.payload->>'restaurantAccountId')::uuid AS restaurant_account_id,
+  c.payload->>'ref' AS ref,
+  (SELECT e.payload->>'legalName' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RestaurantAccountRegistered', 'RestaurantAccountUpdated') AND e.payload ? 'legalName'
+     ORDER BY e.position DESC LIMIT 1) AS legal_name,
+  c.payload->>'defaultCurrency' AS default_currency,
+  (SELECT e.payload->>'timezone' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RestaurantAccountRegistered', 'RestaurantAccountUpdated') AND e.payload ? 'timezone'
+     ORDER BY e.position DESC LIMIT 1) AS timezone,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RestaurantAccountRegistered', 'RestaurantAccountUpdated', 'RestaurantAccountDeleted')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'RestaurantAccountRegistered'
+  AND NOT EXISTS (SELECT 1 FROM domain_events d
+                  WHERE d.stream_name = c.stream_name AND d.event_type = 'RestaurantAccountDeleted');
+
+CREATE OR REPLACE VIEW View_DeliveryJob AS
+SELECT
+  (c.payload->>'deliveryJobId')::uuid AS delivery_job_id,
+  (c.payload->>'orderId')::uuid AS order_id,
+  (c.payload->>'restaurantId')::uuid AS restaurant_id,
+  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 'PENDING' WHEN 'DeliveryAcceptedByRider' THEN 'ASSIGNED' WHEN 'DeliveryAcceptedByPartner' THEN 'ASSIGNED' WHEN 'DeliveryPickedUp' THEN 'PICKED_UP' WHEN 'DeliveryStatusUpdated' THEN e.payload->>'status' WHEN 'DeliveryCompleted' THEN 'DELIVERED' WHEN 'DeliveryCancelled' THEN 'CANCELLED' WHEN 'DeliveryDispatchFailed' THEN 'FAILED' END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryPickedUp', 'DeliveryStatusUpdated', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed')
+     ORDER BY e.position DESC LIMIT 1) AS status,
+  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 'INDEPENDENT' WHEN 'DeliveryAcceptedByPartner' THEN 'PARTNER' END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner')
+     ORDER BY e.position DESC LIMIT 1) AS provider,
+  (SELECT (e.payload->>'riderId')::uuid FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider') AND e.payload ? 'riderId'
+     ORDER BY e.position DESC LIMIT 1) AS rider_id,
+  (SELECT e.payload->'courier' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'courier'
+     ORDER BY e.position DESC LIMIT 1) AS courier,
+  (SELECT e.payload->>'partnerRef' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'partnerRef'
+     ORDER BY e.position DESC LIMIT 1) AS partner_ref,
+  c.payload->'pickup' AS pickup_address,
+  c.payload->'dropoff' AS dropoff_address,
+  (SELECT (e.payload->>'estimatedPickupAt')::timestamptz FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'estimatedPickupAt'
+     ORDER BY e.position DESC LIMIT 1) AS estimated_pickup_at,
+  (SELECT (e.payload->>'estimatedDropoffAt')::timestamptz FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'estimatedDropoffAt'
+     ORDER BY e.position DESC LIMIT 1) AS estimated_dropoff_at,
+  c.occurred_at AS requested_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPickedUp')) AS picked_up_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND (e.event_type = 'DeliveryCompleted' OR (e.event_type = 'DeliveryStatusUpdated' AND e.payload->>'status' = 'DELIVERED'))) AS delivered_at,
+  (SELECT e.payload->>'reason' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRejectedByPartner') AND e.payload ? 'reason'
+     ORDER BY e.position DESC LIMIT 1) AS last_partner_rejection,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByPartner', 'DeliveryRejectedByPartner', 'DeliveryStatusUpdated', 'DeliveryAcceptedByRider', 'DeliveryPickedUp', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'DeliveryRequested';
+
+CREATE OR REPLACE VIEW View_DeliverySatisfaction AS
+SELECT
+  (c.payload->>'orderId')::uuid AS order_id,
+  (c.payload->>'restaurantId')::uuid AS restaurant_id,
+  c.payload->>'timeliness' AS timeliness,
+  c.payload->>'reason' AS reason,
+  c.occurred_at AS recorded_at,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliverySatisfactionRecorded')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'DeliverySatisfactionRecorded';
+
+CREATE OR REPLACE VIEW View_DeliveryPartnerAvailability AS
+SELECT
+  (c.payload->>'registrationId')::uuid AS registration_id,
+  c.payload->>'channel' AS channel,
+  (c.payload->>'cityId')::uuid AS city_id,
+  c.payload->>'partnerName' AS partner_name,
+  c.payload->>'contactEmail' AS contact_email,
+  (SELECT CASE e.event_type WHEN 'DeliveryPartnerAvailabilityRequested' THEN 'PENDING' WHEN 'DeliveryPartnerAvailabilityApproved' THEN 'APPROVED' WHEN 'DeliveryPartnerAvailabilityRevoked' THEN 'REVOKED' END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPartnerAvailabilityRequested', 'DeliveryPartnerAvailabilityApproved', 'DeliveryPartnerAvailabilityRevoked')
+     ORDER BY e.position DESC LIMIT 1) AS status,
+  c.occurred_at AS requested_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPartnerAvailabilityApproved', 'DeliveryPartnerAvailabilityRevoked')) AS decided_at,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryPartnerAvailabilityRequested', 'DeliveryPartnerAvailabilityApproved', 'DeliveryPartnerAvailabilityRevoked')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'DeliveryPartnerAvailabilityRequested';
+
+CREATE OR REPLACE VIEW View_Reclamation AS
+SELECT
+  (c.payload->>'reclamationId')::uuid AS reclamation_id,
+  (c.payload->>'orderId')::uuid AS order_id,
+  (c.payload->>'customerId')::uuid AS customer_id,
+  (c.payload->>'restaurantId')::uuid AS restaurant_id,
+  c.payload->>'category' AS category,
+  c.payload->>'description' AS description,
+  c.payload->>'requestedResolution' AS requested_resolution,
+  (SELECT CASE e.event_type WHEN 'ReclamationOpened' THEN 'OPEN' WHEN 'ReclamationResolved' THEN 'RESOLVED' WHEN 'ReclamationRejected' THEN 'REJECTED' WHEN 'ReclamationReopened' THEN 'OPEN' END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationOpened', 'ReclamationResolved', 'ReclamationRejected', 'ReclamationReopened')
+     ORDER BY e.position DESC LIMIT 1) AS status,
+  (SELECT e.payload->>'resolution' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved') AND e.payload ? 'resolution'
+     ORDER BY e.position DESC LIMIT 1) AS resolution,
+  (SELECT (e.payload->'refundAmount'->>'amountCents')::bigint FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved') AND e.payload ? 'refundAmount'
+     ORDER BY e.position DESC LIMIT 1) AS refund_amount_cents,
+  (SELECT e.payload->'refundAmount'->>'currency' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved') AND e.payload ? 'refundAmount'
+     ORDER BY e.position DESC LIMIT 1) AS currency,
+  (SELECT e.payload->>'reason' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationRejected') AND e.payload ? 'reason'
+     ORDER BY e.position DESC LIMIT 1) AS reject_reason,
+  c.occurred_at AS opened_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationResolved', 'ReclamationRejected')) AS decided_at,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('ReclamationOpened', 'ReclamationResolved', 'ReclamationRejected', 'ReclamationReopened')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'ReclamationOpened';
+
+CREATE OR REPLACE VIEW View_PendingRefunds AS
+SELECT
+  (c.payload->>'orderId')::uuid AS order_id,
+  (c.payload->>'restaurantId')::uuid AS restaurant_id,
+  (SELECT CASE e.event_type WHEN 'RefundOpened' THEN 'REQUESTED' WHEN 'RefundApproved' THEN 'APPROVED' WHEN 'RefundDenied' THEN 'DENIED' WHEN 'PaymentRefunded' THEN 'REFUNDED' END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')
+     ORDER BY e.position DESC LIMIT 1) AS status,
+  (c.payload->'amount'->>'amountCents')::bigint AS amount_cents,
+  c.payload->'amount'->>'currency' AS currency,
+  (SELECT (e.payload->'amount'->>'amountCents')::bigint FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundApproved') AND e.payload ? 'amount'
+     ORDER BY e.position DESC LIMIT 1) AS approved_amount_cents,
+  (SELECT e.payload->>'reason' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied') AND e.payload ? 'reason'
+     ORDER BY e.position DESC LIMIT 1) AS reason,
+  (SELECT e.payload->>'refundId' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('PaymentRefunded') AND e.payload ? 'refundId'
+     ORDER BY e.position DESC LIMIT 1) AS refund_id,
+  c.occurred_at AS requested_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundApproved', 'RefundDenied')) AS decided_at,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'RefundOpened';

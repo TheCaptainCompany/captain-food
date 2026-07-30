@@ -37,9 +37,15 @@ is an enum) are stored as **TEXT holding the `scalars.yaml` value verbatim** (`'
   travels as the UserType TEXT value end to end.
 - `infrastructure::persistence::enum_sql` maps enum ↔ TEXT (`EnumText::to_text`/`from_text`); the
   stored string IS the variant name, so reads still fail loudly on an unknown value.
-- Migration `20260728170000_enum_text_storage.sql` drops the fold views, converts every enum column
-  with a CASE frozen from the retired `ref_*` seeds, replaces `sweep_retention()` with text
-  predicates, drops all `ref_<enum>` tables, and recreates the views from the regenerated SQL.
+- The conversion ships as the `20260730043000`–`20260730043600` migration set: compact the SIRENE
+  mirror first (`VACUUM FULL`, reclaiming the dead payload space), then one transaction per table
+  group with the ordinal→value CASE folded into `ALTER … USING` (a single rewrite per table, no
+  UPDATE pass), the biggest tables (`restaurant`, `inbound_events`, `command_journal`,
+  `domain_events`) each alone, `sweep_retention()` replaced with text predicates, every
+  `ref_<enum>` table dropped, and the fold views recreated from the regenerated SQL last.
+  (The original single-file `20260728170000_enum_text_storage.sql` rewrote every table in one
+  transaction and died on production's 2 GB disk — "no space left on device" — rolling back
+  cleanly; it was retired unapplied and replaced by the split set.)
 - Declaration order in `scalars.yaml` is no longer a storage contract. **Renaming** a value is now
   the migration-worthy event (a data `UPDATE` plus the code change); adding or reordering values is
   free.
