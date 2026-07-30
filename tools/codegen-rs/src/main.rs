@@ -557,7 +557,9 @@ fn classify(file: &str, path: &[String], node: &Value, handled: &BTreeSet<String
         "scalars.yaml" => top.then(|| {
             if node.get("enum").is_some() { Kind::EnumScalar } else { Kind::Scalar }
         }),
-        "actors.yaml" => top.then_some(Kind::Aggregate),
+        // `principals` is the file-header role → identity-scalar map (PROP-20260728-152752 §2.4),
+        // not an actor — excluded so it never registers as a phantom aggregate.
+        "actors.yaml" => (top && path.first().map(String::as_str) != Some("principals")).then_some(Kind::Aggregate),
         "processmanager.yaml" => top.then_some(Kind::ProcessManager),
         "services.yaml" => {
             if top {
@@ -666,6 +668,9 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("actors.yaml", "*.receives[*].emits[*]",           &[Kind::Event]),
     ("actors.yaml", "*.receives[*].throws[*]",          &[Kind::Error]),
     ("actors.yaml", "*.lifecycle.status",               &[Kind::EnumScalar]),
+    // The actor-mailbox addressing layer (ADR-20260730-231500, PROP-20260728-152752 §2/§2.4):
+    // `principals` maps each authenticated role to its resolved domain-identity scalar.
+    ("actors.yaml", "principals.*.id",                  &[Kind::Scalar]),
     ("actors.yaml", "*.lifecycle.initial[*].event",     &[Kind::Event]),
     ("actors.yaml", "*.lifecycle.transitions[*].event", &[Kind::Event]),
 
@@ -1055,6 +1060,7 @@ fn validate(model: &Model) -> Report {
 
     // --- 2c. Aggregate lifecycle state machines (actors.yaml `lifecycle`, ADR-20260720-004419) ---
     validate_lifecycles(model, &mut issues);
+    validate_mailbox_addressing(model, &mut issues);
     {
         let lcs = parse_lifecycles(model);
         cov.lifecycles = lcs.len();
@@ -4260,6 +4266,92 @@ fn scalar_enum_values(model: &Model, scalar: &str) -> Option<Vec<String>> {
         .and_then(|n| n.get("enum"))
         .and_then(|e| e.as_sequence())
         .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect())
+}
+
+/// Whether a message definition ("commands.yaml#/X" / "events.yaml#/X" / "messages.yaml#/X")
+/// declares `properties.<prop>`.
+fn message_property_exists(model: &Model, message_ref: &str, prop: &str) -> bool {
+    let Some((file, key)) = message_ref.split_once("#/") else { return false };
+    model
+        .defs
+        .get(file)
+        .and_then(|d| d.get(key))
+        .and_then(|n| n.get("properties"))
+        .and_then(|p| p.get(prop))
+        .is_some()
+}
+
+/// §2d — the actor-mailbox ADDRESSING layer (ADR-20260730-231500, PROP-20260728-152752 §2):
+/// the file-header `principals` map (role → domain-identity scalar), each aggregate's `identity`
+/// (the payload property that addresses its instances = the stream id) and `mailbox.partitions`
+/// (the fixed keyspace width). Enforced here:
+///   - `pr-role-unknown` (error): a principals key that is not a scalars.yaml#/UserType value;
+///   - `mb-partitions-range` (error): partitions outside 1..=32767 (smallint keyspace);
+///   - `id-missing` (warn, adoption — like lc-missing): an aggregate with no `identity`;
+///   - `id-not-in-payload` (warn until the slice-3 dispatch settles birth-command id minting,
+///     PROP-20260728-152752 §8): a received message whose payload lacks the identity property.
+fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
+    let actors = match model.defs.get("actors.yaml") {
+        Some(Value::Mapping(m)) => m,
+        _ => return,
+    };
+    let user_types = scalar_enum_values(model, "UserType").unwrap_or_default();
+    if let Some(pr) = actors.get("principals").and_then(|v| v.as_mapping()) {
+        for (k, _) in pr {
+            let Some(role) = k.as_str() else { continue };
+            if !user_types.iter().any(|u| u == role) {
+                issues.push(err(
+                    "pr-role-unknown",
+                    format!("actors.yaml/principals/{}", role),
+                    format!("principals key '{}' is not a scalars.yaml#/UserType value.", role),
+                ));
+            }
+        }
+    }
+    for (k, node) in actors {
+        let name = match k.as_str() {
+            Some(s) if s != "principals" => s,
+            _ => continue,
+        };
+        if node.get("type").and_then(|x| x.as_str()) != Some("aggregate") {
+            continue;
+        }
+        if let Some(p) = node.get("mailbox").and_then(|m| m.get("partitions")) {
+            if !p.as_i64().map(|n| (1..=32767).contains(&n)).unwrap_or(false) {
+                issues.push(err(
+                    "mb-partitions-range",
+                    format!("actors.yaml/{}", name),
+                    format!("mailbox.partitions must be an integer in 1..=32767 (smallint keyspace width), got {:?}.", p),
+                ));
+            }
+        }
+        let Some(identity) = node.get("identity").and_then(|x| x.as_str()) else {
+            issues.push(warn(
+                "id-missing",
+                format!("actors.yaml/{}", name),
+                format!(
+                    "aggregate '{}' declares no `identity` — the mailbox cannot address its instances (PROP-20260728-152752 §2).",
+                    name
+                ),
+            ));
+            continue;
+        };
+        for entry in node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten() {
+            let Some(mref) = entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str()) else {
+                continue;
+            };
+            if !message_property_exists(model, mref, identity) {
+                issues.push(warn(
+                    "id-not-in-payload",
+                    format!("actors.yaml/{}", name),
+                    format!(
+                        "'{}' does not carry identity property '{}' — a birth message minting its id, or a gap the slice-3 dispatch must resolve.",
+                        mref, identity
+                    ),
+                ));
+            }
+        }
+    }
 }
 
 /// §2c — validate the declared aggregate lifecycles (ADR-20260720-004419): the status is an enum
