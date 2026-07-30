@@ -9187,9 +9187,16 @@ fn emit_config(model: &Model) -> String {
     // ---- The struct --------------------------------------------------------------------------
     out.push_str("/// The resolved configuration. Built once, injected — never re-read from env.\n#[derive(Debug, Clone)]\npub struct Config {\n    pub profile: Profile,\n");
     for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        // "No default declared" means ABSENT, for every type — never a typed zero. An `int` with no
+        // default used to resolve to `0`, so `DELIVERY_OFFER_MAX_TTL_SECONDS` would have been reported
+        // in the boot log as a TTL of zero seconds while the worker was in fact applying its own 900s
+        // fallback. A boot report that states a number the process does not use is worse than one that
+        // admits it does not know: the whole point of the report is that an operator can trust it.
         let ty = match k.ty.as_str() {
-            "bool" => "bool".to_string(),
-            "int" => "i64".to_string(),
+            "bool" if k.default.is_some() => "bool".to_string(),
+            "bool" => "Option<bool>".to_string(),
+            "int" if k.default.is_some() => "i64".to_string(),
+            "int" => "Option<i64>".to_string(),
             // Optional strings stay Option: "absent" is a state the composition root branches on.
             _ if k.required.is_empty() && k.default.is_none() => "Option<String>".to_string(),
             _ => "String".to_string(),
@@ -9249,20 +9256,26 @@ fn emit_config(model: &Model) -> String {
             format!("matches!(profile, {})", arms.join(" | "))
         };
         match k.ty.as_str() {
-            "bool" => {
-                let d = k.default.clone().unwrap_or_else(|| "false".into());
-                out.push_str(&format!(
+            "bool" => match &k.default {
+                Some(d) => out.push_str(&format!(
                     "        let {f} = raw(\"{n}\")\n            .or_else(|| baked(\"{n}\", profile).map(str::to_string))\n            .map(|v| parse_bool(\"{n}\", &v, {d}))\n            .unwrap_or({d});\n",
                     n = k.name
-                ));
-            }
-            "int" => {
-                let d = k.default.clone().unwrap_or_else(|| "0".into());
-                out.push_str(&format!(
+                )),
+                None => out.push_str(&format!(
+                    "        let {f} = raw(\"{n}\")\n            .or_else(|| baked(\"{n}\", profile).map(str::to_string))\n            .map(|v| parse_bool(\"{n}\", &v, false));\n",
+                    n = k.name
+                )),
+            },
+            "int" => match &k.default {
+                Some(d) => out.push_str(&format!(
                     "        let {f} = raw(\"{n}\").and_then(|v| v.parse::<i64>().ok()).unwrap_or({d});\n",
                     n = k.name
-                ));
-            }
+                )),
+                None => out.push_str(&format!(
+                    "        let {f} = raw(\"{n}\").and_then(|v| v.parse::<i64>().ok());\n",
+                    n = k.name
+                )),
+            },
             _ => {
                 // PRECEDENCE: env var > baked profile value > default. The env var wins so an operator
                 // keeps a seconds-fast override in an incident; the baked value is what runs otherwise.
@@ -9327,10 +9340,14 @@ fn emit_config(model: &Model) -> String {
     );
     for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
         let f = field(&k.name);
-        // Optional non-defaulted strings are `Option<String>` in the struct — "absent" is a state the
-        // composition root branches on — so their report arm must not assume `String`.
-        let is_option =
-            k.required.is_empty() && k.default.is_none() && k.ty != "bool" && k.ty != "int";
+        // Anything with no value to fall back on is an `Option` in the struct — "absent" is a state the
+        // composition root branches on — so its report arm must not assume a bare value.
+        let numeric = k.ty == "bool" || k.ty == "int";
+        let is_option = if numeric {
+            k.default.is_none()
+        } else {
+            k.required.is_empty() && k.default.is_none()
+        };
         let line = if k.secret && k.mode_of.as_deref() == Some("stripe") {
             format!(
                 "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", if self.{f}.is_empty() {{ \"unset\".to_string() }} else {{ format!(\"set [{{}} mode]\", stripe_mode(&self.{f})) }}));\n",
@@ -9346,7 +9363,12 @@ fn emit_config(model: &Model) -> String {
                 "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", if self.{f}.is_empty() {{ \"unset\" }} else {{ \"set\" }}));\n",
                 k.name
             )
-        } else if k.ty == "bool" || k.ty == "int" {
+        } else if numeric && is_option {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}.map_or_else(|| \"unset\".to_string(), |v| v.to_string())));\n",
+                k.name
+            )
+        } else if numeric {
             format!("        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}));\n", k.name)
         } else if k.required.is_empty() && k.default.is_none() {
             format!(
@@ -15522,6 +15544,98 @@ keys:
         }
     }
 
+    /// A numeric key with NO declared default must resolve to `None`, never to a typed zero.
+    ///
+    /// The emitter used to substitute `0` for a defaultless `int`, so
+    /// `DELIVERY_OFFER_MAX_TTL_SECONDS` — whose real fallback (900s) lives in
+    /// `DeliveryOfferTimeoutWorker::new`, which has no Config to read — would have been printed in the
+    /// boot report as a delivery-offer ceiling of ZERO SECONDS. An operator reading that would conclude
+    /// every offer times out instantly. A report that states a number the process never applies is
+    /// worse than one that says `unset`, because it is trusted.
+    #[test]
+    fn a_numeric_key_without_a_default_resolves_to_absent_not_to_zero() {
+        let spec = r#"
+keys:
+  TTL_SECONDS:
+    type: int
+    gates: "No default -- the fallback lives at the call site."
+  WITH_DEFAULT_SECONDS:
+    type: int
+    default: 30
+    gates: "Declares its own."
+"#;
+        let model = Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(spec).expect("parses"),
+            )]),
+        };
+        let emitted = emit_config(&model);
+        assert!(
+            emitted.contains("pub ttl_seconds: Option<i64>"),
+            "a defaultless int must be Option<i64>:\n{emitted}"
+        );
+        assert!(
+            !emitted.contains("raw(\"TTL_SECONDS\").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)"),
+            "a defaultless int must not fall back to 0:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("self.ttl_seconds.map_or_else"),
+            "the boot report must print `unset`, not a fabricated number:\n{emitted}"
+        );
+        // The complement: a declared default is still applied, and still reported as a plain value.
+        assert!(
+            emitted.contains("pub with_default_seconds: i64")
+                && emitted.contains(".unwrap_or(30)"),
+            "a declared default must survive this change:\n{emitted}"
+        );
+    }
+
+    /// The Render sync must resolve repo secrets from the manifest ALONE — never from a second list of
+    /// key names maintained by hand in the workflow.
+    ///
+    /// It did, and the list drifted on its first real run: `HONEYCOMB_API_KEY` and the four `OVH_*`
+    /// credentials were declared in `specs/configuration.yaml` AND configured as repo secrets, but
+    /// missing from the workflow's `env:` block, so the sync reported "repo secret is not set". That is
+    /// the most expensive shape of wrong: it tells an operator who configured the secret correctly that
+    /// they did not, and points them at the wrong file. Two lists of the same names is precisely the
+    /// drift configuration.yaml exists to abolish.
+    #[test]
+    fn the_render_sync_takes_its_secret_names_only_from_the_manifest() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let wf = std::fs::read_to_string(root.join(".github/workflows/render-config-sync.yml"))
+            .expect("the render-config-sync workflow must exist");
+        assert!(
+            wf.contains("toJSON(secrets)"),
+            "the workflow must source every repo secret as one object, so the manifest is the only \
+             list of names"
+        );
+        // RENDER_API_KEY is the one legitimate direct reference: it is the workflow's own credential
+        // for reaching Render, not a value the manifest ever names.
+        //
+        // Comment lines are skipped, because the comment above this very block quotes the
+        // `secrets.NAME` shape it warns against — a rule that cannot survive being explained is a rule
+        // people work around by deleting the explanation.
+        let direct: Vec<&str> = wf
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .flat_map(|l| {
+                l.match_indices("secrets.").map(move |(at, _)| {
+                    let tail = &l[at + "secrets.".len()..];
+                    let end = tail.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'));
+                    &tail[..end.unwrap_or(tail.len())]
+                })
+            })
+            .filter(|n| !n.is_empty())
+            .collect();
+        assert_eq!(
+            direct,
+            ["RENDER_API_KEY"],
+            "only RENDER_API_KEY may be referenced by name; every other secret is looked up from the \
+             manifest. Naming one here recreates the list that drifted."
+        );
+    }
+
     /// A key with a DECLARED DEFAULT must be consumed through the generated `Config`, never re-read
     /// from the environment at the call site.
     ///
@@ -15613,6 +15727,14 @@ keys:
     /// Scope: non-test Rust under `crates/**`. Test files legitimately set throwaway variables
     /// (`DATABASE_URL` overrides, `DB_TESTS_REQUIRED`), and the GENERATED reader is itself the thing
     /// being checked, so both are excluded.
+    ///
+    /// The scan is deliberately NOT a plain search for `env::var("NAME")`. That is how the first
+    /// version of this gate was written, and six `OVH_*` credentials stayed invisible to it for weeks:
+    /// `OvhSmsClient::from_env` reads them through a closure (`let var = |k: &str| env::var(k)`), so no
+    /// key name is ever adjacent to `env::var`. Widening the harvest surfaced 17 more. The three
+    /// shapes actually used in this repo are all recognised, and a fourth — a read whose key the scan
+    /// cannot attribute at all — is rejected outright rather than passing silently. See
+    /// [`env_reads_in`].
     #[test]
     fn every_env_var_read_by_the_crates_is_declared() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
@@ -15652,41 +15774,55 @@ keys:
         files.sort();
         assert!(!files.is_empty(), "found no crate sources to scan");
 
-        let mut offenders: Vec<String> = Vec::new();
-        for f in &files {
+        let scanned: Vec<&std::path::PathBuf> = files
+            .iter()
             // The generated reader legitimately names every key; it IS the declaration's output.
-            if f.to_string_lossy().ends_with("generated/config.rs") {
-                continue;
+            .filter(|f| !f.to_string_lossy().ends_with("generated/config.rs"))
+            .collect();
+
+        // The `*_ENV` const table is built across the WHOLE tree before anything is scanned, because
+        // the const and the read routinely live in different files: `stripe::acl` declares
+        // `STRIPE_WEBHOOK_SECRET_ENV` and `stripe::http` is what passes it to `env::var`. A per-file
+        // table reports four such reads as unresolvable, which is a false alarm, and a gate that cries
+        // wolf gets weakened rather than obeyed.
+        let mut consts: BTreeMap<String, String> = BTreeMap::new();
+        for f in &scanned {
+            if let Ok(src) = std::fs::read_to_string(f) {
+                consts.extend(env_name_consts_in(&src));
             }
+        }
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut blind: Vec<String> = Vec::new();
+        for f in &scanned {
             let Ok(src) = std::fs::read_to_string(f) else { continue };
-            for (idx, line) in src.lines().enumerate() {
-                if line.trim_start().starts_with("//") {
-                    continue;
+            let rel = f.strip_prefix(&root).unwrap_or(f).display().to_string();
+            let scan = env_reads_in(&src, &consts);
+            for (line, name) in scan.keys {
+                if !declared.contains(&name) && !exempt.contains(name.as_str()) {
+                    offenders.push(format!("  {rel}:{line}: {name}"));
                 }
-                for pat in ["env::var(\"", "env_flag(\""] {
-                    let mut rest = line;
-                    while let Some(at) = rest.find(pat) {
-                        let tail = &rest[at + pat.len()..];
-                        let Some(end) = tail.find('"') else { break };
-                        let name = &tail[..end];
-                        if !name.is_empty()
-                            && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-                            && !declared.contains(name)
-                            && !exempt.contains(name)
-                        {
-                            offenders.push(format!(
-                                "  {}:{}: {name}",
-                                f.strip_prefix(&root).unwrap_or(f).display(),
-                                idx + 1
-                            ));
-                        }
-                        rest = &tail[end..];
-                    }
-                }
+            }
+            for (line, expr) in scan.blind {
+                blind.push(format!("  {rel}:{line}: env::var({expr})"));
             }
         }
         offenders.sort();
         offenders.dedup();
+        blind.sort();
+        blind.dedup();
+
+        // Reported FIRST: a read the scan cannot attribute makes the offender list above unreliable,
+        // so an unattributable read is a defect in its own right rather than a gap to be tolerated.
+        assert!(
+            blind.is_empty(),
+            "these environment reads name their key in a way this gate cannot resolve, so the key \
+             could be undeclared and the gate would not notice:\n{}\n\n\
+             Fix: read it by string literal (`env::var(\"MY_KEY\")`), or name it with a \
+             `const MY_KEY_ENV: &str = \"MY_KEY\";` and pass that. Both forms let the gate see the key; \
+             a computed or forwarded name does not.",
+            blind.join("\n")
+        );
         assert!(
             offenders.is_empty(),
             "these environment variables are READ by the crates but NOT declared in \
@@ -15696,6 +15832,243 @@ keys:
              startup validation, to the boot report and to every derived manifest, which is exactly how \
              RUN_SIRENE_WORKER came to gate a production pipeline while being written down nowhere.",
             offenders.join("\n")
+        );
+    }
+
+    /// Collect `const SOME_NAME: &str = "SOME_KEY";` bindings whose VALUE looks like an environment key,
+    /// as `ident -> key`. Gathered tree-wide before scanning, because the const and the `env::var` that
+    /// consumes it are usually in different modules of the same crate.
+    ///
+    /// The value has to look like a key, rather than the identifier having to end in `_ENV`: the naming
+    /// convention is how the code documents intent, and making the gate depend on it would mean a const
+    /// named anything else silently escapes.
+    fn env_name_consts_in(src: &str) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        for line in src.lines() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            let Some(at) = line.find("const ") else { continue };
+            let tail = &line[at + 6..];
+            let Some((ident, rhs)) = tail.split_once(':') else { continue };
+            let Some((_, value)) = rhs.split_once('=') else { continue };
+            let value = value.trim().trim_end_matches(';').trim();
+            let Some(lit) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else { continue };
+            let ident = ident.trim();
+            if !lit.is_empty()
+                && lit.starts_with(|c: char| c.is_ascii_uppercase())
+                && lit.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+                && ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                out.insert(ident.to_string(), lit.to_string());
+            }
+        }
+        out
+    }
+
+    /// What [`env_reads_in`] found in one source file: keys it could attribute, and reads it could not.
+    struct EnvScan {
+        /// `(1-based line, KEY)` for every environment key the file reads.
+        keys: Vec<(usize, String)>,
+        /// `(1-based line, argument expression)` for reads whose key could not be attributed.
+        blind: Vec<(usize, String)>,
+    }
+
+    /// Find every environment key a Rust source reads, across the three shapes this repo uses.
+    ///
+    /// 1. **Literal** — `env::var("PORT")`, `env_flag("RUN_PROJECTOR", …)`. The obvious one.
+    /// 2. **Named const** — `const AVELO37_API_KEY_ENV: &str = "AVELO37_API_KEY";` passed as
+    ///    `env::var(AVELO37_API_KEY_ENV)`. The adapters all use this; the const's VALUE is the key.
+    /// 3. **Wrapper** — a fn or closure that reads whatever key it is handed
+    ///    (`let var = |k: &str| env::var(k).ok()`), called with literals: `var("OVH_ENDPOINT")`. This
+    ///    is the shape that hid the OVH credentials, and the reason the scan resolves wrappers by
+    ///    name instead of only looking next to `env::var`.
+    ///
+    /// Anything else — a key assembled at runtime, or forwarded from a caller the scan cannot see —
+    /// lands in `blind`. That is not pedantry: an unresolvable read is precisely a read that could name
+    /// an undeclared key while the gate reports all clear.
+    ///
+    /// A line-oriented scan, not a parse. It is checking a convention the repo already follows, and the
+    /// convention is what keeps it honest — the alternative is a syn dependency in the codegen to read
+    /// six call sites.
+    fn env_reads_in(src: &str, known_consts: &BTreeMap<String, String>) -> EnvScan {
+        fn is_key(s: &str) -> bool {
+            !s.is_empty()
+                && s.starts_with(|c: char| c.is_ascii_uppercase())
+                && s.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        }
+        // `foo("BAR")` / `foo(BAR_ENV)` — the first argument of a call to `name`, verbatim.
+        fn first_args<'a>(line: &'a str, name: &str) -> Vec<&'a str> {
+            let mut out = Vec::new();
+            let mut rest = line;
+            while let Some(at) = rest.find(name) {
+                let before = rest[..at].chars().next_back();
+                let tail = &rest[at + name.len()..];
+                rest = tail;
+                // Reject an identifier this is merely the tail of (`my_env_flag(`), and the macro form
+                // (`env!("CARGO_PKG_VERSION")` is a compile-time read, not a runtime configuration key).
+                if before.is_some_and(|c| c.is_alphanumeric() || c == '_') || !tail.starts_with('(') {
+                    continue;
+                }
+                let inner = &tail[1..];
+                let end = inner.find([',', ')']).unwrap_or(inner.len());
+                out.push(inner[..end].trim());
+            }
+            out
+        }
+
+        let lines: Vec<&str> = src.lines().collect();
+        let code: Vec<(usize, &str)> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| !l.trim_start().starts_with("//"))
+            .map(|(i, l)| (i + 1, *l))
+            .collect();
+
+        // Shape 2: this file's own consts, on top of the tree-wide table the caller supplies.
+        let mut consts = known_consts.clone();
+        consts.extend(env_name_consts_in(src));
+
+        // Shape 3: wrappers — a binding whose body reads the environment, so its own callers carry the
+        // key. `env_flag` is the crate-wide one; a local `let var = |k: &str| env::var(k)` is the same
+        // thing with a shorter life. Also collect the parameter names such a wrapper forwards, since
+        // `env::var(k)` inside the wrapper is a resolved read, not a blind one.
+        let mut wrappers: BTreeSet<&str> = BTreeSet::from(["env_flag"]);
+        let mut forwarded: BTreeSet<&str> = BTreeSet::new();
+        for (i, (_, line)) in code.iter().enumerate() {
+            if !line.contains("env::var(") {
+                continue;
+            }
+            // The binding or fn this read belongs to, looking back a few lines for a multi-line
+            // signature (`pub fn env_flag(name: &str, …)` reads on the line below its own header).
+            for (_, prev) in code[i.saturating_sub(3)..=i].iter() {
+                if let Some(rest) = prev.split_once("let ").map(|(_, r)| r) {
+                    if let Some((bind, _)) = rest.split_once('=') {
+                        let bind = bind.trim().trim_start_matches("mut ").trim();
+                        if !bind.is_empty() && bind.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                            wrappers.insert(bind);
+                        }
+                    }
+                }
+                if let Some(rest) = prev.split_once("fn ").map(|(_, r)| r) {
+                    if let Some((f, _)) = rest.split_once('(') {
+                        wrappers.insert(f.trim());
+                    }
+                }
+                // `|k: &str|` or `(name: &str,` — the parameter the wrapper forwards to `env::var`.
+                let mut hay = *prev;
+                while let Some(at) = hay.find(": &str") {
+                    let head = &hay[..at];
+                    let start = head
+                        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
+                    let ident = &head[start..];
+                    if !ident.is_empty() {
+                        forwarded.insert(ident);
+                    }
+                    hay = &hay[at + 6..];
+                }
+            }
+        }
+
+        let mut scan = EnvScan { keys: Vec::new(), blind: Vec::new() };
+        for (no, line) in &code {
+            for wrapper in wrappers.iter().chain(std::iter::once(&"env::var")) {
+                for arg in first_args(line, wrapper) {
+                    if let Some(lit) = arg.strip_prefix('"').and_then(|a| a.strip_suffix('"')) {
+                        if is_key(lit) {
+                            scan.keys.push((*no, lit.to_string()));
+                        }
+                    // A qualified path (`acl::STRIPE_WEBHOOK_SECRET_ENV`) names the same const as the
+                    // bare ident an import would give it, so resolve on the last segment.
+                    } else if let Some(key) = consts.get(arg.rsplit("::").next().unwrap_or(arg)) {
+                        scan.keys.push((*no, key.clone()));
+                    } else if *wrapper == "env::var" && !forwarded.contains(arg) {
+                        scan.blind.push((*no, arg.to_string()));
+                    }
+                }
+            }
+        }
+        scan
+    }
+
+    /// The gate must see a key read through a closure, a `*_ENV` const, and a plain literal alike —
+    /// and must refuse a read it cannot attribute.
+    ///
+    /// This exists because the closure case is not hypothetical: it is how
+    /// `OvhSmsClient::from_env` reads its four credentials, and the previous gate scanned for
+    /// `env::var("` so it reported all clear on six undeclared keys. Testing the scanner directly
+    /// (rather than only through the repo sweep) is what keeps that from regressing quietly once the
+    /// tree happens to be clean.
+    #[test]
+    fn the_drift_gate_sees_every_shape_of_environment_read() {
+        let none = BTreeMap::new();
+        let literal = env_reads_in(r#"let p = std::env::var("PORT").ok();"#, &none);
+        assert_eq!(literal.keys.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>(), ["PORT"]);
+        assert!(literal.blind.is_empty());
+
+        // Shape 3 — the OVH shape, verbatim. A gate anchored on `env::var("` sees nothing here.
+        let closure = env_reads_in(
+            r#"
+            pub fn from_env() -> Option<Self> {
+                let var = |k: &str| std::env::var(k).ok().filter(|s| !s.is_empty());
+                Some(Self { key: var("OVH_APPLICATION_KEY")?, sender: var("OVH_SMS_SENDER") })
+            }
+            "#,
+            &none,
+        );
+        let found: Vec<&str> = closure.keys.iter().map(|(_, k)| k.as_str()).collect();
+        assert!(
+            found.contains(&"OVH_APPLICATION_KEY") && found.contains(&"OVH_SMS_SENDER"),
+            "closure-wrapped reads must be attributed, got {found:?}"
+        );
+        assert!(
+            closure.blind.is_empty(),
+            "`env::var(k)` inside the wrapper forwards a parameter -- not a blind read: {:?}",
+            closure.blind
+        );
+
+        // Shape 2 — the adapter shape: the const's VALUE is the key, not its identifier.
+        let named = env_reads_in(
+            r#"
+            pub const AVELO37_API_KEY_ENV: &str = "AVELO37_API_KEY";
+            let key = std::env::var(AVELO37_API_KEY_ENV).ok()?;
+            "#,
+            &none,
+        );
+        assert_eq!(named.keys.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>(), ["AVELO37_API_KEY"]);
+        assert!(named.blind.is_empty());
+
+        // The same const declared in ANOTHER file — `stripe::acl` declares the name, `stripe::http`
+        // does the reading. Resolving this is why the const table is built tree-wide first.
+        let cross = BTreeMap::from([(
+            "STRIPE_WEBHOOK_SECRET_ENV".to_string(),
+            "STRIPE_WEBHOOK_SECRET".to_string(),
+        )]);
+        let elsewhere = env_reads_in(
+            r#"let secret = match std::env::var(STRIPE_WEBHOOK_SECRET_ENV) { Ok(s) => s, _ => return };"#,
+            &cross,
+        );
+        assert_eq!(
+            elsewhere.keys.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>(),
+            ["STRIPE_WEBHOOK_SECRET"]
+        );
+        assert!(elsewhere.blind.is_empty(), "a cross-file const is resolvable: {:?}", elsewhere.blind);
+
+        // The fourth shape: unresolvable. Reported rather than passed over in silence.
+        let computed =
+            env_reads_in(r#"let v = std::env::var(format!("PREFIX_{suffix}")).ok();"#, &none);
+        assert!(computed.keys.is_empty());
+        assert_eq!(computed.blind.len(), 1, "a computed key must be reported: {:?}", computed.blind);
+
+        // `env!` is a compile-time build fact, not runtime configuration — it must not be harvested.
+        let macro_read = env_reads_in(r#"let v = env!("CARGO_PKG_VERSION");"#, &none);
+        assert!(
+            macro_read.keys.is_empty() && macro_read.blind.is_empty(),
+            "env! is not a configuration read: {:?} {:?}",
+            macro_read.keys,
+            macro_read.blind
         );
     }
 

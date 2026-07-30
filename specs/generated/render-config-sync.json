@@ -13,7 +13,15 @@
       { "env_key": "HONEYCOMB_API_KEY", "from_secret": "HONEYCOMB_API_KEY", "secret": true },
       { "env_key": "HUBRISE_WEBHOOK_SECRET", "from_secret": "HUBRISE_WEBHOOK_SECRET", "secret": true },
       { "env_key": "EXTERNAL_API_TOKENS", "from_secret": "EXTERNAL_API_TOKENS", "secret": true },
-      { "env_key": "INTERNAL_TRIGGER_TOKEN", "from_secret": "INTERNAL_TRIGGER_TOKEN", "secret": true }
+      { "env_key": "INTERNAL_TRIGGER_TOKEN", "from_secret": "INTERNAL_TRIGGER_TOKEN", "secret": true },
+      { "env_key": "OVH_APPLICATION_KEY", "from_secret": "OVH_APPLICATION_KEY", "secret": true },
+      { "env_key": "OVH_APPLICATION_SECRET", "from_secret": "OVH_APPLICATION_SECRET", "secret": true },
+      { "env_key": "OVH_CONSUMER_KEY", "from_secret": "OVH_CONSUMER_KEY", "secret": true },
+      { "env_key": "OVH_SMS_SERVICE_NAME", "from_secret": "OVH_SMS_SERVICE_NAME", "secret": true },
+      { "env_key": "UBER_DIRECT_CUSTOMER_ID", "from_secret": "UBER_DIRECT_CUSTOMER_ID_TEST", "secret": true },
+      { "env_key": "UBER_DIRECT_CLIENT_ID", "from_secret": "UBER_DIRECT_CLIENT_ID_TEST", "secret": true },
+      { "env_key": "UBER_DIRECT_CLIENT_SECRET", "from_secret": "UBER_DIRECT_CLIENT_SECRET_TEST", "secret": true },
+      { "env_key": "UBER_DIRECT_WEBHOOK_SECRET", "from_secret": "UBER_DIRECT_WEBHOOK_SECRET_TEST", "secret": true }
     ],
     "production": [
       { "env_key": "DATABASE_URL", "from_secret": "DATABASE_URL", "secret": true },
@@ -24,7 +32,15 @@
       { "env_key": "HONEYCOMB_API_KEY", "from_secret": "HONEYCOMB_API_KEY", "secret": true },
       { "env_key": "HUBRISE_WEBHOOK_SECRET", "from_secret": "HUBRISE_WEBHOOK_SECRET", "secret": true },
       { "env_key": "EXTERNAL_API_TOKENS", "from_secret": "EXTERNAL_API_TOKENS", "secret": true },
-      { "env_key": "INTERNAL_TRIGGER_TOKEN", "from_secret": "INTERNAL_TRIGGER_TOKEN", "secret": true }
+      { "env_key": "INTERNAL_TRIGGER_TOKEN", "from_secret": "INTERNAL_TRIGGER_TOKEN", "secret": true },
+      { "env_key": "OVH_APPLICATION_KEY", "from_secret": "OVH_APPLICATION_KEY", "secret": true },
+      { "env_key": "OVH_APPLICATION_SECRET", "from_secret": "OVH_APPLICATION_SECRET", "secret": true },
+      { "env_key": "OVH_CONSUMER_KEY", "from_secret": "OVH_CONSUMER_KEY", "secret": true },
+      { "env_key": "OVH_SMS_SERVICE_NAME", "from_secret": "OVH_SMS_SERVICE_NAME", "secret": true },
+      { "env_key": "UBER_DIRECT_CUSTOMER_ID", "from_secret": "UBER_DIRECT_CUSTOMER_ID_TEST", "secret": true },
+      { "env_key": "UBER_DIRECT_CLIENT_ID", "from_secret": "UBER_DIRECT_CLIENT_ID_TEST", "secret": true },
+      { "env_key": "UBER_DIRECT_CLIENT_SECRET", "from_secret": "UBER_DIRECT_CLIENT_SECRET_TEST", "secret": true },
+      { "env_key": "UBER_DIRECT_WEBHOOK_SECRET", "from_secret": "UBER_DIRECT_WEBHOOK_SECRET_TEST", "secret": true }
     ]
   }
 }

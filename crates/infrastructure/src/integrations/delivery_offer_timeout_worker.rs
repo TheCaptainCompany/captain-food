@@ -31,8 +31,11 @@ use crate::persistence::{db_err, PgDispatchStrategy, PgEventStore};
 /// `process_status` ordinal for OFFERED (ADR-0037; matches `enum_sql::DeliveryDispatchProcessStatus`).
 const OFFERED_ORDINAL: i32 = 0;
 
-/// Env var for the global maximum offer TTL (the hard ceiling over every channel), in seconds.
-pub const MAX_TTL_ENV: &str = "DELIVERY_OFFER_MAX_TTL_SECONDS";
+/// Fallback ceiling for [`DeliveryOfferTimeoutWorker::new`], and for a caller that passes a
+/// nonsensical one. The DECLARED value lives in `specs/configuration.yaml`
+/// (`DELIVERY_OFFER_MAX_TTL_SECONDS`, default 900) and is resolved by the generated reader in
+/// `crates/server`; this constant only exists because `infrastructure` is an inner layer and may not
+/// import the server's `Config`. Keep the two numbers equal — the spec is the one people read.
 const DEFAULT_MAX_TTL_SECONDS: i64 = 900;
 
 /// Sweep cadence — offers expire on a minutes scale, so a sub-minute pass keeps escalation prompt.
@@ -54,12 +57,14 @@ pub struct DeliveryOfferTimeoutWorker {
 }
 
 impl DeliveryOfferTimeoutWorker {
-    pub fn new(pool: PgPool) -> Self {
-        let max_ttl_seconds = std::env::var(MAX_TTL_ENV)
-            .ok()
-            .and_then(|v| v.parse::<i64>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(DEFAULT_MAX_TTL_SECONDS);
+    /// `max_ttl_seconds` comes from the composition root, which resolved it from the declared
+    /// configuration — this worker does NOT read the environment itself. It used to, and that made the
+    /// spec's `default: 900` inert: the declaration said one thing and the running process obeyed a
+    /// second copy of it. A non-positive value is refused rather than honoured, since a ceiling of zero
+    /// would time out every offer the instant it was made.
+    pub fn new(pool: PgPool, max_ttl_seconds: i64) -> Self {
+        let max_ttl_seconds =
+            if max_ttl_seconds > 0 { max_ttl_seconds } else { DEFAULT_MAX_TTL_SECONDS };
         Self {
             store: PgEventStore::new(pool.clone()),
             strategy: PgDispatchStrategy::new(pool.clone()),
