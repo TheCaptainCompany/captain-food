@@ -141,6 +141,91 @@ generated code and never changed without a keyspace migration.
   window); the checkpoint advance applies a small grace lag; a periodic below-checkpoint audit
   sweeps anything that slipped (paranoia, expected to find nothing). Greg Young's framing: the log
   is the truth, the checkpoint is a cache — treat it like one.
+### 3.1 The lease protocol — how partitions dispatch themselves across nodes
+
+**The pattern is lease-based partition load balancing.** It is exactly what **Azure Event Hubs'
+`EventProcessorClient`** (formerly *Event Processor Host*) does: every consumer node declares its
+presence by writing **ownership records into a shared store** — blobs in a storage container
+there, rows in `mailbox_partitions` here — and the "dispatching" that seems automatic is each node
+independently running the **same greedy balancing loop** against that store. No coordinator
+assigns anything; balance is emergent. (Kafka reaches the same end differently — a broker-side
+group coordinator runs the assignment — which is precisely the component this design avoids
+needing. The lease idea itself is Gray & Cheriton's, and it also underpins Orleans' grain
+placement and Service Fabric's partition ownership.)
+
+The loop every node runs, each cycle (~10s):
+
+1. **Read** all ownership rows for its actor type.
+2. **Count live owners** = distinct `claimed_by` with an unexpired `lease_until` (a node "declares
+   its presence" simply by holding fresh leases — there is no separate membership table).
+3. **Fair share** = `ceil(partitions / live owners incl. self)`.
+4. If it owns **less** than fair share: claim **unowned or expired** rows first; if none are free,
+   **steal ONE** lease from the largest owner — one per cycle, the EventProcessorClient rule that
+   makes rebalancing converge instead of thrash.
+5. **Renew** (heartbeat) the leases it holds; **release** down to fair share if over.
+
+Every claim/steal/renew is one **conditional UPDATE** — `SET claimed_by = me, lease_until =
+now() + 30s WHERE partition = P AND (claimed_by IS NULL OR lease_until before now() OR claimed_by
+= me)` — so Postgres row atomicity is the referee: of two nodes grabbing the same lease, one
+updates one row, the other updates zero and moves on.
+
+#### Claiming and rebalancing — a second node joins
+
+<a href="https://mermaid.live/view#pako:eNqVVMtu20AM_BVCJxlVEyVtDjHaAFJj9NQk6OMWwFitaGub1VLlruIIQf69lORXlaJAfRC8j-EMh-Q-R5pKjOYQefzVotN4bdSaVX3vQH6qDeTaukAe143iYLRplAuQgfJwI2j5tyF-QIZY6UC8DF2DcMsl8uw1LN_D8j3sJxnnQQXwWll8S234C_Dr4nMPrZWxBT0th6NgSICMa-MDdx8KPr2KG4m4P5yDtsrUWC6LLgGLyuOydcHYBHSF-qER5p5spLuhgECPEiBLhG4OPkigtoH79jw9e9-nbMlhAkfk6cnJ5SW0jjYOyzFM9vbqaoAzqhL6A_aVaYBp42FFPHpzuJvNwZpH3N6Ej_CcvSSwUobBV4pRds7SdBJ7yEv02J04Ta4cNCkLP-6us-8L2FQo6K02EOLBAMCnxvBOrCVqACXnTkg8VCipFajCeDpJx-EGxmBDJA_xkaUiU5jiGbyBd6nfVhBdOfU2n0vpS2wsdX4n3lFBZQcBrfVggiiXbgjUk43w_D887e_mrz1NIJ_aqtHYWLyFUzifyfoinbCNLu8cXBn24SDZIawYcQLxAaUCtzeLrdsrphpChWAVr1HwgySIs9k_KkdOIGKBpPfKvrE1e_aRqm943WmLR_Hk4rqfZtiYUMk8STRWvoK4F7J4RBfumDR6T_zJGlkCtxZnkx5z-BTGqgtN25QqSMnTg-d9MB_IojtMxGFW5KTx0JC1xq2lqH8Uh7GRJgNUutqKH3vIDP74fSWORzIfzZU-kbmU7Yu-bvLZF0QyJy6NU_IKJVBQqGSzFM2s3CD2W_ZlMXR8lEBUI8tjUsrj9xzJYT08gyWuVGtD9PLyG1vVrAw" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a>
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Node A worker (actor_type Order)
+    participant B as Node B worker (joins at scale-out)
+    participant REG as mailbox_partitions registry<br/>(per partition: claimed_by, lease_until, checkpoint)
+
+    Note over A,REG: startup — A alone, partitions 0..99 unowned
+    A->>REG: read ownership rows for Order
+    A->>A: live owners = {A}, fair share = 100
+    A->>REG: claim all — conditional UPDATE where unowned or lease expired
+    loop every 10s heartbeat
+        A->>REG: renew owned leases (lease_until = now() + 30s)
+    end
+    Note over B: B deploys — nobody tells it what to own
+    B->>REG: read ownership rows for Order
+    B->>B: live owners = {A, B}, fair share = ceil(100 / 2) = 50
+    B->>REG: claim unowned first — none free
+    B->>REG: steal ONE lease from the largest owner (A) — conditional UPDATE on that row
+    Note over B,REG: one steal per cycle — convergence without thrash (the EventProcessorClient rule)
+    A->>REG: next renewal updates 0 rows for the stolen partition — A stops polling it
+    B->>B: repeat each cycle until it owns 50
+    Note over A,B: steady state 50 / 50 — no coordinator, both nodes ran the SAME loop
+```
+
+#### Failover — a node dies mid-flight
+
+<a href="https://mermaid.live/view#pako:eNptVNtu2kAQ_ZWRX0IkRy1V1Uo8RILgVigkUBKqPkRC4_UAK_bW3TUkivLvmbWBhKZ-sHyZc-bMmZl9zoStKOtBFuhvTUbQUOLKo34wwBfW0Zpal-Tbd4c-SiEdmgh9wAC3jOannfUb8tCxOxPaoCitge_nH2GDI2xwhIXab-XW-v-Ez4qfCaBRqtI-Lo7cATytZIj-6SPmpskhTWlrUy00hYArCg-mjexfXF7eDHogFEoN3u5Adzn4vWx4qL987n6FH5MZzKfD_n0Bd9ejKYwnV9fF8PA3REZwud4KTiHNquW_tZHAbrmufo-tqSQF6EwmNznQVoqUIAdDMdV-fqBaE1OVhEwXonU5SH4S1hhqAFB568K_9GxN70S1Igy0qE2Uir-HwIn3_M0fKP5MR7Ni2PIM2IaGoUSFRrB8EE9CEQRiXFwT0KOTnqo9eM_UuHbS4ze65GoQeGrl0lvdlrMmsXFWcoP2XMn3VLBUiou5Kka_D-LeihzkiVV3z0LTKmXFJllawU7GNfTP3tuUQ7AnjTKWAWbFNGEjHY9EPBXbjoDu5kwZHEaxzplOO0WcHqPVUqBST22uxpItsXx0jkz1ods5M8pl2gaePmsYd3ffH49ZBxrWixv2VWGk1F3QdYg8wheNK40_rc0lLa2ng4rUlc7w23FOElHSkMQYmN-Ofs2LDi8Boc6BRQR24Rycqnlj2rFfyAoqqmpHvEMbaqrwKAjW6LXimB5LfcvHLdtJE_ImzvLNs8hg1Za1c1XIb7xyWKoEMUvFAw2fYDifjkdXvCZZDpkmz9ta8ZnynDGBbk6XipZYq5i9vLwCyjt9Pg" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a>
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Node A worker (owns partition 7)
+    participant B as Node B worker (survivor)
+    participant REG as mailbox_partitions registry
+    participant MB as inbound_messages
+
+    A->>MB: claim row m1 in partition 7 — FOR UPDATE SKIP LOCKED — starts processing
+    Note over A: A dies (OOM, eviction, network) — heartbeats stop, its connection drops
+    Note over REG: partition 7 lease_until passes — lease EXPIRED
+    B->>REG: balancing cycle sees the expired lease — claims partition 7
+    B->>MB: scan partition 7 from its checkpoint — m1 is still RECEIVED
+    Note over B,MB: m1's row lock died with A's connection, so SKIP LOCKED no longer skips it
+    B->>MB: claim m1, dispatch, complete atomically with the event append
+    Note over A,B: if A was only STALLED and wakes late, it must re-check its lease before completing (D6) — and even then UNIQUE(stream, version) plus message_id dedupe make the race harmless: one completion wins, the other resolves as a retryable conflict / DUPLICATE
+```
+
+The safety story is layered, on purpose: the **lease** prevents sustained double-ownership, the
+**row claim** prevents concurrent delivery of one message, and the **stream version check + the
+aggregate's idempotency** make even the residual stall-race harmless — correctness never rests on
+the lease alone (Young's rule again: the serializer is the version check; everything above it is
+throughput machinery).
+
 - **Completion is the dispatch's** (#242 DoD unchanged): the `domain_events` append and the
   `inbound_messages` status flip commit in ONE SQL transaction; the `OperationStatusBus` publish
   happens post-commit, worker-side.
