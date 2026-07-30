@@ -621,6 +621,13 @@ rehydration and by the hot path.
   signal that is never wrong); lease lost / `ownership_version` bump observed → drop ALL
   activations of that partition; idle timeout + LRU bound → passivate (the Proto.Actor
   `ReceiveTimeout` pattern, D2.1 — a timer, nothing more).
+- **Expiry is spec-configured** (product-owner directive, 2026-07-30): unsolicited actors must
+  leave memory on schedule — a **global default** `actors.activation_idle_seconds` in
+  `specs/configuration.yaml` (ADR-20260729-010500 posture), **overridable per actor**
+  (`mailbox.activations.idle_seconds`) where a precise setting is needed, plus a **per-actor
+  memory bound** (`mailbox.activations.max_memory_mb`) driving the LRU — idle actors expire by
+  the clock, hot cache pressure evicts by size, and both knobs are declared, validated
+  configuration rather than constants in code.
 - **The `Reminders` view rides along**: the activation carries the pending-reminders view (§3.4)
   under the same rules — loaded once, mutated on commit, dropped on eviction.
 
