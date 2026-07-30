@@ -574,12 +574,12 @@ fn fx_rider_status_changed() -> DomainEvent {
 
 /// tests.yaml#/fixtures/conversationOpened — events.yaml#/ConversationOpened
 fn fx_conversation_opened() -> DomainEvent {
-    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_chat_enabled: true })
+    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, customer_chat_enabled: true })
 }
 
 /// tests.yaml#/fixtures/conversationOpenedChatDisabled — events.yaml#/ConversationOpened
 fn fx_conversation_opened_chat_disabled() -> DomainEvent {
-    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_chat_enabled: false })
+    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, customer_chat_enabled: false })
 }
 
 /// tests.yaml#/fixtures/messagePostedPublic — events.yaml#/MessagePosted
@@ -3487,7 +3487,7 @@ async fn test_conversation_opened() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_chat_enabled: true };
+    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, customer_chat_enabled: true };
     let result = crate::commands::open_conversation(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestConversationOpened: the spec expects acceptance");
     bed.assert_appended("TestConversationOpened", &before, &[
@@ -3503,7 +3503,7 @@ async fn test_conversation_opened_twice_is_rejected() {
     spec_baseline(&bed).await;
     bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_chat_enabled: true };
+    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, customer_chat_enabled: true };
     let result = crate::commands::open_conversation(&bed.store, cmd, &support::actor()).await;
     let err = result.expect_err("TestConversationOpenedTwiceIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestConversationOpenedTwiceIsRejected", &err, &["ConversationAlreadyOpen"]);

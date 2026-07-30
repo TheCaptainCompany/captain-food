@@ -1768,6 +1768,9 @@ pub async fn open_conversation(
     let event = DomainEvent::ConversationOpened(ConversationOpened {
         order_id: cmd.order_id,
         restaurant_id: cmd.restaurant_id,
+        // #235 consequence A: the aggregate folds the customer participant it will authorize
+        // against (null for guest orders — acting.CUSTOMER then denies).
+        customer_id: cmd.customer_id,
         customer_chat_enabled: cmd.customer_chat_enabled,
     });
     let stream = conversation_stream(&cmd.order_id);

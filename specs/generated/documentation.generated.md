@@ -4366,6 +4366,7 @@ Open the in-app conversation for an order (id = orderId; idempotent birth). Snap
 | --- | --- | --- | --- |
 | <a id="command-openconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="command-openconversation--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-openconversation--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
 | <a id="command-openconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
 
 <a id="command-postmessage"></a>
@@ -4947,6 +4948,7 @@ Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). 
 | --- | --- | --- | --- |
 | <a id="event-conversationopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-conversationopened--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-conversationopened--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
 | <a id="event-conversationopened--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
 
 <a id="event-messageposted"></a>
@@ -9724,7 +9726,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(53)_
+### 🔤 Scalars _(56)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -9762,6 +9764,9 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-commandjournalstatus"></a>🔤 `CommandJournalStatus` | enum (RECEIVED \| SUCCEEDED \| REJECTED \| FAILED) | Lifecycle of a journaled command: RECEIVED (durably accepted, handler spawned), then SUCCEEDED, REJECTED (business invariant) or FAILED (technical). Maps onto the API OperationStatus (RECEIVED → PENDING). A duplicate submission is an acceptance-response attribute, not a status — the journal row keeps the original's real state.  |
 | <a id="scalar-commandchannel"></a>🔤 `CommandChannel` | enum (GRAPHQL \| WORKER \| INTERNAL) | Surface a journaled command arrived through: the GraphQL BFF dispatch, an on-app drain/enrichment worker (e.g. the HubRise enricher), or an internal trigger endpoint.  |
 | <a id="scalar-inboundeventstatus"></a>🔤 `InboundEventStatus` | enum (RECEIVED \| DELIVERED \| FAILED \| IGNORED \| DUPLICATE) | Lifecycle of an adapted inbound business event (inbound_events row). The three terminal success states are NOT interchangeable — they are the answer to "what did this delivery actually do?", and collapsing them is what made a SIRENE sweep unable to distinguish "registered 200,000 restaurants" from "did nothing 200,000 times" (ADR-20260728-011344 D6): * RECEIVED — staged by the adapter ACL, not yet delivered. * DELIVERED — the aggregate decided a fact and it was appended (a creation OR an update; which one landed is answerable from domain_events via `cause_id = inbound_event_id`, a better source than a status column). * IGNORED — the aggregate decided NOTHING changed, so no fact exists to append. A legitimate event-sourcing outcome, not a failure: the external system reported a record we already hold, identically. * DUPLICATE — the exact fact was ALREADY in the aggregate's stream (a redelivery tail). Distinct from IGNORED: here we have seen this very fact before, there the fact is new but semantically inert. Different causes, different fixes. * FAILED — delivery error, left for retry/inspection.  |
+| <a id="scalar-inboundmessagekind"></a>🔤 `InboundMessageKind` | enum (COMMAND \| EVENT \| MESSAGE) | What kind of thing one inbound_messages row is — the request/report split as a column (PROP-20260728-152752 §2): COMMAND = a request the actor may reject (feeds the operationStatus surface); EVENT = an adapted external fact that already happened (nothing to reject — the aggregate decides what follows); MESSAGE = a plain note, typically a reminder to self (§3.4) — neither rejectable nor a business fact.  |
+| <a id="scalar-inboundmessagestatus"></a>🔤 `InboundMessageStatus` | enum (SCHEDULED \| CANCELLED \| RECEIVED \| SUCCEEDED \| REJECTED \| FAILED \| IGNORED \| DUPLICATE) | Lifecycle of a mailbox row (PROP-20260728-152752 §2/§3.4). Immediate rows are born RECEIVED; scheduled rows (reminders / scheduled operations) are born SCHEDULED with NO position and are PROMOTED to RECEIVED with a fresh position when due — or completed CANCELLED before it. Terminal outcomes merge the two legacy vocabularies: SUCCEEDED / REJECTED (business invariant, {code, context} in `error`) / FAILED (technical) from the command journal; IGNORED (the aggregate decided nothing changed) / DUPLICATE (the exact fact was already in the stream) from the inbound-events inbox.  |
+| <a id="scalar-inboundmessagechannel"></a>🔤 `InboundMessageChannel` | enum (GRAPHQL \| WORKER \| EXTERNAL) | Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE, HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and which gains EXTERNAL for adapted facts).  |
 | <a id="scalar-paymentprocessstatus"></a>🔤 `PaymentProcessStatus` | enum (AWAITING_PAYMENT_RESULT \| ORDER_PLACED \| FAILED) | State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart). |
 | <a id="scalar-refundprocessstatus"></a>🔤 `RefundProcessStatus` | enum (PENDING_APPROVAL \| APPROVED_AWAITING_SETTLEMENT \| DENIED \| REFUNDED) | State of one RefundProcess run (refund_process_manager row, keyed by order). Refunds are approved by the restaurant (own orders) or an admin. |
 | <a id="scalar-deliverydispatchprocessstatus"></a>🔤 `DeliveryDispatchProcessStatus` | enum (OFFERED \| ACCEPTED \| FAILED \| COMPLETED \| SELF_DISPATCHED) | State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED now marks the ranked channel walk exhausted (fail closed, rules.yaml#/DispatchExhaustionFailsClosed — #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED was appended LAST to preserve the then-stored ordinals of the pre-#60 values (moot since ADR-20260728: enums persist as TEXT)."  |

@@ -263,6 +263,29 @@ enum InboundEventStatus {
   DUPLICATE
 }
 
+enum InboundMessageKind {
+  COMMAND
+  EVENT
+  MESSAGE
+}
+
+enum InboundMessageStatus {
+  SCHEDULED
+  CANCELLED
+  RECEIVED
+  SUCCEEDED
+  REJECTED
+  FAILED
+  IGNORED
+  DUPLICATE
+}
+
+enum InboundMessageChannel {
+  GRAPHQL
+  WORKER
+  EXTERNAL
+}
+
 enum PaymentProcessStatus {
   AWAITING_PAYMENT_RESULT
   ORDER_PLACED
@@ -1371,6 +1394,7 @@ input RevokeDeliveryPartnerAvailabilityInput {
 input OpenConversationInput {
   orderId: OrderId!
   restaurantId: RestaurantId!
+  customerId: CustomerId
   customerChatEnabled: Boolean!
 }
 

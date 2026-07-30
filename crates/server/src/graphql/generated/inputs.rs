@@ -1004,6 +1004,8 @@ pub struct OpenConversationInput {
     pub order_id: OrderId,
     #[graphql(name = "restaurantId")]
     pub restaurant_id: RestaurantId,
+    #[graphql(name = "customerId")]
+    pub customer_id: Option<CustomerId>,
     #[graphql(name = "customerChatEnabled")]
     pub customer_chat_enabled: bool,
 }

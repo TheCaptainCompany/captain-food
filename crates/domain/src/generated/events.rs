@@ -914,6 +914,7 @@ pub struct RefundDenied {
 pub struct ConversationOpened {
     pub order_id: OrderId,
     pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
     pub customer_chat_enabled: bool,
 }
 

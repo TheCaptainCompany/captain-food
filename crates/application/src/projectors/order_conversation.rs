@@ -227,6 +227,7 @@ mod tests {
         DomainEvent::ConversationOpened(ConversationOpened {
             order_id: OrderId(NIL.parse().unwrap()),
             restaurant_id: RestaurantId(NIL.parse().unwrap()),
+            customer_id: None,
             customer_chat_enabled: true,
         })
     }

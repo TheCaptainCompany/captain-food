@@ -557,7 +557,9 @@ fn classify(file: &str, path: &[String], node: &Value, handled: &BTreeSet<String
         "scalars.yaml" => top.then(|| {
             if node.get("enum").is_some() { Kind::EnumScalar } else { Kind::Scalar }
         }),
-        "actors.yaml" => top.then_some(Kind::Aggregate),
+        // `principals` is the file-header role → identity-scalar map (PROP-20260728-152752 §2.4),
+        // not an actor — excluded so it never registers as a phantom aggregate.
+        "actors.yaml" => (top && path.first().map(String::as_str) != Some("principals")).then_some(Kind::Aggregate),
         "processmanager.yaml" => top.then_some(Kind::ProcessManager),
         "services.yaml" => {
             if top {
@@ -666,6 +668,17 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("actors.yaml", "*.receives[*].emits[*]",           &[Kind::Event]),
     ("actors.yaml", "*.receives[*].throws[*]",          &[Kind::Error]),
     ("actors.yaml", "*.lifecycle.status",               &[Kind::EnumScalar]),
+    // The actor-mailbox addressing layer (ADR-20260730-231500, PROP-20260728-152752 §2/§2.4):
+    // `principals` maps each authenticated role to its resolved domain-identity scalar.
+    ("actors.yaml", "principals.*.id",                  &[Kind::Scalar]),
+    // Declared aggregate state (PROP-20260728-135632 §2.1): typed fields with event(-property)
+    // lineage — `from`/`removedBy` carry properties (latest/set) or whole events (flag/count);
+    // `of` is the set element type (single scalar, or a named map for composite elements).
+    ("actors.yaml", "*.state.*.type",                   &[Kind::Scalar, Kind::EnumScalar]),
+    ("actors.yaml", "*.state.*.from[*]",                &[Kind::MessageProperty, Kind::Event]),
+    ("actors.yaml", "*.state.*.removedBy[*]",           &[Kind::MessageProperty, Kind::Event]),
+    ("actors.yaml", "*.state.*.of",                     &[Kind::Scalar, Kind::EnumScalar]),
+    ("actors.yaml", "*.state.*.of.*",                   &[Kind::Scalar, Kind::EnumScalar]),
     ("actors.yaml", "*.lifecycle.initial[*].event",     &[Kind::Event]),
     ("actors.yaml", "*.lifecycle.transitions[*].event", &[Kind::Event]),
 
@@ -770,7 +783,8 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
 const STRUCTURAL_SEGMENTS: &[&str] = &[
     "actions", "activities", "actor", "args", "by", "call", "columns", "command", "content", "context",
     "deliver", "emits", "expect", "fixtures", "from", "from_hook", "given", "guard", "inputs",
-    "lifecycle", "message", "messages", "model", "mutations", "operations", "params", "ports",
+    "acting", "claims", "identity", "lifecycle", "mailbox", "message", "messages", "model",
+    "mutations", "of", "operations", "params", "ports", "principals", "removedBy", "requires",
     "properties", "queries", "read", "reads", "receives", "resolvers", "returns", "rules", "screens",
     "send", "set", "state", "state_table", "status", "steps", "subscriptions", "tests", "then",
     "throws", "thrown", "to", "transitions", "type", "types", "when", "where", "with", "workflows",
@@ -1055,6 +1069,8 @@ fn validate(model: &Model) -> Report {
 
     // --- 2c. Aggregate lifecycle state machines (actors.yaml `lifecycle`, ADR-20260720-004419) ---
     validate_lifecycles(model, &mut issues);
+    validate_mailbox_addressing(model, &mut issues);
+    validate_actor_state(model, &mut issues);
     {
         let lcs = parse_lifecycles(model);
         cov.lifecycles = lcs.len();
@@ -2998,6 +3014,7 @@ fn table_sql_type(ty: &str) -> &'static str {
         "text" => "TEXT",
         "integer" => "INTEGER",
         "bigint" => "BIGINT",
+        "smallint" => "SMALLINT",   // mailbox partition ordinal (inbound_messages, #242)
         "boolean" => "BOOLEAN",
         "timestamptz" => "TIMESTAMPTZ",
         "jsonb" => "JSONB",
@@ -4259,6 +4276,278 @@ fn scalar_enum_values(model: &Model, scalar: &str) -> Option<Vec<String>> {
         .and_then(|n| n.get("enum"))
         .and_then(|e| e.as_sequence())
         .map(|s| s.iter().filter_map(|v| v.as_str().map(|x| x.to_string())).collect())
+}
+
+/// Whether a message definition ("commands.yaml#/X" / "events.yaml#/X" / "messages.yaml#/X")
+/// declares `properties.<prop>`.
+fn message_property_exists(model: &Model, message_ref: &str, prop: &str) -> bool {
+    let Some((file, key)) = message_ref.split_once("#/") else { return false };
+    model
+        .defs
+        .get(file)
+        .and_then(|d| d.get(key))
+        .and_then(|n| n.get("properties"))
+        .and_then(|p| p.get(prop))
+        .is_some()
+}
+
+/// §2d — the actor-mailbox ADDRESSING layer (ADR-20260730-231500, PROP-20260728-152752 §2):
+/// the file-header `principals` map (role → domain-identity scalar), each aggregate's `identity`
+/// (the payload property that addresses its instances = the stream id) and `mailbox.partitions`
+/// (the fixed keyspace width). Enforced here:
+///   - `pr-role-unknown` (error): a principals key that is not a scalars.yaml#/UserType value;
+///   - `mb-partitions-range` (error): partitions outside 1..=32767 (smallint keyspace);
+///   - `id-missing` (warn, adoption — like lc-missing): an aggregate with no `identity`;
+///   - `id-not-in-payload` (warn until the slice-3 dispatch settles birth-command id minting,
+///     PROP-20260728-152752 §8): a received message whose payload lacks the identity property.
+fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
+    let actors = match model.defs.get("actors.yaml") {
+        Some(Value::Mapping(m)) => m,
+        _ => return,
+    };
+    let user_types = scalar_enum_values(model, "UserType").unwrap_or_default();
+    if let Some(pr) = actors.get("principals").and_then(|v| v.as_mapping()) {
+        for (k, _) in pr {
+            let Some(role) = k.as_str() else { continue };
+            if !user_types.iter().any(|u| u == role) {
+                issues.push(err(
+                    "pr-role-unknown",
+                    format!("actors.yaml/principals/{}", role),
+                    format!("principals key '{}' is not a scalars.yaml#/UserType value.", role),
+                ));
+            }
+        }
+    }
+    for (k, node) in actors {
+        let name = match k.as_str() {
+            Some(s) if s != "principals" => s,
+            _ => continue,
+        };
+        if node.get("type").and_then(|x| x.as_str()) != Some("aggregate") {
+            continue;
+        }
+        if let Some(p) = node.get("mailbox").and_then(|m| m.get("partitions")) {
+            if !p.as_i64().map(|n| (1..=32767).contains(&n)).unwrap_or(false) {
+                issues.push(err(
+                    "mb-partitions-range",
+                    format!("actors.yaml/{}", name),
+                    format!("mailbox.partitions must be an integer in 1..=32767 (smallint keyspace width), got {:?}.", p),
+                ));
+            }
+        }
+        let Some(identity) = node.get("identity").and_then(|x| x.as_str()) else {
+            issues.push(warn(
+                "id-missing",
+                format!("actors.yaml/{}", name),
+                format!(
+                    "aggregate '{}' declares no `identity` — the mailbox cannot address its instances (PROP-20260728-152752 §2).",
+                    name
+                ),
+            ));
+            continue;
+        };
+        for entry in node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten() {
+            let Some(mref) = entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str()) else {
+                continue;
+            };
+            if !message_property_exists(model, mref, identity) {
+                issues.push(warn(
+                    "id-not-in-payload",
+                    format!("actors.yaml/{}", name),
+                    format!(
+                        "'{}' does not carry identity property '{}' — a birth message minting its id, or a gap the slice-3 dispatch must resolve.",
+                        mref, identity
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+/// Split a lineage ref into (event name, Some(property)) — "events.yaml#/X/properties/y" — or
+/// (event name, None) for a whole-event ref "events.yaml#/X".
+fn lineage_parts(r: &str) -> Option<(&str, Option<&str>)> {
+    let rest = r.strip_prefix("events.yaml#/")?;
+    match rest.split_once("/properties/") {
+        Some((ev, prop)) => Some((ev, Some(prop))),
+        None => (!rest.contains('/')).then_some((rest, None)),
+    }
+}
+
+/// The `$ref` string of an event property's type, or None (inline primitive like `type: boolean`).
+fn event_property_type_ref(model: &Model, event: &str, prop: &str) -> Option<String> {
+    let node = model.defs.get("events.yaml")?.get(event)?.get("properties")?.get(prop)?;
+    node.get("$ref").and_then(|r| r.as_str()).map(str::to_string)
+}
+
+/// §2e — declared aggregate STATE + write-side `requires` (ADR-20260730-231500,
+/// PROP-20260728-135632 §2): the state block is a typed, event-lineaged fold declaration; the
+/// requires block is the per-instance authorization contract over it. Validation only in slice 1
+/// (#242 — generation and enforcement are slice 2):
+///   - `st-status-duplicated` (error): a state field named `status` next to a `lifecycle` block;
+///   - `st-event-foreign` (error): a lineage event this aggregate neither emits nor receives;
+///   - `st-type-mismatch` (error): a state field whose `type` $ref differs from its lineage
+///     property's $ref;
+///   - `st-shape` (error): mode/shape contradictions (set without `of`; flag/count lineage that
+///     names properties; latest lineage that names whole events);
+///   - `req-state-unknown` (error): `acting` naming an undeclared state field;
+///   - `req-principal-type` (error): the acting role's principals id scalar differs from the
+///     state field's type;
+///   - `req-principal-missing` (error): a non-`any` acting entry for a role absent from
+///     `principals` (roles without a domain identity can only ever be `any`);
+///   - `req-claim-unknown` (error): a `claims` key that is not a property of the command payload,
+///     or a value other than `actor.role` / `actor.id`.
+fn validate_actor_state(model: &Model, issues: &mut Vec<Issue>) {
+    let actors = match model.defs.get("actors.yaml") {
+        Some(Value::Mapping(m)) => m,
+        _ => return,
+    };
+    // principals: role -> id scalar ref
+    let mut principal_ids: BTreeMap<String, String> = BTreeMap::new();
+    if let Some(pr) = actors.get("principals").and_then(|v| v.as_mapping()) {
+        for (k, v) in pr {
+            if let (Some(role), Some(id)) =
+                (k.as_str(), v.get("id").and_then(|i| i.get("$ref")).and_then(|r| r.as_str()))
+            {
+                principal_ids.insert(role.to_string(), id.to_string());
+            }
+        }
+    }
+    for (k, node) in actors {
+        let name = match k.as_str() {
+            Some(s) if s != "principals" => s,
+            _ => continue,
+        };
+        if node.get("type").and_then(|x| x.as_str()) != Some("aggregate") {
+            continue;
+        }
+        let site = |suffix: String| format!("actors.yaml/{}{}", name, suffix);
+        // The aggregate's event universe: everything it emits or receives.
+        let mut own_events: BTreeSet<String> = BTreeSet::new();
+        for entry in node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten() {
+            for r in [entry.get("message")].into_iter().flatten() {
+                if let Some(s) = r.get("$ref").and_then(|x| x.as_str()) {
+                    if let Some(ev) = s.strip_prefix("events.yaml#/") {
+                        own_events.insert(ev.to_string());
+                    }
+                }
+            }
+            for e in entry.get("emits").and_then(|x| x.as_sequence()).into_iter().flatten() {
+                if let Some(s) = e.get("$ref").and_then(|x| x.as_str()) {
+                    if let Some(ev) = s.strip_prefix("events.yaml#/") {
+                        own_events.insert(ev.to_string());
+                    }
+                }
+            }
+        }
+        // ---- state ----
+        let state = node.get("state").and_then(|s| s.as_mapping());
+        let mut state_types: BTreeMap<String, Option<String>> = BTreeMap::new(); // field -> type $ref
+        if let Some(state) = state {
+            for (fk, field) in state {
+                let Some(fname) = fk.as_str() else { continue };
+                let fsite = || site(format!("/state/{}", fname));
+                if fname == "status" && node.get("lifecycle").is_some() {
+                    issues.push(err(
+                        "st-status-duplicated",
+                        fsite(),
+                        format!("state field 'status' on '{}' — the lifecycle block already owns it (one field, one owner).", name),
+                    ));
+                }
+                let mode = field.get("mode").and_then(|m| m.as_str()).unwrap_or("latest");
+                let type_ref = field.get("type").and_then(|t| t.get("$ref")).and_then(|r| r.as_str()).map(str::to_string);
+                state_types.insert(fname.to_string(), type_ref.clone());
+                if mode == "set" && field.get("of").is_none() {
+                    issues.push(err("st-shape", fsite(), format!("mode `set` on '{}.{}' needs `of` (the element type).", name, fname)));
+                }
+                for key in ["from", "removedBy"] {
+                    for r in field.get(key).and_then(|f| f.as_sequence()).into_iter().flatten() {
+                        let Some(rs) = r.get("$ref").and_then(|x| x.as_str()) else { continue };
+                        let Some((ev, prop)) = lineage_parts(rs) else {
+                            issues.push(err("st-shape", fsite(), format!("lineage ref '{}' is not an events.yaml event or event property.", rs)));
+                            continue;
+                        };
+                        if !own_events.contains(ev) {
+                            issues.push(err(
+                                "st-event-foreign",
+                                fsite(),
+                                format!("lineage event '{}' is neither emitted nor received by '{}'.", ev, name),
+                            ));
+                        }
+                        match (mode, prop) {
+                            ("flag", Some(_)) | ("count", Some(_)) => issues.push(err(
+                                "st-shape",
+                                fsite(),
+                                format!("mode `{}` folds whole-event occurrences — lineage must not name a property ('{}').", mode, rs),
+                            )),
+                            ("latest", None) => issues.push(err(
+                                "st-shape",
+                                fsite(),
+                                format!("mode `latest` folds a carried property — whole-event ref '{}' needs mode flag/count or a /properties/ path.", rs),
+                            )),
+                            ("latest", Some(p)) => {
+                                if let (Some(want), Some(got)) = (type_ref.as_deref(), event_property_type_ref(model, ev, p).as_deref()) {
+                                    if want != got {
+                                        issues.push(err(
+                                            "st-type-mismatch",
+                                            fsite(),
+                                            format!("'{}.{}' is typed {} but lineage property '{}/{}' is {}.", name, fname, want, ev, p, got),
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        // ---- requires ----
+        for entry in node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten() {
+            let Some(req) = entry.get("requires") else { continue };
+            let mref = entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str()).unwrap_or("");
+            let rsite = || site(format!("/requires[{}]", mref));
+            for (rk, rv) in req.get("acting").and_then(|a| a.as_mapping()).into_iter().flatten() {
+                let (Some(role), Some(val)) = (rk.as_str(), rv.as_str()) else { continue };
+                if val == "any" {
+                    continue;
+                }
+                let Some(field) = val.strip_prefix("state.") else {
+                    issues.push(err("req-state-unknown", rsite(), format!("acting.{} must be `any` or `state.<field>`, got '{}'.", role, val)));
+                    continue;
+                };
+                let Some(ftype) = state_types.get(field) else {
+                    issues.push(err("req-state-unknown", rsite(), format!("acting.{} references undeclared state field '{}'.", role, field)));
+                    continue;
+                };
+                match principal_ids.get(role) {
+                    None => issues.push(err(
+                        "req-principal-missing",
+                        rsite(),
+                        format!("acting.{} compares a domain identity, but '{}' has no principals entry — roles without one can only be `any`.", role, role),
+                    )),
+                    Some(pid) => {
+                        if ftype.as_deref() != Some(pid.as_str()) {
+                            issues.push(err(
+                                "req-principal-type",
+                                rsite(),
+                                format!("acting.{}: state.{} is typed {:?} but principals.{}.id is '{}'.", role, field, ftype, role, pid),
+                            ));
+                        }
+                    }
+                }
+            }
+            for (ck, cv) in req.get("claims").and_then(|c| c.as_mapping()).into_iter().flatten() {
+                let (Some(prop), Some(val)) = (ck.as_str(), cv.as_str()) else { continue };
+                if !matches!(val, "actor.role" | "actor.id") {
+                    issues.push(err("req-claim-unknown", rsite(), format!("claims.{} must pin to `actor.role` or `actor.id`, got '{}'.", prop, val)));
+                }
+                if !mref.is_empty() && !message_property_exists(model, mref, prop) {
+                    issues.push(err("req-claim-unknown", rsite(), format!("claims key '{}' is not a property of '{}'.", prop, mref)));
+                }
+            }
+        }
+    }
 }
 
 /// §2c — validate the declared aggregate lifecycles (ADR-20260720-004419): the status is an enum

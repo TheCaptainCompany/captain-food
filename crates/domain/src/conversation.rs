@@ -101,6 +101,7 @@ mod tests {
         DomainEvent::ConversationOpened(ConversationOpened {
             order_id: OrderId(uuid::Uuid::nil()),
             restaurant_id: RestaurantId(uuid::Uuid::nil()),
+            customer_id: None,
             customer_chat_enabled,
         })
     }

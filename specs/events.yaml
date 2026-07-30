@@ -1705,6 +1705,9 @@ ConversationOpened:
   properties:
     orderId: { $ref: 'scalars.yaml#/OrderId' }
     restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true   # guest orders have no customer participant (#235 consequence A: the aggregate folds the participants it authorizes against)
     customerChatEnabled: { type: boolean }
   required: [orderId, restaurantId, customerChatEnabled]
 

@@ -137,6 +137,53 @@ CREATE INDEX ON external_hubrise_callbacks (location_id);
 CREATE INDEX ON external_hubrise_callbacks (received_at);
 CREATE INDEX ON external_hubrise_callbacks (processed_at);
 
+CREATE TABLE inbound_messages (
+  message_id UUID PRIMARY KEY,
+  position BIGINT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_id UUID NOT NULL,
+  partition SMALLINT NOT NULL,
+  message_type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  payload_hash TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  user_id UUID NULL,
+  user_type TEXT NOT NULL,
+  correlation_id UUID NOT NULL,
+  cause_id UUID NULL,
+  session_id UUID NULL,
+  trace_id TEXT NULL,
+  source TEXT NULL,
+  external_id TEXT NULL,
+  scheduled_at TIMESTAMPTZ NULL,
+  status TEXT NOT NULL,
+  error JSONB NULL,
+  received_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ NULL,
+  UNIQUE (source, external_id)
+);
+CREATE INDEX ON inbound_messages (actor_type);
+CREATE INDEX ON inbound_messages (actor_id);
+CREATE INDEX ON inbound_messages (user_id);
+CREATE INDEX ON inbound_messages (correlation_id);
+CREATE INDEX ON inbound_messages (session_id);
+CREATE INDEX ON inbound_messages (source);
+CREATE INDEX ON inbound_messages (status);
+CREATE INDEX ON inbound_messages (received_at);
+CREATE INDEX ON inbound_messages (actor_type, partition, position);
+CREATE INDEX ON inbound_messages (actor_id, position);
+CREATE INDEX ON inbound_messages (scheduled_at);
+
+CREATE TABLE mailbox_partitions (
+  actor_type TEXT PRIMARY KEY,
+  partition SMALLINT PRIMARY KEY,
+  ownership_version BIGINT NOT NULL,
+  claimed_by TEXT NULL,
+  lease_until TIMESTAMPTZ NULL,
+  checkpoint BIGINT NOT NULL
+);
+
 CREATE TABLE command_journal (
   message_id UUID PRIMARY KEY,
   correlation_id UUID NOT NULL,
