@@ -12,6 +12,11 @@
 > clients as the only door, reminders, activations), **PROP-20260730-230803** (projection runtime:
 > generated unit-of-work batches, `business_key` lanes, `target: redis` for ScopeMembership).
 > 🚧 Foundation slice in build on `242-actor-mailbox-foundation` (this PR).
+> ✅ **Slice 1 MERGED** ([#268](https://github.com/TheCaptainCompany/captain-food/pull/268) → `87bcec8`,
+> auto-merge, CI green incl. the real-Postgres suites): mailbox DSL + addressing + state/requires
+> pilot + 12 negative-tested validator rules + runtime knobs. Legacy journal tables stay live until
+> slice 3. Realization directives for slices 2–4: extraction-ready runtime crate + Proto.Actor-inspired
+> test plan (ADR-20260730-234918).
 > Realization starts with [#242 "Write path becomes an actor mailbox…"](https://github.com/TheCaptainCompany/captain-food/issues/242)'s
 > foundation slice (claimed, draft PR per protocol); [#235](https://github.com/TheCaptainCompany/captain-food/issues/235)
 > and [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) follow. Open veto flag:
