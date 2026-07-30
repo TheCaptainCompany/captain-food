@@ -778,3 +778,16 @@ split exists for.
 - **Adopting a distributed actor framework now**: see D2 — correctness doesn't need it, V0 scale
   doesn't justify it, and the port boundary keeps the door open at the moment metrics say
   otherwise.
+- **Protobuf for message/event payloads** (product-owner question after D2.1, 2026-07-30):
+  assessed, not adopted. Proto.Actor needs protobuf because its messages cross *process
+  boundaries in flight* with no durable store — a polyglot binary wire contract is its
+  foundation. Ours cross a *durable store* with no process boundary, and the store's queryable
+  format is load-bearing: the `View_*` projections are SQL folds over `payload` **jsonb**
+  properties (ADR-0039) — binary payloads would break the read-model architecture outright — and
+  the mailbox's everything-debuggable-with-SELECT property (§6 monitor, support queries, the
+  per-sweep reports) is a design feature, not an accident. Schema evolution, protobuf's other
+  gift, is already owned by the DSL + validator. Protobuf **is** in the stack where it fits:
+  OTLP telemetry ships over HTTP/protobuf (`crates/telemetry`, ADR-20260729-183000) — high-volume
+  machine-to-machine wire, no human ever SELECTs it. The one future slot: if the evolution valve
+  (D2) ever moves the transport off Postgres onto a networked runtime, the serialization decision
+  reopens *behind the typed-client port* — and would be made then, not pre-paid now.
