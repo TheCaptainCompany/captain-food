@@ -27,7 +27,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -41,7 +41,7 @@ async fn reset_schema(pool: &PgPool) {
         SELECT
           (c.payload->>'orderId')::uuid AS order_id,
           (c.payload->>'restaurantId')::uuid AS restaurant_id,
-          (SELECT CASE e.event_type WHEN 'RefundOpened' THEN 0 WHEN 'RefundApproved' THEN 1 WHEN 'RefundDenied' THEN 2 WHEN 'PaymentRefunded' THEN 3 END FROM domain_events e
+          (SELECT CASE e.event_type WHEN 'RefundOpened' THEN 'REQUESTED' WHEN 'RefundApproved' THEN 'APPROVED' WHEN 'RefundDenied' THEN 'DENIED' WHEN 'PaymentRefunded' THEN 'REFUNDED' END FROM domain_events e
              WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')
              ORDER BY e.position DESC LIMIT 1) AS status,
           (c.payload->'amount'->>'amountCents')::bigint AS amount_cents,

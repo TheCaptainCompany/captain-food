@@ -24,7 +24,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -37,7 +37,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE restaurant (
           restaurant_id UUID PRIMARY KEY,
           restaurant_account_id UUID,
-          listing_status INTEGER NOT NULL,
+          listing_status TEXT NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
           -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
@@ -46,18 +46,18 @@ async fn reset_schema(pool: &PgPool) {
           description TEXT,
           tags JSONB,
           margin_rate TEXT,
-          cuisine_category INTEGER,
+          cuisine_category TEXT,
           uber_prices_opt_in BOOLEAN,
           website TEXT,
           rating TEXT,
           reviews_count INTEGER,
           gbp_order_url TEXT,
-          gbp_link_status INTEGER,
+          gbp_link_status TEXT,
           address JSONB NOT NULL,
           location JSONB,
           opening_hours JSONB NOT NULL,
-          status INTEGER NOT NULL,
-          order_acceptance INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          order_acceptance TEXT NOT NULL,
           default_currency TEXT NOT NULL,
           timezone TEXT,
           preparation_time_minutes INTEGER,
@@ -67,7 +67,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE prospectionpipeline (
           restaurant_id UUID PRIMARY KEY,
           score INTEGER NOT NULL,
-          pipeline_status INTEGER NOT NULL,
+          pipeline_status TEXT NOT NULL,
           contacts_count INTEGER NOT NULL,
           last_contacted_at TIMESTAMPTZ,
           replied_at TIMESTAMPTZ,
@@ -132,7 +132,7 @@ async fn sirene_mapped_command_flows_through_the_write_path_idempotently() {
     let store = PgEventStore::new(pool.clone());
     let actor = Actor {
         user_id: sirene_system_user_id(),
-        user_type: 6, // UserType::EXTERNAL ordinal
+        user_type: "EXTERNAL".to_string(),
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     };
@@ -144,20 +144,20 @@ async fn sirene_mapped_command_flows_through_the_write_path_idempotently() {
     let cmd = etablissement_to_command(&sample_etablissement()).expect("mapping");
     register_restaurant(&store, &restaurants, cmd, &actor).await.expect("register_restaurant");
 
-    let (stream, event_type, user_type, payload): (String, String, i32, serde_json::Value) =
+    let (stream, event_type, user_type, payload): (String, String, String, serde_json::Value) =
         sqlx::query_as("SELECT stream_name, event_type, user_type, payload FROM domain_events")
             .fetch_one(&pool)
             .await
             .expect("one event row");
     assert_eq!(stream, format!("Restaurant-{restaurant_id}"));
     assert_eq!(event_type, "RestaurantRegistered");
-    assert_eq!(user_type, 6); // EXTERNAL envelope stamp (ADR-0041)
+    assert_eq!(user_type, "EXTERNAL"); // EXTERNAL envelope stamp (ADR-0041)
     assert_eq!(payload["ref"], serde_json::json!("85242109900021"));
     assert_eq!(payload["listingStatus"], serde_json::json!("NON_PARTNER"));
 
     // 2) The EXISTING projection worker materializes the prospect row.
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once");
-    let (slug, display_name, listing_status): (Option<String>, String, i32) = sqlx::query_as(
+    let (slug, display_name, listing_status): (Option<String>, String, String) = sqlx::query_as(
         "SELECT slug, display_name, listing_status FROM restaurant WHERE restaurant_id = $1",
     )
     .bind(restaurant_id)
@@ -166,7 +166,7 @@ async fn sirene_mapped_command_flows_through_the_write_path_idempotently() {
     .expect("projected restaurant row");
     assert_eq!(slug, None, "a registry prospect has no storefront address until one is configured (#220)");
     assert_eq!(display_name, "CHEZ MARCO");
-    assert_eq!(listing_status, 0); // RestaurantListingStatus::NON_PARTNER ordinal
+    assert_eq!(listing_status, "NON_PARTNER"); // RestaurantListingStatus::NON_PARTNER
 
     // 3) Re-run the sync for the same SIRET → deterministic id → absorbed as a no-op.
     let replay = etablissement_to_command(&sample_etablissement()).expect("mapping (replay)");

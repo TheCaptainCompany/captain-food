@@ -123,7 +123,7 @@ mod tests {
             session_id: None,
             trace_id: None,
             user_id: Some(uuid::Uuid::new_v4()),
-            user_type: 6,
+            user_type: "EXTERNAL".to_string(),
             channel: CommandChannel::WORKER,
             command_type: "ImportCatalog".into(),
             payload_hash: payload_hash(&payload),

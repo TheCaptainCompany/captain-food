@@ -169,6 +169,18 @@
 > `POST /internal/sirene/drain` answers `503 internal trigger not configured` — until they are set,
 > `RUN_SIRENE_WORKER=true` is required and sync latency is the 1-hour poll.
 
+> ✅ **2026-07-28 — enum columns now store the TEXT value verbatim; the `ref_<enum>` lookup tables are
+> gone (ADR-20260728-170000, product-owner directive; supersedes the ADR-0037 ordinal scheme).**
+> Every enum-typed column (projections, PM state, journals, `domain_events.user_type`, referential
+> seeds) is TEXT holding the `scalars.yaml` value (`'PLACED'`, `'EXTERNAL'`, …), so rows are
+> self-describing and declaration order is no longer a frozen storage contract. The codegen emits TEXT
+> DDL, no ref tables, and text fold-views; `enum_sql` is now `EnumText` (enum ↔ variant-name string);
+> the envelope's `user_type` travels as text end to end; hand-written SQL and the DB test suites
+> compare values (`status = 'FAILED'`). Migration `20260728170000_enum_text_storage.sql` converts every
+> column with a CASE frozen from the retired ref seeds, swaps `sweep_retention()` to text predicates,
+> drops all `ref_*` tables and recreates the fold views — verified locally end to end (all migrations
+> from scratch + the full DB-gated suites green on Postgres 16).
+
 > ✅ **2026-07-28 — the pre-#227 syncs were journaled, so compaction can now CONFIRM them; CI runs the
 > DB suites; the SIRENE worker tests assert the real contract
 > ([#238](https://github.com/TheCaptainCompany/captain-food/issues/238) /

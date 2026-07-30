@@ -17,8 +17,7 @@ const SENTINEL: &str = "unhashed-pre-20260728";
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
         r#"
-        DROP TABLE IF EXISTS external_sirene_restaurants, command_journal,
-                             ref_command_journal_status CASCADE;
+        DROP TABLE IF EXISTS external_sirene_restaurants, command_journal CASCADE;
         CREATE TABLE external_sirene_restaurants (
           siret TEXT PRIMARY KEY,
           payload JSONB NULL,
@@ -40,12 +39,9 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE command_journal (
           message_id UUID PRIMARY KEY,
           command_type TEXT NOT NULL,
-          status INTEGER NOT NULL,
+          status TEXT NOT NULL,
           completed_at TIMESTAMPTZ NULL
         );
-        CREATE TABLE ref_command_journal_status(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
-        INSERT INTO ref_command_journal_status (value, sort_order)
-             VALUES ('RECEIVED',0),('SUCCEEDED',1),('REJECTED',2),('FAILED',3);
         "#,
     )
     .execute(pool)
@@ -117,7 +113,7 @@ async fn seed_journal_verdict(
 ) {
     sqlx::query(
         "INSERT INTO command_journal (message_id, command_type, status, completed_at) \
-         VALUES ($1, $2, (SELECT sort_order FROM ref_command_journal_status WHERE value = $3), $4)",
+         VALUES ($1, $2, $3, $4)",
     )
     .bind(message_id)
     .bind(command_type)

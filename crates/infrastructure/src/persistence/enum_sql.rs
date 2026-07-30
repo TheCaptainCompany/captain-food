@@ -1,10 +1,11 @@
-//! Enum ↔ INTEGER ordinal mapping (ADR-0037): enum columns are stored as the DECLARATION-ORDER ordinal
-//! (= `ref_<enum>.sort_order`). One impl per enum the projection tables (`Restaurant`,
-//! `ProspectionPipeline`, `Catalog`, `Cart`, `OrderTracking`) need; shared by the read repositories
-//! (row → `…Row`) and the projection upserts (row → SQL).
+//! Enum ↔ TEXT mapping (ADR-20260728, superseding the ADR-0037 INTEGER ordinals): enum columns store
+//! the scalars.yaml value verbatim, so a row is self-describing and needs no `ref_*` lookup join.
+//! One impl per enum the projection tables (`Restaurant`, `ProspectionPipeline`, `Catalog`, `Cart`,
+//! `OrderTracking`) need; shared by the read repositories (row → `…Row`) and the projection upserts
+//! (row → SQL).
 //!
-//! The declaration order below MUST match `domain::generated::scalars` (which is generated from
-//! `specs/scalars.yaml`, the same source the `ref_*` seed rows come from).
+//! The variant names below are EXACTLY the stored values (they mirror `domain::generated::scalars`,
+//! which is generated from `specs/scalars.yaml`).
 
 use domain::generated::scalars::{
     CartStatus, CityAvailabilityStatus, CommandChannel, CommandJournalStatus, ComparisonBasis,
@@ -17,23 +18,23 @@ use domain::generated::scalars::{
 };
 use domain::shared::errors::DomainError;
 
-/// i32 ordinal ↔ domain enum, in declaration order.
-pub trait EnumOrd: Sized {
-    fn to_ord(&self) -> i32;
-    fn from_ord(ord: i32) -> Result<Self, DomainError>;
+/// TEXT value ↔ domain enum — the stored string IS the variant name.
+pub trait EnumText: Sized {
+    fn to_text(&self) -> &'static str;
+    fn from_text(s: &str) -> Result<Self, DomainError>;
 }
 
-macro_rules! enum_ord {
-    ($ty:ident { $($variant:ident => $ord:literal),+ $(,)? }) => {
-        impl EnumOrd for $ty {
-            fn to_ord(&self) -> i32 {
-                match self { $( $ty::$variant => $ord, )+ }
+macro_rules! enum_text {
+    ($ty:ident { $($variant:ident),+ $(,)? }) => {
+        impl EnumText for $ty {
+            fn to_text(&self) -> &'static str {
+                match self { $( $ty::$variant => stringify!($variant), )+ }
             }
-            fn from_ord(ord: i32) -> Result<Self, DomainError> {
-                match ord {
-                    $( $ord => Ok($ty::$variant), )+
+            fn from_text(s: &str) -> Result<Self, DomainError> {
+                match s {
+                    $( stringify!($variant) => Ok($ty::$variant), )+
                     other => Err(DomainError::Repository(format!(
-                        "unknown {} ordinal {other}", stringify!($ty)
+                        "unknown {} value '{other}'", stringify!($ty)
                     ))),
                 }
             }
@@ -41,107 +42,79 @@ macro_rules! enum_ord {
     };
 }
 
-enum_ord!(RestaurantStatus { DRAFT => 0, ACTIVE => 1, INACTIVE => 2 });
-enum_ord!(RestaurantListingStatus { NON_PARTNER => 0, PASSIVE_PARTNER => 1, ACTIVE_PARTNER => 2 });
-enum_ord!(GbpLinkStatus { UNSET => 0, CONFIGURED => 1, VERIFIED => 2, BROKEN => 3 });
-enum_ord!(OrderAcceptanceMode { NORMAL => 0, BUSY => 1, PAUSED => 2 });
-enum_ord!(CuisineCategory {
-    FAST_FOOD => 0,
-    PIZZA => 1,
-    TRADITIONAL => 2,
-    BISTRONOMIC => 3,
-    FOOD_TRUCK => 4,
+enum_text!(RestaurantStatus { DRAFT, ACTIVE, INACTIVE });
+enum_text!(RestaurantListingStatus { NON_PARTNER, PASSIVE_PARTNER, ACTIVE_PARTNER });
+enum_text!(GbpLinkStatus { UNSET, CONFIGURED, VERIFIED, BROKEN });
+enum_text!(OrderAcceptanceMode { NORMAL, BUSY, PAUSED });
+enum_text!(CuisineCategory { FAST_FOOD, PIZZA, TRADITIONAL, BISTRONOMIC, FOOD_TRUCK });
+enum_text!(ProspectPipelineStatus { NEW, CONTACTED, COLD, REPLIED, CONVERTED });
+enum_text!(CartStatus { OPEN, CHECKED_OUT });
+enum_text!(ServiceType { DELIVERY, COLLECTION });
+enum_text!(OrderStatus {
+    PLACED,
+    ACCEPTED,
+    REJECTED,
+    PREPARING,
+    READY,
+    OUT_FOR_DELIVERY,
+    DELIVERED,
+    CANCELLED_BY_CUSTOMER,
+    CANCELLED_BY_RESTAURANT,
 });
-enum_ord!(ProspectPipelineStatus {
-    NEW => 0,
-    CONTACTED => 1,
-    COLD => 2,
-    REPLIED => 3,
-    CONVERTED => 4,
+enum_text!(DeliveryStatus {
+    PENDING,
+    ASSIGNED,
+    PICKED_UP,
+    OUT_FOR_DELIVERY,
+    DELIVERED,
+    FAILED,
+    CANCELLED,
 });
-enum_ord!(CartStatus { OPEN => 0, CHECKED_OUT => 1 });
-enum_ord!(ServiceType { DELIVERY => 0, COLLECTION => 1 });
-enum_ord!(OrderStatus {
-    PLACED => 0,
-    ACCEPTED => 1,
-    REJECTED => 2,
-    PREPARING => 3,
-    READY => 4,
-    OUT_FOR_DELIVERY => 5,
-    DELIVERED => 6,
-    CANCELLED_BY_CUSTOMER => 7,
-    CANCELLED_BY_RESTAURANT => 8,
+enum_text!(DeliveryProvider { PARTNER, INDEPENDENT });
+enum_text!(ComparisonBasis { ESTIMATED, REAL });
+enum_text!(ThumbRating { UP, DOWN });
+enum_text!(DeliveryTimeliness { ON_TIME, ACCEPTABLE_DELAY, TOO_LATE });
+enum_text!(PaymentStatus { PENDING, CAPTURED, FAILED, REFUNDED });
+enum_text!(PaymentProcessStatus { AWAITING_PAYMENT_RESULT, ORDER_PLACED, FAILED });
+enum_text!(RefundStatus { REQUESTED, APPROVED, DENIED, REFUNDED });
+enum_text!(RefundProcessStatus {
+    PENDING_APPROVAL,
+    APPROVED_AWAITING_SETTLEMENT,
+    DENIED,
+    REFUNDED,
 });
-enum_ord!(DeliveryStatus {
-    PENDING => 0,
-    ASSIGNED => 1,
-    PICKED_UP => 2,
-    OUT_FOR_DELIVERY => 3,
-    DELIVERED => 4,
-    FAILED => 5,
-    CANCELLED => 6,
+enum_text!(DeliveryDispatchProcessStatus { OFFERED, ACCEPTED, FAILED, COMPLETED, SELF_DISPATCHED });
+enum_text!(RestaurantDispatchMode { CAPTAIN, RESTAURANT });
+enum_text!(CityAvailabilityStatus { PENDING, APPROVED, REVOKED });
+enum_text!(ReclamationStatus { OPEN, RESOLVED, REJECTED });
+enum_text!(ReclamationCategory {
+    MISSING_ITEM,
+    WRONG_ITEM,
+    QUALITY,
+    LATE_DELIVERY,
+    DAMAGED,
+    NOT_DELIVERED,
+    OTHER,
 });
-enum_ord!(DeliveryProvider { PARTNER => 0, INDEPENDENT => 1 });
-enum_ord!(ComparisonBasis { ESTIMATED => 0, REAL => 1 });
-enum_ord!(ThumbRating { UP => 0, DOWN => 1 });
-enum_ord!(DeliveryTimeliness { ON_TIME => 0, ACCEPTABLE_DELAY => 1, TOO_LATE => 2 });
-enum_ord!(PaymentStatus { PENDING => 0, CAPTURED => 1, FAILED => 2, REFUNDED => 3 });
-enum_ord!(PaymentProcessStatus { AWAITING_PAYMENT_RESULT => 0, ORDER_PLACED => 1, FAILED => 2 });
-enum_ord!(RefundStatus {
-    REQUESTED => 0,
-    APPROVED => 1,
-    DENIED => 2,
-    REFUNDED => 3,
+enum_text!(ReclamationResolution {
+    FULL_REFUND,
+    PARTIAL_REFUND,
+    REPLACEMENT,
+    GOODWILL_CREDIT,
+    REJECTED,
 });
-enum_ord!(RefundProcessStatus {
-    PENDING_APPROVAL => 0,
-    APPROVED_AWAITING_SETTLEMENT => 1,
-    DENIED => 2,
-    REFUNDED => 3,
-});
-enum_ord!(DeliveryDispatchProcessStatus {
-    OFFERED => 0,
-    ACCEPTED => 1,
-    // FAILED keeps retired REOFFER_REQUIRED's slot (both flag manual handling; ADR-20260720-004556).
-    FAILED => 2,
-    COMPLETED => 3,
-    // SELF_DISPATCHED appended last to preserve the pre-#60 ordinals (ADR-0037).
-    SELF_DISPATCHED => 4,
-});
-enum_ord!(RestaurantDispatchMode { CAPTAIN => 0, RESTAURANT => 1 });
-enum_ord!(CityAvailabilityStatus { PENDING => 0, APPROVED => 1, REVOKED => 2 });
-enum_ord!(ReclamationStatus { OPEN => 0, RESOLVED => 1, REJECTED => 2 });
-enum_ord!(ReclamationCategory {
-    MISSING_ITEM => 0,
-    WRONG_ITEM => 1,
-    QUALITY => 2,
-    LATE_DELIVERY => 3,
-    DAMAGED => 4,
-    NOT_DELIVERED => 5,
-    OTHER => 6,
-});
-enum_ord!(ReclamationResolution {
-    FULL_REFUND => 0,
-    PARTIAL_REFUND => 1,
-    REPLACEMENT => 2,
-    GOODWILL_CREDIT => 3,
-    REJECTED => 4,
-});
-enum_ord!(CommandJournalStatus { RECEIVED => 0, SUCCEEDED => 1, REJECTED => 2, FAILED => 3 });
-enum_ord!(CommandChannel { GRAPHQL => 0, WORKER => 1, INTERNAL => 2 });
-// Additive-only (ADR-20260728-011344 D6): IGNORED/DUPLICATE take 3/4 so FAILED keeps ordinal 2 and every
-// stored row keeps its meaning. Inserting them mid-enum would have silently reinterpreted FAILED as
-// IGNORED -- the ordinals ARE the storage format.
-enum_ord!(InboundEventStatus { RECEIVED => 0, DELIVERED => 1, FAILED => 2, IGNORED => 3, DUPLICATE => 4 });
+enum_text!(CommandJournalStatus { RECEIVED, SUCCEEDED, REJECTED, FAILED });
+enum_text!(CommandChannel { GRAPHQL, WORKER, INTERNAL });
+enum_text!(InboundEventStatus { RECEIVED, DELIVERED, FAILED, IGNORED, DUPLICATE });
 
-/// `to_ord` through an `Option` (nullable enum column).
-pub fn opt_to_ord<E: EnumOrd>(v: &Option<E>) -> Option<i32> {
-    v.as_ref().map(EnumOrd::to_ord)
+/// `to_text` through an `Option` (nullable enum column).
+pub fn opt_to_text<E: EnumText>(v: &Option<E>) -> Option<&'static str> {
+    v.as_ref().map(EnumText::to_text)
 }
 
-/// `from_ord` through an `Option` (nullable enum column).
-pub fn opt_from_ord<E: EnumOrd>(ord: Option<i32>) -> Result<Option<E>, DomainError> {
-    ord.map(E::from_ord).transpose()
+/// `from_text` through an `Option` (nullable enum column).
+pub fn opt_from_text<E: EnumText>(s: Option<String>) -> Result<Option<E>, DomainError> {
+    s.as_deref().map(E::from_text).transpose()
 }
 
 #[cfg(test)]
@@ -149,53 +122,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ordinals_round_trip_in_declaration_order() {
-        for (ord, v) in [
-            (0, RestaurantStatus::DRAFT),
-            (1, RestaurantStatus::ACTIVE),
-            (2, RestaurantStatus::INACTIVE),
+    fn text_values_round_trip_as_the_variant_name() {
+        for (text, v) in [
+            ("DRAFT", RestaurantStatus::DRAFT),
+            ("ACTIVE", RestaurantStatus::ACTIVE),
+            ("INACTIVE", RestaurantStatus::INACTIVE),
         ] {
-            assert_eq!(v.to_ord(), ord);
-            assert_eq!(RestaurantStatus::from_ord(ord).unwrap(), v);
+            assert_eq!(v.to_text(), text);
+            assert_eq!(RestaurantStatus::from_text(text).unwrap(), v);
         }
-        assert_eq!(RestaurantListingStatus::ACTIVE_PARTNER.to_ord(), 2);
-        assert_eq!(OrderAcceptanceMode::PAUSED.to_ord(), 2);
-        assert_eq!(CuisineCategory::FOOD_TRUCK.to_ord(), 4);
-        assert_eq!(GbpLinkStatus::BROKEN.to_ord(), 3);
-        assert_eq!(ProspectPipelineStatus::CONVERTED.to_ord(), 4);
-        assert_eq!(ProspectPipelineStatus::from_ord(1).unwrap(), ProspectPipelineStatus::CONTACTED);
-        assert_eq!(CartStatus::CHECKED_OUT.to_ord(), 1);
-        assert_eq!(ServiceType::COLLECTION.to_ord(), 1);
-        assert_eq!(OrderStatus::CANCELLED_BY_RESTAURANT.to_ord(), 8);
-        assert_eq!(OrderStatus::from_ord(4).unwrap(), OrderStatus::READY);
-        assert_eq!(DeliveryStatus::CANCELLED.to_ord(), 6);
-        assert_eq!(DeliveryProvider::PARTNER.to_ord(), 0);
-        assert_eq!(DeliveryProvider::from_ord(1).unwrap(), DeliveryProvider::INDEPENDENT);
-        assert_eq!(ComparisonBasis::REAL.to_ord(), 1);
-        assert_eq!(ThumbRating::DOWN.to_ord(), 1);
-        assert_eq!(PaymentStatus::REFUNDED.to_ord(), 3);
-        assert_eq!(PaymentStatus::from_ord(1).unwrap(), PaymentStatus::CAPTURED);
-        assert_eq!(PaymentProcessStatus::FAILED.to_ord(), 2);
+        assert_eq!(RestaurantListingStatus::ACTIVE_PARTNER.to_text(), "ACTIVE_PARTNER");
+        assert_eq!(OrderAcceptanceMode::PAUSED.to_text(), "PAUSED");
+        assert_eq!(CuisineCategory::FOOD_TRUCK.to_text(), "FOOD_TRUCK");
+        assert_eq!(GbpLinkStatus::BROKEN.to_text(), "BROKEN");
+        assert_eq!(ProspectPipelineStatus::CONVERTED.to_text(), "CONVERTED");
         assert_eq!(
-            PaymentProcessStatus::from_ord(0).unwrap(),
+            ProspectPipelineStatus::from_text("CONTACTED").unwrap(),
+            ProspectPipelineStatus::CONTACTED
+        );
+        assert_eq!(CartStatus::CHECKED_OUT.to_text(), "CHECKED_OUT");
+        assert_eq!(ServiceType::COLLECTION.to_text(), "COLLECTION");
+        assert_eq!(OrderStatus::CANCELLED_BY_RESTAURANT.to_text(), "CANCELLED_BY_RESTAURANT");
+        assert_eq!(OrderStatus::from_text("READY").unwrap(), OrderStatus::READY);
+        assert_eq!(DeliveryStatus::CANCELLED.to_text(), "CANCELLED");
+        assert_eq!(DeliveryProvider::PARTNER.to_text(), "PARTNER");
+        assert_eq!(DeliveryProvider::from_text("INDEPENDENT").unwrap(), DeliveryProvider::INDEPENDENT);
+        assert_eq!(ComparisonBasis::REAL.to_text(), "REAL");
+        assert_eq!(ThumbRating::DOWN.to_text(), "DOWN");
+        assert_eq!(PaymentStatus::REFUNDED.to_text(), "REFUNDED");
+        assert_eq!(PaymentStatus::from_text("CAPTURED").unwrap(), PaymentStatus::CAPTURED);
+        assert_eq!(PaymentProcessStatus::FAILED.to_text(), "FAILED");
+        assert_eq!(
+            PaymentProcessStatus::from_text("AWAITING_PAYMENT_RESULT").unwrap(),
             PaymentProcessStatus::AWAITING_PAYMENT_RESULT
         );
-        assert_eq!(RefundProcessStatus::REFUNDED.to_ord(), 3);
+        assert_eq!(RefundProcessStatus::REFUNDED.to_text(), "REFUNDED");
         assert_eq!(
-            RefundProcessStatus::from_ord(1).unwrap(),
+            RefundProcessStatus::from_text("APPROVED_AWAITING_SETTLEMENT").unwrap(),
             RefundProcessStatus::APPROVED_AWAITING_SETTLEMENT
         );
-        assert_eq!(DeliveryDispatchProcessStatus::COMPLETED.to_ord(), 3);
+        assert_eq!(DeliveryDispatchProcessStatus::COMPLETED.to_text(), "COMPLETED");
         assert_eq!(
-            DeliveryDispatchProcessStatus::from_ord(2).unwrap(),
+            DeliveryDispatchProcessStatus::from_text("FAILED").unwrap(),
             DeliveryDispatchProcessStatus::FAILED
         );
-        assert_eq!(CommandJournalStatus::FAILED.to_ord(), 3);
-        assert_eq!(CommandJournalStatus::from_ord(0).unwrap(), CommandJournalStatus::RECEIVED);
-        assert_eq!(CommandChannel::INTERNAL.to_ord(), 2);
-        assert_eq!(CommandChannel::from_ord(1).unwrap(), CommandChannel::WORKER);
-        assert_eq!(InboundEventStatus::DELIVERED.to_ord(), 1);
-        assert_eq!(InboundEventStatus::from_ord(2).unwrap(), InboundEventStatus::FAILED);
-        assert!(RestaurantStatus::from_ord(99).is_err());
+        assert_eq!(CommandJournalStatus::FAILED.to_text(), "FAILED");
+        assert_eq!(
+            CommandJournalStatus::from_text("RECEIVED").unwrap(),
+            CommandJournalStatus::RECEIVED
+        );
+        assert_eq!(CommandChannel::INTERNAL.to_text(), "INTERNAL");
+        assert_eq!(CommandChannel::from_text("WORKER").unwrap(), CommandChannel::WORKER);
+        assert_eq!(InboundEventStatus::DELIVERED.to_text(), "DELIVERED");
+        assert_eq!(InboundEventStatus::from_text("FAILED").unwrap(), InboundEventStatus::FAILED);
+        assert!(RestaurantStatus::from_text("BOGUS").is_err());
     }
 }

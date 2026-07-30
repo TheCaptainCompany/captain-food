@@ -1,7 +1,7 @@
 //! The 12-column `cart` table ↔ [`CartRow`] mapping, both directions — shared by the read repository
 //! (decode) and the projection worker (load current state + upsert the folded row).
 //!
-//! Column conventions (ADR-0037/0040): `status` is an INTEGER ordinal (see
+//! Column conventions (ADR-20260728/0040): `status` is a TEXT value (see
 //! [`crate::persistence::enum_sql`]); `lines`/`estimated_breakdown`/`uber_comparison` are jsonb columns
 //! carrying `serde_json::Value`; `total_amount_cents` is a BIGINT bound via the `MoneyCents` newtype's
 //! inner `.0`; the other scalar newtypes bind via `.0` too.
@@ -13,7 +13,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 
 /// The full column list, in `CartRow` field order — keep SELECTs and the upsert in sync with it.
 pub(crate) const COLUMNS: &str = "cart_id, restaurant_id, session_id, customer_id, status, lines, \
@@ -34,7 +34,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<CartRow, DomainError> {
             .try_get::<Option<uuid::Uuid>, _>("customer_id")
             .map_err(db_err)?
             .map(CustomerId),
-        status: EnumOrd::from_ord(row.try_get::<i32, _>("status").map_err(db_err)?)?,
+        status: EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?,
         lines: row.try_get("lines").map_err(db_err)?,
         total_amount_cents: MoneyCents(row.try_get("total_amount_cents").map_err(db_err)?),
         currency: CurrencyCode(row.try_get("currency").map_err(db_err)?),
@@ -74,7 +74,7 @@ pub async fn upsert(pool: &PgPool, row: &CartRow) -> Result<(), DomainError> {
         .bind(row.restaurant_id.0)
         .bind(row.session_id.0)
         .bind(row.customer_id.as_ref().map(|v| v.0))
-        .bind(row.status.to_ord())
+        .bind(row.status.to_text())
         .bind(row.lines.clone())
         .bind(row.total_amount_cents.0)
         .bind(row.currency.0.clone())

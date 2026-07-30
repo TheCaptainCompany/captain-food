@@ -2,7 +2,7 @@
 //! per command submission, persisted BEFORE handling. Insert uses `ON CONFLICT (message_id) DO
 //! NOTHING` + fetch-on-conflict so a replayed messageId reports the ORIGINAL row's status + payload
 //! hash (the dispatch layer discriminates idempotent replay vs Conflict). Enum columns are INTEGER
-//! declaration-order ordinals ([`super::enum_sql`]), matching every other store.
+//! TEXT values ([`super::enum_sql`]), matching every other store.
 
 use application::journal::{
     CommandJournal, CommandJournalEntry, CommandJournalRow, JournalInsertOutcome,
@@ -15,7 +15,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 
 /// Column list of `command_journal`, in row field order.
 const COLUMNS: &str = "message_id, correlation_id, cause_id, session_id, trace_id, user_id, \
@@ -32,12 +32,12 @@ fn decode(row: &PgRow) -> Result<CommandJournalRow, DomainError> {
             trace_id: row.try_get("trace_id").map_err(db_err)?,
             user_id: row.try_get("user_id").map_err(db_err)?,
             user_type: row.try_get("user_type").map_err(db_err)?,
-            channel: EnumOrd::from_ord(row.try_get::<i32, _>("channel").map_err(db_err)?)?,
+            channel: EnumText::from_text(&row.try_get::<String, _>("channel").map_err(db_err)?)?,
             command_type: row.try_get("command_type").map_err(db_err)?,
             payload: row.try_get("payload").map_err(db_err)?,
             payload_hash: row.try_get("payload_hash").map_err(db_err)?,
         },
-        status: EnumOrd::from_ord(row.try_get::<i32, _>("status").map_err(db_err)?)?,
+        status: EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?,
         error: row.try_get("error").map_err(db_err)?,
         received_at: row.try_get("received_at").map_err(db_err)?,
         completed_at: row.try_get("completed_at").map_err(db_err)?,
@@ -70,12 +70,12 @@ impl CommandJournal for PgCommandJournal {
             .bind(entry.session_id)
             .bind(entry.trace_id.clone())
             .bind(entry.user_id)
-            .bind(entry.user_type)
-            .bind(entry.channel.to_ord())
+            .bind(entry.user_type.clone())
+            .bind(entry.channel.to_text())
             .bind(entry.command_type.clone())
             .bind(entry.payload.clone())
             .bind(entry.payload_hash.clone())
-            .bind(CommandJournalStatus::RECEIVED.to_ord())
+            .bind(CommandJournalStatus::RECEIVED.to_text())
             .execute(&self.pool)
             .await
             .map_err(db_err)?
@@ -107,7 +107,7 @@ impl CommandJournal for PgCommandJournal {
              WHERE message_id = $1",
         )
         .bind(message_id)
-        .bind(status.to_ord())
+        .bind(status.to_text())
         .bind(error)
         .execute(&self.pool)
         .await
@@ -133,8 +133,8 @@ impl CommandJournal for PgCommandJournal {
                      jsonb_build_object('detail', 'stale RECEIVED swept (handler never completed)')) \
              WHERE status = $2 AND received_at < now() - $3::interval",
         )
-        .bind(CommandJournalStatus::FAILED.to_ord())
-        .bind(CommandJournalStatus::RECEIVED.to_ord())
+        .bind(CommandJournalStatus::FAILED.to_text())
+        .bind(CommandJournalStatus::RECEIVED.to_text())
         .bind(format!("{} seconds", older_than.num_seconds().max(0)))
         .execute(&self.pool)
         .await

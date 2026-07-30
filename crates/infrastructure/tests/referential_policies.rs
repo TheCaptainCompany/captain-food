@@ -29,7 +29,7 @@ async fn reset_schema(pool: &PgPool) {
           effective_from TIMESTAMPTZ NOT NULL
         );
         CREATE TABLE uberestimationpolicy (
-          cuisine_category INTEGER PRIMARY KEY,
+          cuisine_category TEXT PRIMARY KEY,
           price_coefficient NUMERIC NOT NULL,
           effective_from TIMESTAMPTZ NOT NULL
         );
@@ -46,11 +46,11 @@ async fn reset_schema(pool: &PgPool) {
         VALUES ('EUR', 5.0, 60.0, 55.0, 70.0, TIMESTAMPTZ '2026-01-01 00:00:00+00');
         INSERT INTO uberestimationpolicy (cuisine_category, price_coefficient, effective_from)
         VALUES
-          (0, 1.30, TIMESTAMPTZ '2026-01-01 00:00:00+00'),
-          (1, 1.35, TIMESTAMPTZ '2026-01-01 00:00:00+00'),
-          (2, 1.40, TIMESTAMPTZ '2026-01-01 00:00:00+00'),
-          (3, 1.45, TIMESTAMPTZ '2026-01-01 00:00:00+00'),
-          (4, 1.35, TIMESTAMPTZ '2026-01-01 00:00:00+00');
+          ('FAST_FOOD', 1.30, TIMESTAMPTZ '2026-01-01 00:00:00+00'),
+          ('PIZZA', 1.35, TIMESTAMPTZ '2026-01-01 00:00:00+00'),
+          ('TRADITIONAL', 1.40, TIMESTAMPTZ '2026-01-01 00:00:00+00'),
+          ('BISTRONOMIC', 1.45, TIMESTAMPTZ '2026-01-01 00:00:00+00'),
+          ('FOOD_TRUCK', 1.35, TIMESTAMPTZ '2026-01-01 00:00:00+00');
         INSERT INTO ubersplitpolicy (currency, uber_commission_pct, rider_base_cents, rider_per_km_cents,
                                      avg_delivery_fee_cents, platform_fee_pct, effective_from)
         VALUES ('EUR', 30.0, 285, 80, 399, 10.0, TIMESTAMPTZ '2026-01-01 00:00:00+00');
@@ -86,18 +86,18 @@ async fn seeded_policy_tables_round_trip_through_the_read_repositories() {
     assert_eq!(p.margin_low, 55.0);
     assert_eq!(p.margin_high, 70.0);
 
-    // UberEstimationPolicy: five rows in ordinal order, incl. TRADITIONAL → 1.40.
+    // UberEstimationPolicy: five rows in stable text order (alphabetical), incl. TRADITIONAL → 1.40.
     let estimation =
         PgUberEstimationPolicyRepository::new(pool.clone()).list().await.expect("estimation list");
     assert_eq!(estimation.len(), 5);
-    assert_eq!(estimation[0].cuisine_category, CuisineCategory::FAST_FOOD);
-    assert_eq!(estimation[0].price_coefficient, 1.30);
+    assert_eq!(estimation[0].cuisine_category, CuisineCategory::BISTRONOMIC);
+    assert_eq!(estimation[0].price_coefficient, 1.45);
     let traditional = estimation
         .iter()
         .find(|r| r.cuisine_category == CuisineCategory::TRADITIONAL)
         .expect("TRADITIONAL row");
     assert_eq!(traditional.price_coefficient, 1.40);
-    assert_eq!(estimation[4].cuisine_category, CuisineCategory::FOOD_TRUCK);
+    assert_eq!(estimation[4].cuisine_category, CuisineCategory::TRADITIONAL);
 
     // UberSplitPolicy: the single EUR row with the ADR-0024/0025 assumptions (cents widened to i64).
     let split = PgUberSplitPolicyRepository::new(pool.clone()).list().await.expect("split list");

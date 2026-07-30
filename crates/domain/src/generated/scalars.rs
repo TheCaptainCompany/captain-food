@@ -515,7 +515,7 @@ pub enum RefundProcessStatus {
     REFUNDED,
 }
 
-/// State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED now marks the ranked channel walk exhausted (fail closed, rules.yaml#/DispatchExhaustionFailsClosed — #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED is appended LAST to preserve the declaration-order ordinals of the pre-#60 values (ADR-0037)."
+/// State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order). FAILED now marks the ranked channel walk exhausted (fail closed, rules.yaml#/DispatchExhaustionFailsClosed — #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED was appended LAST to preserve the then-stored ordinals of the pre-#60 values (moot since ADR-20260728: enums persist as TEXT)."
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum DeliveryDispatchProcessStatus {

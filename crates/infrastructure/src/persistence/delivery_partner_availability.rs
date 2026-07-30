@@ -5,7 +5,7 @@
 //! `deliveryPartnerAvailabilities` GraphQL query via
 //! `application::queries::DeliveryPartnerAvailabilityReadRepository`.
 //!
-//! Column conventions match the other view repos (ADR-0037): `status` comes back as its INTEGER ordinal
+//! Column conventions match the other view repos (ADR-20260728): `status` comes back as its TEXT value
 //! (the generated view folds it with a declaration-order CASE ladder).
 
 use application::queries::{
@@ -21,7 +21,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 
 /// The view columns the read side consumes, in `DeliveryPartnerAvailabilityRow` field order.
 const COLUMNS: &str = "registration_id, channel, city_id, partner_name, contact_email, status, \
@@ -38,7 +38,7 @@ fn decode(row: &PgRow) -> Result<DeliveryPartnerAvailabilityRow, DomainError> {
         city_id: CityId(row.try_get("city_id").map_err(db_err)?),
         partner_name: DeliveryPartnerName(row.try_get("partner_name").map_err(db_err)?),
         contact_email: EmailAddress(row.try_get("contact_email").map_err(db_err)?),
-        status: EnumOrd::from_ord(row.try_get::<i32, _>("status").map_err(db_err)?)?,
+        status: EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?,
         requested_at: row.try_get("requested_at").map_err(db_err)?,
         decided_at: row.try_get("decided_at").map_err(db_err)?,
     })
@@ -73,7 +73,7 @@ impl DeliveryPartnerAvailabilityReadRepository for PgDeliveryPartnerAvailability
             qb.push(" AND channel = ").push_bind(channel.0);
         }
         if let Some(status) = filter.status {
-            qb.push(" AND status = ").push_bind(status.to_ord());
+            qb.push(" AND status = ").push_bind(status.to_text());
         }
         qb.push(" ORDER BY requested_at DESC");
         let rows = qb.build().fetch_all(&self.pool).await.map_err(db_err)?;

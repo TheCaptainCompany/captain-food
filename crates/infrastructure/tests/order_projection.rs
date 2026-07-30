@@ -19,7 +19,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -34,8 +34,8 @@ async fn reset_schema(pool: &PgPool) {
           ref TEXT NOT NULL,
           restaurant_id UUID NOT NULL,
           customer_id UUID,
-          status INTEGER NOT NULL,
-          service_type INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          service_type TEXT NOT NULL,
           items JSONB NOT NULL,
           total_amount_cents BIGINT NOT NULL,
           currency TEXT NOT NULL,
@@ -49,7 +49,7 @@ async fn reset_schema(pool: &PgPool) {
           uber_restaurant_cents BIGINT,
           uber_rider_cents BIGINT,
           uber_platform_cents BIGINT,
-          uber_basis INTEGER,
+          uber_basis TEXT,
           delivery_address JSONB,
           estimated_ready_at TIMESTAMPTZ,
           placed_at TIMESTAMPTZ NOT NULL,
@@ -58,16 +58,16 @@ async fn reset_schema(pool: &PgPool) {
           payment_status TEXT NOT NULL,
           restaurant_stars INTEGER,
           rating_comment TEXT,
-          rider_thumb INTEGER,
+          rider_thumb TEXT,
           -- Added by migrations/20260722000000; the projector's upsert names it, so a fixture
           -- without it fails the whole INSERT and the row never materializes (caught when #230
           -- first ran this suite in CI).
-          delivery_timeliness INTEGER,
+          delivery_timeliness TEXT,
           rider_tip_cents BIGINT,
           restaurant_tip_cents BIGINT,
           captain_tip_cents BIGINT,
           rated_at TIMESTAMPTZ,
-          delivery_status INTEGER,
+          delivery_status TEXT,
           courier JSONB,
           estimated_dropoff_at TIMESTAMPTZ,
           created_at TIMESTAMPTZ NOT NULL,
@@ -170,11 +170,11 @@ async fn order_events_fold_into_the_read_model() {
     let worker = ProjectionWorker::new(pool.clone());
     worker.run_once().await.expect("run_once (placed)");
 
-    // The row materialized, enums stored as declaration-order ordinals, breakdown leaves extracted,
+    // The row materialized, enums stored as their TEXT values, breakdown leaves extracted,
     // payment already CAPTURED: PlaceOrderProcess emits OrderPlaced only in reaction to
     // PaymentCaptured (V0 prepaid-online), and that capture sits EARLIER in the log than the row it
     // would fold into — the creation arm carries the saga invariant instead of losing it.
-    let (status, service_type, total, articles, payment_status): (i32, i32, i64, i64, String) =
+    let (status, service_type, total, articles, payment_status): (String, String, i64, i64, String) =
         sqlx::query_as(
             "SELECT status, service_type, total_amount_cents, articles_cents, payment_status \
              FROM ordertracking WHERE order_id = $1",
@@ -183,8 +183,8 @@ async fn order_events_fold_into_the_read_model() {
         .fetch_one(&pool)
         .await
         .expect("projected order row");
-    assert_eq!(status, 0); // OrderStatus::PLACED ordinal
-    assert_eq!(service_type, 0); // ServiceType::DELIVERY ordinal
+    assert_eq!(status, "PLACED"); // OrderStatus::PLACED
+    assert_eq!(service_type, "DELIVERY"); // ServiceType::DELIVERY
     assert_eq!(total, 2560);
     assert_eq!(articles, 1960);
     assert_eq!(payment_status, "CAPTURED");

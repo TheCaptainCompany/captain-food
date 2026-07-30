@@ -76,9 +76,9 @@ use crate::connections::HubRiseConnections;
 /// The `source` recorded on every `CatalogImported` from this ACL.
 pub const HUBRISE_SOURCE: &str = "hubrise";
 
-/// `UserType::EXTERNAL` ordinal for the event envelope (enums stored as declaration-order ints,
-/// ADR-0037/0041) — HubRise facts are recorded as the fixed external-system principal, like Stripe's.
-pub(crate) const EXTERNAL_USER_TYPE: i32 = 6;
+/// `UserType::EXTERNAL` TEXT value for the event envelope (enums stored verbatim, ADR-20260728)
+/// — HubRise facts are recorded as the fixed external-system principal, like Stripe's.
+pub(crate) const EXTERNAL_USER_TYPE: &str = "EXTERNAL";
 
 // ================================================================================================
 // Deterministic identity (ADR-0041) — UUIDv5 of the HubRise identifier, like the SIRENE ACL's
@@ -591,7 +591,7 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
             session_id: None,
             trace_id: None,
             user_id: Some(hubrise_system_user_id()),
-            user_type: EXTERNAL_USER_TYPE,
+            user_type: EXTERNAL_USER_TYPE.to_string(),
             channel: CommandChannel::WORKER,
             command_type: command_type.to_string(),
             payload_hash: payload_hash(&payload),
@@ -604,7 +604,7 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
     fn actor_for(entry: &CommandJournalEntry) -> Actor {
         Actor {
             user_id: hubrise_system_user_id(),
-            user_type: EXTERNAL_USER_TYPE,
+            user_type: EXTERNAL_USER_TYPE.to_string(),
             correlation_id: entry.correlation_id,
             cause_id: Some(entry.message_id),
         }
@@ -1006,7 +1006,7 @@ mod tests {
                 &[created],
                 &Actor {
                     user_id: uuid::Uuid::nil(),
-                    user_type: EXTERNAL_USER_TYPE,
+                    user_type: EXTERNAL_USER_TYPE.to_string(),
                     correlation_id: uuid::Uuid::nil(),
                     cause_id: None,
                 },

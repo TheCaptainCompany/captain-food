@@ -2338,7 +2338,7 @@ async fn test_order_tipped_by_restaurant() {
     bed.seed(&format!("Order-{}", support::uid("order-1")), vec![fx_order_placed(), fx_order_delivered()]).await;
     let before = bed.snapshot();
     let cmd = cmds::TipOrder { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), tips: vec![ent::Tip { recipient: sc::TipRecipient::RIDER, amount: ent::Money { amount_cents: sc::MoneyCents(300), currency: sc::CurrencyCode("EUR".into()) } }] };
-    let result = crate::commands::tip_order(&bed.store, cmd, &support::actor_as(3)).await;
+    let result = crate::commands::tip_order(&bed.store, cmd, &support::actor_as("RESTAURANT")).await;
     let _ = result.expect("TestOrderTippedByRestaurant: the spec expects acceptance");
     bed.assert_appended("TestOrderTippedByRestaurant", &before, &[
         (format!("Order-{}", support::uid("order-1")), fx_order_tipped_by_restaurant()),

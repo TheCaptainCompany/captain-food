@@ -26,7 +26,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -39,7 +39,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE restaurant (
           restaurant_id UUID PRIMARY KEY,
           restaurant_account_id UUID,
-          listing_status INTEGER NOT NULL,
+          listing_status TEXT NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
           -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
@@ -48,18 +48,18 @@ async fn reset_schema(pool: &PgPool) {
           description TEXT,
           tags JSONB,
           margin_rate TEXT,
-          cuisine_category INTEGER,
+          cuisine_category TEXT,
           uber_prices_opt_in BOOLEAN,
           website TEXT,
           rating TEXT,
           reviews_count INTEGER,
           gbp_order_url TEXT,
-          gbp_link_status INTEGER,
+          gbp_link_status TEXT,
           address JSONB NOT NULL,
           location JSONB,
           opening_hours JSONB NOT NULL,
-          status INTEGER NOT NULL,
-          order_acceptance INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          order_acceptance TEXT NOT NULL,
           default_currency TEXT NOT NULL,
           timezone TEXT,
           preparation_time_minutes INTEGER,
@@ -69,7 +69,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE prospectionpipeline (
           restaurant_id UUID PRIMARY KEY,
           score INTEGER NOT NULL,
-          pipeline_status INTEGER NOT NULL,
+          pipeline_status TEXT NOT NULL,
           contacts_count INTEGER NOT NULL,
           last_contacted_at TIMESTAMPTZ,
           replied_at TIMESTAMPTZ,
@@ -163,14 +163,14 @@ async fn restaurant_event_folds_into_the_read_model() {
     let worker = ProjectionWorker::new(pool.clone());
     worker.run_once().await.expect("run_once (registered)");
 
-    // The row materialized, enums stored as declaration-order ordinals. No slug yet: registration no
+    // The row materialized, enums stored as their TEXT values. No slug yet: registration no
     // longer carries one (the #220 slug lifecycle) — the storefront address is configured separately.
     let (slug, display_name, status, listing_status, acceptance): (
         Option<String>,
         String,
-        i32,
-        i32,
-        i32,
+        String,
+        String,
+        String,
     ) = sqlx::query_as(
         "SELECT slug, display_name, status, listing_status, order_acceptance \
              FROM restaurant WHERE restaurant_id = $1",
@@ -181,9 +181,9 @@ async fn restaurant_event_folds_into_the_read_model() {
     .expect("projected restaurant row");
     assert_eq!(slug, None, "a freshly-registered listing has no storefront address yet (#220)");
     assert_eq!(display_name, "Chez Marco");
-    assert_eq!(status, 0); // RestaurantStatus::DRAFT
-    assert_eq!(listing_status, 2); // RestaurantListingStatus::ACTIVE_PARTNER
-    assert_eq!(acceptance, 0); // OrderAcceptanceMode::NORMAL
+    assert_eq!(status, "DRAFT"); // RestaurantStatus::DRAFT
+    assert_eq!(listing_status, "ACTIVE_PARTNER"); // RestaurantListingStatus::ACTIVE_PARTNER
+    assert_eq!(acceptance, "NORMAL"); // OrderAcceptanceMode::NORMAL
     assert_eq!(checkpoint(&pool).await, 1);
 
     let status_snapshot = worker.status();

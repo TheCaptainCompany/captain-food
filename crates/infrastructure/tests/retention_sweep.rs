@@ -18,20 +18,14 @@
 use infrastructure::RetentionSweepWorker;
 use sqlx::PgPool;
 
-/// Fresh copies of every table the policy involves (journals + mirrors + the untouchables), the
-/// ref_* enum lookups the function resolves statuses through, and the function itself.
+/// Fresh copies of every table the policy involves (journals + mirrors + the untouchables) and the
+/// function itself (statuses compare as TEXT values, ADR-20260728).
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
         r#"
         DROP TABLE IF EXISTS domain_events, command_journal, inbound_events,
-          external_stripe_events, external_hubrise_callbacks, external_sirene_restaurants,
-          ref_command_journal_status, ref_inbound_event_status CASCADE;
+          external_stripe_events, external_hubrise_callbacks, external_sirene_restaurants CASCADE;
         DROP FUNCTION IF EXISTS sweep_retention();
-
-        CREATE TABLE ref_command_journal_status(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
-        INSERT INTO ref_command_journal_status (value, sort_order) VALUES ('RECEIVED',0),('SUCCEEDED',1),('REJECTED',2),('FAILED',3);
-        CREATE TABLE ref_inbound_event_status(sort_order INT PRIMARY KEY, value TEXT NOT NULL UNIQUE);
-        INSERT INTO ref_inbound_event_status (value, sort_order) VALUES ('RECEIVED',0),('DELIVERED',1),('FAILED',2);
 
         CREATE TABLE domain_events (
           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -39,7 +33,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -56,12 +50,12 @@ async fn reset_schema(pool: &PgPool) {
           session_id UUID NULL,
           trace_id TEXT NULL,
           user_id UUID NULL,
-          user_type INTEGER NOT NULL,
-          channel INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
+          channel TEXT NOT NULL,
           command_type TEXT NOT NULL,
           payload JSONB NOT NULL,
           payload_hash TEXT NOT NULL,
-          status INTEGER NOT NULL,
+          status TEXT NOT NULL,
           error JSONB NULL,
           received_at TIMESTAMPTZ NOT NULL,
           completed_at TIMESTAMPTZ NULL
@@ -73,7 +67,7 @@ async fn reset_schema(pool: &PgPool) {
           correlation_id UUID NOT NULL,
           event_type TEXT NOT NULL,
           payload JSONB NOT NULL,
-          status INTEGER NOT NULL,
+          status TEXT NOT NULL,
           error JSONB NULL,
           received_at TIMESTAMPTZ NOT NULL,
           delivered_at TIMESTAMPTZ NULL,
@@ -115,15 +109,14 @@ async fn reset_schema(pool: &PgPool) {
           n BIGINT;
         BEGIN
           DELETE FROM command_journal
-           WHERE status IN (SELECT sort_order FROM ref_command_journal_status
-                             WHERE value IN ('SUCCEEDED', 'REJECTED', 'FAILED'))
+           WHERE status IN ('SUCCEEDED', 'REJECTED', 'FAILED')
              AND completed_at IS NOT NULL
              AND completed_at < now() - INTERVAL '90 days';
           GET DIAGNOSTICS n = ROW_COUNT;
           swept_table := 'command_journal'; deleted := n; RETURN NEXT;
 
           DELETE FROM inbound_events
-           WHERE status = (SELECT sort_order FROM ref_inbound_event_status WHERE value = 'DELIVERED')
+           WHERE status = 'DELIVERED'
              AND delivered_at IS NOT NULL
              AND delivered_at < now() - INTERVAL '30 days';
           GET DIAGNOSTICS n = ROW_COUNT;
@@ -155,8 +148,8 @@ async fn journal_row(pool: &PgPool, status: &str, received_days: i32, completed_
         "INSERT INTO command_journal
            (message_id, correlation_id, user_type, channel, command_type, payload, payload_hash,
             status, received_at, completed_at)
-         VALUES ($1, $1, 0, 0, 'PlaceOrder', '{}', 'h',
-                 (SELECT sort_order FROM ref_command_journal_status WHERE value = $2),
+         VALUES ($1, $1, 'PUBLIC', 'GRAPHQL', 'PlaceOrder', '{}', 'h',
+                 $2,
                  now() - make_interval(days => $3),
                  CASE WHEN $4::int IS NULL THEN NULL ELSE now() - make_interval(days => $4) END)",
     )
@@ -176,7 +169,7 @@ async fn inbound_row(pool: &PgPool, status: &str, received_days: i32, delivered_
            (inbound_event_id, source, external_id, correlation_id, event_type, payload,
             status, received_at, delivered_at)
          VALUES ($1, 'stripe', $2, $1, 'PaymentCaptured', '{}',
-                 (SELECT sort_order FROM ref_inbound_event_status WHERE value = $3),
+                 $3,
                  now() - make_interval(days => $4),
                  CASE WHEN $5::int IS NULL THEN NULL ELSE now() - make_interval(days => $5) END)",
     )
@@ -299,7 +292,7 @@ async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
     assert_eq!(count(&pool, "external_sirene_restaurants").await, 1, "the SIRENE mirror is exempt");
     let received: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM command_journal
-          WHERE status = (SELECT sort_order FROM ref_command_journal_status WHERE value = 'RECEIVED')",
+          WHERE status = 'RECEIVED'",
     )
     .fetch_one(&pool)
     .await
@@ -307,7 +300,7 @@ async fn sweep_deletes_aged_rows_and_never_touches_the_untouchables() {
     assert_eq!(received, 1, "RECEIVED journal rows are never age-swept");
     let failed: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM inbound_events
-          WHERE status = (SELECT sort_order FROM ref_inbound_event_status WHERE value = 'FAILED')",
+          WHERE status = 'FAILED'",
     )
     .fetch_one(&pool)
     .await

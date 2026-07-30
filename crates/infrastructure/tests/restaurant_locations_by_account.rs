@@ -19,7 +19,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE restaurant (
           restaurant_id UUID PRIMARY KEY,
           restaurant_account_id UUID,
-          listing_status INTEGER NOT NULL,
+          listing_status TEXT NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
           -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
@@ -28,18 +28,18 @@ async fn reset_schema(pool: &PgPool) {
           description TEXT,
           tags JSONB,
           margin_rate TEXT,
-          cuisine_category INTEGER,
+          cuisine_category TEXT,
           uber_prices_opt_in BOOLEAN,
           website TEXT,
           rating TEXT,
           reviews_count INTEGER,
           gbp_order_url TEXT,
-          gbp_link_status INTEGER,
+          gbp_link_status TEXT,
           address JSONB NOT NULL,
           location JSONB,
           opening_hours JSONB NOT NULL,
-          status INTEGER NOT NULL,
-          order_acceptance INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          order_acceptance TEXT NOT NULL,
           default_currency TEXT NOT NULL,
           timezone TEXT,
           preparation_time_minutes INTEGER,
@@ -65,7 +65,7 @@ async fn seed_restaurant(
         "INSERT INTO restaurant \
          (restaurant_id, restaurant_account_id, listing_status, slug, display_name, address, \
           opening_hours, status, order_acceptance, default_currency, created_at, updated_at) \
-         VALUES ($1, $2, 2, $3, $4, '{\"city\":\"Tours\"}'::jsonb, '[]'::jsonb, 1, 0, 'EUR', \
+         VALUES ($1, $2, 'ACTIVE_PARTNER', $3, $4, '{\"city\":\"Tours\"}'::jsonb, '[]'::jsonb, 'ACTIVE', 'NORMAL', 'EUR', \
                  now() + make_interval(mins => $5), now())",
     )
     .bind(id)

@@ -559,8 +559,8 @@ OperationStatus:
     PENDING (accepted, in flight), SUCCEEDED, REJECTED (business invariant), FAILED (technical error)."
 
 # --- Write-path journal lifecycles (database/tables/journals.yaml, ADR-20260720-015300/-015400) ---
-# Enum $ref columns are stored as the compact ordinal + a seeded ref_<enum> table (ADR-0037), so the
-# value ORDER below is a frozen contract once migrated — append-only forever.
+# Enum $ref columns store the enum's TEXT value verbatim (ADR-20260728, superseding the ADR-0037
+# ordinal + ref_<enum> scheme), so rows are self-describing; renaming a value is the migration event.
 
 CommandJournalStatus:
   type: string
@@ -580,9 +580,9 @@ CommandChannel:
 
 InboundEventStatus:
   type: string
-  # ORDER IS STORAGE (ADR-0037/0041: enums persist as declaration-order ints), so the two new states are
-  # APPENDED, never inserted. Inserting them before FAILED would have moved its ordinal 2 -> 4 and
-  # silently reinterpreted every existing FAILED row as IGNORED. Read the semantics below, not the order.
+  # Values persist as TEXT verbatim (ADR-20260728), so declaration order is no longer a storage
+  # contract; IGNORED/DUPLICATE were appended while ordinals were the format (ADR-20260728-011344 D6)
+  # and simply stay where they are. Read the semantics below, not the order.
   enum: [RECEIVED, DELIVERED, FAILED, IGNORED, DUPLICATE]
   description: >
     Lifecycle of an adapted inbound business event (inbound_events row). The three terminal
@@ -631,8 +631,8 @@ DeliveryDispatchProcessStatus:
   description: >
     State of one DeliveryDispatchProcess run (delivery_dispatch_process_manager row, keyed by order).
     FAILED now marks the ranked channel walk exhausted (fail closed, rules.yaml#/DispatchExhaustionFailsClosed —
-    #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED is appended LAST to
-    preserve the declaration-order ordinals of the pre-#60 values (ADR-0037)."
+    #60 supersedes the ADR-20260720-004556 numeric cap-3 framing). SELF_DISPATCHED was appended LAST to
+    preserve the then-stored ordinals of the pre-#60 values (moot since ADR-20260728: enums persist as TEXT)."
 
 RestaurantDispatchMode:
   type: string

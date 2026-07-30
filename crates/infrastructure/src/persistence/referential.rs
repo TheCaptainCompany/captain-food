@@ -5,7 +5,7 @@
 //!
 //! Column conventions: NUMERIC columns are SELECTed cast to `::float8` (no decimal dependency,
 //! policy rates/coefficients are display values); INTEGER cents widen to `i64` in the row;
-//! `cuisine_category` is the enum's INTEGER ordinal (ADR-0037, see [`super::enum_sql`]).
+//! `cuisine_category` is the enum's TEXT value (ADR-20260728, see [`super::enum_sql`]).
 
 use application::queries::{
     PricingPolicyReadRepository, PricingPolicyRow, UberEstimationPolicyReadRepository,
@@ -18,7 +18,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 
 /// Postgres adapter for the PricingPolicy referential table.
 pub struct PgPricingPolicyRepository {
@@ -71,7 +71,7 @@ impl PgUberEstimationPolicyRepository {
 
 fn decode_estimation(row: &PgRow) -> Result<UberEstimationPolicyRow, DomainError> {
     Ok(UberEstimationPolicyRow {
-        cuisine_category: EnumOrd::from_ord(row.try_get::<i32, _>("cuisine_category").map_err(db_err)?)?,
+        cuisine_category: EnumText::from_text(&row.try_get::<String, _>("cuisine_category").map_err(db_err)?)?,
         price_coefficient: row.try_get::<f64, _>("price_coefficient").map_err(db_err)?,
         effective_from: row.try_get("effective_from").map_err(db_err)?,
     })
@@ -79,7 +79,7 @@ fn decode_estimation(row: &PgRow) -> Result<UberEstimationPolicyRow, DomainError
 
 #[async_trait]
 impl UberEstimationPolicyReadRepository for PgUberEstimationPolicyRepository {
-    /// The per-cuisine mark-up coefficients (stable order by cuisine_category ordinal).
+    /// The per-cuisine mark-up coefficients (stable order by cuisine_category text).
     async fn list(&self) -> Result<Vec<UberEstimationPolicyRow>, DomainError> {
         let rows = sqlx::query(
             "SELECT cuisine_category, price_coefficient::float8 AS price_coefficient, effective_from \
@@ -205,7 +205,7 @@ impl DispatchStrategyRepository for PgDispatchStrategy {
             .map_err(db_err)?;
         match row {
             Some(row) => Ok(RestaurantDispatch {
-                mode: EnumOrd::from_ord(row.try_get::<i32, _>("mode").map_err(db_err)?)?,
+                mode: EnumText::from_text(&row.try_get::<String, _>("mode").map_err(db_err)?)?,
                 city_id: row.try_get::<Option<uuid::Uuid>, _>("city_id").map_err(db_err)?.map(CityId),
             }),
             // Absent config ⇒ CAPTAIN, no city (today's default — no config row needed).

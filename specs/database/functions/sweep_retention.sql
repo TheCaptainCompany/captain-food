@@ -23,18 +23,17 @@ AS $$
 DECLARE
   n BIGINT;
 BEGIN
-  -- Status predicates resolve through the ref_* enum lookups (ADR-0037 ordinals) — never
-  -- hard-coded integers.
+  -- Status predicates compare the enum's TEXT value directly (ADR-20260728: enum columns store
+  -- the scalars.yaml value verbatim; the ref_* ordinal lookups are gone).
   DELETE FROM command_journal
-   WHERE status IN (SELECT sort_order FROM ref_command_journal_status
-                     WHERE value IN ('SUCCEEDED', 'REJECTED', 'FAILED'))
+   WHERE status IN ('SUCCEEDED', 'REJECTED', 'FAILED')
      AND completed_at IS NOT NULL
      AND completed_at < now() - INTERVAL '90 days';
   GET DIAGNOSTICS n = ROW_COUNT;
   swept_table := 'command_journal'; deleted := n; RETURN NEXT;
 
   DELETE FROM inbound_events
-   WHERE status = (SELECT sort_order FROM ref_inbound_event_status WHERE value = 'DELIVERED')
+   WHERE status = 'DELIVERED'
      AND delivered_at IS NOT NULL
      AND delivered_at < now() - INTERVAL '30 days';
   GET DIAGNOSTICS n = ROW_COUNT;

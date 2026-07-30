@@ -164,8 +164,7 @@ pub async fn compact_payloads(
               WHERE s.siret = v.siret \
                 AND s.payload IS NOT NULL \
                 AND s.status = 'PENDING' \
-                AND j.status = (SELECT sort_order FROM ref_command_journal_status \
-                                 WHERE value = 'SUCCEEDED') \
+                AND j.status = 'SUCCEEDED' \
                 AND j.completed_at IS NOT NULL",
         )
         .bind(&sirets)

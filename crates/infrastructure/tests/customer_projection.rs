@@ -36,7 +36,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -157,7 +157,7 @@ async fn registered_customer_is_folded_and_served_by_the_read_repository() {
     let repo = PgCustomerRepository::new(pool.clone());
     let actor = Actor {
         user_id: uuid::Uuid::nil(),
-        user_type: 1, // UserType::CUSTOMER ordinal (enums are declaration-order integers, ADR-0037)
+        user_type: "CUSTOMER".to_string(),
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     };

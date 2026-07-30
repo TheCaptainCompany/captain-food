@@ -2,7 +2,7 @@
 //! shared by the read repository (decode) and the projection worker (load current state + upsert the
 //! folded row).
 //!
-//! Column conventions (ADR-0037/0040): `pipeline_status` is an INTEGER ordinal (see
+//! Column conventions (ADR-20260728/0040): `pipeline_status` is a TEXT value (see
 //! [`crate::persistence::enum_sql`]); `score` is an INTEGER column widened into the
 //! `ProspectionScore(i64)` newtype; `contacts_count` is an INTEGER column widened to `i64` in the row.
 
@@ -13,7 +13,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 
 /// The full column list, in `ProspectionPipelineRow` field order — keep SELECTs and the upsert in sync
 /// with it.
@@ -25,7 +25,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<ProspectionPipelineRow, DomainError>
     Ok(ProspectionPipelineRow {
         restaurant_id: RestaurantId(row.try_get("restaurant_id").map_err(db_err)?),
         score: ProspectionScore(i64::from(row.try_get::<i32, _>("score").map_err(db_err)?)),
-        pipeline_status: EnumOrd::from_ord(row.try_get::<i32, _>("pipeline_status").map_err(db_err)?)?,
+        pipeline_status: EnumText::from_text(&row.try_get::<String, _>("pipeline_status").map_err(db_err)?)?,
         contacts_count: i64::from(row.try_get::<i32, _>("contacts_count").map_err(db_err)?),
         last_contacted_at: row.try_get("last_contacted_at").map_err(db_err)?,
         replied_at: row.try_get("replied_at").map_err(db_err)?,
@@ -57,7 +57,7 @@ pub async fn upsert(pool: &PgPool, row: &ProspectionPipelineRow) -> Result<(), D
     sqlx::query(&sql)
         .bind(row.restaurant_id.0)
         .bind(row.score.0 as i32)
-        .bind(row.pipeline_status.to_ord())
+        .bind(row.pipeline_status.to_text())
         .bind(row.contacts_count as i32)
         .bind(row.last_contacted_at)
         .bind(row.replied_at)

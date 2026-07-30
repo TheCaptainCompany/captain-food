@@ -8,7 +8,7 @@ use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 use super::prospection_store;
 
 /// Postgres adapter for the ProspectionPipeline read model.
@@ -25,7 +25,7 @@ impl PgProspectionRepository {
 #[async_trait]
 impl ProspectionReadRepository for PgProspectionRepository {
     /// Scored prospect list, best-score-first (then newest). `min_score` keeps prospects at/above the
-    /// threshold; `status` keeps one pipeline stage (bound as its INTEGER ordinal, ADR-0037).
+    /// threshold; `status` keeps one pipeline stage (bound as its TEXT value, ADR-20260728).
     async fn list(&self, filter: ProspectFilter) -> Result<Vec<ProspectionPipelineRow>, DomainError> {
         let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(format!(
             "SELECT {} FROM prospectionpipeline WHERE TRUE",
@@ -35,7 +35,7 @@ impl ProspectionReadRepository for PgProspectionRepository {
             qb.push(" AND score >= ").push_bind(min_score);
         }
         if let Some(status) = filter.status {
-            qb.push(" AND pipeline_status = ").push_bind(status.to_ord());
+            qb.push(" AND pipeline_status = ").push_bind(status.to_text());
         }
         qb.push(" ORDER BY score DESC, created_at DESC");
         let rows = qb.build().fetch_all(&self.pool).await.map_err(db_err)?;

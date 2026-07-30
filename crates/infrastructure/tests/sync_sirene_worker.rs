@@ -45,12 +45,12 @@ async fn reset_schema(pool: &PgPool) {
           session_id UUID NULL,
           trace_id TEXT NULL,
           user_id UUID NULL,
-          user_type INTEGER NOT NULL,
-          channel INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
+          channel TEXT NOT NULL,
           command_type TEXT NOT NULL,
           payload JSONB NOT NULL,
           payload_hash TEXT NOT NULL,
-          status INTEGER NOT NULL,
+          status TEXT NOT NULL,
           error JSONB NULL,
           received_at TIMESTAMPTZ NOT NULL,
           completed_at TIMESTAMPTZ NULL
@@ -66,7 +66,7 @@ async fn reset_schema(pool: &PgPool) {
           correlation_id UUID NOT NULL,
           event_type TEXT NOT NULL,
           payload JSONB NOT NULL,
-          status INTEGER NOT NULL,
+          status TEXT NOT NULL,
           error JSONB NULL,
           received_at TIMESTAMPTZ NOT NULL,
           delivered_at TIMESTAMPTZ NULL,
@@ -96,7 +96,7 @@ async fn reset_schema(pool: &PgPool) {
           stream_name TEXT NOT NULL,
           version INTEGER NOT NULL,
           user_id UUID NOT NULL,
-          user_type INTEGER NOT NULL,
+          user_type TEXT NOT NULL,
           correlation_id UUID NOT NULL,
           cause_id UUID NULL,
           event_type TEXT NOT NULL,
@@ -109,7 +109,7 @@ async fn reset_schema(pool: &PgPool) {
         CREATE TABLE restaurant (
           restaurant_id UUID PRIMARY KEY,
           restaurant_account_id UUID,
-          listing_status INTEGER NOT NULL,
+          listing_status TEXT NOT NULL,
           external_identifiers JSONB,
           google_place_id TEXT,
           -- NULLABLE since migrations/20260728020000: a prospect has no slug until one is configured.
@@ -118,18 +118,18 @@ async fn reset_schema(pool: &PgPool) {
           description TEXT,
           tags JSONB,
           margin_rate TEXT,
-          cuisine_category INTEGER,
+          cuisine_category TEXT,
           uber_prices_opt_in BOOLEAN,
           website TEXT,
           rating TEXT,
           reviews_count INTEGER,
           gbp_order_url TEXT,
-          gbp_link_status INTEGER,
+          gbp_link_status TEXT,
           address JSONB NOT NULL,
           location JSONB,
           opening_hours JSONB NOT NULL,
-          status INTEGER NOT NULL,
-          order_acceptance INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          order_acceptance TEXT NOT NULL,
           default_currency TEXT NOT NULL,
           timezone TEXT,
           preparation_time_minutes INTEGER,
@@ -341,7 +341,7 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
         String,
         String,
         String,
-        i32,
+        String,
     ) = sqlx::query_as(
         "SELECT inbound_event_id, source, external_id, event_type, status FROM inbound_events",
     )
@@ -360,7 +360,7 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     .expect("staged hash");
     assert_eq!(external_id, format!("85242109900021:{staged_hash}"));
     assert_eq!(event_type, "RestaurantRegistered");
-    assert_eq!(inbound_status, 0, "RECEIVED — awaiting the drain");
+    assert_eq!(inbound_status, "RECEIVED", "RECEIVED — awaiting the drain");
 
     let register_journal: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM command_journal WHERE command_type = 'RegisterRestaurant'",
@@ -395,7 +395,7 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     let (stream, event_type, user_type, cause_id, payload): (
         String,
         String,
-        i32,
+        String,
         Option<uuid::Uuid>,
         serde_json::Value,
     ) = sqlx::query_as(
@@ -406,7 +406,7 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     .expect("one event row");
     assert_eq!(stream, format!("Restaurant-{restaurant_id}"));
     assert_eq!(event_type, "RestaurantRegistered");
-    assert_eq!(user_type, 6); // EXTERNAL envelope stamp (ADR-0041)
+    assert_eq!(user_type, "EXTERNAL"); // EXTERNAL envelope stamp (ADR-0041)
     assert_eq!(cause_id, Some(inbound_event_id), "the fact chains to the inbound record");
     assert_eq!(payload["ref"], serde_json::json!("85242109900021"));
     assert_eq!(payload["listingStatus"], serde_json::json!("NON_PARTNER"));
@@ -489,7 +489,7 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
         .expect("count close journal rows"),
         sqlx::query_scalar(
             "SELECT COUNT(*) FROM command_journal \
-             WHERE command_type = 'MarkRestaurantClosed' AND channel = 1 AND status = 1",
+             WHERE command_type = 'MarkRestaurantClosed' AND channel = 'WORKER' AND status = 'SUCCEEDED'",
         )
         .fetch_one(&pool)
         .await
@@ -505,7 +505,7 @@ async fn seed_projection_row(pool: &PgPool, id: uuid::Uuid, slug: &str, identifi
         "INSERT INTO restaurant (restaurant_id, listing_status, external_identifiers, slug, \
            display_name, address, opening_hours, status, order_acceptance, default_currency, \
            created_at, updated_at) \
-         VALUES ($1, 0, $2, $3, 'CHEZ MARCO', '{}'::jsonb, '[]'::jsonb, 0, 0, 'EUR', now(), now())",
+         VALUES ($1, 'NON_PARTNER', $2, $3, 'CHEZ MARCO', '{}'::jsonb, '[]'::jsonb, 'DRAFT', 'NORMAL', 'EUR', now(), now())",
     )
     .bind(id)
     .bind(identifiers)
@@ -567,7 +567,7 @@ async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_
     });
     let actor = Actor {
         user_id: uuid::Uuid::nil(),
-        user_type: 6,
+        user_type: "EXTERNAL".to_string(),
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     };
@@ -650,12 +650,12 @@ async fn a_failed_delivery_leaves_a_durable_trace_and_is_not_retried_forever() {
     assert_eq!(delivered.delivered, 0);
 
     // (a) The verdict is durable and queryable — support can answer "what happened to this row".
-    let (inbound_status, error): (i32, Option<serde_json::Value>) =
+    let (inbound_status, error): (String, Option<serde_json::Value>) =
         sqlx::query_as("SELECT status, error FROM inbound_events WHERE source = 'sirene'")
             .fetch_one(&pool)
             .await
             .expect("inbound verdict");
-    assert_eq!(inbound_status, 2, "FAILED (declaration-order ordinal)");
+    assert_eq!(inbound_status, "FAILED");
     let error = error.expect("the failure reason is recorded on the row");
     assert!(
         error["detail"].as_str().is_some_and(|d| !d.is_empty()),
@@ -735,7 +735,7 @@ async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
     // The drain worker delivers it and the aggregate decides. Simulated here by writing the verdict the
     // real InboundEventsDrainWorker writes — DELIVERED (ordinal 1).
     let updated = sqlx::query(
-        "UPDATE inbound_events SET status = 1, delivered_at = now() WHERE source = 'sirene'",
+        "UPDATE inbound_events SET status = 'DELIVERED', delivered_at = now() WHERE source = 'sirene'",
     )
     .execute(&pool)
     .await
@@ -786,7 +786,7 @@ async fn an_ignored_verdict_still_counts_as_synced() {
     stage_row(&pool, "A").await;
     worker.run_once().await.expect("stage the fact");
     // IGNORED = 3 (declaration-order ordinal): the aggregate decided nothing had changed.
-    sqlx::query("UPDATE inbound_events SET status = 3, delivered_at = now() WHERE source = 'sirene'")
+    sqlx::query("UPDATE inbound_events SET status = 'IGNORED', delivered_at = now() WHERE source = 'sirene'")
         .execute(&pool)
         .await
         .expect("simulate a no-change verdict");
@@ -866,7 +866,7 @@ async fn a_failed_verdict_keeps_the_payload() {
     stage_row(&pool, "A").await;
     worker.run_once().await.expect("stage the fact");
     // FAILED = 2 (declaration-order ordinal).
-    sqlx::query("UPDATE inbound_events SET status = 2 WHERE source = 'sirene'")
+    sqlx::query("UPDATE inbound_events SET status = 'FAILED' WHERE source = 'sirene'")
         .execute(&pool)
         .await
         .expect("simulate a failed delivery");

@@ -11,7 +11,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 
 /// Column list of `inbound_events`, in [`InboundEventRow`] field order.
 const COLUMNS: &str = "inbound_event_id, source, external_id, correlation_id, event_type, payload, \
@@ -25,7 +25,7 @@ fn decode(row: &PgRow) -> Result<InboundEventRow, DomainError> {
         correlation_id: row.try_get("correlation_id").map_err(db_err)?,
         event_type: row.try_get("event_type").map_err(db_err)?,
         payload: row.try_get("payload").map_err(db_err)?,
-        status: EnumOrd::from_ord(row.try_get::<i32, _>("status").map_err(db_err)?)?,
+        status: EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?,
         error: row.try_get("error").map_err(db_err)?,
         received_at: row.try_get("received_at").map_err(db_err)?,
         delivered_at: row.try_get("delivered_at").map_err(db_err)?,
@@ -58,7 +58,7 @@ impl InboundEvents for PgInboundEvents {
             .bind(row.correlation_id)
             .bind(row.event_type.clone())
             .bind(row.payload.clone())
-            .bind(InboundEventStatus::RECEIVED.to_ord())
+            .bind(InboundEventStatus::RECEIVED.to_text())
             .execute(&self.pool)
             .await
             .map_err(db_err)?
@@ -72,7 +72,7 @@ impl InboundEvents for PgInboundEvents {
              ORDER BY received_at, inbound_event_id LIMIT $2"
         );
         let rows = sqlx::query(&sql)
-            .bind(InboundEventStatus::RECEIVED.to_ord())
+            .bind(InboundEventStatus::RECEIVED.to_text())
             .bind(limit.max(0))
             .fetch_all(&self.pool)
             .await
@@ -85,7 +85,7 @@ impl InboundEvents for PgInboundEvents {
             "UPDATE inbound_events SET status = $2, delivered_at = now() WHERE inbound_event_id = $1",
         )
         .bind(inbound_event_id)
-        .bind(InboundEventStatus::DELIVERED.to_ord())
+        .bind(InboundEventStatus::DELIVERED.to_text())
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -100,7 +100,7 @@ impl InboundEvents for PgInboundEvents {
             "UPDATE inbound_events SET status = $2, delivered_at = now() WHERE inbound_event_id = $1",
         )
         .bind(inbound_event_id)
-        .bind(InboundEventStatus::IGNORED.to_ord())
+        .bind(InboundEventStatus::IGNORED.to_text())
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -113,7 +113,7 @@ impl InboundEvents for PgInboundEvents {
             "UPDATE inbound_events SET status = $2, delivered_at = now() WHERE inbound_event_id = $1",
         )
         .bind(inbound_event_id)
-        .bind(InboundEventStatus::DUPLICATE.to_ord())
+        .bind(InboundEventStatus::DUPLICATE.to_text())
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -127,7 +127,7 @@ impl InboundEvents for PgInboundEvents {
     ) -> Result<(), DomainError> {
         sqlx::query("UPDATE inbound_events SET status = $2, error = $3 WHERE inbound_event_id = $1")
             .bind(inbound_event_id)
-            .bind(InboundEventStatus::FAILED.to_ord())
+            .bind(InboundEventStatus::FAILED.to_text())
             .bind(error)
             .execute(&self.pool)
             .await

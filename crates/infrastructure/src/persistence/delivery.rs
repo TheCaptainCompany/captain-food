@@ -17,7 +17,7 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 
 use super::db_err;
-use super::enum_sql::{opt_from_ord, EnumOrd};
+use super::enum_sql::{opt_from_text, EnumText};
 
 /// The view columns the read side consumes, in `DeliveryJobRow` field order (the view also carries
 /// `last_partner_rejection`/`created_at`/`updated_at`, which the API does not expose).
@@ -39,8 +39,8 @@ fn decode(row: &PgRow) -> Result<DeliveryJobRow, DomainError> {
         delivery_job_id: DeliveryJobId(row.try_get("delivery_job_id").map_err(db_err)?),
         order_id: OrderId(row.try_get("order_id").map_err(db_err)?),
         restaurant_id: RestaurantId(row.try_get("restaurant_id").map_err(db_err)?),
-        status: EnumOrd::from_ord(row.try_get::<i32, _>("status").map_err(db_err)?)?,
-        provider: opt_from_ord(row.try_get("provider").map_err(db_err)?)?,
+        status: EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?,
+        provider: opt_from_text(row.try_get("provider").map_err(db_err)?)?,
         rider_id: row.try_get::<Option<uuid::Uuid>, _>("rider_id").map_err(db_err)?.map(RiderId),
         courier: opt_json(row.try_get("courier").map_err(db_err)?),
         partner_ref: row
@@ -94,10 +94,10 @@ impl DeliveryReadRepository for PgDeliveryRepository {
             QueryBuilder::new(format!("SELECT {COLUMNS} FROM {VIEW} WHERE (rider_id = "));
         qb.push_bind(rider_id.0)
             .push(" OR (status = ")
-            .push_bind(DeliveryStatus::PENDING.to_ord())
+            .push_bind(DeliveryStatus::PENDING.to_text())
             .push(" AND rider_id IS NULL))");
         if let Some(status) = status {
-            qb.push(" AND status = ").push_bind(status.to_ord());
+            qb.push(" AND status = ").push_bind(status.to_text());
         }
         qb.push(" ORDER BY requested_at DESC");
         let rows = qb.build().fetch_all(&self.pool).await.map_err(db_err)?;
@@ -113,7 +113,7 @@ impl DeliveryReadRepository for PgDeliveryRepository {
             QueryBuilder::new(format!("SELECT {COLUMNS} FROM {VIEW} WHERE restaurant_id = "));
         qb.push_bind(restaurant_id.0);
         if let Some(status) = status {
-            qb.push(" AND status = ").push_bind(status.to_ord());
+            qb.push(" AND status = ").push_bind(status.to_text());
         }
         qb.push(" ORDER BY requested_at DESC");
         let rows = qb.build().fetch_all(&self.pool).await.map_err(db_err)?;

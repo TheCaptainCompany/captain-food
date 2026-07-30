@@ -9,7 +9,7 @@ use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 use super::order_tracking_store;
 
 /// Postgres adapter for the OrderTracking read model.
@@ -26,7 +26,7 @@ impl PgOrderRepository {
 #[async_trait]
 impl OrderReadRepository for PgOrderRepository {
     /// Orders, most recently placed first. `customer_id` scopes the customer's history,
-    /// `restaurant_id`/`status` the back-office queue (`status` bound as its INTEGER ordinal, ADR-0037).
+    /// `restaurant_id`/`status` the back-office queue (`status` bound as its TEXT value, ADR-20260728).
     async fn list(&self, filter: OrderFilter) -> Result<Vec<OrderTrackingRow>, DomainError> {
         let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(format!(
             "SELECT {} FROM ordertracking WHERE TRUE",
@@ -39,7 +39,7 @@ impl OrderReadRepository for PgOrderRepository {
             qb.push(" AND restaurant_id = ").push_bind(restaurant_id.0);
         }
         if let Some(status) = filter.status {
-            qb.push(" AND status = ").push_bind(status.to_ord());
+            qb.push(" AND status = ").push_bind(status.to_text());
         }
         qb.push(" ORDER BY placed_at DESC");
         let rows = qb.build().fetch_all(&self.pool).await.map_err(db_err)?;

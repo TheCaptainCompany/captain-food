@@ -13,7 +13,7 @@ use domain::shared::identifiers::RestaurantId;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 
 use super::db_err;
-use super::enum_sql::EnumOrd;
+use super::enum_sql::EnumText;
 use super::restaurant_store;
 
 /// Postgres adapter for the Restaurant read model.
@@ -82,11 +82,11 @@ impl RestaurantReadRepository for PgRestaurantRepository {
         }
         if filter.orderable_only == Some(true) {
             qb.push(" AND listing_status = ")
-                .push_bind(RestaurantListingStatus::ACTIVE_PARTNER.to_ord())
+                .push_bind(RestaurantListingStatus::ACTIVE_PARTNER.to_text())
                 .push(" AND status = ")
-                .push_bind(RestaurantStatus::ACTIVE.to_ord())
+                .push_bind(RestaurantStatus::ACTIVE.to_text())
                 .push(" AND order_acceptance <> ")
-                .push_bind(OrderAcceptanceMode::PAUSED.to_ord());
+                .push_bind(OrderAcceptanceMode::PAUSED.to_text());
         }
         qb.push(" ORDER BY created_at DESC");
         // First-class pagination (#113): `limit` is CLAMPED to RESTAURANT_PAGE_MAX (the #107/#108
