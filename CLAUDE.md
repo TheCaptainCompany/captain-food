@@ -156,8 +156,16 @@ is **generated/derived**, **planning is separate from execution**, and **observa
 Topic rules live in [docs/claude/](docs/claude/) — read the relevant one before working:
 [dsl.md](docs/claude/dsl.md) · [codegen.md](docs/claude/codegen.md) ·
 [observability.md](docs/claude/observability.md) · [c4.md](docs/claude/c4.md) ·
-[adr.md](docs/claude/adr.md) · [loops.md](docs/claude/loops.md) · [mermaid.md](docs/claude/mermaid.md). Decisions are recorded in
+[adr.md](docs/claude/adr.md) · [loops.md](docs/claude/loops.md) · [mermaid.md](docs/claude/mermaid.md) ·
+[sessions.md](docs/claude/sessions.md). Decisions are recorded in
 [docs/adr/](docs/adr/).
+
+**[sessions.md](docs/claude/sessions.md) is operational, not conceptual** — read it before a long or
+exploratory session: which gate is cheap vs expensive, why `df` lies about the disk allowance (and what
+deleting `target/debug` costs you afterwards), how to keep GitHub MCP output from dwarfing every file you
+read, that PDFs cannot be read in this container at all, and why a third-party integration's API suite and
+auth mechanism must be established **before** any credential is named (ADR-20260730-032306 — getting that
+order wrong cost two wrong key sets and four mis-named repository secrets).
 
 Generator/reviewer/observability agents are defined in `.claude/agents/`; acceptance gates are wired as
 hooks in `.claude/settings.json` (`.claude/hooks/stop-gate.sh`, `validate-generated.sh`). `make help`
