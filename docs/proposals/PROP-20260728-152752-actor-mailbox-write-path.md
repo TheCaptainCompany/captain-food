@@ -634,9 +634,36 @@ to the owner" is an in-process map lookup and gRPC machinery would be ceremony. 
 designed (registry-routed, `claimed_by` carrying a reachable address when multi-instance
 arrives); opening it is a later, separate decision.
 
-Sequencing: this is an optimization with zero correctness weight, switchable per actor type
-(`mailbox.activations: true`?) — it can land any time after the lanes work, and the D2 revisit
-trigger (rehydration p99 at peak) tells us when it *must*.
+**Direct response — call-and-wait over gRPC** (product-owner proposal, 2026-07-30): when a caller
+reaches the actor by RPC, the actor can return the outcome **in the same call** — no status poll,
+no subscription. This is sound because nothing about the write path changes: the request is
+journaled into `inbound_messages` FIRST, flows through the activation's micro-mailbox **in its
+normal turn** (a sync caller waits in the queue, never jumps it — per-actor ordering is not
+negotiable), the §3.4 four-effect transaction commits, and only THEN does the response go back on
+the open connection. The response channel is the only difference: the RPC connection instead of
+the response bus. Rules that keep it honest:
+
+- **The row makes the response disposable.** If the connection drops after commit, the caller
+  lost nothing: it holds the `message_id`, and a retry under the same id replays the recorded
+  outcome (DUPLICATE semantics). Durable request, best-effort response — safe only because the
+  journal came first, which is exactly the product-owner condition.
+- **Timeout → fall back, never cancel.** A caller that stops waiting must NOT abort the
+  operation (it is journaled; it WILL complete) — it falls back to `watch(message_id)` on the
+  response bus. `ask` over RPC is an optimization of the happy path; the bus remains the
+  universal mechanism (late subscribers, reconnects, multiple observers).
+- **Internal only, for now — the public edge stays acceptance-first.** ADR-20260720-015500 chose
+  PENDING-acceptance so a Friday-peak checkout never hangs a customer's request on processing;
+  call-and-wait holds a connection for the full decision, making queue depth caller-visible.
+  Right for a PM awaiting an aggregate, an adapter, an admin operation; wrong as the default for
+  the storefront. Whether selected LOW-traffic public mutations later earn a per-operation sync
+  exception is the old #19 question — decided then, on #16's latency data, never blanket.
+- **Routing follows the registry** (`claimed_by` → owner); a mis-routed call (stale view during a
+  steal) is forwarded or refused with the fresh owner — and even a successfully mis-processed
+  one cannot commit, thanks to the `ownership_version` fence.
+
+Sequencing: activations and their direct-response door are optimizations with zero correctness
+weight, switchable per actor type (`mailbox.activations: true`?) — they can land any time after
+the lanes work, and the D2 revisit trigger (rehydration p99 at peak) tells us when they *must*.
 
 ## 4. Decisions surfaced
 
