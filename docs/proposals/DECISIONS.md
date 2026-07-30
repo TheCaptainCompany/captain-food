@@ -9,6 +9,15 @@ holds the queue. If a decision is not here, it is not blocking anything.
 
 Last reconciled: **2026-07-28** · 12 proposals `Proposed` · **66 open decisions** (PROP-004616's six and PROP-120931's five both closed, both proposals `Approved`; PROP-032306 added 2026-07-30 with five open of seven — §11)
 
+> **2026-07-30 — the actor-runtime set is `Approved`** (product owner, in-session:
+> *"we are at the same page, we can build it now"*; ADR-20260730-231500):
+> [PROP-20260728-135632 "Aggregate state as spec"](PROP-20260728-135632-aggregate-state-as-spec.md) (D1–D5),
+> [PROP-20260728-152752 "The write path becomes an actor mailbox"](PROP-20260728-152752-actor-mailbox-write-path.md) (D1–D7),
+> [PROP-20260730-230803 "Projection runtime"](PROP-20260730-230803-projection-runtime-batched-partitioned.md) (D1–D3)
+> — all recommended options stand; one approved-by-default flag with an open veto window:
+> `messages.yaml` as the third payload catalog. Build starts at
+> [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s foundation slice.
+
 ---
 
 ## How to decide

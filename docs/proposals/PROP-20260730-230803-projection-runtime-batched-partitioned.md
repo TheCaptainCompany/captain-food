@@ -1,6 +1,6 @@
 # PROP-20260730-230803 — Projection runtime: batched unit-of-work commits, business-key partitioned lanes, spec-declared targets
 
-- **Status**: Proposed
+- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D3 recommended options stand; ADR-20260730-231500
 - **Date**: 2026-07-30
 - **Tracking issue**: [#267 "Projection runtime: batched unit-of-work commits, business-key partitioned lanes, spec-declared targets (Postgres / Redis)"](https://github.com/TheCaptainCompany/captain-food/issues/267)
 - **Companion**: [PROP-20260728-152752 "The write path becomes an actor mailbox"](PROP-20260728-152752-actor-mailbox-write-path.md)

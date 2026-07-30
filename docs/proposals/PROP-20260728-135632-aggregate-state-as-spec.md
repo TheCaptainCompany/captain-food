@@ -1,6 +1,6 @@
 # PROP-20260728-135632 — Aggregate state as spec: declared, event-lineaged, and the ground `requires:` stands on
 
-- **Status**: Proposed
+- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D5 recommended options stand; ADR-20260730-231500
 - **Date**: 2026-07-28
 - **Tracking issue**: [#235 "Write-side per-instance authorization: actors must check the acting principal against the instance (and stop trusting claimed roles)"](https://github.com/TheCaptainCompany/captain-food/issues/235)
 - **Extends / corrects**: [PROP-20260726-171500 "Write-side per-instance authorization"](PROP-20260726-171500-write-side-per-instance-authorization.md) — the product-owner correction on

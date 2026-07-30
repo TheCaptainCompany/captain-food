@@ -3,6 +3,19 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-30. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-07-30 — the actor-runtime redesign is APPROVED and in build (ADR-20260730-231500).**
+> Three proposals approved in-session by the product owner (*"we can build it now"*):
+> **PROP-20260728-135632** (aggregate state as spec: declared `state:` lineage, generated
+> `apply`/`fold` ON the actor, `requires` acting/claims), **PROP-20260728-152752** (the write path
+> becomes an actor mailbox: `inbound_messages` replaces `command_journal` + `inbound_events`,
+> `(actor_type, actor_id)` addressing, partition leases + `ownership_version` fencing, typed
+> clients as the only door, reminders, activations), **PROP-20260730-230803** (projection runtime:
+> generated unit-of-work batches, `business_key` lanes, `target: redis` for ScopeMembership).
+> Realization starts with [#242 "Write path becomes an actor mailbox…"](https://github.com/TheCaptainCompany/captain-food/issues/242)'s
+> foundation slice (claimed, draft PR per protocol); [#235](https://github.com/TheCaptainCompany/captain-food/issues/235)
+> and [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) follow. Open veto flag:
+> `messages.yaml` as the third payload catalog.
+
 > 🚧 **2026-07-30 — pipeline isolated: build (auto) / deploy (manual) / migrate (after deploy) —
 > ADR-20260730-051500 (product-owner directive).** Render is paused (outbound bandwidth exhausted), which
 > exposed the hazard in migrate-on-green-ci: the enum-text schema conversion would have applied underneath
