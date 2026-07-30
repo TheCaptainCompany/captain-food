@@ -549,12 +549,49 @@ proposal, §2.3 there) and bumps its held version. Fold-on-every-message becomes
    `UNIQUE(stream_name, version)` rejects any write from a stale fold. **Correctness never
    depends on the cache** — a duplicate activation can waste memory for seconds; it cannot write.
 
+**The generated activation shell** (product-owner sketch, 2026-07-30 — Vernon's event-sourced
+entity shape; the base lives in framework code, "where does not matter"):
+
+```rust
+// GENERATED — one activation class per actor type
+pub struct ConversationActor {
+    state: ConversationState,        // the held fold
+    version: StreamVersion,          // last COMMITTED version
+    staged: Vec<ConversationEvent>,  // the sketch's `generatedEvents` — what the dispatch persists
+}
+impl ConversationActor {
+    pub fn send(&mut self, msg: Envelope<PostMessage>) -> Result<(), DomainError> {
+        self.requires(&msg)?;                       // generated acting/claims (companion D4)
+        // ... decision logic reads self.state ...
+        self.apply_events([MessagePosted { .. }]);  // stage + apply eagerly
+        Ok(())
+    }
+    fn apply_events(&mut self, events: Vec<ConversationEvent>) {   // framework base
+        for e in &events {
+            self.state = Conversation::apply(self.state, e);       // companion §2.3, same fold
+        }
+        self.staged.extend(events);
+    }
+}
+// dispatch: drain `staged` into the §3.4 four-effect transaction
+//   commit OK  -> activation keeps its state, version advances
+//   any failure -> EVICT the activation (dirty state must not survive a failed persist)
+```
+
+The per-event `Apply` overloads of the sketch (`State.MessageCount++` on `MessagePosted`) ARE the
+companion proposal's generated `apply(state, event)` methods — one fold implementation shared by
+rehydration and by the hot path.
+
 **Cache discipline** (each rule earns its place):
 
-- **Apply-after-commit**: the activation mutates its held state ONLY after the §3.4
-  four-effect transaction commits — decide on the held state, commit, then `apply` the decided
-  events and advance the held version. A rollback (fence, conflict, crash) leaves the activation
-  untouched or evicted, never half-applied.
+- **The invariant, stated once**: *the state the NEXT message sees must equal the fold of
+  COMMITTED events.* Two compliant strategies: **eager-apply + evict-on-failure** ✅ (the sketch's
+  shape, chosen: `ApplyEvents` mutates the working state as it stages, so logic later in the same
+  handler — and the next decided event of a multi-event decision — reads up-to-date state; a
+  failed commit evicts the activation, discarding the dirty state — the Akka-persistence
+  "restart on persist failure" rule), or apply-after-commit (stricter, no eviction needed, but
+  the handler reads stale state mid-decision). Either way, a rollback can never leave a
+  half-applied activation alive.
 - **Eviction**: version conflict on append → evict and refold (the state was stale — the one
   signal that is never wrong); lease lost / `ownership_version` bump observed → drop ALL
   activations of that partition; idle timeout + LRU bound → passivate (the Proto.Actor

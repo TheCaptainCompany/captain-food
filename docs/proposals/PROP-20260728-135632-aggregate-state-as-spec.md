@@ -77,8 +77,8 @@ where it runs (write-side rehydration vs read model) and in needing two modes pr
       type: <$ref scalars.yaml | boolean | …>   # same typing rules as projection columns
       from: [ <event(-property) $refs> ]        # the lineage: which event property fills it
       nullable: true                            # optional: absent until a carrying event arrives
-      mode: latest | flag | set                 # optional: inferred from the lineage shape
-      removedBy: [ <event-property $refs> ]     # set mode only: the removal lineage
+      mode: latest | flag | set | count         # optional: inferred from the lineage shape
+      removedBy: [ <event-property $refs> ]     # set/count modes: the removal/decrement lineage
       note: "…"                                 # optional: which invariant this field serves
 ```
 
@@ -92,6 +92,10 @@ Fold modes — **the same inference rule as projections** (`mode` optional, deri
 - **`set`** (explicit): an accumulating set. `of:` gives the element type (one `$ref`, or a named
   map for composite elements — element properties are read off the carrying event's payload by
   name); `from:` adds, `removedBy:` removes.
+- **`count`** (explicit; added 2026-07-30 — the product owner's `messageCount++` example): an
+  integer incremented once per carrying-event occurrence (`from` refs are whole events);
+  `removedBy:` decrements. Where a `set` already exists, prefer its size; `count` is for tallies
+  whose members need not be retained.
 
 `status` is **deliberately not declarable in `state:`** — it already has a source of truth, the
 `lifecycle:` block. The generated state struct includes `status` whenever a lifecycle is declared;
