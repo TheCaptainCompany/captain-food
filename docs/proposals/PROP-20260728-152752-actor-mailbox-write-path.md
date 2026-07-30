@@ -661,9 +661,37 @@ the response bus. Rules that keep it honest:
   steal) is forwarded or refused with the fresh owner — and even a successfully mis-processed
   one cannot commit, thanks to the `ownership_version` fence.
 
-Sequencing: activations and their direct-response door are optimizations with zero correctness
-weight, switchable per actor type (`mailbox.activations: true`?) — they can land any time after
-the lanes work, and the D2 revisit trigger (rehydration p99 at peak) tells us when they *must*.
+**Transport independence — the actor runtime never imports the journal** (product-owner
+directive, 2026-07-30): the activation, its micro-mailbox, the single-flight/ordering/batching
+discipline depend on TWO ports only — `Mailbox` (claim / stage / complete) and `PlacementLookup`
+(partition → owner) — and `inbound_messages` + `mailbox_partitions` are *one adapter pair* behind
+them. If exchange volume ever makes DB-stored messages too expensive, the transport swaps behind
+the ports (D2's valve, now structural): the queue-management discipline — the expensive part to
+get right — moves nowhere.
+
+**Batched turns + the memento** (product-owner directive, 2026-07-30 — chatty-commit avoidance):
+the activation drains up to K messages per turn and commits ONCE:
+
+1. `working = held_state.clone()` — the **memento is the untouched held state** (this is
+   apply-after-commit's payoff: restore = discard, nothing to undo);
+2. for each message, in order: `requires` → decide against `working` → apply the staged events
+   to `working` (so message 2 sees message 1's effects);
+3. ONE §3.4 transaction: all appends (expected version advances by the staged count), all status
+   flips, all reminder effects, one checkpoint move — one fsync instead of K;
+4. commit OK → `held = working`, publish each response post-commit; failure → discard `working`,
+   held state untouched.
+
+Failure rules that keep batches honest: **a rejection is an outcome, not a failure** — a
+`NotAParticipant` inside the batch completes that row REJECTED and the batch continues; a
+**technical failure aborts the whole batch**, and the worker falls back to serial (batch of 1) to
+isolate the poison message rather than retrying the batch forever. K is the same per-drain budget
+as the micro-mailbox discipline — it caps latency contribution, memento size, and blast radius at
+once.
+
+Sequencing: activations, their direct-response door, and batched turns are optimizations with
+zero correctness weight, switchable per actor type (`mailbox.activations: true`?) — they can land
+any time after the lanes work, and the D2 revisit trigger (rehydration p99 at peak) tells us when
+they *must*.
 
 ## 4. Decisions surfaced
 
@@ -798,6 +826,22 @@ the claim/checkpoint/lease mechanics, so the saga that moves money is never the 
 | **Lease rows in the partition registry** (`mailbox_partitions.claimed_by / lease_until / ownership_version`, heartbeat renewal; the checkpoint table doubles as the lease table) ✅ recommended | No coordinator, no new infrastructure; crash → lease expiry → automatic takeover by survivors; scaling out = new instance leases whatever is free; the registry is also the ops surface (§6 monitor reads it); resolves #193's single-flight need for this path | Lease/heartbeat tuning (too short = flapping, too long = slow takeover — start 30s lease / 10s heartbeat); the steal window means bounded dual belief — rendered harmless by the `ownership_version` fence in the completion transaction (§3.1), never by trust in the clock |
 | Static ranges from deployment config (env: `MAILBOX_RANGES=Order:0-49`) | Dead simple; deterministic | No failover — a dead instance's range goes dark until a human redeploys; config drift between replicas is silent double-ownership risk (caught only by SKIP LOCKED and the version check) |
 | Advisory locks taken per pass, no standing ownership | No lease bookkeeping at all | With 100 partitions × several types, every pass is a lock-shopping spree; ownership churn defeats the hot-aggregate cache (D2's evolution valve) which needs stable placement |
+
+### D7 — Where does a caller resolve partition → owner address? (product-owner question, 2026-07-30)
+
+The *partition itself* needs no lookup anywhere: `hash(actor_id) mod N` is computed client-side
+from the frozen hash and the DSL-generated `N` — compile-time constants. The decision is only
+about resolving the partition's **current owner address** (the §3.5 direct-call door).
+
+| Option | Pros | Cons |
+|---|---|---|
+| **`mailbox_partitions` is the ONLY truth; callers read it through a `PlacementLookup` port with a cache in front (in-process cache at V0; Redis as the cache implementation when multi-instance call rates demand)** ✅ recommended | One truth, and it is the one already transactional with the lease and the `ownership_version` fence; cache staleness is *benign by construction* — a mis-routed call is forwarded/refused and a stale commit is fenced, so the cache may be lazy (TTL ≈ heartbeat, invalidate on ownership change); zero new infrastructure until metrics ask | Registry reads on cache misses hit Postgres (bounded: one row per partition, refreshed per heartbeat interval) |
+| Redis as the AUTHORITATIVE address registry (the product-owner suggestion, assessed) | Fast reads, pub/sub invalidation for free; familiar Event-Hubs-checkpoint-store shape | **A second truth that is wrong during every steal**: ownership changes commit in Postgres (lease + fence), and Redis learns later — reintroducing exactly the dual-authority window §3.1 fenced, but now in the routing layer; a second stateful system to run/secure/pin to the EU (ADR-0042 posture); coherence code (PG→Redis propagation) is new surface with no correctness payoff, since the fence must stay in PG anyway |
+| Gossip the placement between workers (Proto.Actor's shape) | No store on the read path | D2.1's verdict already: convergence-oriented, not safety-oriented; we would be rebuilding the weakest part of the framework we declined |
+
+The port is the decision that matters: `PlacementLookup` hides whether the answer came from the
+registry, an in-process cache, or Redis — swapping implementations is a config change, not a
+design change.
 
 ## 5. Sequence diagram — PostMessage through the mailbox
 
