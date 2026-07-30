@@ -3,6 +3,17 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-30. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-07-30 — pipeline isolated: build (auto) / deploy (manual) / migrate (after deploy) —
+> ADR-20260730-051500 (product-owner directive).** Render is paused (outbound bandwidth exhausted), which
+> exposed the hazard in migrate-on-green-ci: the enum-text schema conversion would have applied underneath
+> an old binary no deploy could replace (the first attempt already failed on disk space —
+> [#264 "fix: split the enum-text migration so it fits production's disk"](https://github.com/TheCaptainCompany/captain-food/pull/264)
+> replaced it with the lean split set). `build-image` now only pushes to GHCR; the NEW manual `deploy`
+> workflow is the only thing that touches Render (digest-pinned, `tag` input for rollback); `db-migrate`
+> follows `deploy` instead of `ci`. **The enum-text release is merged but NOT live**: once the Render
+> workspace is restored — (1) dispatch `deploy` (tag `sha-db738ad` unless a newer image exists), (2)
+> `db-migrate` follows automatically and applies `20260730043000`–`0436`, (3) run `prod-smoke`.
+
 > 📋 **2026-07-30 — Uber Eats Marketplace is a NEW integration, and it is specified now rather than
 > discovered later ([#260](https://github.com/TheCaptainCompany/captain-food/issues/260),
 > PROP-20260730-032306, ADR-20260730-032306).**

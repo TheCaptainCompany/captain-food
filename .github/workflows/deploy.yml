@@ -1,0 +1,83 @@
+# Deploy a previously-built image to Render — MANUAL, and the ONLY workflow that touches Render
+# (ADR-20260730-051500; splits the old build-image.yml build-and-deploy job).
+#
+# WHY manual: Render can be unable to receive a deploy (workspace paused, outbound bandwidth
+# exhausted, spend cap). When that happens nothing should auto-run against production — neither the
+# deploy nor the schema migration that follows it. Publishing images stays automatic (build-image.yml);
+# RUNNING one is a deliberate human dispatch of this workflow.
+#
+# Ordering (deploy → migrate): db-migrate.yml triggers on this workflow's completion, so the schema
+# is never converted for a binary that cannot arrive. The app's /health schema-version gate holds the
+# new instance (503) until the migration lands, so the rollout converges regardless of which of the
+# two finishes first — but neither starts unless a deploy was intentionally dispatched.
+#
+# The image reference: by default the sha-<short> tag of the commit this workflow runs on (i.e. the
+# main HEAD you dispatch it from, which build-image.yml pushed after that commit's green ci). Pass
+# `tag` to deploy a different published tag (e.g. a previous sha-XXXXXXX to roll back). Either way the
+# deploy is pinned to the tag's DIGEST — content-addressed, cryptographically immutable (a tag can be
+# repointed, a digest cannot).
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published image tag to deploy (default: sha-<short> of the dispatched commit)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/thecaptaincompany/captain-food
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to GHCR (read — resolve the tag's digest)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the image reference to its immutable digest
+        id: resolve
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          TAG="${TAG_INPUT:-sha-${GITHUB_SHA:0:7}}"
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          if [ -z "$DIGEST" ]; then
+            echo "::error::could not resolve ${IMAGE}:${TAG} — was it published by build-image for a green ci run?"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "resolved ${IMAGE}:${TAG} → ${DIGEST}"
+
+      - name: Trigger Render to deploy the pinned image (by immutable digest)
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::error::repo secret RENDER_DEPLOY_HOOK_URL is not set — Render was not told to deploy"
+            exit 1
+          fi
+          # Deploy by DIGEST — the `imgURL` query param tells the Render image-backed deploy hook the
+          # EXACT image to run (Render docs: "Deploy hooks for image-backed services").
+          REF="${IMAGE}@${DIGEST}"
+          curl -fsS -X POST "${HOOK}&imgURL=${REF}" >/dev/null
+          echo "✓ triggered Render deploy of ${REF} (${{ steps.resolve.outputs.tag }})"
+          echo "db-migrate follows automatically on this workflow's completion."
