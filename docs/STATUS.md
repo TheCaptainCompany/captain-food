@@ -1,7 +1,41 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-29. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-30. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 📋 **2026-07-30 — Uber Eats Marketplace is a NEW integration, and it is specified now rather than
+> discovered later ([#260](https://github.com/TheCaptainCompany/captain-food/issues/260),
+> PROP-20260730-032306, ADR-20260730-032306).**
+> The product owner registered **Captain Food Restaurant** on the Uber **Eats Marketplace** suite and
+> accepted the API Licensing Agreement with all seven APIs — a real commercial commitment to an
+> integration the specs did not contain. Note the three distinct Uber concerns the repo now holds:
+> Uber **Direct** = delivery (`crates/adapters/uber_direct`, ✅ #57); Uber Eats **price comparison** =
+> display only (ADR-0022/0023/0024/0025/0030, ✅); Uber Eats **Marketplace** = order centralization +
+> menu sync (📋 new, nothing built).
+> **Decided** (ADR-20260730-032306): app auth is **asymmetric** (application id + key id + private key,
+> retiring `UBER_DIRECT_CLIENT_SECRET`/`SCOPE` and its token manager); private keys stored **base64**
+> so a mangled PEM fails validation rather than first-signature; webhook HMAC accepts **either** of two
+> signing keys so rotation never drops an order notification; **two Uber Direct organizations** split by
+> acquisition surface (storefront first); delivery channels keyed `uber_direct:<surface>` so an
+> unconfigured surface is an *unwired channel* that times out and escalates rather than dispatching on
+> the wrong org's credentials; per-tenant values (Uber store ids, merchant consent) live in
+> `uber_eats_connections`, never in configuration.
+> **This forces two things into the open.** The catalog would flow **outbound** for the first time
+> (today it only ever flows in, HubRise → `ImportCatalog`), raising menu ownership and price parity —
+> restaurants mark Uber prices up to absorb Uber's commission, which is exactly what ADR-0024's
+> comparison coefficients assume. And an Uber-originated order **was already paid, on Uber's rails**,
+> while `OrderPlaced` implies a Captain PaymentIntent — a money assumption, so it pairs with the payout
+> posture in DECISIONS §1.
+> **Contractual, not optional**: the Order API clause makes the Provider *"wholly responsible for
+> correctly relaying all information … including but not limited to allergy information and special
+> instructions"* — with EU FIC 1169/2011 that becomes a `rules.yaml` rule with a test. The Reporting API
+> needs a per-restaurant consent record. And licensed data serves the merchant *on Uber*: it must never
+> seed the Captain marketplace catalog.
+> **Open** (DECISIONS §11): D4 order representation · D5 menu ownership/parity · **D7 — the agreement
+> was signed by *Caring Hope Foundation* (RNA W372020229, a loi-1901 association), not
+> `TheCaptainCompany`; an API licence follows the entity, so this needs legal input.** Nothing is built
+> yet: no adapter, no `UBER_EATS_*` keys declared (deliberately — a declared key with no reader is drift
+> too). Five `UBER_EATS_*` repository secrets exist on the GitHub side, `_TEST`-suffixed.
 
 > ✅ **2026-07-29 — the observability contracts finally leave the repo: OpenTelemetry to Honeycomb EU
 > ([#191](https://github.com/TheCaptainCompany/captain-food/issues/191), PROP-20260726-170500 D1+D2,
