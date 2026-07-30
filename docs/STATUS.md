@@ -8,8 +8,10 @@
 > egress (Render bandwidth + Supabase DB egress) is the structural problem; colocating on an EU OVH
 > VPS (traffic unmetered by policy) removes both meters. Start VPS-1, upgrade in-place on evidence;
 > Premium backup + nightly off-box `pg_dump`. **Scaleway is excluded** (product-owner directive,
-> prior security incident) — do not re-propose it. Migration sequenced AFTER the pending enum-text
-> release; nothing provisioned yet.
+> prior security incident) — do not re-propose it. Migration plan: `PROP-20260730-234500` +
+> [#269 "Migrate hosting to an OVH VPS: app + Postgres colocated, Supabase kept for identity only"](https://github.com/TheCaptainCompany/captain-food/issues/269)
+> — D4 recommends going straight to the VPS (the enum-text set applies on the new box first; Render
+> is never revived). Nothing provisioned yet; D1–D5 await product-owner choices.
 
 > 🚧 **2026-07-30 — bandwidth mitigation: `live.captain.food` answers `204 No Content` on every
 > path — ADR-20260730-135741 (product-owner directive).** The marketplace host's data-full SSR was
