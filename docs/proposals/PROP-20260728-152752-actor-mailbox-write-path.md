@@ -229,7 +229,17 @@ this window during rebalancing. What must never exist is dual *authority* — tw
 to **commit** work for the same partition. Two mechanisms close it:
 
 1. **The epoch fence** (Event Hubs calls it the *epoch*; Kafka, the *generation*; the literature,
-   a *fencing token*). `mailbox_partitions` carries an `epoch bigint` incremented on **every
+   a *fencing token*).
+
+   > **"Epoch" here is NOT a date** — no relation to the Unix epoch (product-owner clarification,
+   > 2026-07-30). It is an **ownership counter**: an integer the database increments each time the
+   > partition changes hands (created = 0, A claims = 1, B steals = 2, …). Bigger = more recent
+   > owner. A counter, not a timestamp, on purpose: node clocks can skew, and only an integer
+   > equality can sit as an atomic guard inside the completion UPDATE. Hotel-key-card analogy:
+   > re-coding the lock at check-in — the previous guest still holds a card, but the door no
+   > longer opens; the registry row is the door, the epoch is the lock code.
+
+   `mailbox_partitions` carries an `epoch bigint` incremented on **every
    ownership change** — a steal, a takeover of an expired lease, any claim. A worker memorizes the
    epoch it acquired. The completion transaction — the SAME one that appends `domain_events` and
    flips the message row — includes the guard
