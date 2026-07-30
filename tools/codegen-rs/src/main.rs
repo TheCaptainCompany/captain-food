@@ -2998,6 +2998,7 @@ fn table_sql_type(ty: &str) -> &'static str {
         "text" => "TEXT",
         "integer" => "INTEGER",
         "bigint" => "BIGINT",
+        "smallint" => "SMALLINT",   // mailbox partition ordinal (inbound_messages, #242)
         "boolean" => "BOOLEAN",
         "timestamptz" => "TIMESTAMPTZ",
         "jsonb" => "JSONB",

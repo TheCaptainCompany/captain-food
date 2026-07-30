@@ -1788,6 +1788,113 @@ impl From<InboundEventStatus> for ds::InboundEventStatus {
     }
 }
 
+/// What kind of thing one inbound_messages row is — the request/report split as a column (PROP-20260728-152752 §2): COMMAND = a request the actor may reject (feeds the operationStatus surface); EVENT = an adapted external fact that already happened (nothing to reject — the aggregate decides what follows); MESSAGE = a plain note, typically a reminder to self (§3.4) — neither rejectable nor a business fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum InboundMessageKind {
+    #[graphql(name = "COMMAND")]
+    COMMAND,
+    #[graphql(name = "EVENT")]
+    EVENT,
+    #[graphql(name = "MESSAGE")]
+    MESSAGE,
+}
+impl From<ds::InboundMessageKind> for InboundMessageKind {
+    fn from(v: ds::InboundMessageKind) -> Self {
+        match v {
+            ds::InboundMessageKind::COMMAND => Self::COMMAND,
+            ds::InboundMessageKind::EVENT => Self::EVENT,
+            ds::InboundMessageKind::MESSAGE => Self::MESSAGE,
+        }
+    }
+}
+impl From<InboundMessageKind> for ds::InboundMessageKind {
+    fn from(v: InboundMessageKind) -> Self {
+        match v {
+            InboundMessageKind::COMMAND => Self::COMMAND,
+            InboundMessageKind::EVENT => Self::EVENT,
+            InboundMessageKind::MESSAGE => Self::MESSAGE,
+        }
+    }
+}
+
+/// Lifecycle of a mailbox row (PROP-20260728-152752 §2/§3.4). Immediate rows are born RECEIVED; scheduled rows (reminders / scheduled operations) are born SCHEDULED with NO position and are PROMOTED to RECEIVED with a fresh position when due — or completed CANCELLED before it. Terminal outcomes merge the two legacy vocabularies: SUCCEEDED / REJECTED (business invariant, {code, context} in `error`) / FAILED (technical) from the command journal; IGNORED (the aggregate decided nothing changed) / DUPLICATE (the exact fact was already in the stream) from the inbound-events inbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum InboundMessageStatus {
+    #[graphql(name = "SCHEDULED")]
+    SCHEDULED,
+    #[graphql(name = "CANCELLED")]
+    CANCELLED,
+    #[graphql(name = "RECEIVED")]
+    RECEIVED,
+    #[graphql(name = "SUCCEEDED")]
+    SUCCEEDED,
+    #[graphql(name = "REJECTED")]
+    REJECTED,
+    #[graphql(name = "FAILED")]
+    FAILED,
+    #[graphql(name = "IGNORED")]
+    IGNORED,
+    #[graphql(name = "DUPLICATE")]
+    DUPLICATE,
+}
+impl From<ds::InboundMessageStatus> for InboundMessageStatus {
+    fn from(v: ds::InboundMessageStatus) -> Self {
+        match v {
+            ds::InboundMessageStatus::SCHEDULED => Self::SCHEDULED,
+            ds::InboundMessageStatus::CANCELLED => Self::CANCELLED,
+            ds::InboundMessageStatus::RECEIVED => Self::RECEIVED,
+            ds::InboundMessageStatus::SUCCEEDED => Self::SUCCEEDED,
+            ds::InboundMessageStatus::REJECTED => Self::REJECTED,
+            ds::InboundMessageStatus::FAILED => Self::FAILED,
+            ds::InboundMessageStatus::IGNORED => Self::IGNORED,
+            ds::InboundMessageStatus::DUPLICATE => Self::DUPLICATE,
+        }
+    }
+}
+impl From<InboundMessageStatus> for ds::InboundMessageStatus {
+    fn from(v: InboundMessageStatus) -> Self {
+        match v {
+            InboundMessageStatus::SCHEDULED => Self::SCHEDULED,
+            InboundMessageStatus::CANCELLED => Self::CANCELLED,
+            InboundMessageStatus::RECEIVED => Self::RECEIVED,
+            InboundMessageStatus::SUCCEEDED => Self::SUCCEEDED,
+            InboundMessageStatus::REJECTED => Self::REJECTED,
+            InboundMessageStatus::FAILED => Self::FAILED,
+            InboundMessageStatus::IGNORED => Self::IGNORED,
+            InboundMessageStatus::DUPLICATE => Self::DUPLICATE,
+        }
+    }
+}
+
+/// Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE, HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and which gains EXTERNAL for adapted facts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum InboundMessageChannel {
+    #[graphql(name = "GRAPHQL")]
+    GRAPHQL,
+    #[graphql(name = "WORKER")]
+    WORKER,
+    #[graphql(name = "EXTERNAL")]
+    EXTERNAL,
+}
+impl From<ds::InboundMessageChannel> for InboundMessageChannel {
+    fn from(v: ds::InboundMessageChannel) -> Self {
+        match v {
+            ds::InboundMessageChannel::GRAPHQL => Self::GRAPHQL,
+            ds::InboundMessageChannel::WORKER => Self::WORKER,
+            ds::InboundMessageChannel::EXTERNAL => Self::EXTERNAL,
+        }
+    }
+}
+impl From<InboundMessageChannel> for ds::InboundMessageChannel {
+    fn from(v: InboundMessageChannel) -> Self {
+        match v {
+            InboundMessageChannel::GRAPHQL => Self::GRAPHQL,
+            InboundMessageChannel::WORKER => Self::WORKER,
+            InboundMessageChannel::EXTERNAL => Self::EXTERNAL,
+        }
+    }
+}
+
 /// State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum PaymentProcessStatus {
