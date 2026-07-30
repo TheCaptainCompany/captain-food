@@ -3,6 +3,15 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-30. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-07-30 — bandwidth mitigation: `live.captain.food` answers `204 No Content` on every
+> path — ADR-20260730-135741 (product-owner directive).** The marketplace host's data-full SSR was
+> being polled by the external uptime monitor, burning Render bandwidth *and* Supabase egress per
+> probe; switching the monitor to HEAD does not help server-side (axum runs the same handler and
+> strips only the body), so the short-circuit is in `crates/server/src/hosts.rs` before any data
+> resolution. Repo audit: no workflow or crate monitors that host (`prod-smoke` → `api.` + tenant;
+> keep-warm is documented as `/ping`). Restore = remove the `HostRoute::Live` arm + its test once
+> the hosting/egress decision lands. `restos`/`riders`/tenant storefronts unchanged.
+
 > 🚧 **2026-07-30 — pipeline isolated: build (auto) / deploy (manual) / migrate (after deploy) —
 > ADR-20260730-051500 (product-owner directive).** Render is paused (outbound bandwidth exhausted), which
 > exposed the hazard in migrate-on-green-ci: the enum-text schema conversion would have applied underneath

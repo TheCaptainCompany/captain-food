@@ -170,9 +170,16 @@ async fn tenant_page(
 
 async fn render(route: HostRoute, ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str, locale: &str) -> Response {
     match route {
+        // TEMPORARY (ADR-20260730-135741, product-owner directive): the marketplace host answers
+        // `204 No Content` on every path, BEFORE any SSR/data resolution — each render of the
+        // discovery screens pulls the cross-restaurant reads from the database, and that traffic
+        // exhausted the hosting plan's outbound bandwidth. Note a HEAD probe does NOT avoid this:
+        // axum runs the same handler for HEAD and only strips the body, so the short-circuit must
+        // live here, not in the monitor's verb. Remove this arm to restore the marketplace.
+        HostRoute::Live => StatusCode::NO_CONTENT.into_response(),
         // The audience SDUI surfaces: SSR the matched screen WITH live data (web::router mirrors
         // classify_host's audience mapping — see its module docs).
-        HostRoute::Live | HostRoute::Restos | HostRoute::Riders => {
+        HostRoute::Restos | HostRoute::Riders => {
             match app_page(ssr, raw_host, path, locale).await {
                 Some(html) => Html(html).into_response(),
                 None => (StatusCode::NOT_FOUND, "no such page").into_response(),
@@ -373,6 +380,18 @@ mod tests {
         // No database at all (dev): same fail-open behaviour.
         let response = tenant_page(&TenantLookup(None), &ssr(), "any-slug", "any-slug.captain.food", "/", "fr").await;
         assert!(body_of(response).await.contains("data-hydrate=\"restaurant\""));
+    }
+
+    /// The bandwidth mitigation (ADR-20260730-135741): the marketplace host serves NO bytes — no
+    /// SSR, no data resolution — on any path, so neither a monitor's GET nor its HEAD (axum runs
+    /// the handler either way) can pull the discovery reads.
+    #[tokio::test]
+    async fn the_live_host_answers_no_content_on_every_path() {
+        for path in ["/", "/search", "/anything"] {
+            let response = render(HostRoute::Live, &ssr(), "live.captain.food", path, "fr").await;
+            assert_eq!(response.status(), StatusCode::NO_CONTENT, "{path}");
+            assert!(body_of(response).await.is_empty(), "{path}: a 204 must carry no body");
+        }
     }
 
     #[test]
