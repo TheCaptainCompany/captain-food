@@ -55,9 +55,9 @@ the two current tables there):
 
 | column | type | meaning |
 |---|---|---|
-| `position` | `bigint` from ONE sequence, unique | the checkpoint/consumption axis — a single total order over every write intent |
+| `position` | `bigint` from ONE sequence, unique, NULL until due for scheduled rows | the checkpoint/consumption axis — assigned at insert for immediate rows, at PROMOTION for scheduled ones (§3.4) |
 | `message_id` | `uuid` PK | idempotency identity: the client's acceptance handle (commands), UUIDv5 of `(source, external_id)` (inbound facts) |
-| `kind` | enum `COMMAND` \| `EVENT` | can the sender be told "no"? (the CLAUDE.md request/report split, now a column) |
+| `kind` | enum `COMMAND` \| `EVENT` \| `MESSAGE` | can the sender be told "no"? (the request/report split, now a column) — `MESSAGE` = a plain note, typically a reminder to self (§3.4): neither rejectable nor a business fact |
 | `actor_type` | text | the addressed actor — **validated against the `actors.yaml` catalog** |
 | `actor_id` | `uuid` | the addressed instance (= stream id) |
 | `partition` | `smallint` | `hash(actor_id) mod N` per actor type — stamped at insert so consumption filters cheaply |
@@ -65,7 +65,8 @@ the two current tables there):
 | `payload` | `jsonb` | the commands.yaml / events.yaml body |
 | `channel` | enum | GRAPHQL \| WORKER \| EXTERNAL |
 | `user_id`, `user_type`, `correlation_id`, `cause_id` | envelope | ADR-0041 — the acting principal and causality chain |
-| `status` | enum | `RECEIVED` → `SUCCEEDED` \| `REJECTED` \| `FAILED` \| `IGNORED` \| `DUPLICATE` (merges both tables' vocabularies) |
+| `status` | enum | `SCHEDULED` → (`CANCELLED` \| promotion) → `RECEIVED` → `SUCCEEDED` \| `REJECTED` \| `FAILED` \| `IGNORED` \| `DUPLICATE` (merges both tables' vocabularies + the reminder lifecycle §3.4) |
+| `scheduled_at` | `timestamptz`, NULL | reminders/scheduled operations: eligible only once due (§3.4) |
 | `error`, `received_at`, `completed_at` | | rejection payload + timestamps |
 
 What each old table contributed: `command_journal` brings the acceptance-first contract
@@ -112,6 +113,35 @@ One correctness detail the stamping forces: the hash must be **stable and docume
 default hasher (SipHash with per-process random keys) is disqualified by design; use a fixed,
 boring function over the uuid bytes (e.g. CRC32C, or the uuid's low 64 bits) `mod N`, named in the
 generated code and never changed without a keyspace migration.
+
+### 2.1 The typed actor client — the ONLY door to the mailbox (product-owner directive, 2026-07-30)
+
+No layer touches `inbound_messages` directly, in either direction — not GraphQL, not the adapter
+ACLs, not process managers. Codegen emits **one strongly-typed client per actor type** (it has
+everything it needs in `actors.yaml`: `receives` → the send overloads, `identity` → the
+constructor parameters, `mailbox.partitions` + the frozen hash → the partition stamp):
+
+```rust
+// generated from actors.yaml — the clean entry point for the client layer
+let conversation = ConversationClient::for_order(order_id);      // identity params, strongly typed
+conversation.send(Envelope::new(post_message, principal)).await?;        // -> ACCEPTED {message_id}
+conversation.schedule(Envelope::new(post_message, principal), at).await?; // -> SCHEDULED (§3.4)
+```
+
+- **`send` knows every column** — kind (from the message's catalog file), `actor_type`,
+  `actor_id` (extracted via the declared `identity`), `partition` (the frozen hash), envelope
+  fields, payload serialization, the idempotent-insert semantics (PK replay / payload-hash
+  conflict). The caller cannot fill a column wrong because the caller cannot see columns.
+- **The inbox is enforced by the type system**: a `ConversationClient` exposes
+  `send(Envelope<PostMessage>)`, `send(Envelope<EscalateToAdmin>)`, … and nothing else — sending
+  a message the actor does not `receive` is a **compile error**, not a runtime rejection.
+- **Status reads are symmetric**: a generic `OperationStatusClient` (`status(message_id)` /
+  `watch(message_id)`) backs the `operationStatus` query and the `operationStatusChanged`
+  subscription — nobody SELECTs the table either.
+- A GraphQL resolver collapses to three generated lines: build the client from the input's
+  identity, `send`, return the acceptance. The worker-side channels (HubRise enricher, SIRENE
+  ACL, PM emissions) use the same clients with `channel: WORKER | EXTERNAL` — one insertion
+  logic, centralized, generated.
 
 ## 3. Consumption: partitions, ordering, checkpoint
 
@@ -281,8 +311,8 @@ CREATE SEQUENCE inbound_messages_position_seq;
 
 CREATE TABLE inbound_messages (
     message_id      uuid        PRIMARY KEY,       -- idempotency identity (client handle | UUIDv5(source, external_id))
-    position        bigint      NOT NULL UNIQUE
-                                DEFAULT nextval('inbound_messages_position_seq'),
+    position        bigint      UNIQUE                -- NULL while SCHEDULED: assigned at insert for
+                                DEFAULT nextval('inbound_messages_position_seq'),  -- immediate rows, at PROMOTION when due (3.4)
     kind            text        NOT NULL,          -- 'COMMAND' | 'EVENT'
     actor_type      text        NOT NULL,          -- an actors.yaml actor (validated)
     actor_id        uuid        NOT NULL,          -- the addressed instance = stream id
@@ -295,7 +325,8 @@ CREATE TABLE inbound_messages (
     correlation_id  uuid        NOT NULL,
     cause_id        uuid            NULL,
     status          text        NOT NULL DEFAULT 'RECEIVED',
-                                -- RECEIVED -> SUCCEEDED | REJECTED | FAILED | IGNORED | DUPLICATE
+                                -- SCHEDULED -> (CANCELLED | RECEIVED) ; RECEIVED -> SUCCEEDED | REJECTED | FAILED | IGNORED | DUPLICATE
+    scheduled_at    timestamptz     NULL,          -- reminders / scheduled operations (3.4)
     error           jsonb           NULL,          -- {code, context} on REJECTED / FAILED
     received_at     timestamptz NOT NULL DEFAULT now(),
     completed_at    timestamptz     NULL
@@ -308,6 +339,10 @@ CREATE INDEX idx_inbound_messages_drain
 -- per-instance history: everything ever sent to one actor (support/debug)
 CREATE INDEX idx_inbound_messages_actor
     ON inbound_messages (actor_id, position);
+-- the scheduler index: due reminders awaiting promotion (3.4)
+CREATE INDEX idx_inbound_messages_due
+    ON inbound_messages (scheduled_at)
+    WHERE status = 'SCHEDULED';
 ```
 
 **`mailbox_partitions` — the registry** (NEW; one row per `(actor_type, partition)`, seeded from
@@ -416,6 +451,52 @@ Checkpoint = 18403 (largest position with *everything at or below it* terminal).
 `position > 18403 AND status = 'RECEIVED'` → finds 18404. When 18404 completes, the checkpoint
 jumps straight to 18405. A late-visible row *below* the checkpoint (the §3 anomaly) is what the
 periodic below-checkpoint audit exists for — expected count: 0.
+
+### 3.4 Reminders — an actor schedules a message to itself, the edge schedules an operation for later (product-owner directive, 2026-07-30)
+
+A **reminder is simply a mailbox row with a `scheduled_at`** — the actor's future self is just one
+more sender. This replaces bespoke timer machinery we already run (the delivery-offer timeout
+worker's ranked-walk ticks, the PM timer loops #193 worries about) with ONE mechanism, observable
+in SQL, riding the same ordering/lease/fence rails as everything else.
+
+- **The third `kind`: `MESSAGE`.** A reminder's content is not necessarily a command (nobody to
+  reject) nor an event (no fact occurred) — often it is a plain note to self
+  (`CheckPreparationDelay`). Scheduling itself is **orthogonal**: a `COMMAND` can also carry
+  `scheduled_at` (the client-facing `schedule(...)`), and `operationStatus` shows it `SCHEDULED`
+  until execution.
+- **Aggregate/PM API — pure, intent-based**: `remind(message, in: Duration)` /
+  `remind(message, at: DateTime)` do not insert anything; they **collect intents**, and `decide`
+  returns them alongside the events. The dispatch persists reminders **in the SAME transaction**
+  as the append and the completion — a decided reminder is exactly as durable as a decided event,
+  and the domain stays free of I/O.
+- **Lifecycle and the checkpoint (the subtle part)**: a future-dated row must neither hold the
+  checkpoint back for hours nor be missed beneath it. So a scheduled row is born
+  `status = SCHEDULED` **with `position = NULL`** — it does not exist on the consumption axis
+  yet. A cheap **promotion pass** (the due index: `scheduled_at <= now() AND status =
+  'SCHEDULED'`) stamps a **fresh `position = nextval(...)`** and flips the row `RECEIVED`.
+  Checkpoint semantics stay untouched, and a reminder due at 20:05 orders among the 20:05
+  traffic — which is what "later" means.
+- **Guarantees**: fires at-or-after `scheduled_at`, never before; accuracy = promotion cadence
+  (the poll safety net, plus an optional per-partition next-due wakeup); at-least-once like every
+  delivery — reminder handlers are idempotent like every other handler.
+- **Cancellation and replacement**: `remind` returns the `message_id`; for one-per-purpose
+  reminders derive it deterministically (`UUIDv5(actor_id, "prep-delay-check")`) so re-reminding
+  *replaces* (upsert of `scheduled_at`) and cancelling completes the row `SCHEDULED → CANCELLED`.
+  An aggregate whose situation resolves early (order marked READY) just cancels — or lets the
+  reminder fire and decides nothing (an `IGNORED` completion), both correct.
+
+**S8 — worked example.** `Order 5b1e…c421` is accepted at 19:50; the aggregate decides
+`OrderAccepted` **and** `remind(CheckPreparationDelay, in: 15 min)`:
+
+| message_id | position | kind | actor_type | message_type | scheduled_at | status |
+|---|---|---|---|---|---|---|
+| `eeee…0005` = UUIDv5(`5b1e…`, `prep-delay-check`) | **NULL** | MESSAGE | Order | CheckPreparationDelay | 20:05 | **SCHEDULED** |
+
+At 20:05 the promotion pass stamps `position = 19288`, status → `RECEIVED`; the Order-lane worker
+delivers it; the aggregate folds its stream and decides: kitchen already marked READY at 20:01 →
+nothing follows, row completes `SUCCEEDED` with no event — or still not ready →
+`OrderPreparationDelayed` appended (the operator alert the ETA promise needs), same one-transaction
+completion as any message.
 
 ## 4. Decisions surfaced
 
