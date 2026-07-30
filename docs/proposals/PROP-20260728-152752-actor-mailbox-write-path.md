@@ -142,6 +142,8 @@ conversation.schedule(Envelope::new(post_message, principal), at).await?; // -> 
   identity, `send`, return the acceptance. The worker-side channels (HubRise enricher, SIRENE
   ACL, PM emissions) use the same clients with `channel: WORKER | EXTERNAL` — one insertion
   logic, centralized, generated.
+- **Process managers get clients too** (D5): a PM that `receives:` a command is directly
+  addressable from GraphQL through its own generated client — an actor is an actor.
 
 ## 3. Consumption: partitions, ordering, checkpoint
 
@@ -622,13 +624,33 @@ durable `message_id` uniqueness gives unconditionally.
 | Pure watermark (`position` alone defines consumed) | Simplest mental model | A late-committing insert below the watermark is **silently never processed** — a paid-order message lost to a race is the exact failure CLAUDE.md calls the worst |
 | No checkpoint, status-scan only | No anomaly at all | Scans grow with table size until retention (#18) trims; the directive names the checkpoint explicitly |
 
-### D5 — Do process managers join the mailbox?
+### D5 — Process managers are first-class mailbox actors (amended 2026-07-30, product-owner directive)
 
-Yes, by shape — a PM is an actor with an inbox of events (`actors.yaml` already says so) — but
-**not in this change's scope**. Today PMs react in-process; moving their deliveries into
-`inbound_messages` (kind = EVENT, actor_type = the PM) unifies retries/observability and is the
-natural follow-up once the Order/Conversation lanes prove the mechanics. Recorded as a follow-up,
-not silently deferred.
+> *"All things said for the actors concern also the process manager — it's possible to call a
+> process manager directly from GraphQL if needed."*
+
+Not "by shape, eventually" — **by design, uniformly**. Everything in this proposal reads "actor"
+as *aggregate OR process manager*:
+
+- **Addressing**: `actor_type` may name a PM (`PlaceOrderProcess`, `RefundProcess` — the
+  validator already checks against the whole `actors.yaml` catalog); the PM's catalog entry gains
+  the same `identity:` and `mailbox.partitions` declarations.
+- **Typed clients**: generated for PMs too. A PM's `receives:` may include **commands**, so
+  GraphQL can target a saga directly (`RefundProcessClient::for_order(id).send(Envelope<…>)`)
+  when a use case calls for it — same compile-time inbox enforcement, same acceptance +
+  `operationStatus` contract.
+- **Reminders**: PMs are the *primary* customer — saga timeouts ARE reminders
+  (`remind(EscalateDeliveryOffer, in: 30s)` replaces the bespoke timeout worker), with the same
+  `Reminders` companion and cancel semantics (§3.4).
+- **The one-transaction invariant, PM variant**: a PM appends no stream of its own — its
+  decision's effects are the **pm_state save** + the handled row's status flip + new/cancelled
+  reminders, committed together under the partition's `ownership_version` guard; its outbound
+  commands go through the same typed clients as everyone else's (each becoming its own mailbox
+  row, `cause_id` chaining back).
+
+What remains sequenced (not descoped): **migrating today's in-process PM reactions** (the runner
+subscribed to local events) onto mailbox delivery — done after the Order/Conversation lanes prove
+the claim/checkpoint/lease mechanics, so the saga that moves money is never the guinea pig.
 
 ### D6 — How workers acquire their partition ranges
 
