@@ -4366,6 +4366,7 @@ Open the in-app conversation for an order (id = orderId; idempotent birth). Snap
 | --- | --- | --- | --- |
 | <a id="command-openconversation--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="command-openconversation--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-openconversation--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
 | <a id="command-openconversation--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
 
 <a id="command-postmessage"></a>
@@ -4947,6 +4948,7 @@ Birth of the per-order in-app conversation (id = orderId; ADR-20260725-015921). 
 | --- | --- | --- | --- |
 | <a id="event-conversationopened--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-conversationopened--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-conversationopened--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ |  |
 | <a id="event-conversationopened--customerchatenabled"></a>`customerChatEnabled` | `boolean` | ✅ |  |
 
 <a id="event-messageposted"></a>

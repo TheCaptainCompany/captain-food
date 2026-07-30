@@ -836,6 +836,7 @@ pub struct PlaceReplacementOrder {
 pub struct OpenConversation {
     pub order_id: OrderId,
     pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
     pub customer_chat_enabled: bool,
 }
 

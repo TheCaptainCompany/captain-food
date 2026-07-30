@@ -1394,6 +1394,7 @@ input RevokeDeliveryPartnerAvailabilityInput {
 input OpenConversationInput {
   orderId: OrderId!
   restaurantId: RestaurantId!
+  customerId: CustomerId
   customerChatEnabled: Boolean!
 }
 

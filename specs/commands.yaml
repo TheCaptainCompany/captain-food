@@ -1484,6 +1484,9 @@ OpenConversation:
   properties:
     orderId: { $ref: 'scalars.yaml#/OrderId' }
     restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      nullable: true   # copied from OrderPlaced by the opener (PM); null for guest orders (#235)
     customerChatEnabled: { type: boolean }
   required: [orderId, restaurantId, customerChatEnabled]
 
