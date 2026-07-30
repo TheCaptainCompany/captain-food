@@ -37,7 +37,7 @@ own page renders it just as small (that approach was tried and rolled back the s
 the closing fence** it carries a link that opens the same source in mermaid.live's pan/zoom viewer:
 
 ```markdown
-<a href="https://mermaid.live/view#pako:…" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a>
+<a href="https://mermaid.live/view#pako:…" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 ```
 
 **HTML anchor, not a Markdown link** (product-owner directive, 2026-07-28): the link must open in a
@@ -64,7 +64,7 @@ without it hands the new page a handle on ours.
       pako = base64.urlsafe_b64encode(zlib.compress(state.encode(), 9)).decode().rstrip('=')
       print(f'diagram {i}: <a href="https://mermaid.live/view#pako:{pako}" '
             'target="_blank" rel="noopener noreferrer">'
-            'Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a>')
+            'Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>')
   EOF
   ```
 

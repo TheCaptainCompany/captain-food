@@ -120,7 +120,7 @@ generated code and never changed without a keyspace migration.
   (0–49 / 50–99); ten split it again — the Kafka consumer-group shape. The mechanism is a
   **partition registry**: `mailbox_partitions` with one row per `(actor_type, partition)`, seeded
   from the DSL's `partitions` count, each row carrying the partition's **checkpoint**, its
-  **lease** (`claimed_by`, `lease_until`), and its **epoch** (the fencing token — §3.1). A worker starts with an actor type and a capacity,
+  **lease** (`claimed_by`, `lease_until`), and its **`ownership_version`** (the fencing counter — §3.1). A worker starts with an actor type and a capacity,
   acquires leases on unclaimed-or-expired partition rows up to capacity, heartbeats to renew, and
   processes each owned partition with
   `WHERE actor_type = T AND partition = P AND status = RECEIVED ORDER BY position`
@@ -171,14 +171,14 @@ updates one row, the other updates zero and moves on.
 
 #### Claiming and rebalancing — a second node joins
 
-<a href="https://mermaid.live/view#pako:eNqVVNtu2zAM_RXCTwnmtWm3PjTYCthrsKe1xS5vBQJFYmKtiqhRclOj6L-PtnObOwxYHozocngOD0k9Z5oMZlPIIv6q0Wu8tmrFan3vQX6qTuTr9QK5XwfFyWoblE9QgIpwI2j5tyF-QIaR0ol4npqAcMsGefwaVu5h5R72k6yPoBJErRy-pTr9Bfh19rmFrpV1C3qad0fJkgAZVzYmbj4s-PRqFCTi_nAK2im7RjNfNDk4VBHntU_W5YCBdJWDrlA_BBHQcvasN5QQ6FHiFLmwTiEmiVcHuK_PJ2fv28wdeczhSMPk5OTyEmpPG4-mD1O8vbrq4IzKQHvAsbIBmDYRlsS9RYe7xRScfcTtTfgIz8VLDktlGWKlGGXnbDIZxO7SEz1uJ06TN50m5eDH3XXxfQabCgW91QZC3PkA-BQs78Q6ogAoOTdCEqFCSW2BKvWng3Q8bqAP1kWKMDpyVmQK02gMb-DdJG4Lid4MvS2n0gEGg6Mm7sR7WpBpIKFzEWwS5dIUiVqyHl7-h6ft3fK1pzmUQ1s1WjcSb-EUzseyvpgM2HqXdw4uLcd0kOwRlow4gMSEUoHbm9nW7SXTGlKF4BSvUPCdJBgV439UjrxAxAJJ75V9fWu27D1V2_e60Q6P4snFVTvUsLGpkrGSaKxiBaNWyOwRfbpj0hgj8SdnZQlcOxwPeszjU-qrLjR1MCpJyScHz9tgMZFDf5iIw6zISYgQyDnrV1LUP4rDGKTJAJWutuL7HrKdP3FfieORLHtzpU9kLmX7oq2bfPYFkcyJjfVKHqMcFpQq2TSimZXvxH4rvsy6js9yyNbI8qYYeQOfMzlcd6-hwaWqXcpeXn4DhyOuZw" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a>
+<a href="https://mermaid.live/view#pako:eNqVVE1v2zAM_SuETw7mtW63HhpsBew12GltsY9bgUCWmVirLHqU3NQo-t9H2_maOwxYDkkk8pGPj6SeI00lRnOIPP5q0Wm8NmrNqr53IB_VBnJtXSCP50ZxMNo0ygXIQHm4EbT82xA_IEOsdCBehq5BuOUSefYalu9h-R72k4zzoAJ4rSy-pTb8Bfh18bmH1srYgp6WgykYEiDj2vjA3YeCT6_iRiLujXPQVpkay2XRJWBReVy2LhibAG0csq9Ms3yUX_FNQFeoHxoh0-cfGdxQQCDxgCwRBnPwQWK3Ddy35-nZ-14FSw4TOOKTnpxcXkLr-gzlGCZ7e3U1wBlVeUgNTBsPK-JRroNvNgdrHnHrCR_hOXtJYKUMg68Uo9ycpekk9lCq8LE7cppcOXBSFn7cXWffF7CpUNBbbiCJB00AnxrDO7KWqAGUmjtJ4qFCKa1AFUbrpByHGxiDDZE8xEcqC03JFM_gDbxL_bap6MqptvlcpqHExlLnd-QdFVR2ENBaDyYIcxmQQH2yEZ7_h6a9b_5a0wTyqawajY1FWziF85mcL9JJtlHlnYIrwz4cKDuEFSNOID6gdOD2ZrFVe8VUQ6gQrOI1Cn6gBHE2-0fnyAlEJJDyXsk3jmaffUzV74DutMWjeOK47hccNiZUsmISjZWvIO6JLB7RhTsmjd4Tf7JGjsCtxdlkxhw-hbHrkqZtShWk5elB8z6YD2TRHTbisCtiaTw0ZK1xa2nqH81hbGTIAJWutuTHGTKDPn7fieOVzEdxZU5kL-X6ou-bfO0bIpUTl8YpeZgSKChUclkKZ1ZuIPst-7IYJj5KIKqR5X0p5T18jsRYDy9jiSvV2hC9vPwGadOznA" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant A as Node A worker (actor_type Order)
     participant B as Node B worker (joins at scale-out)
-    participant REG as mailbox_partitions registry<br/>(per partition: claimed_by, lease_until, epoch, checkpoint)
+    participant REG as mailbox_partitions registry<br/>(per partition: claimed_by, lease_until, ownership_version, checkpoint)
 
     Note over A,REG: startup — A alone, partitions 0..99 unowned
     A->>REG: read ownership rows for Order
@@ -200,7 +200,7 @@ sequenceDiagram
 
 #### Failover — a node dies mid-flight
 
-<a href="https://mermaid.live/view#pako:eNptVMtO40AQ_JWWLwTJK5EVq5VyQMrDLIhAImAfByTUGXeSUebhnR4nRIh_p8dOgCybk-OZqq6q7vZzpnxJWQ8ypr81OUUjjYuA9sGB_LCO3tV2RqH9X2GIWukKXYQ-IMONoOVp48OKAnT8xnF7KWrv4PvxZ9jgDTZ4g3Ed1nrtw3-u3xY_EsCiNjP_9PjGzRBooTmG7WfMdVNDu5mvXfloiRkXxA-uvdn_cnZ2PeiBMqgtBL8B25XLH2XDQ_31pHsK55Nb-Dkd9e8LuLu6nMJ4MrwqRvtTjoIQu8ErKaHdouW_8ZHAr8VXvyfRlJoYOpPJdQ601ioVyMFRTN6P91RLEqoZodBx9FUOWp6Ud44aAJTBV_wvvUTTO1BtCJkeaxe1kffMUnjH35xA8Wd6eVuMWp6BxNAwzNCgUyIf1FYZAibBxSUBPVU6ULkD75ia1A56_E6XUmWFh1HOg7etnSWpVeW1NGjHlXJPhrUxYmZYXP7ai3s3OcgTq-0ecdMq49UqRVrCRscl9I8-xpQD-4NGOS8AtxAaXulKRiIeim1HwHZzoeQKo1rmQmcrQ1Ieo7daoTHbtlYTyZpEPlYVufJTt3Nh1PO0DTJ93gnu7r4_HosOdKIXV5KrwUh5Q1VMJ8MLOC9uhkXT86RuH0xrq9GRQowBHWM7Camtaeqo8moJpy3XfhXE8AYYtwzf2oNFjaGU5RFnUvwkRciNmnT4-2IyLg7IOx_9yU4oU5dUHgvMGJZBUassh8xSkHUs5aPxnAmPbT4fJc2xNjF7eXkFVpRxnw" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a>
+<a href="https://mermaid.live/view#pako:eNptVGFP4kAQ_SuTflGTXiIXL5fwwQSknkSkBD29DyZk2I6wYbvb29mCxPjfnW1B5Ty-UNh9b957M9OXRLmCki4kTH9rsooGGhcey0cL8sE6OFuXc_Lt7wp90EpXaAP0ABnGgpanjfMr8nDsNpbbS0E7Cz9PvsL677D-O4xrv9Zr5_9zfZr9ioAStZm759k7N4Onhebgt18xN00NbeeutsWsJGZcED_a9mbv2_n5Tb8LyqAuwbsNlB25_Fk2PNbfTztncJlP4fdk0LvL4PZ6OIFRfnGdDfanHAQhdr1TUkLbRcs_doHArcVXryvRFJoYjvP8JgVaaxULpGApRO8ne6olCdWcUOg4uCoFLU_KWUsNAArvKv6XXqLpHqg2hEyz2gZt5H9mKbzjb04g-zMZTrNBy9OXGBqGORq0SuSD2ipDwCS4sCSg50p7KnbgHVOT2kGPP-hiqqzwMMon78rWzpLUqnJaGrTjirlHw9oYMXORDe_34j5M9tPIWnaOuGmVcWoVIy1go8MSekefY0qB3UGjrBOAXQgNr3QlIxEOxbYjUHZSoeQKg1qmQldWhqQ8BldqhcZs21pNJGsS-VhVZIsv3U6FUT_FbZDpc1Zwt3e90Uh0oBW9uJJcDQZKG6r8YZxNb6-Gk9m9fA_zMVxm44us6X9Uug-ptdhoioEGj5axnYrY4jiBsnXkeamrmejgeHLW1tiviASxAcYtw4_2YFGjL2SpxLGIOo3RcqMyHj5c5aPsoNDxZ9-yK8rUBRUnAjOGZYDUKkkhKcnLmhbyMnlJhKdsXisFPWFtQvL6-gbMenqp" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 ```mermaid
 sequenceDiagram
@@ -217,7 +217,7 @@ sequenceDiagram
     B->>MB: scan partition 7 from its checkpoint — m1 is still RECEIVED
     Note over B,MB: m1's row lock died with A's connection, so SKIP LOCKED no longer skips it
     B->>MB: claim m1, dispatch, complete atomically with the event append
-    Note over A,B: if A was only STALLED and wakes late, the EPOCH FENCE stops it — A's completion transaction asserts epoch 4, the registry now says 5, the guard matches 0 rows and the WHOLE transaction (event append included) rolls back
+    Note over A,B: if A was only STALLED and wakes late, the OWNERSHIP_VERSION FENCE stops it — A's completion transaction asserts ownership_version 4, the registry now says 5, the guard matches 0 rows and the WHOLE transaction (event append included) rolls back
 ```
 
 #### The steal window — dual BELIEF is allowed, dual AUTHORITY is fenced
@@ -228,26 +228,26 @@ heartbeat, ~10s), **both nodes believe they own the partition — is that a spli
 this window during rebalancing. What must never exist is dual *authority* — two nodes both able
 to **commit** work for the same partition. Two mechanisms close it:
 
-1. **The epoch fence** (Event Hubs calls it the *epoch*; Kafka, the *generation*; the literature,
-   a *fencing token*).
+1. **The `ownership_version` fence** — a *fencing token*. (Renamed from "epoch" on 2026-07-30,
+   product-owner directive: "epoch" reads as a date. Same thing Azure Event Hubs calls the
+   *epoch* and Kafka the *generation*.)
 
-   > **"Epoch" here is NOT a date** — no relation to the Unix epoch (product-owner clarification,
-   > 2026-07-30). It is an **ownership counter**: an integer the database increments each time the
-   > partition changes hands (created = 0, A claims = 1, B steals = 2, …). Bigger = more recent
-   > owner. A counter, not a timestamp, on purpose: node clocks can skew, and only an integer
-   > equality can sit as an atomic guard inside the completion UPDATE. Hotel-key-card analogy:
-   > re-coding the lock at check-in — the previous guest still holds a card, but the door no
-   > longer opens; the registry row is the door, the epoch is the lock code.
+   > `ownership_version` is an **ownership counter, not a timestamp**: an integer the database
+   > increments each time the partition changes hands (created = 0, A claims = 1, B steals = 2,
+   > …). Bigger = more recent owner. A counter on purpose: node clocks can skew, and only an
+   > integer equality can sit as an atomic guard inside the completion UPDATE. Hotel-key-card
+   > analogy: re-coding the lock at check-in — the previous guest still holds a card, but the
+   > door no longer opens; the registry row is the door, `ownership_version` is the lock code.
 
-   `mailbox_partitions` carries an `epoch bigint` incremented on **every
+   `mailbox_partitions` carries an `ownership_version bigint` incremented on **every
    ownership change** — a steal, a takeover of an expired lease, any claim. A worker memorizes the
-   epoch it acquired. The completion transaction — the SAME one that appends `domain_events` and
-   flips the message row — includes the guard
-   `UPDATE mailbox_partitions SET checkpoint = … WHERE actor_type = T AND partition = P AND epoch
-   = {my epoch}`; **0 rows matched aborts the whole transaction, append included**. A stale owner
-   can poll, rehydrate, even decide — it can no longer *commit*. Authority changes hands at the
-   exact instant of the steal, atomically, in the store; the loser finds out at its next write,
-   not at its next heartbeat.
+   `ownership_version` it acquired. The completion transaction — the SAME one that appends
+   `domain_events` and flips the message row — includes the guard
+   `UPDATE mailbox_partitions SET checkpoint = … WHERE actor_type = T AND partition = P AND
+   ownership_version = {mine}`; **0 rows matched aborts the whole transaction, append included**.
+   A stale owner can poll, rehydrate, even decide — it can no longer *commit*. Authority changes
+   hands at the exact instant of the steal, atomically, in the store; the loser finds out at its
+   next write, not at its next heartbeat.
 2. **Head-of-line consumption within a partition.** `SKIP LOCKED` is for competing over the
    *lease*, not over *messages inside an owned partition*: if a new owner skipped a locked head
    (a message the stale owner still holds) and processed the next one, a single aggregate's
@@ -258,7 +258,7 @@ to **commit** work for the same partition. Two mechanisms close it:
    partitions.
 
 With those two, the safety story is layered, on purpose: the **lease** bounds double-belief to a
-heartbeat, the **epoch fence** makes stale authority impossible at the transaction boundary, the
+heartbeat, the **`ownership_version` fence** makes stale authority impossible at the transaction boundary, the
 **head-of-line rule** preserves per-aggregate order through a takeover, and beneath everything the
 **stream version check + the aggregate's idempotency** stand as the last line — correctness never
 rests on the lease alone (Young's rule again: the serializer is the version check; everything
@@ -267,6 +267,155 @@ above it is throughput machinery).
 - **Completion is the dispatch's** (#242 DoD unchanged): the `domain_events` append and the
   `inbound_messages` status flip commit in ONE SQL transaction; the `OperationStatusBus` publish
   happens post-commit, worker-side.
+
+### 3.2 The tables, in full
+
+Everything this proposal touches, as DDL sketches (the final DDL is GENERATED from
+`specs/database/tables/journals.yaml` — ADR-0037; enum columns store TEXT verbatim,
+ADR-20260728-170000):
+
+**`inbound_messages` — the mailbox** (NEW; replaces `command_journal` + `inbound_events`):
+
+```sql
+CREATE SEQUENCE inbound_messages_position_seq;
+
+CREATE TABLE inbound_messages (
+    message_id      uuid        PRIMARY KEY,       -- idempotency identity (client handle | UUIDv5(source, external_id))
+    position        bigint      NOT NULL UNIQUE
+                                DEFAULT nextval('inbound_messages_position_seq'),
+    kind            text        NOT NULL,          -- 'COMMAND' | 'EVENT'
+    actor_type      text        NOT NULL,          -- an actors.yaml actor (validated)
+    actor_id        uuid        NOT NULL,          -- the addressed instance = stream id
+    partition       smallint    NOT NULL,          -- stable_hash(actor_id) mod N, stamped at insert
+    message_type    text        NOT NULL,          -- 'PostMessage' | 'PaymentCaptured' | ... (validated)
+    payload         jsonb       NOT NULL,
+    channel         text        NOT NULL,          -- 'GRAPHQL' | 'WORKER' | 'EXTERNAL'
+    user_id         uuid            NULL,          -- envelope (ADR-0041)
+    user_type       text            NULL,
+    correlation_id  uuid        NOT NULL,
+    cause_id        uuid            NULL,
+    status          text        NOT NULL DEFAULT 'RECEIVED',
+                                -- RECEIVED -> SUCCEEDED | REJECTED | FAILED | IGNORED | DUPLICATE
+    error           jsonb           NULL,          -- {code, context} on REJECTED / FAILED
+    received_at     timestamptz NOT NULL DEFAULT now(),
+    completed_at    timestamptz     NULL
+);
+
+-- the drain index: exactly what a worker pass scans
+CREATE INDEX idx_inbound_messages_drain
+    ON inbound_messages (actor_type, partition, position)
+    WHERE status = 'RECEIVED';
+-- per-instance history: everything ever sent to one actor (support/debug)
+CREATE INDEX idx_inbound_messages_actor
+    ON inbound_messages (actor_id, position);
+```
+
+**`mailbox_partitions` — the registry** (NEW; one row per `(actor_type, partition)`, seeded from
+the DSL's `mailbox.partitions` — checkpoint, lease and fence in the same row):
+
+```sql
+CREATE TABLE mailbox_partitions (
+    actor_type         text        NOT NULL,       -- 'Order', 'Conversation', ...
+    partition          smallint    NOT NULL,       -- 0 .. partitions-1
+    ownership_version  bigint      NOT NULL DEFAULT 0,  -- fencing counter (§3.1) — NOT a date
+    claimed_by         text            NULL,       -- worker instance id; NULL = unowned
+    lease_until        timestamptz     NULL,       -- past or NULL = claimable
+    checkpoint         bigint      NOT NULL DEFAULT 0,  -- every row at or below it is terminal
+    PRIMARY KEY (actor_type, partition)
+);
+```
+
+**`domain_events` — existing, UNCHANGED** (`specs/database/tables/eventstore.yaml`). Shown only
+for its two join points with the mailbox: an appended event's `cause_id` = the mailbox row's
+`message_id` (causality chain), and `UNIQUE (stream_name, version)` remains the final serializer
+beneath everything in §3.1.
+
+**Dropped**: `command_journal` and `inbound_events` — backfilled into `inbound_messages` in
+`received_at` order, then removed (§8.6).
+
+### 3.3 Worked examples — the data in every scenario
+
+Shared cast: order `5b1e…c421`, whose `stable_hash mod 100 = 37`; customer `9acd…77f2`;
+worker instances `w-A` / `w-B` on the `Conversation` lanes.
+
+**S1 — happy-path command** (`postMessage`, the §5 diagram). After the GraphQL edge accepts
+(client already holds `ACCEPTED {messageId: aaaa…0001, status: PENDING}`):
+
+| message_id | position | kind | actor_type | actor_id | partition | message_type | channel | status | error |
+|---|---|---|---|---|---|---|---|---|---|
+| `aaaa…0001` | 18402 | COMMAND | Conversation | `5b1e…c421` | 37 | PostMessage | GRAPHQL | **RECEIVED** | — |
+
+Worker `w-A` claims it; the aggregate authorizes and decides; ONE transaction then writes all
+three of these:
+
+| table | change |
+|---|---|
+| `domain_events` | + row `stream_name = Conversation-5b1e…c421`, `version = 4`, `event_type = MessagePosted`, `cause_id = aaaa…0001` |
+| `inbound_messages` | `aaaa…0001` → `status = SUCCEEDED`, `completed_at = 19:42:07` |
+| `mailbox_partitions` | `(Conversation, 37)`: `checkpoint 18401 → 18402` — guarded by `AND ownership_version = 1` |
+
+`operationStatus(aaaa…0001)` → `SUCCEEDED`.
+
+**S2 — rejected command** (the #235 negative: a *different* customer posts into that thread):
+
+| message_id | position | kind | message_type | status | error |
+|---|---|---|---|---|---|
+| `bbbb…0002` | 18403 | COMMAND | PostMessage | **REJECTED** | `{ "code": "NotAParticipant", "context": { "orderId": "5b1e…c421" } }` |
+
+**No `domain_events` row.** `operationStatus(bbbb…0002)` → `REJECTED`, `errorCode NotAParticipant`.
+The rejection is a recorded fact about the attempt, not about the order.
+
+**S3 — duplicate command redelivery** (client retries `aaaa…0001` with the same payload): the
+insert hits the `message_id` PK → **no new row, nothing re-executed**; the edge replays the
+acceptance from the existing row (now `SUCCEEDED`). Same payload hash = idempotent replay; a
+DIFFERENT payload under the same id = `Conflict`, never dispatched.
+
+**S4 — inbound EXTERNAL fact** (Stripe reports the capture; nobody can tell Stripe "no"):
+
+| message_id | position | kind | actor_type | actor_id | partition | message_type | channel | user_type | status |
+|---|---|---|---|---|---|---|---|---|---|
+| `cccc…0003` = UUIDv5(stripe, `evt_1Q7…`) | 18404 | EVENT | Order | `5b1e…c421` | 37 | PaymentCaptured | EXTERNAL | EXTERNAL | RECEIVED → **SUCCEEDED** |
+
+Same mailbox, same mechanics — the Order-lane worker delivers it, the aggregate records the fact,
+`cause_id = cccc…0003` on the appended event. A Stripe **redelivery** of the same webhook derives
+the same UUIDv5 → PK hit → no new row (S3's shape). A different delivery carrying an
+already-recorded fact → the aggregate says "already have it" → row completed **DUPLICATE**.
+
+**S5 — inbound fact that changes nothing** (SIRENE re-reports an unchanged établissement):
+
+| message_id | kind | actor_type | message_type | status |
+|---|---|---|---|---|
+| `dddd…0004` = UUIDv5(sirene, `{siret}:{payload_hash}`) | EVENT | Restaurant | RestaurantRegistered | **IGNORED** |
+
+The aggregate folded its stream, compared, decided nothing follows — nothing appended, the
+delivery recorded `IGNORED` (the ADR-20260728-011344 D6 outcome, kept).
+
+**S6 — the registry through claim, steal, fence, crash** — `(Conversation, 37)` over time:
+
+| t | what happens | claimed_by | ownership_version | lease_until | checkpoint |
+|---|---|---|---|---|---|
+| t0 | seeded from the DSL (`partitions: 100`) | — | 0 | — | 0 |
+| t1 | `w-A` claims (startup, fair share 100/1) | w-A | **1** | t1+30s | 0 |
+| t2 | `w-A` processes S1, heartbeats renew | w-A | 1 | renewed | 18402 |
+| t3 | `w-B` joins, steals partition 37 | w-B | **2** | t3+30s | 18402 |
+| t4 | stalled `w-A` tries to complete position 18404 with guard `ownership_version = 1` → **0 rows → whole transaction rolls back** (no event, no status flip) | w-B | 2 | … | 18402 |
+| t5 | `w-B` claims 18404 (lock freed by t4's rollback), completes with guard `= 2` ✓ | w-B | 2 | … | 18404 |
+| t6 | `w-B` crashes; lease expires unrenewed | w-B | 2 | **expired** | 18404 |
+| t7 | survivor `w-A` claims the expired lease | w-A | **3** | t7+30s | 18404 |
+
+**S7 — the checkpoint deciding what to scan** — partition 37's rows:
+
+| position | status | |
+|---|---|---|
+| 18402 | SUCCEEDED | ≤ checkpoint — never scanned again |
+| 18403 | REJECTED | terminal too |
+| 18404 | **RECEIVED** | ← holds the checkpoint at 18403 |
+| 18405 | SUCCEEDED | terminal, but the checkpoint cannot pass 18404 |
+
+Checkpoint = 18403 (largest position with *everything at or below it* terminal). The worker scans
+`position > 18403 AND status = 'RECEIVED'` → finds 18404. When 18404 completes, the checkpoint
+jumps straight to 18405. A late-visible row *below* the checkpoint (the §3 anomaly) is what the
+periodic below-checkpoint audit exists for — expected count: 0.
 
 ## 4. Decisions surfaced
 
@@ -322,23 +471,23 @@ What it lacks — and concedes in its own code — on exactly the properties a p
   fact (`ResolveDuplicateActivations`: "this kind of double-activation should not happen in normal
   operations"); its test harness comments that duplicated activation "is by design". The DB-backed
   mode (Redis/Mongo) is closest to us — CAS + TTL lock + commit-time lock re-check then poison —
-  but uses a GUID lock, not a monotonic epoch.
+  but uses a GUID lock, not a monotonic counter like our `ownership_version`.
 - **No concurrency guard in persistence**: `PersistEvent` has no version check at all — the exact
   place our `UNIQUE(stream_name, version)` turns a double-activation into a loud conflict, theirs
   lets two grains silently diverge.
 
 What we adopted from it (the parts they got right):
 
-1. **The epoch must cancel in-flight work in-process, not only fence at commit.** .NET's
+1. **The ownership fence must cancel in-flight work in-process, not only fence at commit.** .NET's
    `ClusterTopology.TopologyValidityToken` is a cancellation token minted per topology change;
-   every rebalance loop is linked to it. Ours: a failed lease renewal / observed epoch bump aborts
+   every rebalance loop is linked to it. Ours: a failed lease renewal / observed `ownership_version` bump aborts
    the worker's dequeue/processing loops immediately — the commit-time fence stays the guarantee,
    the cancellation keeps the stale worker from wasting a full batch to find out.
 2. **Rebalance = pause only NEW claims, keep draining what you hold, readiness keys + timeout,
    then proceed anyway.** .NET parks only unknown identities during handover, gossips
    `reb:ready`/`reb:done` per topology hash, and proceeds after 10s without consensus. Same shape
    for lease handoff — with the difference that our proceed-anyway is *actually safe*, because the
-   old owner's writes are epoch-fenced; theirs is not.
+   old owner's writes are fenced by `ownership_version`; theirs are not.
 3. **The routing function is a frozen compatibility contract, separate from placement policy.**
    Their `RendezvousFast` header warns that any modification "would result in duplicate parallel
    activations". Ours: `hash(actor_id) mod N` is pinned and versioned (§2), while *which worker
@@ -378,13 +527,13 @@ not silently deferred.
 
 | Option | Pros | Cons |
 |---|---|---|
-| **Lease rows in the partition registry** (`mailbox_partitions.claimed_by / lease_until / epoch`, heartbeat renewal; the checkpoint table doubles as the lease table) ✅ recommended | No coordinator, no new infrastructure; crash → lease expiry → automatic takeover by survivors; scaling out = new instance leases whatever is free; the registry is also the ops surface (§6 monitor reads it); resolves #193's single-flight need for this path | Lease/heartbeat tuning (too short = flapping, too long = slow takeover — start 30s lease / 10s heartbeat); the steal window means bounded dual belief — rendered harmless by the epoch fence in the completion transaction (§3.1), never by trust in the clock |
+| **Lease rows in the partition registry** (`mailbox_partitions.claimed_by / lease_until / ownership_version`, heartbeat renewal; the checkpoint table doubles as the lease table) ✅ recommended | No coordinator, no new infrastructure; crash → lease expiry → automatic takeover by survivors; scaling out = new instance leases whatever is free; the registry is also the ops surface (§6 monitor reads it); resolves #193's single-flight need for this path | Lease/heartbeat tuning (too short = flapping, too long = slow takeover — start 30s lease / 10s heartbeat); the steal window means bounded dual belief — rendered harmless by the `ownership_version` fence in the completion transaction (§3.1), never by trust in the clock |
 | Static ranges from deployment config (env: `MAILBOX_RANGES=Order:0-49`) | Dead simple; deterministic | No failover — a dead instance's range goes dark until a human redeploys; config drift between replicas is silent double-ownership risk (caught only by SKIP LOCKED and the version check) |
 | Advisory locks taken per pass, no standing ownership | No lease bookkeeping at all | With 100 partitions × several types, every pass is a lock-shopping spree; ownership churn defeats the hot-aggregate cache (D2's evolution valve) which needs stable placement |
 
 ## 5. Sequence diagram — PostMessage through the mailbox
 
-<a href="https://mermaid.live/view#pako:eNqNVtFu4zYQ_JWFXyqjzuXuUPTBaAM4ihr4LnZytnPpwwEBLdIycRKpkpSTXJp_75CSLNl1geYlic1dzs7OjPQ6SDUXgzENrPirEioVV5JlhhXfFOGHVU6rqlgLU_9fMuNkKkumHMXELMWVdboQhtJcCuXqU2v9TNeGldsvNyR4JiiSamOYdaZKXWXEsD523PAax9Fy8lwVB-W_rc35RWR0LihjTtDPVBqpfFFORlidV05q1TQViv8b6uzSN5ZqrSvFHwthLcuEpYLJHFjr_loJKrWVvhe1ZIzqNuGz32nL7DZiqdPmUfIhFZrTfNiN_KTNd2Hs_5z2wUN6CCXUNHUvpcA1sVY79GFhqhpcLpgFYEaLyfw6Ib0htxX0_t27-dmHDqIdYQ1MFpYWSZxMvyZXZPSTH7ybTBsuzDFXHj0ry1ym4VJKtRGnUU_KMuyod5hLWzKXbk8XLESpfYX_DQjavFD0ZCTWaCX_L24mWRbE1SOCWJYZ4fdfM5IJJQz-4wH4y_lG5xzKMFichCgo3Yr0Oz7gIsU99K36-P7DL1R2-zgY_nBjxDgrHW4-jS5ZenB3WbKD4pcYCQJ3mriGntSj8J_a_iX1n_HZxQUUPvarcLNaglHYxpSPvNG22iyg8THF98vV7SxZjALqj782vVDctgArcvNCnx5Wo9oBO9HzxB4LYXIFaYDy1qdTftBtdjnG7FYY10mmoeq7VJzi29lsMr8Cvk6g_a20X0gO3TbDUATOc2awmvb-4agT4MboIqjXbsOZ1modLOCKxzSJ4-RuBTyvjV-n_K3FprTbSpXBga1O5xqK0sBF8cgPVccRQRW5d8BOMtKlFwwgLB1zlSVcCzFqc_xFvGUq88CqtU2NLP03x5f4K5ii5M9VsphPbmgDGihaOhxHZiyni2SeDClnigf3-XGXk1nSJo7XT-A3-ZrMVwGddHBVfFNf9NCsJti-5--OPFhBQq_YbMpKloLjsxBuwG08fDCOY6rOA1Li2R1kAmFk0k8Kx7uAa8j943ZB93dXk1VCy8_TO7q5jT8nkEBzN3NdyU-Nz0ot2-z30JEO430sRM36GqnAEjuRg_JGhziLCp8OYwy1feHe1IfO36CqlVld5I-jKln6GoZVOfwqumiuTyXLs33r2pUH1QiZsRcIjxrLtgR4fkMrjHcUM5GFRDBKqGgnyLLunj5wLyfxmu6d1_r5rQejZSv0JXCbVsZ45foue-HVJAXAECfPRXTXhciIGlABcw9UU9GNsA_H0ohUK36wdlTDUu0TpHn85857LTDST8BzvxPvEf9Q7kKyYSIMBK9M7nolf5MPt5m0xeGzoh4tWFYXZS7AwiL5lMTB-cIYbWK8oPScf7BKkcMfdXbKH4KfhtI8AqIQ_mNqaPMMHlT0hGjZTuxVgfzrsLUG9h5a3iOikqsuMm_nsAxeWhwsaD2f7f6ONAsp4cFA0VpsfQgEdrVxewHez6df7pOoVvWolcKQpA1nN1Ih5RHakuWY2hw9z9rwYHzHkKs9h0aH0V0OsVQLyWmEdFZpZCIeekXoHt4bIrwIokHOskZVs8smnE9H5rhHCTx7ao-DEQ1gBtDI8dL5OsA8RXj95GLDqtwN3t7-AVgHiNs" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a> —
+<a href="https://mermaid.live/view#pako:eNqNVtFu4zYQ_JWFXyqjzuXuUPTBaAM4ihr4LnZytnPpwwEBLdIycRKpkpSTXJp_75CSLNl1geYlic1dzs7OjPQ6SDUXgzENrPirEioVV5JlhhXfFOGHVU6rqlgLU_9fMuNkKkumHMXELMWVdboQhtJcCuXqU2v9TNeGldsvNyR4JiiSamOYdaZKXWXEsD523PAax9Fy8lwVB-W_rc35RWR0LihjTtDPVBqpfFFORlidV05q1TQViv8b6uzSN5ZqrSvFHwthLcuEpYLJHFjr_loJKrWVvhe1ZIzqNuGz32nL7DZiqdPmUfIhFZrTfNiN_KTNd2Hs_5z2wUN6CCXUNHUvpcA1sVY79GFhqhpcLpgFYEaLyfw6Ib0htxX0_t27-dmHDqIdYQ1MFpYWSZxMvyZXZPSTH7ybTBsuzDFXHj0ry1ym4VJKtRGnUU_KMuyod5hLWzKXbk8XLESpfYX_DQjavFD0ZCTWaCX_L24mWRbE1SOCWJYZ4fdfM5IJJQz-4wH4y_lG5xzKMFichCgo3Yr0Oz7gIsU99K36-P7DL1R2-zgY_nBjxDgrHW4-jS5ZenB3WbKD4pcYCQJ3mriGntSj8J_a_iX1n_HZxQUUPvarcLNaglHYxpSPvNG22iyg8THF98vV7SxZjALqj782vVDctgArcvNCnx5Wo9oBO9HzxB4LYXIFaYDy1qdTftBtdjnG7FYY10mmoeq7VJzi29lsMr8Cvk6g_a20X0gO3TbDUATOc2awmvb-4agT4MboIqjXbsOZ1modLOCKxzSJ4-RuBTyvjV-n_K3FprTbSpXBga1O5xqK0sBF8cgPVccRQRW5d8BOMtKlFwwgLB1zlSVcCzFqc_xFvGUq88CqtU2NLP03x5f4K5ii5M9VsphPbmgDGihaOhxHZiyni2SeDClnigf3-XGXk1nSJo7XT-A3-ZrMVwGddHBVfFNf9NCsJti-5--OPFhBQq_YbMpKloLjsxBuwG08fDCOY6rOA1Li2R1kAmFk0k8Kx7uAa8j943ZB93dXk1VCy8_TO7q5jT8nkEBzN3NdyU-Nz0ot2-z30JEO430sRM36GqnAEjuRg_JGhziLCp8OYwy1feHe1IfO36CqlVld5I-jKln6GoZVOfwqumiuTyXLs33r2pUH1QiZsRcIjxrLtgR4fkMrjHcUM5GFRDBKqGgnyLLunj5wLyfxmu6d1_r5rQejZSv0JXCbVsZ45foue-HVJAXAECfPRXTXhciIGlABcw9UU9GNsA_H0ohUK36wdlTDUu0TpHn85857LTDST8BzvxPvEf9Q7kKyYSIMBK9M7nolf5MPt5m0xeGzoh4tWFYXZS7AwiL5lMTB-cIYbWK8oPScf7BKkcMfdXbKH4KfhtI8AqIQ_mNqaPMMHlT0hGjZTuxVgfzrsLUG9h5a3iOikqsuMm_nsAxeWhwsaD2f7f6ONAsp4cFA0VpsfQgEdrVxewHez6df7pOoVvWolcKQpA1nN1Ih5RHakuWY2hw9z9rwYHzHkKs9h0aH0V0OsVQLyWmEdFZpZCIeekXoHt4bIrwIokHOskZVs8smnE9H5rhHCTx7ao-DEQ1gBtDI8dL5OsA8RXj95GLDqtwN3t7-AVgHiNs" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a> —
 regenerate this link (snippet in docs/claude/mermaid.md) whenever the fenced block below changes.
 
 ```mermaid
@@ -466,7 +615,7 @@ split exists for.
   idempotent redelivery (same `message_id` → DUPLICATE, no double-apply); crash between claim and
   completion → row re-claimed after the stale sweep, and the version check makes the retry safe.
 - Fencing tests (§3.1): a stalled owner completing after a steal → its transaction rolls back,
-  append included (epoch mismatch); takeover with a locked head-of-line row → the new owner waits
+  append included (`ownership_version` mismatch); takeover with a locked head-of-line row → the new owner waits
   and preserves position order for that aggregate, never skips within the partition.
 - The atomicity test #242 demands: kill between append and complete is IMPOSSIBLE by construction
   (one transaction) — asserted by a test that fails if they ever split into two.
