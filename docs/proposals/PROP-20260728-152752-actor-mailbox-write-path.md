@@ -343,6 +343,10 @@ CREATE INDEX idx_inbound_messages_actor
 CREATE INDEX idx_inbound_messages_due
     ON inbound_messages (scheduled_at)
     WHERE status = 'SCHEDULED';
+-- the Reminders-companion load: one actor's pending reminders, read before every handle (3.4)
+CREATE INDEX idx_inbound_messages_pending_reminders
+    ON inbound_messages (actor_id)
+    WHERE status = 'SCHEDULED';
 ```
 
 **`mailbox_partitions` — the registry** (NEW; one row per `(actor_type, partition)`, seeded from
@@ -484,6 +488,28 @@ in SQL, riding the same ordering/lease/fence rails as everything else.
   *replaces* (upsert of `scheduled_at`) and cancelling completes the row `SCHEDULED → CANCELLED`.
   An aggregate whose situation resolves early (order marked READY) just cancels — or lets the
   reminder fire and decides nothing (an `IGNORED` completion), both correct.
+- **The `Reminders` companion — the actor SEES its pending reminders** (product-owner refinement,
+  2026-07-30): when the dispatch prepares a message, it loads — alongside the folded state — the
+  actor's pending reminders (`SCHEDULED` rows for this `actor_id`), and passes them in:
+  `handle(cmd, state, actor, reminders)`. The actor can enumerate what is waiting
+  (`reminders.pending()`, typed) and decide `reminders.cancel(remind)` exactly as it decides
+  `reminders.remind(…)` — **both are pure intents**, executed by the dispatch. The in-memory
+  collection is a *loaded working view* for the decision, never a second source of truth: the
+  table is the truth, so a crash between deliveries loses nothing, and the hot-aggregate cache
+  (D2's evolution valve) may later keep the view warm exactly as it keeps the fold warm.
+- **Cancel-vs-promotion race, resolved by construction**: `cancel` is an
+  `UPDATE … SET status = 'CANCELLED' WHERE message_id = $id AND status = 'SCHEDULED'` inside the
+  actor's completion transaction. If the promotion pass already flipped the row `RECEIVED`
+  (it came due in the same instant), the cancel matches 0 rows — harmless: the reminder will be
+  *delivered*, the actor folds its (now updated) state, sees the situation resolved, decides
+  nothing, and the row completes `IGNORED`. Per-actor single-threading makes this the only
+  possible interleaving, and both outcomes are correct.
+- **One transaction, all four effects** (product-owner directive, restated as the invariant): the
+  `domain_events` append, the handled row's status flip, the **insertion of newly decided
+  reminders**, and the **cancellation of revoked ones** commit together or not at all — all under
+  the same `ownership_version` guard. A decision's outputs are indivisible: no order can end up
+  accepted with its delay-check reminder lost, and no cancelled reminder can survive its
+  cancelling decision.
 
 **S8 — worked example.** `Order 5b1e…c421` is accepted at 19:50; the aggregate decides
 `OrderAccepted` **and** `remind(CheckPreparationDelay, in: 15 min)`:
