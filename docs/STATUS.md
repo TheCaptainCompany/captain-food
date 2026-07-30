@@ -3,6 +3,14 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-07-30. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 📋 **2026-07-30 — hosting decision: app + Postgres move to one OVH VPS (Gravelines/Strasbourg);
+> Supabase stays for identity only — ADR-20260730-233749 (product-owner directive).** Split-cloud
+> egress (Render bandwidth + Supabase DB egress) is the structural problem; colocating on an EU OVH
+> VPS (traffic unmetered by policy) removes both meters. Start VPS-1, upgrade in-place on evidence;
+> Premium backup + nightly off-box `pg_dump`. **Scaleway is excluded** (product-owner directive,
+> prior security incident) — do not re-propose it. Migration sequenced AFTER the pending enum-text
+> release; nothing provisioned yet.
+
 > 🚧 **2026-07-30 — bandwidth mitigation: `live.captain.food` answers `204 No Content` on every
 > path — ADR-20260730-135741 (product-owner directive).** The marketplace host's data-full SSR was
 > being polled by the external uptime monitor, burning Render bandwidth *and* Supabase egress per
