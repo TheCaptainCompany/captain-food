@@ -11,6 +11,7 @@
 > `(actor_type, actor_id)` addressing, partition leases + `ownership_version` fencing, typed
 > clients as the only door, reminders, activations), **PROP-20260730-230803** (projection runtime:
 > generated unit-of-work batches, `business_key` lanes, `target: redis` for ScopeMembership).
+> 🚧 Foundation slice in build on `242-actor-mailbox-foundation` (this PR).
 > Realization starts with [#242 "Write path becomes an actor mailbox…"](https://github.com/TheCaptainCompany/captain-food/issues/242)'s
 > foundation slice (claimed, draft PR per protocol); [#235](https://github.com/TheCaptainCompany/captain-food/issues/235)
 > and [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) follow. Open veto flag:
