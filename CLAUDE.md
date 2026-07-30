@@ -204,6 +204,16 @@ mutation/query is reached by a story step, and every test↔rule link holds both
 - Review and validation gates are executable and **blocking**; never hand-edit generated output
   (`specs/generated/**`, the `database.md` GENERATED region) — change the spec/emitter and regenerate.
 - Every recurring agent/loop failure becomes a new rule, test, or ADR.
+- **Every session records what it learned** (ADR-20260730-034635, product-owner directive), in the
+  **same change** as the work — not just failures, and not only on the second occurrence. Operational
+  findings (environment limits, tool behaviour, gate costs, workflow traps) go to
+  [docs/claude/sessions.md](docs/claude/sessions.md) or the relevant topic file; decisions to an ADR;
+  option spaces to a proposal; state to `STATUS.md`. **Prefer executable over prose** — a validator
+  rule, test or hook beats a bullet point, because prose can be ignored and a gate cannot
+  (`makefile_recipe_lines_are_ascii` is the model). Record only what is **not derivable from the code**
+  and would **cost the next session time**, with the concrete cost that earned it; sharpen an existing
+  rule rather than appending a near-duplicate. **Writing nothing is a valid outcome** — a session diary
+  is not a lesson, and padding lowers the odds the real rules get read.
 - Keep **`docs/STATUS.md`** current with every substantive change, and land cross-cutting **decisions as
   ADRs in the same change** — so concurrent sessions never diverge on state or intent. ADR ids are
   **date-time** (`ADR-YYYYMMDD-HHMMSS`) to avoid collisions (ADR-20260718-135417); legacy `0001`–`0047`

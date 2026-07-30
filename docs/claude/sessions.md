@@ -106,7 +106,26 @@ The reader decides the owner. This matters because the boot report is supposed t
 integration configured in production?" from one `curl` — a key attributed to the wrong process is
 absent from the report that should have shown it.
 
-## 7. Commit the durable artifact, not the conversation
+## 7. This file is your obligation, not just your reference
+
+**Every session records what it learned** (ADR-20260730-034635), in the same change as the work. That
+is why this file exists, and it is how it stays worth reading.
+
+- **Where it goes**: operational findings (environment limits, tool behaviour, gate costs, workflow
+  traps) → here, or the relevant `docs/claude/` topic file. Decisions → an ADR. Option spaces →
+  a proposal + tracking issue. State → `STATUS.md`.
+- **Prefer executable over prose.** If the lesson can be a validator rule, a behaviour test or a hook,
+  write *that* — prose can be ignored, a gate cannot. `makefile_recipe_lines_are_ascii` turned a
+  one-off Makefile breakage into a codegen test so it could not silently return; that is the bar.
+- **Bar for an entry**: not derivable from the code, and it would cost the next session time. State
+  the concrete cost that earned it — "one `search_issues` call returned six complete epics" is a rule;
+  "be careful with MCP output" is noise.
+- **Sharpen, don't duplicate.** Extend the existing rule rather than adding a near-identical one; two
+  overlapping rules mean neither is trusted.
+- **Writing nothing is a valid outcome.** A session that learned nothing transferable adds nothing.
+  If this file ever reads like a diary it has failed, and the fix is deletion, not more headings.
+
+## 8. Commit the durable artifact, not the conversation
 
 A long session slows down: every turn reprocesses the whole transcript. The mitigation is the
 operating model itself — **proposals, ADRs, `DECISIONS.md` and `STATUS.md` are how knowledge leaves a
