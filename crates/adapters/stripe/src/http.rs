@@ -82,13 +82,13 @@ async fn stripe_webhook(
         Ok(outcome) => {
             let status = match &outcome {
                 StripeIngestOutcome::Recorded { event_type } => {
-                    println!("stripe webhook: recorded {event_type} ({})", event.id);
+                    tracing::info!(adapter = "stripe", %event_type, event_id = %event.id, "webhook fact recorded");
                     "recorded"
                 }
                 StripeIngestOutcome::Duplicate => "duplicate",
                 StripeIngestOutcome::Ignored { .. } => "ignored",
                 StripeIngestOutcome::Unmappable { reason } => {
-                    eprintln!("stripe webhook: unmappable {} ({}): {reason}", event.event_type, event.id);
+                    tracing::warn!(adapter = "stripe", event_type = %event.event_type, event_id = %event.id, %reason, "webhook verified but unmappable");
                     "unmappable"
                 }
             };
@@ -97,7 +97,9 @@ async fn stripe_webhook(
         }
         // Infrastructure failure (event store unreachable): 5xx so Stripe retries the delivery.
         Err(e) => {
-            eprintln!("stripe webhook: append failed for {}: {e}", event.id);
+                    // A payment fact we cannot record is the worst case this product has: the money
+            // moved and the domain does not know. 5xx so Stripe redelivers.
+            tracing::error!(adapter = "stripe", event_id = %event.id, error = %e, "append failed -- payment fact NOT recorded; 5xx so Stripe redelivers");
             (StatusCode::INTERNAL_SERVER_ERROR, "failed to record event").into_response()
         }
     }

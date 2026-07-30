@@ -61,10 +61,12 @@ impl DeliveryService for CompositeDeliveryGateway {
                 // never answers, so the DeliveryOfferTimeoutWorker escalates to the next ranked
                 // channel (unconfigured channels fall through; the independent-rider POOL keeps the
                 // job open to riders).
-                eprintln!(
-                    "delivery gateway: channel '{}' has no wired adapter — job {} (order {}) left \
-                     open (offer will time out and escalate to the next ranked channel)",
-                    input.channel.0, input.job.delivery_job_id.0, input.job.order_id.0
+                tracing::warn!(
+                    channel = %input.channel.0,
+                    delivery_job_id = %input.job.delivery_job_id.0,
+                    order_id = %input.job.order_id.0,
+                    "channel has no wired adapter -- job left open; the offer will time out and \
+                     escalate to the next ranked channel"
                 );
                 Ok(())
             }

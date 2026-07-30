@@ -99,9 +99,13 @@ impl InboundEventsDrainWorker {
         loop {
             if let Some(s) = self.run_once().await {
                 if s != InboundDrainSummary::default() {
-                    println!(
-                        "inbound drain: delivered={} (already={}) failed={} swept_commands={}",
-                        s.delivered, s.already_recorded, s.failed, s.swept_commands
+                    tracing::info!(
+                        worker = "inbound_drain",
+                        delivered = s.delivered,
+                        already_recorded = s.already_recorded,
+                        failed = s.failed,
+                        swept_commands = s.swept_commands,
+                        "drain pass complete"
                     );
                 }
             }
@@ -114,13 +118,13 @@ impl InboundEventsDrainWorker {
         // Journal crash hygiene rides on the same tick (cheap UPDATE, usually 0 rows).
         match self.journal.sweep_stale_received(STALE_COMMAND_SWEEP).await {
             Ok(swept) => summary.swept_commands = swept,
-            Err(e) => eprintln!("inbound drain: stale-command sweep failed: {e}"),
+            Err(e) => tracing::error!(worker = "inbound_drain", error = %e, "stale-command sweep failed"),
         }
         loop {
             let batch = match self.inbox.pending(BATCH_SIZE).await {
                 Ok(rows) => rows,
                 Err(e) => {
-                    eprintln!("inbound drain: pending read failed: {e}");
+                    tracing::error!(worker = "inbound_drain", error = %e, "pending read failed -- pass abandoned");
                     return summary;
                 }
             };
@@ -168,15 +172,15 @@ impl InboundEventsDrainWorker {
                     }
                 };
                 if let Err(e) = marked {
-                    eprintln!("inbound drain: marking {id} {status} failed: {e}");
+                    tracing::error!(worker = "inbound_drain", %id, ?status, error = %e, "marking the row failed");
                 }
             }
             Err(reason) => {
                 summary.failed += 1;
-                eprintln!("inbound drain: delivery of {id} ({}) failed: {reason}", row.event_type);
+                tracing::error!(worker = "inbound_drain", %id, event_type = %row.event_type, %reason, "delivery through the write path failed");
                 let err = serde_json::json!({ "detail": reason });
                 if let Err(e) = self.inbox.mark_failed(id, err).await {
-                    eprintln!("inbound drain: mark_failed({id}) failed: {e}");
+                    tracing::error!(worker = "inbound_drain", %id, error = %e, "mark_failed also failed -- the row will be retried");
                 }
             }
         }

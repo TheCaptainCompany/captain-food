@@ -1,0 +1,179 @@
+# Push the DECLARED configuration to the Render service (PROP-20260729-014500, issue #248).
+#
+# WHY THIS EXISTS. Configuration used to be typed by hand into the Render dashboard, which is invisible
+# from the repository. That is how `RUN_SIRENE_WORKER` came to gate a paused production pipeline while
+# being written down nowhere (6,649 SIRENE rows sat PENDING for four hours), and how `API_SECRET` came
+# to sit on the service read by nothing. A declaration nothing enforces is documentation; this is what
+# makes specs/configuration.yaml true.
+#
+# WHAT IT DOES **NOT** DO — and this is the important half:
+#
+#   * It does not push NON-SECRET values. Those are BAKED into the binary by the codegen (D5), so they
+#     travel with the image digest: redeploying `sha-abc123` next month reproduces its behaviour, and a
+#     rollback restores the configuration that shipped with that build. Pushing them here as well would
+#     recreate the mutable state the baking removed, and the two copies could disagree.
+#   * It never DELETES (D1, upsert only). A key on the service that the spec does not declare is
+#     REPORTED, never removed — the safe ordering #238 taught: never remove what CI does not yet write.
+#
+# So the only keys it writes are the SECRETS (plus non-secrets a key chose to source from a repo
+# secret): exactly the values that cannot be baked, because the GHCR package is PUBLIC and a baked ENV
+# is readable by anyone via `docker pull` + `docker history`.
+#
+# DRY-RUN IS THE DEFAULT (D2). This workflow cannot be tested anywhere but here — there is no local
+# `RENDER_API_KEY` — so its first real execution would otherwise be an untested write against live
+# production config. Dry-run prints the exact diff and writes nothing. Flip `apply: true` once the
+# report reads the way you expect.
+#
+# Requires: RENDER_API_KEY (already used read-only by render-status.yml and prod-smoke.sh, D4), plus a
+# repo secret for each `from_secret` name in specs/generated/render-config-sync.json. A declared secret
+# with no corresponding repo secret is REPORTED and skipped — never written as empty, which would look
+# configured while being useless.
+name: render-config-sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Which profile's declaration to sync."
+        type: choice
+        required: true
+        default: production
+        options: [production, staging]
+      apply:
+        description: "false = dry-run (print the diff, write nothing). true = upsert the changed keys."
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-config-sync
+  cancel-in-progress: false # never interrupt a half-applied sync
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sync the declared configuration
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          PROFILE: ${{ inputs.profile }}
+          APPLY: ${{ inputs.apply }}
+          # EVERY repo secret, as one JSON object, so the manifest is the ONLY list of names.
+          #
+          # This was a hand-written `NAME: ${{ secrets.NAME }}` line per key, and it drifted the first
+          # time it was tested: HONEYCOMB_API_KEY and the four OVH_* credentials were declared in the
+          # spec and configured as repo secrets, but absent from this block — so the sync reported them
+          # as "repo secret is not set". That message is a lie in the most expensive direction: it tells
+          # an operator who just configured the secret correctly that they did not, and the fix is in a
+          # file they were not looking at. A second list of key names is exactly the drift
+          # specs/configuration.yaml exists to abolish; it does not get to survive here.
+          #
+          # `toJSON(secrets)` is resolved by the runner and still masked in logs. Only names the manifest
+          # declares are ever looked up, and no value is printed either way — the script reports
+          # set/unset/unchanged, never content.
+          #
+          # Non-secrets are deliberately NOT sourced here: they carry literal per-profile values in
+          # specs/configuration.yaml and are baked into the image, because a non-secret hidden in Actions
+          # secrets is as opaque as one typed into the dashboard — you still could not read the repo and
+          # know what production runs (directive, 2026-07-29). Absent secrets are reported and skipped,
+          # never written empty: a key that LOOKS configured but is not is worse than one plainly missing.
+          ALL_REPO_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_API_KEY}" ]; then
+            echo "::error::repo secret RENDER_API_KEY is not set -- cannot reach the Render API"
+            exit 1
+          fi
+          MANIFEST=specs/generated/render-config-sync.json
+          [ -f "$MANIFEST" ] || { echo "::error::$MANIFEST missing -- run 'make generate'"; exit 1; }
+
+          # Resolve the service by NAME, exactly as render-status.yml and prod-smoke.sh already do.
+          SID=$(curl -sS -m 20 -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services?name=captain-food&limit=1" | jq -r '.[0].service.id // empty')
+          [ -n "$SID" ] || { echo "::error::Render service 'captain-food' not found (is RENDER_API_KEY an ACCOUNT key?)"; exit 1; }
+          echo "service: captain-food ($SID) | profile: $PROFILE | apply: $APPLY"
+          echo
+
+          # 100 is the Render API's maximum page size; limit=200 is rejected HTTP 400 with
+          # {"message":"invalid limit: too large"}. That error object -- NOT a real env-vars shape --
+          # is what the parser below then saw as "an object wrapper": it read 0 vars and failed loud.
+          # The service has ~10 keys, so one page of 100 covers all of them.
+          RAW=$(curl -sS -m 20 -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$SID/env-vars?limit=100")
+          # SHAPE-AGNOSTIC. The Render docs do not pin the env-vars record shape (array of
+          # `{envVar:{key,value}}` vs a bare `{key,value}`). Rather than encode a guess that breaks
+          # silently on the other shape, pull every object that HAS key+value, wherever it sits. The
+          # first attempt assumed the array form and died on `Cannot index string with string "envVar"`.
+          CURRENT=$(jq -c '[.. | objects | select(has("key") and has("value"))]' <<<"$RAW")
+          COUNT=$(jq 'length' <<<"$CURRENT")
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::could not read env vars from the Render API (parsed 0 of them)."
+            echo "Response shape was: $(jq -r 'if type=="array" then "array" else (keys|join(",")) end' <<<"$RAW" 2>/dev/null || echo 'not JSON')"
+            exit 1
+          fi
+          echo "read $COUNT env var(s) currently on the service"
+          echo
+
+          changed=0; unchanged=0; skipped=0; failed=0
+          declared=""
+          while read -r row; do
+            KEY=$(jq -r '.env_key' <<<"$row")
+            FROM=$(jq -r '.from_secret' <<<"$row")
+            declared="$declared $KEY"
+            # Looked up BY NAME out of the secrets object, so adding a key to configuration.yaml is the
+            # only step there is. `// empty` covers both "no such secret" and one set to the empty string.
+            VALUE=$(jq -r --arg n "$FROM" '.[$n] // empty' <<<"$ALL_REPO_SECRETS")
+            if [ -z "$VALUE" ]; then
+              echo "  SKIP       $KEY  <- repo secret '$FROM' is not set"
+              skipped=$((skipped+1)); continue
+            fi
+            HAVE=$(jq -r --arg k "$KEY" 'map(select(.key==$k)) | .[0].value // empty' <<<"$CURRENT")
+            if [ "$HAVE" = "$VALUE" ]; then
+              echo "  unchanged  $KEY"
+              unchanged=$((unchanged+1)); continue
+            fi
+            changed=$((changed+1))
+            if [ "$APPLY" != "true" ]; then
+              echo "  WOULD SET  $KEY  <- $FROM"
+              continue
+            fi
+            # Upsert ONE key (D1). This endpoint cannot delete, so a bad manifest can never wipe config.
+            code=$(curl -sS -m 20 -o /tmp/put.json -w "%{http_code}" -X PUT \
+              -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+              --data "$(jq -nc --arg v "$VALUE" '{value:$v}')" \
+              "https://api.render.com/v1/services/$SID/env-vars/$KEY")
+            if [ "$code" = "200" ] || [ "$code" = "201" ]; then
+              echo "  SET        $KEY  <- $FROM"
+            else
+              echo "::error::failed to set $KEY (HTTP $code)"
+              failed=$((failed+1))
+            fi
+          done < <(jq -c --arg p "$PROFILE" '.profiles[$p][]' "$MANIFEST")
+
+          # Anything on the service the spec does not declare. Reported, never deleted (D1) -- this list
+          # is the removal-candidate set a human reviews, not something CI acts on.
+          echo
+          for k in $(jq -r '.[].key' <<<"$CURRENT" | sort); do
+            case " $declared " in
+              *" $k "*) ;;
+              *) echo "  UNDECLARED $k  [on the service, in no spec]" ;;
+            esac
+          done
+
+          echo
+          echo "$changed change(s), $unchanged unchanged, $skipped skipped, $failed failed."
+          [ "$failed" -eq 0 ] || exit 1
+          if [ "$APPLY" != "true" ]; then
+            echo "Dry-run: nothing was written. Re-run with apply=true to upsert the changes above."
+          else
+            # Render does NOT deploy on an env change ("you must call the deploy API, irrespective of
+            # the autoDeploy option"), so the new values reach the app only on the next deploy -- which
+            # build-image triggers with a digest-pinned hook. Nothing here races that.
+            echo "Applied. The service picks these up on its NEXT deploy (env changes never auto-deploy)."
+          fi

@@ -118,6 +118,37 @@ validation. In the story map, inbound events are marked 📥.
   `$(shell ...)` are unaffected — only the tab-indented recipe text. Enforced by the
   `makefile_recipe_lines_are_ascii` codegen test, so it cannot silently come back.
 
+## Reading production telemetry (Honeycomb MCP)
+
+Traces and metrics go to **Honeycomb EU (`eu1`)** — a GDPR constraint, not a default
+(ADR-20260729-183000: spans carry `customerId`/`orderId`, and ADR-0042 pinned data to Frankfurt).
+The MCP server used to read them back is declared in [`.mcp.json`](.mcp.json), pinned to the **EU**
+host `https://mcp.eu1.honeycomb.io/mcp`.
+
+**The region is the trap.** The `honeycomb` plugin ships the **US** default (`mcp.honeycomb.io`), and
+US/EU are separate tenancies — authorizing the US host *succeeds* and then returns an empty environment
+list, which reads as a broken integration rather than a wrong region. The project-scoped `.mcp.json`
+exists to override that default for everyone, so do not "fix" it back to the documented default.
+
+Auth is per-user OAuth on first use, so **no secret lives in the repo**. It needs an **interactive**
+session (the browser flow cannot complete in a remote/non-interactive one) and **Honeycomb Intelligence**
+enabled on the team — an empty tool list after a clean auth is usually that add-on, not the config. The
+headless alternative is a **Management** API key (`<Key ID>:<Secret Key>`; scopes `Model Context Protocol`
++ `Environments`, read). Note the two key kinds are not interchangeable: the **ingest** key the app uses
+to *send* telemetry cannot read it back.
+
+When querying:
+
+- Call `get_workspace_context` **first** — it establishes which environments and datasets exist.
+- Discover fields with `find_columns` / `get_dataset_columns` before querying them.
+- Use human-readable time ranges (`"last 2 hours"`, `"24h"`), not epoch timestamps.
+- Name the environment and dataset explicitly in every query.
+- Prefer percentiles and `HEATMAP` over `AVG`. An average hides exactly the tail that matters at peak
+  (Friday/Saturday 19:00-21:30) — a P99 checkout regression is invisible in a flat mean.
+- Correlate by `correlation_id` / `trace_id`: the write path is acceptance-first
+  (ADR-20260720-015500), so a command's interesting half runs on a spawned task **after** the mutation
+  has already answered `PENDING`. Filtering to the GraphQL span alone shows the accept, not the outcome.
+
 ## Operating model (read [docs/PLAYBOOK.md](docs/PLAYBOOK.md))
 
 The project runs on a strict operating model: the **YAML DSL is the source of truth**, everything else
@@ -125,8 +156,16 @@ is **generated/derived**, **planning is separate from execution**, and **observa
 Topic rules live in [docs/claude/](docs/claude/) — read the relevant one before working:
 [dsl.md](docs/claude/dsl.md) · [codegen.md](docs/claude/codegen.md) ·
 [observability.md](docs/claude/observability.md) · [c4.md](docs/claude/c4.md) ·
-[adr.md](docs/claude/adr.md) · [loops.md](docs/claude/loops.md) · [mermaid.md](docs/claude/mermaid.md). Decisions are recorded in
+[adr.md](docs/claude/adr.md) · [loops.md](docs/claude/loops.md) · [mermaid.md](docs/claude/mermaid.md) ·
+[sessions.md](docs/claude/sessions.md). Decisions are recorded in
 [docs/adr/](docs/adr/).
+
+**[sessions.md](docs/claude/sessions.md) is operational, not conceptual** — read it before a long or
+exploratory session: which gate is cheap vs expensive, why `df` lies about the disk allowance (and what
+deleting `target/debug` costs you afterwards), how to keep GitHub MCP output from dwarfing every file you
+read, that PDFs cannot be read in this container at all, and why a third-party integration's API suite and
+auth mechanism must be established **before** any credential is named (ADR-20260730-032306 — getting that
+order wrong cost two wrong key sets and four mis-named repository secrets).
 
 Generator/reviewer/observability agents are defined in `.claude/agents/`; acceptance gates are wired as
 hooks in `.claude/settings.json` (`.claude/hooks/stop-gate.sh`, `validate-generated.sh`). `make help`
@@ -165,6 +204,16 @@ mutation/query is reached by a story step, and every test↔rule link holds both
 - Review and validation gates are executable and **blocking**; never hand-edit generated output
   (`specs/generated/**`, the `database.md` GENERATED region) — change the spec/emitter and regenerate.
 - Every recurring agent/loop failure becomes a new rule, test, or ADR.
+- **Every session records what it learned** (ADR-20260730-034635, product-owner directive), in the
+  **same change** as the work — not just failures, and not only on the second occurrence. Operational
+  findings (environment limits, tool behaviour, gate costs, workflow traps) go to
+  [docs/claude/sessions.md](docs/claude/sessions.md) or the relevant topic file; decisions to an ADR;
+  option spaces to a proposal; state to `STATUS.md`. **Prefer executable over prose** — a validator
+  rule, test or hook beats a bullet point, because prose can be ignored and a gate cannot
+  (`makefile_recipe_lines_are_ascii` is the model). Record only what is **not derivable from the code**
+  and would **cost the next session time**, with the concrete cost that earned it; sharpen an existing
+  rule rather than appending a near-duplicate. **Writing nothing is a valid outcome** — a session diary
+  is not a lesson, and padding lowers the odds the real rules get read.
 - Keep **`docs/STATUS.md`** current with every substantive change, and land cross-cutting **decisions as
   ADRs in the same change** — so concurrent sessions never diverge on state or intent. ADR ids are
   **date-time** (`ADR-YYYYMMDD-HHMMSS`) to avoid collisions (ADR-20260718-135417); legacy `0001`–`0047`

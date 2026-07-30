@@ -70,7 +70,7 @@ impl RetentionSweepWorker {
                 "external_stripe_events" => summary.external_stripe_events = deleted,
                 "external_hubrise_callbacks" => summary.external_hubrise_callbacks = deleted,
                 // A future window added to the function must not silently vanish from the logs.
-                other => eprintln!("retention sweep: unmapped swept_table '{other}' ({deleted} rows)"),
+                other => tracing::warn!(worker = "retention_sweep", table = %other, deleted, "unmapped swept_table -- not counted in the summary"),
             }
         }
         Ok(summary)
@@ -80,12 +80,16 @@ impl RetentionSweepWorker {
     pub async fn run_loop(self: Arc<Self>) {
         loop {
             match self.run_once().await {
-                Ok(s) if s.total() > 0 => println!(
-                    "retention sweep: command_journal={} inbound_events={} external_stripe_events={} external_hubrise_callbacks={}",
-                    s.command_journal, s.inbound_events, s.external_stripe_events, s.external_hubrise_callbacks
+                Ok(s) if s.total() > 0 => tracing::info!(
+                    worker = "retention_sweep",
+                    command_journal = s.command_journal,
+                    inbound_events = s.inbound_events,
+                    external_stripe_events = s.external_stripe_events,
+                    external_hubrise_callbacks = s.external_hubrise_callbacks,
+                    "sweep pass complete"
                 ),
                 Ok(_) => {}
-                Err(e) => eprintln!("retention sweep failed: {e}"),
+                Err(e) => tracing::error!(worker = "retention_sweep", error = %e, "sweep pass failed -- storage keeps growing until it succeeds"),
             }
             tokio::time::sleep(SWEEP_INTERVAL).await;
         }

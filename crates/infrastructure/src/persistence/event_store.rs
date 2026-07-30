@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use domain::generated::events::DomainEvent;
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
+use tracing::Instrument as _;
 
 use crate::persistence::db_err;
 use crate::persistence::event_bus::{AppendedEvent, EventBus};
@@ -41,6 +42,42 @@ impl EventStore for PgEventStore {
         events: &[DomainEvent],
         actor: &Actor,
     ) -> Result<i64, DomainError> {
+        // Split every event ONCE, up front. This used to happen inside the insert loop; hoisting it
+        // means the `event.store.append` span can name `business.event_type` (the contract requires it,
+        // and it is only knowable after serialization) without serializing each event a second time.
+        let split: Vec<(String, serde_json::Value)> =
+            events.iter().map(split_event).collect::<Result<_, _>>()?;
+
+        // event.store.append (INTERNAL). `business.event_type` names the FIRST event of the batch —
+        // the contract's attribute is singular while an append is one transaction over possibly several
+        // events, so `event_count` carries the rest. Naming the first is what makes the span findable
+        // for the event that drove the command; the count stops that reading as "there was only one".
+        let span = telemetry::spans::event_store_append(
+            split.first().map(|(t, _)| t.as_str()).unwrap_or("<empty>"),
+            stream_name,
+        );
+        telemetry::spans::record_event_count(&span, split.len());
+
+        // `.instrument` rather than `span.enter()`: this body awaits (begin, insert, commit), and a
+        // guard held across an await re-parents whatever else that worker thread picks up.
+        self.append_instrumented(stream_name, expected_version, split, actor).instrument(span).await
+    }
+
+    async fn load(&self, stream_name: &str) -> Result<(Vec<DomainEvent>, i64), DomainError> {
+        self.load_inner(stream_name).await
+    }
+}
+
+impl PgEventStore {
+    /// The append body, separated so the public `append` stays the instrumentation boundary.
+    async fn append_instrumented(
+        &self,
+        stream_name: &str,
+        expected_version: i64,
+        split: Vec<(String, serde_json::Value)>,
+        actor: &Actor,
+    ) -> Result<i64, DomainError> {
+        let event_count = split.len();
         // One transaction per append: a multi-event emission lands atomically or not at all, and a
         // version clash on ANY row rolls the whole batch back.
         let mut tx = self.pool.begin().await.map_err(db_err)?;
@@ -48,9 +85,8 @@ impl EventStore for PgEventStore {
         // Envelopes to broadcast once (and only if) the transaction commits.
         let mut published: Vec<AppendedEvent> = Vec::new();
 
-        for (index, event) in events.iter().enumerate() {
+        for (index, (event_type, payload)) in split.into_iter().enumerate() {
             let version = expected_version + index as i64 + 1;
-            let (event_type, payload) = split_event(event)?;
             if self.bus.is_some() {
                 published.push(AppendedEvent {
                     stream_name: stream_name.to_owned(),
@@ -93,13 +129,19 @@ impl EventStore for PgEventStore {
         // no subscribers / a closed channel is a no-op (the bus is a notification, not a ledger).
         if let Some(bus) = &self.bus {
             for envelope in published {
-                bus.publish(envelope);
+                // event.publish (PRODUCER), one span PER envelope rather than one for the batch: the
+                // contract binds the span to `business.event_type`, and a single span covering
+                // OrderPlaced + CartCheckedOut could only name one of the two.
+                let publish_span = telemetry::spans::event_publish(&envelope.event_type);
+                publish_span.in_scope(|| bus.publish(envelope));
             }
         }
-        Ok(expected_version + events.len() as i64)
+        Ok(expected_version + event_count as i64)
     }
 
-    async fn load(&self, stream_name: &str) -> Result<(Vec<DomainEvent>, i64), DomainError> {
+    /// The load body. Not instrumented as a contract span: no contract declares one for a stream read,
+    /// and `c4-l3.yaml` scopes `event-store-adapter` instrumentation to the append path.
+    async fn load_inner(&self, stream_name: &str) -> Result<(Vec<DomainEvent>, i64), DomainError> {
         let rows = sqlx::query(
             "SELECT event_type, payload, version FROM domain_events \
              WHERE stream_name = $1 ORDER BY version",

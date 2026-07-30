@@ -10,6 +10,9 @@
 //!   Every response carries `version` (the build's git SHA, ADR-20260721-175411) for failure diagnostics.
 //! - `/projector` — projection-worker readiness (running / checkpoint / head / lag / lastTickAt).
 //! - `/saga` — process-manager (saga) runner readiness, same shape as `/projector`.
+//! - `/sirene` — SIRENE sync-worker readiness (issue #244), same shape plus `lastSummary`. `503` with
+//!   `reason: poll_loop_not_started` when `RUN_SIRENE_WORKER` left the loop paused — the state that
+//!   was undiagnosable from outside during the department-37 pilot (#238).
 //! - `/{role}/graphql` (+ `/{role}/voyager`) — the GraphQL BFF (ADR-0006), see `graphql`.
 //! - `POST /internal/sirene/drain` — wakes the SIRENE sync worker after a CI ingestion run (ADR-0045);
 //!   secured by the `INTERNAL_TRIGGER_TOKEN` shared secret (`x-internal-token` header).
@@ -139,6 +142,70 @@ pub fn build_version() -> &'static str {
     })
 }
 
+/// Install telemetry from the declared configuration (issue #191).
+///
+/// The translation layer between the generated config reader and `crates/telemetry`: the telemetry
+/// crate sits below `server` and must not know `Config` exists, so the mapping happens here rather than
+/// by handing it the whole struct.
+///
+/// A malformed sample ratio cannot reach this point — the `TraceSampleRatio` scalar is validated at
+/// startup and a bad value is reported as a configuration problem — so the parse fallback is a belt-and-
+/// braces `1.0` (keep everything) rather than `0.0`. Defaulting to zero here would turn one unexpected
+/// value into total, silent trace loss, which is the failure this whole issue exists to end.
+pub fn init_telemetry(config: &generated::config::Config) -> telemetry::TelemetryGuard {
+    let cfg = telemetry::TelemetryConfig {
+        api_key: config.honeycomb_api_key.clone(),
+        endpoint: config.honeycomb_api_endpoint.clone(),
+        dataset: config.honeycomb_dataset.clone(),
+        sample_ratio: config.otel_traces_sample_ratio.parse().unwrap_or(1.0),
+        log_level: config.log_level.clone(),
+        service_version: build_version().to_string(),
+        profile: config.profile.to_string(),
+    };
+    let (guard, _emission) = telemetry::init(&cfg);
+    guard
+}
+
+/// Read a `RUN_*` worker toggle, leniently and uniformly (issue #244).
+///
+/// The gates used to be written inline, and inconsistently: `RUN_SIRENE_WORKER` was an exact
+/// `v == "true"` (so `TRUE`, `True`, a space-padded or dashboard-quoted value all silently meant
+/// PAUSED, with one boot-log line as the only trace), while the others were `v != "false"` (so
+/// `RUN_INBOUND_DRAIN=0` meant ON). For a flag whose job is to resume a paused production pipeline,
+/// silent-off on a case variant is the wrong failure mode — it cost hours on the department-37 pilot.
+///
+/// Accepts `true/1/yes/on` and `false/0/no/off`, case-insensitive, surrounding whitespace and wrapping
+/// quotes trimmed. Anything unrecognised (including an empty value) falls back to `default` **and says
+/// so on stdout**: a typo must never be silently interpreted as either state.
+///
+/// Behaviour change worth naming: `RUN_INBOUND_DRAIN=0` now means OFF, where the old `!= "false"`
+/// shortcut read it as ON. The new reading is the intended one.
+pub fn env_flag(name: &str, default: bool) -> bool {
+    parse_flag(std::env::var(name).ok().as_deref(), name, default)
+}
+
+/// The parsing half of [`env_flag`], split out so it is testable without mutating process env
+/// (`set_var` races across the threads of one test binary).
+fn parse_flag(raw: Option<&str>, name: &str, default: bool) -> bool {
+    let Some(raw) = raw else { return default };
+    let normalized = raw.trim().trim_matches(['"', '\'']).trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "true" | "1" | "yes" | "on" => true,
+        "false" | "0" | "no" | "off" => false,
+        "" => default,
+        other => {
+            tracing::warn!(
+                flag = name,
+                value = other,
+                default,
+                "unrecognised worker-toggle value -- using the default. \
+                 Accepted: true/1/yes/on, false/0/no/off."
+            );
+            default
+        }
+    }
+}
+
 /// Readiness states published by the heartbeat, read by `/health`.
 mod db_state {
     pub const NOT_CONFIGURED: u8 = 0; // DATABASE_URL unset
@@ -169,9 +236,15 @@ pub struct AppState {
     /// Live saga-runner (process managers, actors.yaml) status when it runs in-process; `None` when
     /// not started.
     saga_status: Option<Arc<Mutex<ProcessManagerStatus>>>,
+    /// Live SIRENE sync-worker status. Unlike the two above this is `Some` whenever a DATABASE_URL
+    /// pool exists — the worker is always constructed (the ping endpoint needs it), so the snapshot
+    /// can distinguish "loop not started" (`running: false`) from "no database" (`None`). That
+    /// distinction is the point of the endpoint (#244).
+    sirene_status: Option<Arc<Mutex<infrastructure::SireneSyncStatus>>>,
 }
 
-/// Build the Axum router: `/ping`, `/health`, `/projector`, and the role-as-path GraphQL routes. Reads
+/// Build the Axum router: `/ping`, `/health`, `/projector`, `/saga`, `/sirene`, and the role-as-path
+/// GraphQL routes. Reads
 /// `DATABASE_URL`; when present it opens a lazy pool used by the heartbeat, the read-model repo (injected
 /// into GraphQL), and the in-process projection worker.
 /// Resolve the `identity` service impl (#117): the real Supabase adapter when configured
@@ -181,17 +254,23 @@ pub struct AppState {
 fn identity_service_impl() -> Arc<dyn application::generated::services::IdentityService> {
     match infrastructure::SupabaseIdentityService::from_env() {
         Some(adapter) => {
-            println!("identity service: SupabaseIdentityService (SUPABASE_URL set)");
+            tracing::info!(binding = "identity", impl_ = "SupabaseIdentityService", "identity service wired (SUPABASE_URL set)");
             Arc::new(adapter)
         }
         None => {
-            eprintln!("SUPABASE_URL/PUBLISHABLE_KEY unset — identity fail-closed (auth anonymous-only)");
+            tracing::warn!(binding = "identity", impl_ = "FailClosedIdentityService", "SUPABASE_URL/PUBLISHABLE_KEY unset -- identity fails closed, auth stays anonymous-only");
             Arc::new(FailClosedIdentityService)
         }
     }
 }
 
 pub fn router() -> Router {
+    // The DECLARED configuration (specs/configuration.yaml), resolved once. Every value below comes
+    // from here rather than a local `env::var` + inline fallback: a default that is declared in the
+    // spec and then re-typed at the call site is two sources of truth, and the spec's copy is the one
+    // that turns out to be inert. `main` resolves it too — for the startup gate — and both resolutions
+    // read the same process env, so they agree by construction.
+    let (config, _) = generated::config::Config::resolve();
     let snap = Arc::new(Mutex::new(Snapshot::default()));
     // In-process appended-event bus: every event-store append in THIS process (GraphQL mutations,
     // Stripe/HubRise inbound facts) is broadcast after commit, feeding the GraphQL subscriptions.
@@ -212,6 +291,7 @@ pub fn router() -> Router {
     let mut write_deps: Option<WriteDeps> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
+    let mut sirene_status: Option<Arc<Mutex<infrastructure::SireneSyncStatus>>> = None;
     let mut sirene_worker: Option<Arc<SireneSyncWorker>> = None;
     let mut stripe_ingestor: Option<Arc<StripeWebhookIngestor>> = None;
     let mut avelo37_ingestor: Option<Arc<Avelo37WebhookIngestor>> = None;
@@ -220,7 +300,7 @@ pub fn router() -> Router {
     // URL + OAuth per instance) and the inbound webhook route (per-instance secret). Empty ⇒ no-op.
     let coopcycle_registry = coopcycle_adapter::CoopCycleRegistry::from_env()
         .unwrap_or_else(|e| {
-            eprintln!("COOPCYCLE_INSTANCES misconfigured, treating as unset: {e}");
+            tracing::warn!(error = %e, key = "COOPCYCLE_INSTANCES", "misconfigured, treating as unset");
             None
         })
         .unwrap_or_default();
@@ -228,7 +308,7 @@ pub fn router() -> Router {
     // The Uber Direct config (UBER_DIRECT_*) — shared by the outbound gateway (OAuth2 + create
     // delivery) and the inbound webhook route (signing secret). None ⇒ unconfigured (no-op stand-in).
     let uber_direct_config = uber_direct_adapter::UberDirectConfig::from_env().unwrap_or_else(|e| {
-        eprintln!("UBER_DIRECT_* misconfigured, treating as unset: {e}");
+        tracing::warn!(error = %e, key = "UBER_DIRECT_*", "misconfigured, treating as unset");
         None
     });
     let mut hubrise_state = hubrise_adapter::HubRiseWebhookState::default();
@@ -326,12 +406,14 @@ pub fn router() -> Router {
                     payments: infrastructure::generated::service_bindings::payment_service(|| {
                         match std::env::var("STRIPE_SECRET_KEY") {
                             Ok(key) if !key.is_empty() => {
-                                println!("payment service: StripePaymentGateway (STRIPE_SECRET_KEY set)");
+                                tracing::info!(binding = "payments", impl_ = "StripePaymentGateway", "payment service wired (STRIPE_SECRET_KEY set)");
                                 Arc::new(stripe_adapter::StripePaymentGateway::new(key))
                             }
                             _ => {
-                                println!(
-                                    "payment service: FailClosedPaymentGateway (STRIPE_SECRET_KEY unset — every checkout declines)"
+                                tracing::warn!(
+                                    binding = "payments",
+                                    impl_ = "FailClosedPaymentGateway",
+                                    "STRIPE_SECRET_KEY unset -- EVERY checkout declines"
                                 );
                                 Arc::new(FailClosedPaymentGateway)
                             }
@@ -360,11 +442,11 @@ pub fn router() -> Router {
                         match infrastructure::PgAuthSessionStore::from_env(pool.clone()) {
                             Some(store) => {
                                 auth_sessions = Arc::new(store);
-                                println!("auth sessions: encrypted Pg store (AUTH_SESSION_KEY set)");
+                                tracing::info!(binding = "auth_sessions", impl_ = "encrypted Pg store", "auth session store wired (AUTH_SESSION_KEY set)");
                                 auth_sessions.clone()
                             }
                             None => {
-                                eprintln!("AUTH_SESSION_KEY not set — session cookies unavailable (auth stays anonymous-only)");
+                                tracing::warn!(binding = "auth_sessions", "AUTH_SESSION_KEY unset -- session cookies unavailable, auth stays anonymous-only");
                                 auth_sessions.clone()
                             }
                         }
@@ -372,13 +454,13 @@ pub fn router() -> Router {
                 });
 
                 // In-process projection worker (ADR-0040). RUN_PROJECTOR=false hands it to a dedicated worker.
-                if std::env::var("RUN_PROJECTOR").map(|v| v != "false").unwrap_or(true) {
+                if config.run_projector {
                     let worker = ProjectionWorker::new(pool.clone());
                     projector_status = Some(worker.status());
                     tokio::spawn(worker.run_loop());
-                    println!("projection worker: running in-process (set RUN_PROJECTOR=false to disable)");
+                    tracing::info!(worker = "projection", running = true, toggle = "RUN_PROJECTOR", "worker running in-process");
                 } else {
-                    println!("RUN_PROJECTOR=false — projection worker not started in-process");
+                    tracing::warn!(worker = "projection", running = false, toggle = "RUN_PROJECTOR", "worker NOT started -- no read model advances, queries serve stale data");
                 }
 
                 // In-process saga runner (the state-table process managers of
@@ -391,7 +473,7 @@ pub fn router() -> Router {
                 // logged no-op stand-in (jobs stay open to independent riders; the bounded re-offer
                 // run row still terminates ACCEPTED/FAILED). The partner's answers always arrive
                 // asynchronously through the webhook inbox below, never this outbound call.
-                if std::env::var("RUN_PROCESS_MANAGERS").map(|v| v != "false").unwrap_or(true) {
+                if config.run_process_managers {
                     // Composite delivery gateway (#60): the saga offers a job on a strategy-resolved
                     // CHANNEL, so the single Avelo-vs-Noop choice becomes a registry of channel →
                     // adapter. `independent` is the rider POOL (a deliberate no-op — jobs stay open to
@@ -421,9 +503,11 @@ pub fn router() -> Router {
                                 Arc::new(uber_direct_adapter::UberDirectDeliveryGateway::new(config)),
                             );
                         }
-                        println!(
-                            "delivery gateway: composite — wired channels {:?} (unwired channels fall through via offer timeout)",
-                            gateway.wired_channels()
+                        tracing::info!(
+                            binding = "delivery",
+                            impl_ = "composite",
+                            wired_channels = ?gateway.wired_channels(),
+                            "delivery gateway wired (unwired channels fall through via offer timeout)"
                         );
                         Arc::new(gateway)
                     })
@@ -446,20 +530,25 @@ pub fn router() -> Router {
                         .with_payments(saga_payments);
                     saga_status = Some(runner.status());
                     tokio::spawn(runner.run_loop());
-                    println!("saga runner: running in-process (set RUN_PROCESS_MANAGERS=false to disable)");
+                    tracing::info!(worker = "saga_runner", running = true, toggle = "RUN_PROCESS_MANAGERS", "worker running in-process");
 
                     // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next
                     // ranked channel. Env-gated like the other in-process workers.
-                    if std::env::var("RUN_DELIVERY_OFFER_TIMEOUT").map(|v| v != "false").unwrap_or(true) {
-                        let timeout_worker =
-                            Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(pool.clone()));
+                    if config.run_delivery_offer_timeout {
+                        // The ceiling comes from the DECLARED configuration, resolved once above --
+                        // `infrastructure` is an inner layer and cannot read `Config` itself, so the
+                        // composition root is the only place the two can meet.
+                        let timeout_worker = Arc::new(infrastructure::DeliveryOfferTimeoutWorker::new(
+                            pool.clone(),
+                            config.delivery_offer_max_ttl_seconds,
+                        ));
                         tokio::spawn(timeout_worker.run_loop());
-                        println!("delivery offer-timeout worker: running in-process (set RUN_DELIVERY_OFFER_TIMEOUT=false to disable)");
+                        tracing::info!(worker = "delivery_offer_timeout", running = true, toggle = "RUN_DELIVERY_OFFER_TIMEOUT", "worker running in-process");
                     } else {
-                        println!("RUN_DELIVERY_OFFER_TIMEOUT=false — delivery offer-timeout worker not started");
+                        tracing::warn!(worker = "delivery_offer_timeout", running = false, toggle = "RUN_DELIVERY_OFFER_TIMEOUT", "worker NOT started -- an unanswered offer is never expired");
                     }
                 } else {
-                    println!("RUN_PROCESS_MANAGERS=false — saga runner not started in-process");
+                    tracing::warn!(worker = "saga_runner", running = false, toggle = "RUN_PROCESS_MANAGERS", "worker NOT started -- no cross-aggregate reaction fires");
                 }
 
                 // SIRENE sync worker (ADR-0045): drains the `external_sirene_restaurants` staging
@@ -477,11 +566,11 @@ pub fn router() -> Router {
                     Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
                 ));
                 inbound_drain = Some(drain.clone());
-                if std::env::var("RUN_INBOUND_DRAIN").map(|v| v != "false").unwrap_or(true) {
+                if config.run_inbound_drain {
                     tokio::spawn(drain.clone().run_loop());
-                    println!("inbound drain worker: running in-process (set RUN_INBOUND_DRAIN=false to disable)");
+                    tracing::info!(worker = "inbound_drain", running = true, toggle = "RUN_INBOUND_DRAIN", "worker running in-process");
                 } else {
-                    println!("RUN_INBOUND_DRAIN=false — inbound drain poll loop not started (nudge trigger stays active)");
+                    tracing::warn!(worker = "inbound_drain", running = false, toggle = "RUN_INBOUND_DRAIN", "poll loop NOT started -- webhook-staged facts accumulate undelivered (nudge trigger stays active)");
                 }
 
                 // Stripe webhook ingestor (ADR-20260720-015400 inbound event sourcing): verify →
@@ -580,7 +669,7 @@ pub fn router() -> Router {
                         hubrise_connections,
                         hubrise_adapter::connect::HttpHubRiseConnectGateway {
                             api: hubrise_adapter::api::HubRiseApi::from_env(),
-                            client_id: std::env::var("HUBRISE_CLIENT_ID").unwrap_or_default(),
+                            client_id: config.hubrise_client_id.clone().unwrap_or_default(),
                             client_secret: std::env::var("HUBRISE_WEBHOOK_SECRET").unwrap_or_default(),
                         },
                     )));
@@ -590,16 +679,20 @@ pub fn router() -> Router {
                 // sweep_retention() SQL function — journal/mirror retention windows live in the
                 // function, never here. Env-gated like the other workers; a pg_cron job calling
                 // the same function is the alternative where DB-side scheduling is preferred.
-                if std::env::var("RUN_RETENTION_SWEEP").map(|v| v != "false").unwrap_or(true) {
+                if config.run_retention_sweep {
                     let sweeper =
                         Arc::new(infrastructure::RetentionSweepWorker::new(pool.clone()));
                     tokio::spawn(sweeper.run_loop());
-                    println!("retention sweep worker: running in-process (set RUN_RETENTION_SWEEP=false to disable)");
+                    tracing::info!(worker = "retention_sweep", running = true, toggle = "RUN_RETENTION_SWEEP", "worker running in-process");
                 } else {
-                    println!("RUN_RETENTION_SWEEP=false — retention sweep worker not started");
+                    tracing::warn!(worker = "retention_sweep", running = false, toggle = "RUN_RETENTION_SWEEP", "worker NOT started -- nothing expires and storage grows without bound");
                 }
 
                 let worker = Arc::new(SireneSyncWorker::new(pool.clone()));
+                // Taken unconditionally, BEFORE the gate below: the worker exists either way (the ping
+                // endpoint drives it), so `/sirene` can report `running: false` for a paused loop
+                // instead of the ambiguous "not available" (#244).
+                sirene_status = Some(worker.status());
                 sirene_worker = Some(worker.clone());
                 // PAUSED 2026-07-28 (product-owner directive): the default is OFF until the write-path
                 // defects in issue #220 are resolved — a drain pass issues one `RegisterRestaurant` per
@@ -609,18 +702,21 @@ pub fn router() -> Router {
                 // It also cannot apply what it reads: no `UpdateRestaurant` exists here, so INSEE changes
                 // are swallowed by that same conflict. The CI half is paused in sirene-sync.yml.
                 // Re-enable BOTH halves together: `RUN_SIRENE_WORKER=true` + the workflow's cron.
-                if std::env::var("RUN_SIRENE_WORKER").map(|v| v == "true").unwrap_or(false) {
+                if config.run_sirene_worker {
                     tokio::spawn(worker.run_loop());
-                    println!(
-                        "sirene sync worker: running in-process (set RUN_SIRENE_WORKER=false to keep only the ping trigger)"
+                    tracing::info!(
+                        worker = "sirene_sync",
+                        running = true,
+                        toggle = "RUN_SIRENE_WORKER",
+                        "worker running in-process"
                     );
                 } else {
-                    println!("sirene sync worker: PAUSED (issue #220) — poll loop not started; set RUN_SIRENE_WORKER=true to resume");
+                    tracing::warn!(worker = "sirene_sync", running = false, toggle = "RUN_SIRENE_WORKER", "worker PAUSED (issue #220) -- staged rows stay PENDING; set RUN_SIRENE_WORKER=true to resume");
                 }
             }
-            Err(e) => eprintln!("DATABASE_URL set but pool init failed: {e}"),
+            Err(e) => tracing::error!(error = %e, "DATABASE_URL set but pool init failed -- /health will report degraded"),
         },
-        _ => eprintln!("DATABASE_URL not set — /health will report not_configured (503)"),
+        _ => tracing::warn!("DATABASE_URL not set -- /health will report not_configured (503)"),
     }
 
     let base = Router::new()
@@ -628,7 +724,8 @@ pub fn router() -> Router {
         .route("/health", get(health))
         .route("/projector", get(projector))
         .route("/saga", get(saga))
-        .with_state(AppState { snap, projector_status, saga_status });
+        .route("/sirene", get(sirene))
+        .with_state(AppState { snap, projector_status, saga_status, sirene_status });
 
     // Built once, shared twice: the HTTP GraphQL routes AND the SSR page renderer (#92 — the
     // in-process transport executes screens' data_requirements against this same schema).
@@ -643,7 +740,7 @@ pub fn router() -> Router {
         // The Supabase Send-SMS hook → OVH delivery (#118): both the OVH client and the hook secret
         // must be configured, else the hook 503s (SMS-less, never half-open).
         sms: infrastructure::OvhSmsClient::from_env().map(|c| {
-            println!("sms delivery: OvhSmsClient (OVH_* set)");
+            tracing::info!(binding = "sms", impl_ = "OvhSmsClient", "sms delivery wired (OVH_* set)");
             Arc::new(c)
         }),
         sms_hook_secret: std::env::var("SUPABASE_SMS_HOOK_SECRET")
@@ -691,7 +788,7 @@ pub fn router() -> Router {
         .nest_service(
             "/assets",
             tower_http::services::ServeDir::new(
-                std::env::var("WEB_ASSETS_DIR").unwrap_or_else(|_| "/app/web-assets".into()),
+                config.web_assets_dir.clone(),
             ),
         )
         // Host-based serving (ADR-0036 + split 4/4 of #21): any path not matched above is dispatched by
@@ -771,6 +868,48 @@ async fn saga(State(app): State<AppState>) -> impl IntoResponse {
     }
 }
 
+/// SIRENE sync-worker readiness (issue #244) — the `/projector` counterpart for the staging drain.
+/// `200` when the poll loop is running, `503` otherwise, and the body says WHICH `503` it is:
+///
+/// - `sirene_worker_not_available` — no `DATABASE_URL`, so no worker at all;
+/// - `poll_loop_not_started` — the worker exists (the ping endpoint can drive it) but
+///   `RUN_SIRENE_WORKER` did not start the loop. This is the department-37 case (#238): rows sitting
+///   `PENDING` for hours with no way, from outside, to tell a paused loop from a crashing one.
+///
+/// `lastError` separates the two failure modes once the loop IS running, and `lastSummary` reports
+/// what the last pass did. A ping-triggered pass updates the snapshot too, so the endpoint describes
+/// the worker rather than only the loop.
+async fn sirene(State(app): State<AppState>) -> impl IntoResponse {
+    let status = app
+        .sirene_status
+        .as_ref()
+        .map(|handle| handle.lock().expect("sirene status mutex").clone());
+    let (code, body) = sirene_readiness(status);
+    (code, Json(body))
+}
+
+/// The `/sirene` response, split from the handler so the three states are unit-testable without a
+/// router or a database. `None` = no worker (no `DATABASE_URL`); `Some(status)` = a worker exists and
+/// `running` says whether its poll loop was started.
+fn sirene_readiness(
+    status: Option<infrastructure::SireneSyncStatus>,
+) -> (StatusCode, serde_json::Value) {
+    let Some(status) = status else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({ "running": false, "reason": "sirene_worker_not_available" }),
+        );
+    };
+    let code = if status.running { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    let mut body = serde_json::to_value(&status).unwrap_or_else(|_| json!({ "running": false }));
+    if !status.running {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("reason".to_string(), json!("poll_loop_not_started"));
+        }
+    }
+    (code, body)
+}
+
 /// Every 30s, recompute readiness and cache it. The first run happens immediately.
 fn spawn_heartbeat(pool: PgPool, snap: Arc<Mutex<Snapshot>>) {
     tokio::spawn(async move {
@@ -824,5 +963,180 @@ async fn health(State(app): State<AppState>) -> impl IntoResponse {
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "status": "degraded", "db": "down", "version": build_version() })),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The failure this fixes: `RUN_SIRENE_WORKER=TRUE` on Render silently meant PAUSED, because the
+    /// gate was an exact `== "true"`. Every spelling a human or a dashboard plausibly produces must
+    /// resolve to the state the operator intended (#244).
+    #[test]
+    fn flag_accepts_the_spellings_an_operator_actually_types() {
+        for on in ["true", "TRUE", "True", " true ", "\"true\"", "'true'", "1", "yes", "ON"] {
+            assert!(parse_flag(Some(on), "RUN_SIRENE_WORKER", false), "{on:?} should enable");
+        }
+        for off in ["false", "FALSE", " False ", "\"false\"", "0", "no", "OFF"] {
+            assert!(!parse_flag(Some(off), "RUN_INBOUND_DRAIN", true), "{off:?} should disable");
+        }
+    }
+
+    /// Unset, empty and unparsable all fall back to the DEFAULT — never to a fixed state. A typo must
+    /// not silently pause a worker that defaults on, nor start one that defaults off.
+    #[test]
+    fn flag_falls_back_to_the_default_when_it_cannot_tell() {
+        for undecidable in [None, Some(""), Some("   "), Some("maybe"), Some("2")] {
+            assert!(parse_flag(undecidable, "RUN_PROJECTOR", true), "{undecidable:?}: default true");
+            assert!(
+                !parse_flag(undecidable, "RUN_SIRENE_WORKER", false),
+                "{undecidable:?}: default false"
+            );
+        }
+    }
+
+    /// No `DATABASE_URL` → no worker at all. Distinct from a worker whose loop is merely paused.
+    #[test]
+    fn sirene_readiness_reports_no_worker_without_a_database() {
+        let (code, body) = sirene_readiness(None);
+        assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["reason"], "sirene_worker_not_available");
+        assert_eq!(body["running"], false);
+    }
+
+    /// THE case the department-37 pilot could not diagnose (#238): the worker exists, the loop never
+    /// started, 6,649 rows sat `PENDING` for hours, and nothing outside the process said so. `503` +
+    /// `poll_loop_not_started` is that answer in one request.
+    #[test]
+    fn sirene_readiness_names_a_paused_poll_loop() {
+        let (code, body) = sirene_readiness(Some(infrastructure::SireneSyncStatus::default()));
+        assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["reason"], "poll_loop_not_started");
+        assert_eq!(body["lastTickAt"], serde_json::Value::Null);
+    }
+
+    /// A running loop is `200`, carries no `reason`, and reports the last pass in camelCase (the
+    /// wire shape `/projector` and `/saga` already use).
+    #[test]
+    fn sirene_readiness_reports_a_running_loop_and_its_last_pass() {
+        let status = infrastructure::SireneSyncStatus {
+            running: true,
+            last_tick_at: Some(chrono::Utc::now()),
+            last_error: None,
+            last_summary: Some(infrastructure::SireneSyncSummary {
+                processed: 6649,
+                registered: 6649,
+                ..Default::default()
+            }),
+        };
+        let (code, body) = sirene_readiness(Some(status));
+        assert_eq!(code, StatusCode::OK);
+        assert!(body.get("reason").is_none(), "a running loop needs no reason");
+        assert_eq!(body["lastSummary"]["processed"], 6649);
+        assert!(body["lastTickAt"].is_string());
+    }
+
+    /// The generated configuration reader (PROP-20260729-004500) must agree with the spec on the two
+    /// things the startup gate depends on: what is REQUIRED in production, and that a missing key is
+    /// reported rather than defaulted away. A drift here silently re-opens the hole the spec closed.
+    #[test]
+    fn generated_config_requires_the_money_and_identity_keys_in_production() {
+        use crate::generated::config::DECLARED_KEYS;
+        for k in [
+            "DATABASE_URL",
+            "STRIPE_SECRET_KEY",
+            "STRIPE_WEBHOOK_SECRET",
+            "AUTH_SESSION_KEY",
+            "SUPABASE_URL",
+            "RUN_SIRENE_WORKER",
+        ] {
+            assert!(DECLARED_KEYS.contains(&k), "{k} must be declared in specs/configuration.yaml");
+        }
+    }
+
+    /// The report must name EVERY problem, not the first — an operator who learns about one bad key
+    /// per deploy cycle fixes a three-key outage in three deploys — and it must separate "absent" from
+    /// "present but unusable", which are different fixes.
+    #[test]
+    fn config_report_lists_every_problem_and_never_prints_a_secret() {
+        use crate::generated::config::{ConfigProblems, InvalidKey, MissingConfig, MissingKey, Profile};
+        let report = MissingConfig {
+            profile: Profile::Production,
+            problems: ConfigProblems {
+                missing: vec![MissingKey { name: "DATABASE_URL", gates: "Postgres pool." }],
+                invalid: vec![InvalidKey {
+                    name: "STRIPE_SECRET_KEY",
+                    scalar: "StripeSecretKey",
+                    pattern: "^sk_(test|live)_[A-Za-z0-9]+$",
+                    gates: "Stripe API key for PaymentIntents.",
+                }],
+            },
+        }
+        .to_string();
+        assert!(report.contains("DATABASE_URL"), "the missing key is named");
+        assert!(report.contains("STRIPE_SECRET_KEY"), "the invalid key is named too");
+        assert!(report.contains("MISSING"), "absent keys are grouped");
+        assert!(report.contains("INVALID"), "malformed keys are grouped separately — a different fix");
+        assert!(report.contains("^sk_(test|live)_"), "the EXPECTED shape is shown");
+        assert!(report.contains("production"), "the profile is named");
+        assert!(report.contains("Nothing was started."), "says what did NOT happen");
+    }
+
+    /// Enforcement follows the PROFILE (product-owner directive 2026-07-29): production and staging
+    /// stop, development reports and continues. No second toggle to get wrong.
+    #[test]
+    fn only_development_continues_past_a_configuration_problem() {
+        use crate::generated::config::Profile;
+        for (profile, stops) in
+            [(Profile::Production, true), (Profile::Staging, true), (Profile::Development, false)]
+        {
+            assert_eq!(
+                !matches!(profile, Profile::Development),
+                stops,
+                "{profile} enforcement"
+            );
+        }
+    }
+
+    /// The scalars are what turn "present" into "usable". Each pattern must accept the real shape and
+    /// reject the plausible mistake — a LIVE key in the test slot, a truncated session key, a bare host.
+    #[test]
+    fn config_scalars_reject_the_plausible_mistakes() {
+        let cases: &[(&str, &str, bool)] = &[
+            ("^sk_(test|live)_[A-Za-z0-9]+$", "sk_test_abc123", true),
+            ("^sk_(test|live)_[A-Za-z0-9]+$", "sk_live_abc123", true),
+            ("^sk_(test|live)_[A-Za-z0-9]+$", "pk_test_abc123", false), // publishable in a secret slot
+            ("^sk_test_[A-Za-z0-9]+$", "sk_live_abc123", false),        // LIVE key in the test slot
+            ("^whsec_[A-Za-z0-9_-]+$", "whsec_abc123", true),
+            ("^whsec_[A-Za-z0-9_-]+$", "sk_test_abc123", false),        // wrong secret entirely
+            ("^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", &"a".repeat(64), true),
+            ("^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", &"a".repeat(63), false), // 31 bytes, not 32
+            ("^postgres(ql)?://", "postgresql://u:p@h:5432/db", true),
+            ("^postgres(ql)?://", "h:5432/db", false),                  // bare host
+            ("^([0-9]{2,3}|2[AB])(,([0-9]{2,3}|2[AB]))*$", "37,2A", true), // Corsica: 2A is 1 digit + letter
+            ("^([0-9]{2,3}|2[AB])(,([0-9]{2,3}|2[AB]))*$", "37;41", false), // wrong separator
+            ("^(?i)(true|yes|1|on|false|no|0|off)$", "TRUE", true),     // the #245 failure
+            ("^(?i)(true|yes|1|on|false|no|0|off)$", "oui", false),
+        ];
+        for (pattern, value, expected) in cases {
+            let re = regex::Regex::new(pattern).expect("pattern compiles");
+            assert_eq!(re.is_match(value), *expected, "{pattern} vs {value:?}");
+        }
+    }
+
+    /// A loop that runs and fails every pass must not look like a healthy one: `running` stays true
+    /// (the loop IS turning) and `lastError` carries the reason — the second half of the diagnosis.
+    #[test]
+    fn sirene_readiness_surfaces_a_failing_pass() {
+        let status = infrastructure::SireneSyncStatus {
+            running: true,
+            last_tick_at: Some(chrono::Utc::now()),
+            last_error: Some("connection refused".to_string()),
+            last_summary: None,
+        };
+        let (code, body) = sirene_readiness(Some(status));
+        assert_eq!(code, StatusCode::OK, "the loop is running; the PASS failed");
+        assert_eq!(body["lastError"], "connection refused");
     }
 }

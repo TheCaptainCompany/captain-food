@@ -512,7 +512,7 @@ pub mod refund_process {
                 payment.refund(input, &crate::generated::services::ServiceCallMeta::new(actor.correlation_id)).await?;
             }
             super::HookOutcome::Skip(reason) => {
-                eprintln!("saga[RefundProcess]: call payment.refund skipped — {reason}");
+                tracing::warn!(saga = "RefundProcess", port = "payment", operation = "refund", %reason, "service call skipped");
             }
         }
         // deliver RefundApproved → Payment (the aggregate records the fact)
@@ -695,7 +695,7 @@ pub mod cart_binding_process {
                     return Err(domain::shared::errors::DomainError::Repository(e))
                 }
                 Err(rejection) => {
-                    eprintln!("saga[CartBindingProcess]: BindCartToCustomer rejected ({rejection}) — skipped, the target aggregate's own invariants stand");
+                    tracing::warn!(saga = "CartBindingProcess", command = "BindCartToCustomer", %rejection, "command rejected -- leg skipped, the target aggregate's own invariants stand");
                 }
             }
         }
@@ -826,7 +826,7 @@ pub mod delivery_dispatch_process {
                 delivery.offer_job(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
             }
             super::HookOutcome::Skip(reason) => {
-                eprintln!("saga[DeliveryDispatchProcess]: call delivery.offer_job skipped — {reason}");
+                tracing::warn!(saga = "DeliveryDispatchProcess", port = "delivery", operation = "offer_job", %reason, "service call skipped");
             }
         }
         // state.set — upsert the run row (envelope stamps last_update_utc). Open the run under the resolved strategy (#60). A CAPTAIN-dispatch order opens OFFERED at rank 1 with current_rank/current_channel set to the rank-1 channel offer_job was invoked against; a RESTAURANT-dispatch order opens SELF_DISPATCHED with current_rank/current_channel null (Captain offers no channel and only tracks — the restaurant drives progress and the customer still gets tracking). process_status/current_rank/current_channel are resolved by runtime strategy hooks (from_hook) reading RestaurantDispatchConfig + CityDeliveryRanking; offer_attempts = 1 counts the birth offer.
@@ -943,7 +943,7 @@ pub mod delivery_dispatch_process {
                     delivery.offer_job(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
                 }
                 super::HookOutcome::Skip(reason) => {
-                    eprintln!("saga[DeliveryDispatchProcess]: call delivery.offer_job skipped — {reason}");
+                    tracing::warn!(saga = "DeliveryDispatchProcess", port = "delivery", operation = "offer_job", %reason, "service call skipped");
                 }
             }
             // state.set — upsert the run row (envelope stamps last_update_utc). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step — arithmetic/selection the value forms cannot carry); the run stays OFFERED awaiting the answer.
@@ -1049,7 +1049,7 @@ pub mod delivery_dispatch_process {
                     delivery.offer_job(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
                 }
                 super::HookOutcome::Skip(reason) => {
-                    eprintln!("saga[DeliveryDispatchProcess]: call delivery.offer_job skipped — {reason}");
+                    tracing::warn!(saga = "DeliveryDispatchProcess", port = "delivery", operation = "offer_job", %reason, "service call skipped");
                 }
             }
             // state.set — upsert the run row (envelope stamps last_update_utc). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
@@ -1155,7 +1155,7 @@ pub mod delivery_dispatch_process {
                     delivery.offer_job(input, &crate::generated::services::ServiceCallMeta::new(env.correlation_id)).await?;
                 }
                 super::HookOutcome::Skip(reason) => {
-                    eprintln!("saga[DeliveryDispatchProcess]: call delivery.offer_job skipped — {reason}");
+                    tracing::warn!(saga = "DeliveryDispatchProcess", port = "delivery", operation = "offer_job", %reason, "service call skipped");
                 }
             }
             // state.set — upsert the run row (envelope stamps last_update_utc). ADVANCE branch: offer_attempts += 1 and current_rank/current_channel advance to the next ranked channel (the orchestrator computes the walk step); the run stays OFFERED.
@@ -1240,7 +1240,7 @@ pub mod delivery_dispatch_process {
             }
             Err(rejection) => {
                 let reason = format!("MarkOrderDelivered rejected: {rejection} — the target aggregate's own invariants stand; skipped");
-                eprintln!("saga[DeliveryDispatchProcess]: {reason}");
+                tracing::warn!(saga = "DeliveryDispatchProcess", %reason, "leg skipped");
                 leg_outcome = Outcome::Skipped(reason);
             }
         }
@@ -1292,7 +1292,7 @@ pub mod delivery_dispatch_process {
             }
             Err(rejection) => {
                 let reason = format!("MarkOrderDelivered rejected: {rejection} — the target aggregate's own invariants stand; skipped");
-                eprintln!("saga[DeliveryDispatchProcess]: {reason}");
+                tracing::warn!(saga = "DeliveryDispatchProcess", %reason, "leg skipped");
                 leg_outcome = Outcome::Skipped(reason);
             }
         }
@@ -1349,7 +1349,7 @@ pub mod reclamation_process {
                 }
                 Err(rejection) => {
                     let reason = format!("GrantCustomerCredit rejected: {rejection} — the target aggregate's own invariants stand; skipped");
-                    eprintln!("saga[ReclamationProcess]: {reason}");
+                    tracing::warn!(saga = "ReclamationProcess", %reason, "leg skipped");
                     leg_outcome = Outcome::Skipped(reason);
                 }
             }

@@ -37,8 +37,16 @@ own page renders it just as small (that approach was tried and rolled back the s
 the closing fence** it carries a link that opens the same source in mermaid.live's pan/zoom viewer:
 
 ```markdown
-[Open this diagram with pan and zoom (mermaid.live)](https://mermaid.live/view#pako:…)
+<a href="https://mermaid.live/view#pako:…" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a>
 ```
+
+**HTML anchor, not a Markdown link** (product-owner directive, 2026-07-28): the link must open in a
+NEW tab — the reader is mid-document and must not lose their place. Markdown cannot express
+`target`, so the link is written as a raw `<a target="_blank" rel="noopener noreferrer">`. Caveat:
+github.com's Markdown sanitizer strips `target`, so on GitHub itself use Ctrl/Cmd+click or
+middle-click — but every renderer that honors the attribute (VS Code preview, the generated HTML
+docs, most viewers) opens the new tab as intended. Keep `rel="noopener noreferrer"` — `_blank`
+without it hands the new page a handle on ours.
 
 - The `#pako:` fragment **encodes the diagram source itself** (deflate + base64url of the editor
   state), so the link works with zero build tooling — but it also means the link **goes stale the
@@ -54,7 +62,9 @@ the closing fence** it carries a link that opens the same source in mermaid.live
   for i, code in enumerate(re.findall(r'```mermaid\n(.*?)```', src, re.S), 1):
       state = json.dumps({"code": code.strip(), "mermaid": {"theme": "default"}})
       pako = base64.urlsafe_b64encode(zlib.compress(state.encode(), 9)).decode().rstrip('=')
-      print(f"diagram {i}: https://mermaid.live/view#pako:{pako}")
+      print(f'diagram {i}: <a href="https://mermaid.live/view#pako:{pako}" '
+            'target="_blank" rel="noopener noreferrer">'
+            'Open this diagram with pan and zoom (mermaid.live, opens a new tab)</a>')
   EOF
   ```
 

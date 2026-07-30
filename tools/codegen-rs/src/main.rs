@@ -35,6 +35,10 @@ const SOURCE_FILES: &[&str] = &[
     // crates so a stale entry (matching no code) is itself caught.
     "translations.code_refs.yaml",
     "observability.yaml",
+    // Runtime configuration (PROP-20260729-004500, issue #246): every env-fulfilled setting the app
+    // needs, with its type, per-profile required-ness and — printed in the fail-fast report — what it
+    // gates. Emits the typed reader; a drift test pins every env::var call site to a declared key.
+    "configuration.yaml",
     "architecture/c4-l2.yaml",
     "architecture/c4-l3.yaml",
 ];
@@ -653,6 +657,10 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("entities.yaml",  "*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
     ("errors.yaml",    "*.context.**",     &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
 
+    // Configuration keys are TYPED (PROP-20260729-004500): each binds the scalar whose `pattern` the
+    // generated reader enforces at startup, so "present" is checked against "usable".
+    ("configuration.yaml", "keys.*.scalar", &[Kind::Scalar, Kind::EnumScalar]),
+
     // Actors (aggregates): the inbox and the lifecycle state machine.
     ("actors.yaml", "*.receives[*].message",            &[Kind::Command, Kind::Event]),
     ("actors.yaml", "*.receives[*].emits[*]",           &[Kind::Event]),
@@ -988,6 +996,9 @@ fn validate(model: &Model) -> Report {
 
     // --- 1b. Ref-KIND contract: a resolving $ref must also point at the right KIND of thing -------
     validate_ref_kinds(model, &mut issues);
+
+    // --- 1c. Configuration hygiene (PROP-20260729-004500) ----------------------------------------
+    validate_configuration(model, &mut issues);
 
     let actors = parse_actors(model);
     let api = parse_api(model);
@@ -8721,6 +8732,685 @@ fn emit_service_bindings(model: &Model) -> String {
     out
 }
 
+/// One declared configuration key (`specs/configuration.yaml`).
+#[derive(Debug, Clone)]
+struct ConfigKey {
+    name: String,
+    ty: String,
+    values: Vec<String>,
+    required: Vec<String>,
+    default: Option<String>,
+    secret: bool,
+    gates: String,
+    mode_of: Option<String>,
+    /// Which binary reads it. `server` (default) lands in the server's typed Config; other consumers
+    /// (e.g. the CI `sirene_ingest` job) are DECLARED — so the drift gate and the docs cover them —
+    /// without being injected into a process that never reads them.
+    consumer: String,
+    /// The scalars.yaml type this value must satisfy, and its regex — validated at STARTUP, because
+    /// "present" is not "usable" (a live key in the test slot, a 31-byte session key, a pasted newline).
+    scalar: Option<String>,
+    pattern: Option<String>,
+    /// Non-secret per-profile values, BAKED into the binary (PROP-20260729-014500 D5): profile -> value.
+    deploy: BTreeMap<String, String>,
+    /// Secret sources, SYNCED by CI from GitHub repo secrets: profile -> repo-secret name. Never baked
+    /// — the GHCR package is public, so a baked ENV would be world-readable.
+    from_secret: BTreeMap<String, String>,
+}
+
+/// The profiles a key may be required in — also the `APP_PROFILE` enum.
+const CONFIG_PROFILES: &[&str] = &["development", "staging", "production"];
+
+/// Parse `configuration.yaml` into the declared key list, in DECLARATION ORDER (the emitted report
+/// follows it, so the spec's grouping — persistence, identity, payments, toggles — survives into the
+/// operator-facing output).
+fn parse_config_keys(model: &Model) -> Vec<ConfigKey> {
+    let Some(doc) = model.defs.get("configuration.yaml") else { return Vec::new() };
+    let Some(keys) = doc.get("keys").and_then(|k| k.as_mapping()) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (name, node) in keys {
+        let Some(name) = name.as_str() else { continue };
+        let str_at = |k: &str| node.get(k).and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+        // `default` is typed in YAML (bool/int/string) — render it back to its literal text.
+        let scalar_ref = node
+            .get("scalar")
+            .and_then(|sc| sc.get("$ref"))
+            .and_then(|r| r.as_str())
+            .and_then(ref_name);
+        let default = node.get("default").map(|v| match v {
+            Value::Bool(b) => b.to_string(),
+            Value::Number(n) => n.to_string(),
+            Value::String(s) => s.clone(),
+            other => format!("{other:?}"),
+        });
+        out.push(ConfigKey {
+            name: name.to_string(),
+            ty: str_at("type").unwrap_or_default(),
+            values: node
+                .get("values")
+                .and_then(|v| v.as_sequence())
+                .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
+            required: node
+                .get("required")
+                .and_then(|v| v.as_sequence())
+                .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
+            default,
+            secret: node.get("secret").and_then(|v| v.as_bool()).unwrap_or(false),
+            gates: str_at("gates").unwrap_or_default(),
+            mode_of: str_at("mode_of"),
+            consumer: str_at("consumer").unwrap_or_else(|| "server".to_string()),
+            deploy: node
+                .get("deploy")
+                .and_then(|d| d.as_mapping())
+                .map(|m| {
+                    m.iter()
+                        .filter(|(k, _)| k.as_str() != Some("from_secret"))
+                        .filter_map(|(k, v)| match (k.as_str(), v) {
+                            (Some(k), Value::String(v)) => Some((k.to_string(), v.clone())),
+                            (Some(k), Value::Bool(v)) => Some((k.to_string(), v.to_string())),
+                            (Some(k), Value::Number(v)) => Some((k.to_string(), v.to_string())),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            from_secret: node
+                .get("deploy")
+                .and_then(|d| d.get("from_secret"))
+                .and_then(|f| f.as_mapping())
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(k, v)| Some((k.as_str()?.to_string(), v.as_str()?.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            scalar: scalar_ref.clone(),
+            pattern: scalar_ref.as_deref().and_then(|name| {
+                model
+                    .defs
+                    .get("scalars.yaml")
+                    .and_then(|sc| sc.get(name))
+                    .and_then(|sc| sc.get("pattern"))
+                    .and_then(|p| p.as_str())
+                    .map(str::to_string)
+            }),
+        });
+    }
+    out
+}
+
+/// §12 — configuration hygiene (PROP-20260729-004500). The rules exist because each one maps to a way
+/// the declaration could silently stop being trustworthy, which is the failure this spec file replaces.
+fn validate_configuration(model: &Model, issues: &mut Vec<Issue>) {
+    let keys = parse_config_keys(model);
+    if keys.is_empty() {
+        issues.push(err(
+            "config-empty",
+            "configuration.yaml".to_string(),
+            "no configuration keys declared — the app reads env vars, so this cannot be empty".into(),
+        ));
+        return;
+    }
+    for k in &keys {
+        let at = format!("configuration.yaml/{}", k.name);
+        if k.name != k.name.to_uppercase() || k.name.contains('-') {
+            issues.push(err(
+                "config-key-name",
+                at.clone(),
+                format!("'{}' must be SCREAMING_SNAKE_CASE (it is an env var name)", k.name),
+            ));
+        }
+        // `gates` is not documentation: it is PRINTED next to the key when startup fails, so an empty
+        // one produces a report that names a variable without saying why anyone should care.
+        if k.gates.is_empty() {
+            issues.push(err(
+                "config-gates-missing",
+                at.clone(),
+                "no `gates`: the fail-fast report prints it, so a key without one is unactionable"
+                    .into(),
+            ));
+        }
+        match k.ty.as_str() {
+            "bool" | "string" | "int" => {}
+            "enum" => {
+                if k.values.is_empty() {
+                    issues.push(err(
+                        "config-enum-values",
+                        at.clone(),
+                        "type: enum declares no `values`".into(),
+                    ));
+                }
+                if let Some(d) = &k.default {
+                    if !k.values.contains(d) {
+                        issues.push(err(
+                            "config-default-invalid",
+                            at.clone(),
+                            format!("default '{d}' is not one of {:?}", k.values),
+                        ));
+                    }
+                }
+            }
+            other => issues.push(err(
+                "config-type-unknown",
+                at.clone(),
+                format!("unknown type '{other}' (bool | string | int | enum)"),
+            )),
+        }
+        if k.ty == "int" {
+            if let Some(d) = &k.default {
+                if d.parse::<i64>().is_err() {
+                    issues.push(err(
+                        "config-default-invalid",
+                        at.clone(),
+                        format!("type: int but default '{d}' is not an integer"),
+                    ));
+                }
+            }
+        }
+        // A `scalar` that does not resolve, or resolves to something with no `pattern`, is a validation
+        // that silently does nothing — the exact shape of bug this whole file exists to prevent.
+        if let Some(name) = &k.scalar {
+            match model.defs.get("scalars.yaml").and_then(|sc| sc.get(name.as_str())) {
+                None => issues.push(err(
+                    "config-scalar-unresolved",
+                    at.clone(),
+                    format!("scalar '{name}' is not declared in scalars.yaml"),
+                )),
+                Some(_) if k.pattern.is_none() => issues.push(err(
+                    "config-scalar-no-pattern",
+                    at.clone(),
+                    format!(
+                        "scalar '{name}' declares no `pattern`, so binding it validates nothing"
+                    ),
+                )),
+                Some(_) => {
+                    if let Some(pat) = &k.pattern {
+                        if let Err(e) = regex::Regex::new(pat) {
+                            issues.push(err(
+                                "config-pattern-invalid",
+                                at.clone(),
+                                format!("scalar '{name}' pattern does not compile: {e}"),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        // A declared default must itself satisfy the scalar — otherwise the fallback is the bad value.
+        if let (Some(pat), Some(d)) = (&k.pattern, &k.default) {
+            if let Ok(re) = regex::Regex::new(pat) {
+                if !re.is_match(d) {
+                    issues.push(err(
+                        "config-default-invalid",
+                        at.clone(),
+                        format!("default '{d}' does not match scalar {:?} ({pat})", k.scalar),
+                    ));
+                }
+            }
+        }
+        // --- deploy block (PROP-20260729-014500) -------------------------------------------------
+        for profile in k.deploy.keys().chain(k.from_secret.keys()) {
+            if !CONFIG_PROFILES.contains(&profile.as_str()) {
+                issues.push(err(
+                    "config-deploy-profile-unknown",
+                    at.clone(),
+                    format!("deploy declares unknown profile '{profile}' (expected {CONFIG_PROFILES:?})"),
+                ));
+            }
+        }
+        // A secret must never be BAKED: the GHCR package is public, so a baked value is world-readable
+        // via `docker pull` + `docker history`. This is the rule that keeps D5's split honest.
+        if k.secret && !k.deploy.is_empty() {
+            issues.push(err(
+                "config-secret-baked",
+                at.clone(),
+                "a secret declares literal `deploy` values — the image is PUBLIC, so those would be                  world-readable. Use `deploy.from_secret` instead".into(),
+            ));
+        }
+        // A non-secret may NOT be sourced from a repo secret (product-owner directive, 2026-07-29:
+        // "the non secret keys should not be put in the repo actions secrets"). The point of declaring
+        // configuration is that the configuration is VISIBLE: a non-secret hidden in Actions secrets is
+        // as opaque as one typed into the dashboard — you still cannot read the repo and know what
+        // production runs. Non-secrets carry literal per-profile `deploy` values and are baked.
+        if !k.secret && !k.from_secret.is_empty() {
+            issues.push(err(
+                "config-nonsecret-from-secret",
+                at.clone(),
+                "non-secret declares `deploy.from_secret`: give it literal per-profile `deploy` values \
+                 so the configuration is readable in the repo and baked into the image, or mark it \
+                 `secret: true` if it genuinely must not be committed"
+                    .into(),
+            ));
+        }
+        // The profile selector cannot be baked: one image is promoted across environments by digest, so
+        // the thing that DISTINGUISHES them cannot live inside it (and selecting the per-profile table
+        // by a baked profile would be circular).
+        if k.name == "APP_PROFILE" && !k.deploy.is_empty() {
+            issues.push(err(
+                "config-profile-baked",
+                at.clone(),
+                "APP_PROFILE must come from the service environment — baking it is circular (it is what                  selects the baked table) and one image serves every profile".into(),
+            ));
+        }
+        // A baked value must satisfy its own scalar, or the artifact ships a value the reader rejects.
+        if let Some(pat) = &k.pattern {
+            if let Ok(re) = regex::Regex::new(pat) {
+                for (profile, value) in &k.deploy {
+                    if !re.is_match(value) {
+                        issues.push(err(
+                            "config-deploy-value-invalid",
+                            at.clone(),
+                            format!(
+                                "baked value '{value}' for profile '{profile}' does not match scalar {:?} ({pat})",
+                                k.scalar
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        for p in &k.required {
+            if !CONFIG_PROFILES.contains(&p.as_str()) {
+                issues.push(err(
+                    "config-profile-unknown",
+                    at.clone(),
+                    format!("required in unknown profile '{p}' (expected one of {CONFIG_PROFILES:?})"),
+                ));
+            }
+        }
+        // A required key with a default can never be reported missing — the default satisfies it — so
+        // the requirement is silently inert. That is exactly the class of bug this file exists to end.
+        if !k.required.is_empty() && k.default.is_some() {
+            issues.push(err(
+                "config-required-with-default",
+                at.clone(),
+                "declares both `required` and `default` — the default masks the requirement, so it can never fail".into(),
+            ));
+        }
+        // An optional non-secret with no default resolves to "absent" with nothing to fall back on.
+        if k.required.is_empty() && k.default.is_none() && !k.secret && k.ty != "string" {
+            issues.push(warn(
+                "config-optional-no-default",
+                at.clone(),
+                "optional and non-secret but declares no default".into(),
+            ));
+        }
+    }
+}
+
+/// Emit `crates/server/src/generated/config.rs` — the typed reader for `specs/configuration.yaml`.
+///
+/// The generated `Config::from_env` collects EVERY missing required key before failing, because an
+/// operator who learns about one missing variable per deploy cycle fixes a three-key outage in three
+/// deploys. `Display` renders the report the app prints before exiting.
+fn emit_config(model: &Model) -> String {
+    // Only the server's own keys become its Config; other consumers are declared for the drift gate
+    // and the docs, not injected into a process that never reads them.
+    let keys: Vec<ConfigKey> =
+        parse_config_keys(model).into_iter().filter(|k| k.consumer == "server").collect();
+    let field = |name: &str| name.to_lowercase();
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/configuration.yaml — do not edit by hand.\n\
+         //\n\
+         // The typed runtime configuration (PROP-20260729-004500, issue #246). Every setting the app\n\
+         // needs is DECLARED in the spec and read here, once, at startup — never through a scattered\n\
+         // `env::var` call. A missing REQUIRED key (per the resolved `APP_PROFILE`) is collected with\n\
+         // every other missing key and reported together; the composition root then stops the app.\n\
+         //\n\
+         // Secrets are never rendered: the boot report shows `set` / `unset`, and for a key declaring\n\
+         // `mode_of: stripe` the derived test/live mode — never the value.\n\n\
+         use std::fmt;\n\n",
+    );
+
+    // ---- Profile -----------------------------------------------------------------------------
+    out.push_str(
+        "/// Which keys are required. Declared via `APP_PROFILE`, never inferred from the host or from\n\
+         /// a key's prefix — an inferred profile is wrong exactly when it matters most (a mode switch).\n\
+         #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n\
+         pub enum Profile {\n    Development,\n    Staging,\n    Production,\n}\n\n\
+         impl Profile {\n    pub fn as_str(self) -> &'static str {\n        match self {\n            Profile::Development => \"development\",\n            Profile::Staging => \"staging\",\n            Profile::Production => \"production\",\n        }\n    }\n}\n\n\
+         impl fmt::Display for Profile {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        f.write_str(self.as_str())\n    }\n}\n\n",
+    );
+
+    // ---- Value parsing -----------------------------------------------------------------------
+    out.push_str(
+        "/// Lenient boolean parsing (ADR-20260728-224500): `true/1/yes/on` and `false/0/no/off`,\n\
+         /// case-insensitive, trimmed, wrapping quotes stripped. An unrecognised value falls back to the\n\
+         /// declared default AND says so — a typo must never be silently interpreted as either state.\n\
+         fn parse_bool(name: &str, raw: &str, default: bool) -> bool {\n\
+         \x20   match raw.trim().trim_matches(['\"', '\\'']).trim().to_ascii_lowercase().as_str() {\n\
+         \x20       \"true\" | \"1\" | \"yes\" | \"on\" => true,\n\
+         \x20       \"false\" | \"0\" | \"no\" | \"off\" => false,\n\
+         \x20       \"\" => default,\n\
+         \x20       other => {\n\
+         \x20           println!(\n\
+         \x20               \"{name}: unrecognised value {other:?} -- using the default ({default}). \\\n\
+         Accepted: true/1/yes/on, false/0/no/off.\"\n\
+         \x20           );\n\
+         \x20           default\n\
+         \x20       }\n\
+         \x20   }\n}\n\n\
+         /// Read a key, treating an empty/whitespace-only value as ABSENT — a dashboard field someone\n\
+         /// cleared must count as missing, not as an empty string that satisfies a requirement.\n\
+         fn raw(name: &str) -> Option<String> {\n\
+         \x20   std::env::var(name).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())\n}\n\n\
+         /// Validate a value against its scalar's regex. Compiled once per pattern and cached: startup\n\
+         /// cost is a handful of small regexes, paid to make \"present but unusable\" impossible to miss.\n\
+         fn matches_pattern(pattern: &str, value: &str) -> bool {\n\
+         \x20   use std::collections::HashMap;\n\
+         \x20   use std::sync::{Mutex, OnceLock};\n\
+         \x20   static CACHE: OnceLock<Mutex<HashMap<String, regex::Regex>>> = OnceLock::new();\n\
+         \x20   let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));\n\
+         \x20   let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());\n\
+         \x20   let re = guard.entry(pattern.to_string()).or_insert_with(|| {\n\
+         \x20       regex::Regex::new(pattern).expect(\"configuration pattern compiles (checked by codegen)\")\n\
+         \x20   });\n\
+         \x20   re.is_match(value)\n}\n\n\
+         /// The non-secret values DECLARED per profile (`deploy:` in configuration.yaml), baked into the\n\
+         /// binary (PROP-20260729-014500 D5). Render has no per-deploy env override, so this is the only\n\
+         /// way to make configuration part of the ARTIFACT: the digest then determines behaviour, and a\n\
+         /// rollback restores the configuration that shipped with that build. Secrets are never here —\n\
+         /// the GHCR package is public, so a baked value is world-readable.\n\
+         fn baked(name: &str, profile: Profile) -> Option<&'static str> {\n\
+         \x20   BAKED\n\
+         \x20       .iter()\n\
+         \x20       .find(|(k, p, _)| *k == name && *p == profile.as_str())\n\
+         \x20       .map(|(_, _, v)| *v)\n}\n\n\
+         /// Stripe mode from the key prefix — reportable where the key itself never is.\n\
+         fn stripe_mode(value: &str) -> &'static str {\n\
+         \x20   if value.starts_with(\"sk_live_\") {\n        \"live\"\n    } else if value.starts_with(\"sk_test_\") {\n        \"test\"\n    } else {\n        \"unknown\"\n    }\n}\n\n",
+    );
+
+    // ---- Missing-key report ------------------------------------------------------------------
+    out.push_str(
+        "/// A required key that was not supplied, with the `gates` text from the spec.\n\
+         #[derive(Debug, Clone)]\npub struct MissingKey {\n    pub name: &'static str,\n    pub gates: &'static str,\n}\n\n\
+         /// A key that WAS supplied but does not satisfy its scalar. Carries the expected shape, never\n\
+         /// the offending value: a malformed secret is still a secret.\n\
+         #[derive(Debug, Clone)]\npub struct InvalidKey {\n    pub name: &'static str,\n    pub scalar: &'static str,\n    pub pattern: &'static str,\n    pub gates: &'static str,\n}\n\n\
+         /// Everything wrong with the configuration, in one report — never just the first problem. An\n\
+         /// operator who learns of one bad key per deploy cycle fixes a three-key outage in three deploys.\n\
+         #[derive(Debug, Clone, Default)]\npub struct ConfigProblems {\n    pub missing: Vec<MissingKey>,\n    pub invalid: Vec<InvalidKey>,\n}\n\n\
+         impl ConfigProblems {\n    pub fn is_empty(&self) -> bool {\n        self.missing.is_empty() && self.invalid.is_empty()\n    }\n\n    pub fn len(&self) -> usize {\n        self.missing.len() + self.invalid.len()\n    }\n}\n\n\
+         /// The report the app prints before it stops (production/staging) or continues (development).\n\
+         #[derive(Debug, Clone)]\npub struct MissingConfig {\n    pub profile: Profile,\n    pub problems: ConfigProblems,\n}\n\n\
+         impl fmt::Display for MissingConfig {\n\
+         \x20   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n\
+         \x20       writeln!(\n            f,\n            \"FATAL: {} configuration problem(s) (profile: {})\\n\",\n            self.problems.len(),\n            self.profile\n        )?;\n\
+         \x20       let width = self\n            .problems\n            .missing\n            .iter()\n            .map(|m| m.name.len())\n            .chain(self.problems.invalid.iter().map(|i| i.name.len()))\n            .max()\n            .unwrap_or(0);\n\
+         \x20       if !self.problems.missing.is_empty() {\n            writeln!(f, \"MISSING — required in this profile:\")?;\n            for m in &self.problems.missing {\n                writeln!(f, \"  {:width$}  {}\", m.name, m.gates, width = width)?;\n            }\n            writeln!(f)?;\n        }\n\
+         \x20       if !self.problems.invalid.is_empty() {\n            writeln!(f, \"INVALID — supplied but malformed (the value is never printed):\")?;\n            for i in &self.problems.invalid {\n                writeln!(f, \"  {:width$}  expected {} matching {}\", i.name, i.scalar, i.pattern, width = width)?;\n                writeln!(f, \"  {:width$}  {}\", \"\", i.gates, width = width)?;\n            }\n            writeln!(f)?;\n        }\n\
+         \x20       write!(f, \"Fix them in the service environment and redeploy. Nothing was started.\")\n\
+         \x20   }\n}\n\n",
+    );
+
+    // ---- The struct --------------------------------------------------------------------------
+    out.push_str("/// The resolved configuration. Built once, injected — never re-read from env.\n#[derive(Debug, Clone)]\npub struct Config {\n    pub profile: Profile,\n");
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        // "No default declared" means ABSENT, for every type — never a typed zero. An `int` with no
+        // default used to resolve to `0`, so `DELIVERY_OFFER_MAX_TTL_SECONDS` would have been reported
+        // in the boot log as a TTL of zero seconds while the worker was in fact applying its own 900s
+        // fallback. A boot report that states a number the process does not use is worse than one that
+        // admits it does not know: the whole point of the report is that an operator can trust it.
+        let ty = match k.ty.as_str() {
+            "bool" if k.default.is_some() => "bool".to_string(),
+            "bool" => "Option<bool>".to_string(),
+            "int" if k.default.is_some() => "i64".to_string(),
+            "int" => "Option<i64>".to_string(),
+            // Optional strings stay Option: "absent" is a state the composition root branches on.
+            _ if k.required.is_empty() && k.default.is_none() => "Option<String>".to_string(),
+            _ => "String".to_string(),
+        };
+        out.push_str(&format!("    /// {}\n    pub {}: {},\n", k.gates.replace('\n', " ").trim(), field(&k.name), ty));
+    }
+    out.push_str("}\n\n");
+
+    // ---- from_env ----------------------------------------------------------------------------
+    out.push_str(
+        "impl Config {\n\
+         \x20   /// Resolve from the process environment, returning the config AND every missing required\n\
+         \x20   /// key. Both, always: the warn-only rollout phase (`CONFIG_ENFORCE=false`, D5) has to boot\n\
+         \x20   /// with the config it managed to build while still reporting what was absent. A missing\n\
+         \x20   /// required string resolves to empty — the caller decides whether that is fatal.\n\
+         \x20   pub fn resolve() -> (Self, ConfigProblems) {\n\
+         \x20       Self::resolve_inner()\n\
+         \x20   }\n\n\
+         \x20   /// Strict form: `Err` when anything required is missing. Used by tests and any caller that\n\
+         \x20   /// wants no warn-only escape hatch.\n\
+         \x20   pub fn from_env() -> Result<Self, MissingConfig> {\n\
+         \x20       let (cfg, problems) = Self::resolve_inner();\n\
+         \x20       if problems.is_empty() {\n            Ok(cfg)\n        } else {\n            Err(MissingConfig { profile: cfg.profile, problems })\n        }\n\
+         \x20   }\n\n\
+         \x20   /// Whether a configuration problem must STOP the app. Decided by the PROFILE, not by a\n\
+         \x20   /// separate toggle (product-owner directive 2026-07-29): production and staging stop,\n\
+         \x20   /// development reports and continues. Stopping is safe on Render — an exiting container\n\
+         \x20   /// fails the deploy and the PREVIOUS version keeps serving, so a misconfigured build can\n\
+         \x20   /// never replace a working one.\n\
+         \x20   pub fn must_stop_on_problems(&self) -> bool {\n        !matches!(self.profile, Profile::Development)\n    }\n\n\
+         \x20   fn resolve_inner() -> (Self, ConfigProblems) {\n\
+         \x20       let profile = match raw(\"APP_PROFILE\").as_deref() {\n\
+         \x20           Some(\"production\") => Profile::Production,\n\
+         \x20           Some(\"staging\") => Profile::Staging,\n\
+         \x20           Some(\"development\") | None => Profile::Development,\n\
+         \x20           Some(other) => {\n\
+         \x20               println!(\"APP_PROFILE: unrecognised value {other:?} -- using development.\");\n\
+         \x20               Profile::Development\n\
+         \x20           }\n\
+         \x20       };\n\
+         \x20       let mut problems = ConfigProblems::default();\n",
+    );
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        let f = field(&k.name);
+        let gates_lit = k.gates.replace('\n', " ").trim().replace('"', "\\\"");
+        let required_expr = if k.required.is_empty() {
+            "false".to_string()
+        } else {
+            let arms: Vec<String> = k
+                .required
+                .iter()
+                .map(|p| format!("Profile::{}", {
+                    let mut c = p.chars();
+                    c.next().map(|x| x.to_uppercase().to_string() + c.as_str()).unwrap_or_default()
+                }))
+                .collect();
+            format!("matches!(profile, {})", arms.join(" | "))
+        };
+        match k.ty.as_str() {
+            "bool" => match &k.default {
+                Some(d) => out.push_str(&format!(
+                    "        let {f} = raw(\"{n}\")\n            .or_else(|| baked(\"{n}\", profile).map(str::to_string))\n            .map(|v| parse_bool(\"{n}\", &v, {d}))\n            .unwrap_or({d});\n",
+                    n = k.name
+                )),
+                None => out.push_str(&format!(
+                    "        let {f} = raw(\"{n}\")\n            .or_else(|| baked(\"{n}\", profile).map(str::to_string))\n            .map(|v| parse_bool(\"{n}\", &v, false));\n",
+                    n = k.name
+                )),
+            },
+            "int" => match &k.default {
+                Some(d) => out.push_str(&format!(
+                    "        let {f} = raw(\"{n}\").and_then(|v| v.parse::<i64>().ok()).unwrap_or({d});\n",
+                    n = k.name
+                )),
+                None => out.push_str(&format!(
+                    "        let {f} = raw(\"{n}\").and_then(|v| v.parse::<i64>().ok());\n",
+                    n = k.name
+                )),
+            },
+            _ => {
+                // PRECEDENCE: env var > baked profile value > default. The env var wins so an operator
+                // keeps a seconds-fast override in an incident; the baked value is what runs otherwise.
+                if k.deploy.is_empty() {
+                    out.push_str(&format!("        let {f} = raw(\"{n}\");\n", n = k.name));
+                } else {
+                    out.push_str(&format!(
+                        "        let {f} = raw(\"{n}\").or_else(|| baked(\"{n}\", profile).map(str::to_string));\n",
+                        n = k.name
+                    ));
+                }
+                if !k.required.is_empty() {
+                    out.push_str(&format!(
+                        "        if {f}.is_none() && {required_expr} {{\n            problems.missing.push(MissingKey {{ name: \"{n}\", gates: \"{g}\" }});\n        }}\n",
+                        n = k.name,
+                        g = gates_lit
+                    ));
+                    out.push_str(&format!("        let {f} = {f}.unwrap_or_default();\n"));
+                } else if let Some(d) = &k.default {
+                    out.push_str(&format!(
+                        "        let {f} = {f}.unwrap_or_else(|| \"{d}\".to_string());\n"
+                    ));
+                }
+            }
+        }
+    }
+    // Pattern validation, emitted AFTER every key is read so one pass reports every problem. A bool
+    // is validated by its own parser (an unrecognised spelling is reported there, not guessed).
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        let (Some(pat), Some(scalar)) = (&k.pattern, &k.scalar) else { continue };
+        if k.ty == "bool" {
+            continue;
+        }
+        let f = field(&k.name);
+        let gates_lit = k.gates.replace('\n', " ").trim().replace('"', "\\\"");
+        let pat_lit = pat.replace('\\', "\\\\").replace('"', "\\\"");
+        // Optional keys are Option<String> here; required ones were unwrapped to String above.
+        let value_expr = if k.required.is_empty() && k.default.is_none() {
+            format!("{f}.as_deref()")
+        } else {
+            format!("Some({f}.as_str())")
+        };
+        out.push_str(&format!(
+            "        if let Some(v) = {value_expr} {{\n            if !v.is_empty() && !matches_pattern(r\"{pat_lit}\", v) {{\n                problems.invalid.push(InvalidKey {{ name: \"{n}\", scalar: \"{scalar}\", pattern: r\"{pat_lit}\", gates: \"{g}\" }});\n            }}\n        }}\n",
+            n = k.name,
+            g = gates_lit
+        ));
+    }
+    out.push_str("        (\n            Self {\n                profile,\n");
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        out.push_str(&format!("                {},\n", field(&k.name)));
+    }
+    out.push_str("            },\n            problems,\n        )\n    }\n\n");
+
+    // ---- Boot report -------------------------------------------------------------------------
+    out.push_str(
+        "    /// What actually resolved, for the boot log. Secrets render as `set` / `unset`, never as a\n\
+         \x20   /// value; a key declaring `mode_of: stripe` additionally reports its derived mode, so\n\
+         \x20   /// \"is production actually live?\" is answerable without reading a secret.\n\
+         \x20   pub fn boot_report(&self) -> String {\n\
+         \x20       let mut out = format!(\"config: profile={}, {} keys resolved\\n\", self.profile, KEY_COUNT);\n",
+    );
+    for k in keys.iter().filter(|k| k.name != "APP_PROFILE") {
+        let f = field(&k.name);
+        // Anything with no value to fall back on is an `Option` in the struct — "absent" is a state the
+        // composition root branches on — so its report arm must not assume a bare value.
+        let numeric = k.ty == "bool" || k.ty == "int";
+        let is_option = if numeric {
+            k.default.is_none()
+        } else {
+            k.required.is_empty() && k.default.is_none()
+        };
+        let line = if k.secret && k.mode_of.as_deref() == Some("stripe") {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", if self.{f}.is_empty() {{ \"unset\".to_string() }} else {{ format!(\"set [{{}} mode]\", stripe_mode(&self.{f})) }}));\n",
+                k.name
+            )
+        } else if k.secret && is_option {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", if self.{f}.is_some() {{ \"set\" }} else {{ \"unset\" }}));\n",
+                k.name
+            )
+        } else if k.secret {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", if self.{f}.is_empty() {{ \"unset\" }} else {{ \"set\" }}));\n",
+                k.name
+            )
+        } else if numeric && is_option {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}.map_or_else(|| \"unset\".to_string(), |v| v.to_string())));\n",
+                k.name
+            )
+        } else if numeric {
+            format!("        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}));\n", k.name)
+        } else if k.required.is_empty() && k.default.is_none() {
+            format!(
+                "        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}.as_deref().unwrap_or(\"unset\")));\n",
+                k.name
+            )
+        } else {
+            format!("        out.push_str(&format!(\"  {:<26} = {{}}\\n\", self.{f}));\n", k.name)
+        };
+        out.push_str(&line);
+    }
+    out.push_str("        out\n    }\n}\n\n");
+    out.push_str(&format!(
+        "/// How many keys the spec declares (excluding the profile selector).\npub const KEY_COUNT: usize = {};\n\n\
+         /// Every declared key name — the drift test asserts each `env::var` call site is one of these.\n\
+         pub const DECLARED_KEYS: &[&str] = &[\n",
+        keys.iter().filter(|k| k.name != "APP_PROFILE").count()
+    ));
+    for k in &keys {
+        out.push_str(&format!("    \"{}\",\n", k.name));
+    }
+    out.push_str("];\n\n");
+    out.push_str(
+        "/// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR\n\
+         /// and carried by the image digest, so redeploying a digest reproduces its behaviour exactly.\n\
+         const BAKED: &[(&str, &str, &str)] = &[\n",
+    );
+    for k in &keys {
+        for (profile, value) in &k.deploy {
+            out.push_str(&format!(
+                "    (\"{}\", \"{}\", \"{}\"),\n",
+                k.name,
+                profile,
+                value.replace('\\', "\\\\").replace('"', "\\\"")
+            ));
+        }
+    }
+    out.push_str("];\n");
+    out
+}
+
+/// Emit `specs/generated/render-config-sync.json` — the manifest the CI sync step consumes
+/// (PROP-20260729-014500, D1–D4).
+///
+/// Only the keys CI must push to the Render service appear here: the secrets, plus the non-secrets a
+/// key chose to source from a repo secret. Baked values are deliberately absent — they travel in the
+/// image (D5), so pushing them to the service as well would recreate the mutable state the baking was
+/// meant to remove, and the two copies would be free to disagree.
+fn emit_render_sync_manifest(model: &Model) -> String {
+    let keys = parse_config_keys(model);
+    let mut out = String::from(
+        "{\n  \"_generated\": \"by the Captain.Food codegen from specs/configuration.yaml — do not edit by hand\",\n\
+         \x20 \"_contract\": \"env_key <- the named GitHub repo secret, per profile. Upsert only (D1): this manifest never expresses a deletion.\",\n\
+         \x20 \"profiles\": {\n",
+    );
+    let profiles: Vec<&str> = CONFIG_PROFILES.to_vec();
+    for (pi, profile) in profiles.iter().enumerate() {
+        out.push_str(&format!("    \"{profile}\": [\n"));
+        let mut rows: Vec<String> = Vec::new();
+        for k in &keys {
+            if k.consumer != "server" {
+                continue;
+            }
+            if let Some(secret_name) = k.from_secret.get(*profile) {
+                rows.push(format!(
+                    "      {{ \"env_key\": \"{}\", \"from_secret\": \"{}\", \"secret\": {} }}",
+                    k.name, secret_name, k.secret
+                ));
+            }
+        }
+        out.push_str(&rows.join(",\n"));
+        if !rows.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(if pi + 1 == profiles.len() { "    ]\n" } else { "    ],\n" });
+    }
+    out.push_str("  }\n}\n");
+    out
+}
+
 /// Emit `crates/server/src/generated/services_routes.rs` — the DERIVED `/services/<service>/<op>`
 /// axum routes, emitted ONLY for services declaring `expose: true` (ADR-20260719-214500). With no
 /// exposed service (the V0 default) the router is empty and state-generic; exposing one is a
@@ -9916,7 +10606,7 @@ fn wired_query_body(name: &str) -> Option<&'static str> {
 fn emit_server_mutation(model: &Model) -> String {
     let api = parse_api(model);
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/api.yaml — do not edit by hand.\n// The GraphQL MutationRoot, ACCEPTANCE-FIRST (ADR-20260720-015500): one resolver per api.yaml\n// mutation, `(input: <Command>Input!, metadata: MetadataInput) -> MutationAcceptance!`. The resolver\n// journals the command into `command_journal` (durable RECEIVED, idempotent by messageId — same\n// payload hash replays the original acceptance, a different one is a Conflict), spawns the command\n// handler on Arc-cloned ports, and answers with the effective envelope + PENDING. The spawned task\n// completes the journal row (SUCCEEDED | REJECTED | FAILED) and publishes the transition on the\n// OperationStatusBus; post-acceptance rejections surface as Operation.errorCode, never as GraphQL\n// errors (the sync path — input/metadata validation, duplicate-payload Conflict — still uses them).\n// Each non-public field carries its api.yaml `roles` as a `guard` + `visible` pair (ADR-0006).\n#![allow(unused_variables)]\n#![allow(dead_code)]\n\nuse super::acl::*;\nuse super::inputs::*;\nuse super::scalars::*;\nuse super::types::*;\n",
+        "// GENERATED by the Captain.Food codegen from specs/api.yaml — do not edit by hand.\n// The GraphQL MutationRoot, ACCEPTANCE-FIRST (ADR-20260720-015500): one resolver per api.yaml\n// mutation, `(input: <Command>Input!, metadata: MetadataInput) -> MutationAcceptance!`. The resolver\n// journals the command into `command_journal` (durable RECEIVED, idempotent by messageId — same\n// payload hash replays the original acceptance, a different one is a Conflict), spawns the command\n// handler on Arc-cloned ports, and answers with the effective envelope + PENDING. The spawned task\n// completes the journal row (SUCCEEDED | REJECTED | FAILED) and publishes the transition on the\n// OperationStatusBus; post-acceptance rejections surface as Operation.errorCode, never as GraphQL\n// errors (the sync path — input/metadata validation, duplicate-payload Conflict — still uses them).\n// Each non-public field carries its api.yaml `roles` as a `guard` + `visible` pair (ADR-0006).\n//\n// OBSERVABILITY (issue #191): every resolver emits the `command-acceptance` contract's three spans —\n// `command.receive` (SERVER) -> `command.journal` (INTERNAL) -> `command.dispatch` (INTERNAL) — plus its\n// four metrics. The span field names live in `crates/telemetry`, not here: inlining `info_span!` would\n// copy the contract's attribute list into every one of these resolvers, so a contract change could land\n// in some and not others with nothing to catch it.\n#![allow(unused_variables)]\n#![allow(dead_code)]\n\nuse tracing::Instrument as _;\n\nuse super::acl::*;\nuse super::inputs::*;\nuse super::scalars::*;\nuse super::types::*;\n",
     );
     out.push_str("\npub struct MutationRoot;\n\n#[async_graphql::Object(name = \"Mutation\")]\nimpl MutationRoot {\n");
     for m in &api.mutations {
@@ -9926,7 +10616,7 @@ fn emit_server_mutation(model: &Model) -> String {
         match wired_mutation_dispatch(&m.name) {
             // Wired: journal → spawn the command handler over Arc-cloned ports → acceptance.
             Some((resolve_ports, handler_call)) => out.push_str(&format!(
-                "    #[graphql(name = \"{name}\"{acl})]\n    async fn {fnname}(&self, ctx: &async_graphql::Context<'_>, input: {command}Input, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {{\n        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();\n        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();\n{resolve_ports}        let payload_json = command_payload(&input)?;\n        let cmd: domain::generated::commands::{command} = serde_json::from_value(payload_json.clone())\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        let env = request_envelope(ctx, &metadata);\n        let entry = application::journal::CommandJournalEntry {{\n            message_id: env.message_id,\n            correlation_id: env.correlation_id,\n            cause_id: env.cause_id,\n            session_id: env.session_id,\n            trace_id: env.trace_id.clone(),\n            user_id: env.user_id,\n            user_type: env.user_type.clone(),\n            channel: domain::generated::scalars::CommandChannel::GRAPHQL,\n            command_type: \"{command}\".into(),\n            payload_hash: application::journal::payload_hash(&payload_json),\n            payload: payload_json,\n        }};\n        match journal.insert(&entry).await.map_err(domain_error)? {{\n            application::journal::JournalInsertOutcome::Duplicate {{ status, payload_hash }} => {{\n                if payload_hash != entry.payload_hash {{\n                    return Err(conflict_error(env.message_id));\n                }}\n                return Ok(acceptance(&env, journal_status_api(status), true));\n            }}\n            application::journal::JournalInsertOutcome::Inserted => {{}}\n        }}\n        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.\n        let actor = application::ports::Actor {{\n            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),\n            user_type: env.user_type.clone(),\n            correlation_id: env.correlation_id,\n            cause_id: Some(env.message_id),\n        }};\n        let (message_id, correlation_id) = (env.message_id, env.correlation_id);\n        tokio::spawn(async move {{\n            let outcome = {handler_call};\n            complete_operation(journal, status_bus, message_id, correlation_id, outcome).await;\n        }});\n        Ok(acceptance(&env, OperationStatus::PENDING, false))\n    }}\n",
+                "    #[graphql(name = \"{name}\"{acl})]\n    async fn {fnname}(&self, ctx: &async_graphql::Context<'_>, input: {command}Input, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {{\n        // command.receive (SERVER). Opened before any fallible work so an input that fails to\n        // deserialize still leaves a span naming the command that was attempted.\n        let __receive = telemetry::spans::command_receive(\n            \"{command}\",\n            crate::graphql::acl::request_role(ctx).api_name(),\n            telemetry::CHANNEL_GRAPHQL,\n        );\n        let __rx = __receive.clone();\n        async move {{\n        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();\n        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();\n{resolve_ports}        let payload_json = command_payload(&input)?;\n        let cmd: domain::generated::commands::{command} = serde_json::from_value(payload_json.clone())\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        let env = request_envelope(ctx, &metadata);\n        // run_identity: both ids are mandatory in every contract and both may be server-generated.\n        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());\n        let entry = application::journal::CommandJournalEntry {{\n            message_id: env.message_id,\n            correlation_id: env.correlation_id,\n            cause_id: env.cause_id,\n            session_id: env.session_id,\n            trace_id: env.trace_id.clone(),\n            user_id: env.user_id,\n            user_type: env.user_type.clone(),\n            channel: domain::generated::scalars::CommandChannel::GRAPHQL,\n            command_type: \"{command}\".into(),\n            payload_hash: application::journal::payload_hash(&payload_json),\n            payload: payload_json,\n        }};\n        // command.journal (INTERNAL). `command_completion_ms` is measured from HERE — the contract\n        // defines it as journal insert -> terminal status, not as resolver wall-clock.\n        let __journaled_at = std::time::Instant::now();\n        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());\n        let __inserted = journal.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;\n        match __inserted {{\n            application::journal::JournalInsertOutcome::Duplicate {{ status, payload_hash }} => {{\n                if payload_hash != entry.payload_hash {{\n                    // A reused messageId with a DIFFERENT payload is a client bug, and the only\n                    // acceptance outcome the contract does NOT count as success.\n                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);\n                    telemetry::meters::acceptance::sync_conflict(\"{command}\");\n                    return Err(conflict_error(env.message_id));\n                }}\n                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);\n                let _ = telemetry::spans::command_dispatch(\n                    &env.message_id.to_string(),\n                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,\n                );\n                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);\n                return Ok(acceptance(&env, journal_status_api(status), true));\n            }}\n            application::journal::JournalInsertOutcome::Inserted => {{\n                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);\n            }}\n        }}\n        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.\n        let actor = application::ports::Actor {{\n            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),\n            user_type: env.user_type.clone(),\n            correlation_id: env.correlation_id,\n            cause_id: Some(env.message_id),\n        }};\n        let (message_id, correlation_id) = (env.message_id, env.correlation_id);\n        // command.dispatch (INTERNAL) — and the parent of the handler's own spans. The spawned task is\n        // instrumented with it rather than inheriting nothing: `tokio::spawn` leaves the current span\n        // behind, so without this the whole async half of the run would be a separate, parentless trace.\n        let __dispatch = telemetry::spans::command_dispatch(\n            &message_id.to_string(),\n            telemetry::dispatch_outcome::SPAWNED,\n        );\n        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);\n        tokio::spawn(async move {{\n            let outcome = {handler_call};\n            complete_operation(journal, status_bus, message_id, correlation_id, outcome, __journaled_at).await;\n        }}.instrument(__dispatch));\n        Ok(acceptance(&env, OperationStatus::PENDING, false))\n        }}\n        .instrument(__receive)\n        .await\n    }}\n",
                 name = m.name, acl = acl, fnname = fnname, command = m.command,
                 resolve_ports = resolve_ports, handler_call = handler_call
             )),
@@ -9939,7 +10629,7 @@ fn emit_server_mutation(model: &Model) -> String {
     out.push_str("}\n");
     // Shared write-side plumbing for the wired resolvers.
     out.push_str(
-        "\n/// The stripped serde wire shape of the GraphQL input — both the journal `payload` column and the\n/// domain command deserialize from it (generated from the same commands.yaml, camelCase). `null`s\n/// are stripped first — an unset GraphQL optional serializes as an explicit null, while the domain\n/// payloads model absence as a MISSING key (`Option` fields / `#[serde(default)]` arrays).\nfn command_payload(input: &impl serde::Serialize) -> async_graphql::Result<serde_json::Value> {\n    let mut value = serde_json::to_value(input).map_err(|e| async_graphql::Error::new(e.to_string()))?;\n    strip_nulls(&mut value);\n    Ok(value)\n}\n\nfn strip_nulls(value: &mut serde_json::Value) {\n    match value {\n        serde_json::Value::Object(map) => {\n            map.retain(|_, v| !v.is_null());\n            for v in map.values_mut() {\n                strip_nulls(v);\n            }\n        }\n        serde_json::Value::Array(items) => {\n            for v in items.iter_mut() {\n                strip_nulls(v);\n            }\n        }\n        _ => {}\n    }\n}\n\n/// `RequestRole` → the scalars.yaml UserType TEXT value (ADR-20260728: enums are stored verbatim).\nfn role_text(role: &crate::graphql::acl::RequestRole) -> &'static str {\n    use crate::graphql::acl::RequestRole as R;\n    match role {\n        R::Public => \"PUBLIC\",\n        R::Customer => \"CUSTOMER\",\n        R::RestaurantAccount => \"RESTAURANT_ACCOUNT\",\n        R::Restaurant => \"RESTAURANT\",\n        R::Rider => \"RIDER\",\n        R::Admin => \"ADMIN\",\n        R::External => \"EXTERNAL\",\n    }\n}\n\n/// The EFFECTIVE technical envelope of one mutation request (ADR-20260720-015500): what the client\n/// supplied via MetadataInput/headers, completed server-side (UUIDv7) and echoed back verbatim in\n/// the MutationAcceptance.\npub(crate) struct RequestEnvelope {\n    pub message_id: uuid::Uuid,\n    pub correlation_id: uuid::Uuid,\n    pub cause_id: Option<uuid::Uuid>,\n    pub session_id: Option<uuid::Uuid>,\n    pub trace_id: Option<String>,\n    pub user_id: Option<uuid::Uuid>,\n    pub user_type: String,\n}\n\nfn request_envelope(ctx: &async_graphql::Context<'_>, metadata: &Option<MetadataInput>) -> RequestEnvelope {\n    let principal = ctx.data_opt::<crate::auth::Principal>();\n    let user_id = principal\n        .and_then(|p| p.user_id.as_deref())\n        .and_then(|s| uuid::Uuid::parse_str(s).ok());\n    let user_type = principal.map(|p| role_text(&p.role)).unwrap_or(\"PUBLIC\").to_string();\n    let session_id = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n    let trace_id = ctx.data_opt::<crate::graphql::session::TraceContext>().and_then(|t| t.0.clone());\n    // Client-suppliable ids validate structurally at scalar parse time; anything missing is\n    // server-generated (time-ordered UUIDv7) and the correlation defaults to the messageId.\n    let message_id = metadata\n        .as_ref()\n        .and_then(|m| m.message_id.as_ref())\n        .map(|v| v.0)\n        .unwrap_or_else(uuid::Uuid::now_v7);\n    let correlation_id = metadata\n        .as_ref()\n        .and_then(|m| m.correlation_id.as_ref())\n        .map(|v| v.0)\n        .unwrap_or(message_id);\n    let cause_id = metadata.as_ref().and_then(|m| m.cause_id.as_ref()).map(|v| v.0);\n    RequestEnvelope { message_id, correlation_id, cause_id, session_id, trace_id, user_id, user_type }\n}\n\n/// The uniform acceptance payload from the effective envelope.\nfn acceptance(env: &RequestEnvelope, status: OperationStatus, duplicate: bool) -> MutationAcceptance {\n    MutationAcceptance {\n        message_id: MessageId(env.message_id),\n        correlation_id: CorrelationId(env.correlation_id),\n        cause_id: env.cause_id.map(CauseId),\n        session_id: env.session_id.map(SessionId),\n        trace_id: env.trace_id.clone().map(TraceId),\n        operation_status: status,\n        duplicate,\n    }\n}\n\n/// `command_journal` lifecycle → the caller-facing OperationStatus (RECEIVED reads as PENDING).\npub(crate) fn journal_status_api(s: domain::generated::scalars::CommandJournalStatus) -> OperationStatus {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    match s {\n        J::RECEIVED => OperationStatus::PENDING,\n        J::SUCCEEDED => OperationStatus::SUCCEEDED,\n        J::REJECTED => OperationStatus::REJECTED,\n        J::FAILED => OperationStatus::FAILED,\n    }\n}\n\n/// A `command_journal` row → the API Operation shape (`operationStatus` / `operationStatusChanged`).\npub(crate) fn operation_from_journal(row: &application::journal::CommandJournalRow) -> Operation {\n    let error_code = row\n        .error\n        .as_ref()\n        .and_then(|e| e.get(\"code\"))\n        .and_then(|c| c.as_str())\n        .map(str::to_owned);\n    let message = match (&error_code, row.error.as_ref().and_then(|e| e.get(\"context\"))) {\n        (Some(code), Some(context)) => domain::generated::errors::message_en(code, context),\n        _ => None,\n    };\n    Operation {\n        message_id: MessageId(row.entry.message_id),\n        correlation_id: CorrelationId(row.entry.correlation_id),\n        status: journal_status_api(row.status),\n        error_code,\n        message,\n        occurred_at: row.completed_at.unwrap_or(row.received_at),\n    }\n}\n\n/// The operation ownership scope (ADR-20260720-015500): ADMIN, the journaling actor (JWT subject),\n/// or the journaling session (X-SESSION-ID). Callers resolve null / an empty stream on false — the\n/// PUBLIC surface must not become an existence oracle.\npub(crate) fn operation_owned(\n    ctx: &async_graphql::Context<'_>,\n    row: &application::journal::CommandJournalRow,\n) -> bool {\n    let admin = matches!(\n        ctx.data_opt::<crate::graphql::acl::RequestRole>(),\n        Some(crate::graphql::acl::RequestRole::Admin)\n    );\n    let principal_uuid = ctx\n        .data_opt::<crate::auth::Principal>()\n        .and_then(|p| p.user_id.as_deref())\n        .and_then(|s| uuid::Uuid::parse_str(s).ok());\n    let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n    admin\n        || (principal_uuid.is_some() && principal_uuid == row.entry.user_id)\n        || (session.is_some() && session == row.entry.session_id)\n}\n\n/// The spawned handler's terminal transition: complete the journal row and publish the update.\n/// REJECTED = an anticipated errors.yaml rejection (surfaced as Operation.errorCode); FAILED = the\n/// catalogued generic Internal (adapter detail never leaks).\nasync fn complete_operation(\n    journal: std::sync::Arc<dyn application::journal::CommandJournal>,\n    bus: infrastructure::OperationStatusBus,\n    message_id: uuid::Uuid,\n    correlation_id: uuid::Uuid,\n    outcome: Result<(), domain::shared::errors::DomainError>,\n) {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    use domain::shared::errors::DomainError;\n    let (status, error, error_code, message) = match outcome {\n        Ok(()) => (J::SUCCEEDED, None, None, None),\n        Err(DomainError::Rejected { code, context }) => {\n            let msg = domain::generated::errors::message_en(&code, &context).unwrap_or_else(|| code.clone());\n            let error = serde_json::json!({ \"code\": code, \"context\": context });\n            (J::REJECTED, Some(error), Some(code), Some(msg))\n        }\n        // Legacy \"<Code>: <detail>\" string invariants (interim adapters): a catalogued prefix is a\n        // rejection; anything else — and every Repository failure — is a technical failure.\n        Err(DomainError::Invariant(msg)) => {\n            let code = msg.split(':').next().map(str::trim).unwrap_or(\"\").to_string();\n            if domain::generated::errors::find(&code).is_some() {\n                let error = serde_json::json!({ \"code\": code, \"context\": { \"detail\": msg } });\n                (J::REJECTED, Some(error), Some(code), Some(msg))\n            } else {\n                internal_completion()\n            }\n        }\n        Err(DomainError::Repository(_)) => internal_completion(),\n    };\n    if let Err(e) = journal.complete(message_id, status, error).await {\n        eprintln!(\"command journal: complete({message_id}) failed: {e}\");\n    }\n    bus.publish(infrastructure::OperationUpdate { message_id, correlation_id, status, error_code, message });\n}\n\nfn internal_completion() -> (\n    domain::generated::scalars::CommandJournalStatus,\n    Option<serde_json::Value>,\n    Option<String>,\n    Option<String>,\n) {\n    let def = domain::generated::errors::INTERNAL;\n    (\n        domain::generated::scalars::CommandJournalStatus::FAILED,\n        Some(serde_json::json!({ \"code\": def.code, \"context\": {} })),\n        Some(def.code.to_string()),\n        Some(def.message_en.to_string()),\n    )\n}\n\n/// The synchronous Conflict for a replayed messageId whose payload differs — a client bug, not a\n/// retry (ADR-20260720-015300); errors.yaml cross-cutting `Conflict`, P-10 extensions shape.\nfn conflict_error(message_id: uuid::Uuid) -> async_graphql::Error {\n    use async_graphql::ErrorExtensions;\n    let def = domain::generated::errors::CONFLICT;\n    async_graphql::Error::new(format!(\n        \"messageId {message_id} was already used with a different payload\"\n    ))\n    .extend_with(|_, ext| ext.set(\"code\", def.code))\n}\n\n/// Map a SYNCHRONOUS failure (journal insert, input deserialization) onto the GraphQL error\n/// contract (P-10): an anticipated errors.yaml rejection surfaces `extensions.code` = the stable\n/// PascalCase code, the interpolated English message as the error message, and its typed context\n/// fields under the extensions; anything unexpected (repository/adapter failures) surfaces as the\n/// generic catalogued `Internal` — never leaking adapter details to the client.\nfn domain_error(e: domain::shared::errors::DomainError) -> async_graphql::Error {\n",
+        "\n/// The stripped serde wire shape of the GraphQL input — both the journal `payload` column and the\n/// domain command deserialize from it (generated from the same commands.yaml, camelCase). `null`s\n/// are stripped first — an unset GraphQL optional serializes as an explicit null, while the domain\n/// payloads model absence as a MISSING key (`Option` fields / `#[serde(default)]` arrays).\nfn command_payload(input: &impl serde::Serialize) -> async_graphql::Result<serde_json::Value> {\n    let mut value = serde_json::to_value(input).map_err(|e| async_graphql::Error::new(e.to_string()))?;\n    strip_nulls(&mut value);\n    Ok(value)\n}\n\nfn strip_nulls(value: &mut serde_json::Value) {\n    match value {\n        serde_json::Value::Object(map) => {\n            map.retain(|_, v| !v.is_null());\n            for v in map.values_mut() {\n                strip_nulls(v);\n            }\n        }\n        serde_json::Value::Array(items) => {\n            for v in items.iter_mut() {\n                strip_nulls(v);\n            }\n        }\n        _ => {}\n    }\n}\n\n/// `RequestRole` → the scalars.yaml UserType TEXT value (ADR-20260728: enums are stored verbatim).\nfn role_text(role: &crate::graphql::acl::RequestRole) -> &'static str {\n    use crate::graphql::acl::RequestRole as R;\n    match role {\n        R::Public => \"PUBLIC\",\n        R::Customer => \"CUSTOMER\",\n        R::RestaurantAccount => \"RESTAURANT_ACCOUNT\",\n        R::Restaurant => \"RESTAURANT\",\n        R::Rider => \"RIDER\",\n        R::Admin => \"ADMIN\",\n        R::External => \"EXTERNAL\",\n    }\n}\n\n/// The EFFECTIVE technical envelope of one mutation request (ADR-20260720-015500): what the client\n/// supplied via MetadataInput/headers, completed server-side (UUIDv7) and echoed back verbatim in\n/// the MutationAcceptance.\npub(crate) struct RequestEnvelope {\n    pub message_id: uuid::Uuid,\n    pub correlation_id: uuid::Uuid,\n    pub cause_id: Option<uuid::Uuid>,\n    pub session_id: Option<uuid::Uuid>,\n    pub trace_id: Option<String>,\n    pub user_id: Option<uuid::Uuid>,\n    pub user_type: String,\n}\n\nfn request_envelope(ctx: &async_graphql::Context<'_>, metadata: &Option<MetadataInput>) -> RequestEnvelope {\n    let principal = ctx.data_opt::<crate::auth::Principal>();\n    let user_id = principal\n        .and_then(|p| p.user_id.as_deref())\n        .and_then(|s| uuid::Uuid::parse_str(s).ok());\n    let user_type = principal.map(|p| role_text(&p.role)).unwrap_or(\"PUBLIC\").to_string();\n    let session_id = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n    let trace_id = ctx.data_opt::<crate::graphql::session::TraceContext>().and_then(|t| t.0.clone());\n    // Client-suppliable ids validate structurally at scalar parse time; anything missing is\n    // server-generated (time-ordered UUIDv7) and the correlation defaults to the messageId.\n    let message_id = metadata\n        .as_ref()\n        .and_then(|m| m.message_id.as_ref())\n        .map(|v| v.0)\n        .unwrap_or_else(uuid::Uuid::now_v7);\n    let correlation_id = metadata\n        .as_ref()\n        .and_then(|m| m.correlation_id.as_ref())\n        .map(|v| v.0)\n        .unwrap_or(message_id);\n    let cause_id = metadata.as_ref().and_then(|m| m.cause_id.as_ref()).map(|v| v.0);\n    RequestEnvelope { message_id, correlation_id, cause_id, session_id, trace_id, user_id, user_type }\n}\n\n/// The uniform acceptance payload from the effective envelope.\nfn acceptance(env: &RequestEnvelope, status: OperationStatus, duplicate: bool) -> MutationAcceptance {\n    MutationAcceptance {\n        message_id: MessageId(env.message_id),\n        correlation_id: CorrelationId(env.correlation_id),\n        cause_id: env.cause_id.map(CauseId),\n        session_id: env.session_id.map(SessionId),\n        trace_id: env.trace_id.clone().map(TraceId),\n        operation_status: status,\n        duplicate,\n    }\n}\n\n/// `command_journal` lifecycle → the caller-facing OperationStatus (RECEIVED reads as PENDING).\npub(crate) fn journal_status_api(s: domain::generated::scalars::CommandJournalStatus) -> OperationStatus {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    match s {\n        J::RECEIVED => OperationStatus::PENDING,\n        J::SUCCEEDED => OperationStatus::SUCCEEDED,\n        J::REJECTED => OperationStatus::REJECTED,\n        J::FAILED => OperationStatus::FAILED,\n    }\n}\n\n/// A `command_journal` row → the API Operation shape (`operationStatus` / `operationStatusChanged`).\npub(crate) fn operation_from_journal(row: &application::journal::CommandJournalRow) -> Operation {\n    let error_code = row\n        .error\n        .as_ref()\n        .and_then(|e| e.get(\"code\"))\n        .and_then(|c| c.as_str())\n        .map(str::to_owned);\n    let message = match (&error_code, row.error.as_ref().and_then(|e| e.get(\"context\"))) {\n        (Some(code), Some(context)) => domain::generated::errors::message_en(code, context),\n        _ => None,\n    };\n    Operation {\n        message_id: MessageId(row.entry.message_id),\n        correlation_id: CorrelationId(row.entry.correlation_id),\n        status: journal_status_api(row.status),\n        error_code,\n        message,\n        occurred_at: row.completed_at.unwrap_or(row.received_at),\n    }\n}\n\n/// The operation ownership scope (ADR-20260720-015500): ADMIN, the journaling actor (JWT subject),\n/// or the journaling session (X-SESSION-ID). Callers resolve null / an empty stream on false — the\n/// PUBLIC surface must not become an existence oracle.\npub(crate) fn operation_owned(\n    ctx: &async_graphql::Context<'_>,\n    row: &application::journal::CommandJournalRow,\n) -> bool {\n    let admin = matches!(\n        ctx.data_opt::<crate::graphql::acl::RequestRole>(),\n        Some(crate::graphql::acl::RequestRole::Admin)\n    );\n    let principal_uuid = ctx\n        .data_opt::<crate::auth::Principal>()\n        .and_then(|p| p.user_id.as_deref())\n        .and_then(|s| uuid::Uuid::parse_str(s).ok());\n    let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);\n    admin\n        || (principal_uuid.is_some() && principal_uuid == row.entry.user_id)\n        || (session.is_some() && session == row.entry.session_id)\n}\n\n/// The spawned handler's terminal transition: complete the journal row and publish the update.\n/// REJECTED = an anticipated errors.yaml rejection (surfaced as Operation.errorCode); FAILED = the\n/// catalogued generic Internal (adapter detail never leaks).\nasync fn complete_operation(\n    journal: std::sync::Arc<dyn application::journal::CommandJournal>,\n    bus: infrastructure::OperationStatusBus,\n    message_id: uuid::Uuid,\n    correlation_id: uuid::Uuid,\n    outcome: Result<(), domain::shared::errors::DomainError>,\n    journaled_at: std::time::Instant,\n) {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    use domain::shared::errors::DomainError;\n    let (status, error, error_code, message) = match outcome {\n        Ok(()) => (J::SUCCEEDED, None, None, None),\n        Err(DomainError::Rejected { code, context }) => {\n            let msg = domain::generated::errors::message_en(&code, &context).unwrap_or_else(|| code.clone());\n            let error = serde_json::json!({ \"code\": code, \"context\": context });\n            (J::REJECTED, Some(error), Some(code), Some(msg))\n        }\n        // Legacy \"<Code>: <detail>\" string invariants (interim adapters): a catalogued prefix is a\n        // rejection; anything else — and every Repository failure — is a technical failure.\n        Err(DomainError::Invariant(msg)) => {\n            let code = msg.split(':').next().map(str::trim).unwrap_or(\"\").to_string();\n            if domain::generated::errors::find(&code).is_some() {\n                let error = serde_json::json!({ \"code\": code, \"context\": { \"detail\": msg } });\n                (J::REJECTED, Some(error), Some(code), Some(msg))\n            } else {\n                internal_completion()\n            }\n        }\n        Err(DomainError::Repository(_)) => internal_completion(),\n    };\n    // command_completion_ms{status} — journal insert to terminal status, with REJECTED and FAILED kept\n    // apart: a business rejection is the system working, a technical failure is not, and one histogram\n    // averaging both hides each behind the other.\n    telemetry::meters::acceptance::completed(\n        journal_status_label(status),\n        journaled_at.elapsed().as_secs_f64() * 1000.0,\n    );\n    if let Err(e) = journal.complete(message_id, status, error).await {\n        // The command RAN; only the record of its outcome failed to persist. That leaves the row in\n        // RECEIVED for the stale sweep to flip to FAILED, so a caller polling operationStatus is told\n        // something rather than waiting forever -- but it is a real inconsistency and must be loud.\n        tracing::error!(error = %e, %message_id, %correlation_id, \"command journal: complete() failed -- terminal status not persisted\");\n    }\n    bus.publish(infrastructure::OperationUpdate { message_id, correlation_id, status, error_code, message });\n}\n\n/// `CommandJournalStatus` → the `command_completion_ms{status}` label the contract names\n/// (SUCCEEDED | REJECTED | FAILED). RECEIVED cannot reach here: it is not terminal.\nfn journal_status_label(s: domain::generated::scalars::CommandJournalStatus) -> &'static str {\n    use domain::generated::scalars::CommandJournalStatus as J;\n    match s {\n        J::RECEIVED => \"RECEIVED\",\n        J::SUCCEEDED => \"SUCCEEDED\",\n        J::REJECTED => \"REJECTED\",\n        J::FAILED => \"FAILED\",\n    }\n}\n\nfn internal_completion() -> (\n    domain::generated::scalars::CommandJournalStatus,\n    Option<serde_json::Value>,\n    Option<String>,\n    Option<String>,\n) {\n    let def = domain::generated::errors::INTERNAL;\n    (\n        domain::generated::scalars::CommandJournalStatus::FAILED,\n        Some(serde_json::json!({ \"code\": def.code, \"context\": {} })),\n        Some(def.code.to_string()),\n        Some(def.message_en.to_string()),\n    )\n}\n\n/// The synchronous Conflict for a replayed messageId whose payload differs — a client bug, not a\n/// retry (ADR-20260720-015300); errors.yaml cross-cutting `Conflict`, P-10 extensions shape.\nfn conflict_error(message_id: uuid::Uuid) -> async_graphql::Error {\n    use async_graphql::ErrorExtensions;\n    let def = domain::generated::errors::CONFLICT;\n    async_graphql::Error::new(format!(\n        \"messageId {message_id} was already used with a different payload\"\n    ))\n    .extend_with(|_, ext| ext.set(\"code\", def.code))\n}\n\n/// Map a SYNCHRONOUS failure (journal insert, input deserialization) onto the GraphQL error\n/// contract (P-10): an anticipated errors.yaml rejection surfaces `extensions.code` = the stable\n/// PascalCase code, the interpolated English message as the error message, and its typed context\n/// fields under the extensions; anything unexpected (repository/adapter failures) surfaces as the\n/// generic catalogued `Internal` — never leaking adapter details to the client.\nfn domain_error(e: domain::shared::errors::DomainError) -> async_graphql::Error {\n",
     );
     out.push_str(
         "    use async_graphql::ErrorExtensions;\n    use domain::shared::errors::DomainError;\n    match e {\n        DomainError::Rejected { code, context } => {\n            let message = domain::generated::errors::message_en(&code, &context)\n                .unwrap_or_else(|| code.clone());\n            async_graphql::Error::new(message).extend_with(|_, ext| {\n                ext.set(\"code\", code.as_str());\n                if let Some(fields) = context.as_object() {\n                    for (key, value) in fields {\n                        if key == \"code\" {\n                            continue; // never let a context field shadow the wire code\n                        }\n                        ext.set(\n                            key.as_str(),\n                            async_graphql::Value::from_json(value.clone())\n                                .unwrap_or(async_graphql::Value::Null),\n                        );\n                    }\n                }\n            })\n        }\n        // Legacy \"<Code>: <detail>\" string invariants (interim adapters, e.g. the fail-closed\n        // payment stand-in): surface the prefix when it is a catalogued code, else it is unexpected.\n        DomainError::Invariant(msg) => {\n            let code = msg.split(':').next().map(str::trim).unwrap_or(\"\").to_string();\n            if domain::generated::errors::find(&code).is_some() {\n                async_graphql::Error::new(msg).extend_with(|_, ext| ext.set(\"code\", code.as_str()))\n            } else {\n                internal_error()\n            }\n        }\n        DomainError::Repository(_) => internal_error(),\n    }\n}\n\n/// The generic catalogued `Internal` fallback (errors.yaml): unexpected/infrastructure failures\n/// never leak their detail to the client.\nfn internal_error() -> async_graphql::Error {\n    use async_graphql::ErrorExtensions;\n    let def = domain::generated::errors::INTERNAL;\n    async_graphql::Error::new(def.message_en).extend_with(|_, ext| ext.set(\"code\", def.code))\n}\n",
@@ -11510,7 +12200,7 @@ impl<'a> PmLegGen<'a> {
         );
         self.push(ind + 4, "}");
         self.push(ind + 4, "super::HookOutcome::Skip(reason) => {");
-        self.push(ind + 8, &format!("eprintln!(\"saga[{}]: call {}.{} skipped — {{reason}}\");", self.pm.name, port, operation));
+        self.push(ind + 8, &format!("tracing::warn!(saga = \"{}\", port = \"{}\", operation = \"{}\", %reason, \"service call skipped\");", self.pm.name, port, operation));
         self.push(ind + 4, "}");
         self.push(ind, "}");
         let sig = self.hook_sig();
@@ -11669,7 +12359,7 @@ impl<'a> PmLegGen<'a> {
             self.push(
                 body_ind + 8,
                 &format!(
-                    "eprintln!(\"saga[{}]: {} rejected ({{rejection}}) — skipped, the target aggregate's own invariants stand\");",
+                    "tracing::warn!(saga = \"{}\", command = \"{}\", %rejection, \"command rejected -- leg skipped, the target aggregate's own invariants stand\");",
                     self.pm.name, command
                 ),
             );
@@ -11681,7 +12371,7 @@ impl<'a> PmLegGen<'a> {
                     command
                 ),
             );
-            self.push(body_ind + 8, &format!("eprintln!(\"saga[{}]: {{reason}}\");", self.pm.name));
+            self.push(body_ind + 8, &format!("tracing::warn!(saga = \"{}\", %reason, \"leg skipped\");", self.pm.name));
             self.push(body_ind + 8, "leg_outcome = Outcome::Skipped(reason);");
         }
         self.push(body_ind + 4, "}");
@@ -12822,7 +13512,10 @@ fn main() {
         eprintln!("✗ create {}: {}", out_dir.display(), e);
         std::process::exit(1);
     }
-    let artifacts: [(&str, String); 8] = [
+    let artifacts: [(&str, String); 9] = [
+        // The CI env-sync manifest (PROP-20260729-014500): which repo secret supplies which service
+        // env key, per profile. Baked values are NOT here — they ride the image (D5).
+        ("render-config-sync.json", emit_render_sync_manifest(&model)),
         ("translations.generated.json", emit_translations_json(&model)),
         ("views.generated.sql", emit_views_sql(&model)),
         ("schema.generated.sql", emit_schema_sql(&model, &specs)),
@@ -12930,7 +13623,8 @@ fn main() {
     }
     for (name, content) in [
         ("services_routes.rs", emit_services_routes(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod services_routes;\n".to_string()),
+        ("config.rs", emit_config(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod config;\npub mod services_routes;\n".to_string()),
     ] {
         let path = srv_svc_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
@@ -14756,6 +15450,789 @@ geocoding:
     /// Detection is deliberately the simple over-approximation "any line starting with a TAB":
     /// this Makefile does not set `.RECIPEPREFIX`, and treating a stray tab-indented non-recipe
     /// line as a recipe only tightens the guard, never loosens it.
+    /// `required` and `default` are MUTUALLY EXCLUSIVE — you must choose (product-owner directive,
+    /// 2026-07-29). A required key carrying a default can never be reported missing, because the
+    /// default always satisfies it: the requirement is silently inert, which is worse than not
+    /// declaring it, since the spec then states a guarantee the runtime does not make.
+    #[test]
+    fn a_required_key_may_not_also_declare_a_default() {
+        let spec = r#"
+keys:
+  BOTH:
+    type: string
+    required: [production]
+    default: "fallback"
+    gates: "Declares both, which cannot be honoured."
+"#;
+        let model = Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(spec).expect("parses"),
+            )]),
+        };
+        let mut issues = Vec::new();
+        validate_configuration(&model, &mut issues);
+        let hit = issues.iter().find(|i| i.rule == "config-required-with-default");
+        assert!(
+            hit.is_some(),
+            "a key declaring BOTH `required` and `default` must be rejected; got {:?}",
+            issues.iter().map(|i| i.rule).collect::<Vec<_>>()
+        );
+    }
+
+    /// The complement: each on its own is fine. A guard that also rejects the legal shapes would push
+    /// people to stop declaring defaults at all.
+    #[test]
+    fn required_alone_and_default_alone_are_both_accepted() {
+        for body in [
+            "    required: [production]\n",
+            "    default: \"fallback\"\n",
+        ] {
+            let spec = format!(
+                "keys:\n  ONE:\n    type: string\n{body}    gates: \"Fine on its own.\"\n"
+            );
+            let model = Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(&spec).expect("parses"),
+                )]),
+            };
+            let mut issues = Vec::new();
+            validate_configuration(&model, &mut issues);
+            assert!(
+                !issues.iter().any(|i| i.rule == "config-required-with-default"),
+                "{body:?} is a legal declaration"
+            );
+        }
+    }
+
+    /// A numeric key with NO declared default must resolve to `None`, never to a typed zero.
+    ///
+    /// The emitter used to substitute `0` for a defaultless `int`, so
+    /// `DELIVERY_OFFER_MAX_TTL_SECONDS` — whose real fallback (900s) lives in
+    /// `DeliveryOfferTimeoutWorker::new`, which has no Config to read — would have been printed in the
+    /// boot report as a delivery-offer ceiling of ZERO SECONDS. An operator reading that would conclude
+    /// every offer times out instantly. A report that states a number the process never applies is
+    /// worse than one that says `unset`, because it is trusted.
+    #[test]
+    fn a_numeric_key_without_a_default_resolves_to_absent_not_to_zero() {
+        let spec = r#"
+keys:
+  TTL_SECONDS:
+    type: int
+    gates: "No default -- the fallback lives at the call site."
+  WITH_DEFAULT_SECONDS:
+    type: int
+    default: 30
+    gates: "Declares its own."
+"#;
+        let model = Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(spec).expect("parses"),
+            )]),
+        };
+        let emitted = emit_config(&model);
+        assert!(
+            emitted.contains("pub ttl_seconds: Option<i64>"),
+            "a defaultless int must be Option<i64>:\n{emitted}"
+        );
+        assert!(
+            !emitted.contains("raw(\"TTL_SECONDS\").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)"),
+            "a defaultless int must not fall back to 0:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("self.ttl_seconds.map_or_else"),
+            "the boot report must print `unset`, not a fabricated number:\n{emitted}"
+        );
+        // The complement: a declared default is still applied, and still reported as a plain value.
+        assert!(
+            emitted.contains("pub with_default_seconds: i64")
+                && emitted.contains(".unwrap_or(30)"),
+            "a declared default must survive this change:\n{emitted}"
+        );
+    }
+
+    /// The Render sync must resolve repo secrets from the manifest ALONE — never from a second list of
+    /// key names maintained by hand in the workflow.
+    ///
+    /// It did, and the list drifted on its first real run: `HONEYCOMB_API_KEY` and the four `OVH_*`
+    /// credentials were declared in `specs/configuration.yaml` AND configured as repo secrets, but
+    /// missing from the workflow's `env:` block, so the sync reported "repo secret is not set". That is
+    /// the most expensive shape of wrong: it tells an operator who configured the secret correctly that
+    /// they did not, and points them at the wrong file. Two lists of the same names is precisely the
+    /// drift configuration.yaml exists to abolish.
+    #[test]
+    fn the_render_sync_takes_its_secret_names_only_from_the_manifest() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let wf = std::fs::read_to_string(root.join(".github/workflows/render-config-sync.yml"))
+            .expect("the render-config-sync workflow must exist");
+        assert!(
+            wf.contains("toJSON(secrets)"),
+            "the workflow must source every repo secret as one object, so the manifest is the only \
+             list of names"
+        );
+        // RENDER_API_KEY is the one legitimate direct reference: it is the workflow's own credential
+        // for reaching Render, not a value the manifest ever names.
+        //
+        // Comment lines are skipped, because the comment above this very block quotes the
+        // `secrets.NAME` shape it warns against — a rule that cannot survive being explained is a rule
+        // people work around by deleting the explanation.
+        let direct: Vec<&str> = wf
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .flat_map(|l| {
+                l.match_indices("secrets.").map(move |(at, _)| {
+                    let tail = &l[at + "secrets.".len()..];
+                    let end = tail.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'));
+                    &tail[..end.unwrap_or(tail.len())]
+                })
+            })
+            .filter(|n| !n.is_empty())
+            .collect();
+        assert_eq!(
+            direct,
+            ["RENDER_API_KEY"],
+            "only RENDER_API_KEY may be referenced by name; every other secret is looked up from the \
+             manifest. Naming one here recreates the list that drifted."
+        );
+    }
+
+    /// A key with a DECLARED DEFAULT must be consumed through the generated `Config`, never re-read
+    /// from the environment at the call site.
+    ///
+    /// This is the gap the product owner caught: `WEB_ASSETS_DIR` declared `default: /app/web-assets`,
+    /// the generated reader resolved it correctly — and the composition root ignored it, doing its own
+    /// `env::var(..).unwrap_or_else(|_| "/app/web-assets")`. Two copies of one default, and the spec's
+    /// copy was the inert one. Declaring a default is only meaningful if the declaration is what runs.
+    #[test]
+    fn a_declared_default_is_not_re_implemented_at_the_call_site() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let spec = std::fs::read_to_string(root.join("specs/configuration.yaml"))
+            .expect("specs/configuration.yaml must exist");
+        let model = Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(&spec).expect("configuration.yaml parses"),
+            )]),
+        };
+        let defaulted: BTreeSet<String> = parse_config_keys(&model)
+            .into_iter()
+            .filter(|k| k.default.is_some() && k.consumer == "server")
+            .map(|k| k.name)
+            .collect();
+        assert!(!defaulted.is_empty(), "no defaulted keys parsed");
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name != "target" && name != "tests" {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates/server"), &mut files);
+        files.sort();
+
+        let mut offenders = Vec::new();
+        for f in &files {
+            if f.to_string_lossy().ends_with("generated/config.rs") {
+                continue; // the generated reader IS where the default is applied
+            }
+            let Ok(src) = std::fs::read_to_string(f) else { continue };
+            for (idx, line) in src.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for key in &defaulted {
+                    if line.contains(&format!("env::var(\"{key}\"")) 
+                        || line.contains(&format!("env_flag(\"{key}\""))
+                    {
+                        offenders.push(format!(
+                            "  {}:{}: {key}",
+                            f.strip_prefix(&root).unwrap_or(f).display(),
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+        }
+        offenders.sort();
+        assert!(
+            offenders.is_empty(),
+            "these keys declare a DEFAULT in specs/configuration.yaml but are re-read from the \
+             environment at the call site:\n{}\n\n\
+             Fix: read them from the resolved `Config` (`config.<field>`) instead. Why: a default \
+             declared in the spec and re-typed at the call site is TWO sources of truth, and the \
+             spec's copy is the one that turns out to be inert — the declaration then documents a \
+             behaviour nothing implements.",
+            offenders.join("\n")
+        );
+    }
+
+    /// Every environment variable the crates READ must be DECLARED in `specs/configuration.yaml`
+    /// (PROP-20260729-004500, issue #246).
+    ///
+    /// This is the rule that stops the inventory rotting again, and it exists because the rot was
+    /// measured rather than imagined: `render.yaml` documented 9 of ~21 variables, `RUN_SIRENE_WORKER`
+    /// gated a paused pipeline while being written down NOWHERE (6,649 rows sat PENDING for four hours
+    /// because of it), and `API_SECRET` sat configured on the production service, read by nothing.
+    /// Any hand-maintained list drifts; only a gate keeps one honest.
+    ///
+    /// Scope: non-test Rust under `crates/**`. Test files legitimately set throwaway variables
+    /// (`DATABASE_URL` overrides, `DB_TESTS_REQUIRED`), and the GENERATED reader is itself the thing
+    /// being checked, so both are excluded.
+    ///
+    /// The scan is deliberately NOT a plain search for `env::var("NAME")`. That is how the first
+    /// version of this gate was written, and six `OVH_*` credentials stayed invisible to it for weeks:
+    /// `OvhSmsClient::from_env` reads them through a closure (`let var = |k: &str| env::var(k)`), so no
+    /// key name is ever adjacent to `env::var`. Widening the harvest surfaced 17 more. The three
+    /// shapes actually used in this repo are all recognised, and a fourth — a read whose key the scan
+    /// cannot attribute at all — is rejected outright rather than passing silently. See
+    /// [`env_reads_in`].
+    #[test]
+    fn every_env_var_read_by_the_crates_is_declared() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let spec = std::fs::read_to_string(root.join("specs/configuration.yaml"))
+            .expect("specs/configuration.yaml must exist — it is the configuration source of truth");
+        let model = Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(&spec).expect("configuration.yaml parses"),
+            )]),
+        };
+        let declared: BTreeSet<String> =
+            parse_config_keys(&model).into_iter().map(|k| k.name).collect();
+        assert!(!declared.is_empty(), "no keys parsed from configuration.yaml");
+
+        // Platform-injected or tooling-only names the APP never reads through its own config.
+        let exempt: BTreeSet<&str> = ["DB_TESTS_REQUIRED", "CARGO_MANIFEST_DIR", "OUT_DIR"]
+            .into_iter()
+            .collect();
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name != "target" && name != "tests" {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates"), &mut files);
+        files.sort();
+        assert!(!files.is_empty(), "found no crate sources to scan");
+
+        let scanned: Vec<&std::path::PathBuf> = files
+            .iter()
+            // The generated reader legitimately names every key; it IS the declaration's output.
+            .filter(|f| !f.to_string_lossy().ends_with("generated/config.rs"))
+            .collect();
+
+        // The `*_ENV` const table is built across the WHOLE tree before anything is scanned, because
+        // the const and the read routinely live in different files: `stripe::acl` declares
+        // `STRIPE_WEBHOOK_SECRET_ENV` and `stripe::http` is what passes it to `env::var`. A per-file
+        // table reports four such reads as unresolvable, which is a false alarm, and a gate that cries
+        // wolf gets weakened rather than obeyed.
+        let mut consts: BTreeMap<String, String> = BTreeMap::new();
+        for f in &scanned {
+            if let Ok(src) = std::fs::read_to_string(f) {
+                consts.extend(env_name_consts_in(&src));
+            }
+        }
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut blind: Vec<String> = Vec::new();
+        for f in &scanned {
+            let Ok(src) = std::fs::read_to_string(f) else { continue };
+            let rel = f.strip_prefix(&root).unwrap_or(f).display().to_string();
+            let scan = env_reads_in(&src, &consts);
+            for (line, name) in scan.keys {
+                if !declared.contains(&name) && !exempt.contains(name.as_str()) {
+                    offenders.push(format!("  {rel}:{line}: {name}"));
+                }
+            }
+            for (line, expr) in scan.blind {
+                blind.push(format!("  {rel}:{line}: env::var({expr})"));
+            }
+        }
+        offenders.sort();
+        offenders.dedup();
+        blind.sort();
+        blind.dedup();
+
+        // Reported FIRST: a read the scan cannot attribute makes the offender list above unreliable,
+        // so an unattributable read is a defect in its own right rather than a gap to be tolerated.
+        assert!(
+            blind.is_empty(),
+            "these environment reads name their key in a way this gate cannot resolve, so the key \
+             could be undeclared and the gate would not notice:\n{}\n\n\
+             Fix: read it by string literal (`env::var(\"MY_KEY\")`), or name it with a \
+             `const MY_KEY_ENV: &str = \"MY_KEY\";` and pass that. Both forms let the gate see the key; \
+             a computed or forwarded name does not.",
+            blind.join("\n")
+        );
+        assert!(
+            offenders.is_empty(),
+            "these environment variables are READ by the crates but NOT declared in \
+             specs/configuration.yaml:\n{}\n\n\
+             Fix: declare each one (type, required-per-profile, default, secret, and `gates` — what \
+             breaks without it), then `make generate`. Why: an undeclared variable is invisible to the \
+             startup validation, to the boot report and to every derived manifest, which is exactly how \
+             RUN_SIRENE_WORKER came to gate a production pipeline while being written down nowhere.",
+            offenders.join("\n")
+        );
+    }
+
+    /// Collect `const SOME_NAME: &str = "SOME_KEY";` bindings whose VALUE looks like an environment key,
+    /// as `ident -> key`. Gathered tree-wide before scanning, because the const and the `env::var` that
+    /// consumes it are usually in different modules of the same crate.
+    ///
+    /// The value has to look like a key, rather than the identifier having to end in `_ENV`: the naming
+    /// convention is how the code documents intent, and making the gate depend on it would mean a const
+    /// named anything else silently escapes.
+    fn env_name_consts_in(src: &str) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        for line in src.lines() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            let Some(at) = line.find("const ") else { continue };
+            let tail = &line[at + 6..];
+            let Some((ident, rhs)) = tail.split_once(':') else { continue };
+            let Some((_, value)) = rhs.split_once('=') else { continue };
+            let value = value.trim().trim_end_matches(';').trim();
+            let Some(lit) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else { continue };
+            let ident = ident.trim();
+            if !lit.is_empty()
+                && lit.starts_with(|c: char| c.is_ascii_uppercase())
+                && lit.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+                && ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                out.insert(ident.to_string(), lit.to_string());
+            }
+        }
+        out
+    }
+
+    /// What [`env_reads_in`] found in one source file: keys it could attribute, and reads it could not.
+    struct EnvScan {
+        /// `(1-based line, KEY)` for every environment key the file reads.
+        keys: Vec<(usize, String)>,
+        /// `(1-based line, argument expression)` for reads whose key could not be attributed.
+        blind: Vec<(usize, String)>,
+    }
+
+    /// Find every environment key a Rust source reads, across the three shapes this repo uses.
+    ///
+    /// 1. **Literal** — `env::var("PORT")`, `env_flag("RUN_PROJECTOR", …)`. The obvious one.
+    /// 2. **Named const** — `const AVELO37_API_KEY_ENV: &str = "AVELO37_API_KEY";` passed as
+    ///    `env::var(AVELO37_API_KEY_ENV)`. The adapters all use this; the const's VALUE is the key.
+    /// 3. **Wrapper** — a fn or closure that reads whatever key it is handed
+    ///    (`let var = |k: &str| env::var(k).ok()`), called with literals: `var("OVH_ENDPOINT")`. This
+    ///    is the shape that hid the OVH credentials, and the reason the scan resolves wrappers by
+    ///    name instead of only looking next to `env::var`.
+    ///
+    /// Anything else — a key assembled at runtime, or forwarded from a caller the scan cannot see —
+    /// lands in `blind`. That is not pedantry: an unresolvable read is precisely a read that could name
+    /// an undeclared key while the gate reports all clear.
+    ///
+    /// A line-oriented scan, not a parse. It is checking a convention the repo already follows, and the
+    /// convention is what keeps it honest — the alternative is a syn dependency in the codegen to read
+    /// six call sites.
+    fn env_reads_in(src: &str, known_consts: &BTreeMap<String, String>) -> EnvScan {
+        fn is_key(s: &str) -> bool {
+            !s.is_empty()
+                && s.starts_with(|c: char| c.is_ascii_uppercase())
+                && s.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        }
+        // `foo("BAR")` / `foo(BAR_ENV)` — the first argument of a call to `name`, verbatim.
+        fn first_args<'a>(line: &'a str, name: &str) -> Vec<&'a str> {
+            let mut out = Vec::new();
+            let mut rest = line;
+            while let Some(at) = rest.find(name) {
+                let before = rest[..at].chars().next_back();
+                let tail = &rest[at + name.len()..];
+                rest = tail;
+                // Reject an identifier this is merely the tail of (`my_env_flag(`), and the macro form
+                // (`env!("CARGO_PKG_VERSION")` is a compile-time read, not a runtime configuration key).
+                if before.is_some_and(|c| c.is_alphanumeric() || c == '_') || !tail.starts_with('(') {
+                    continue;
+                }
+                let inner = &tail[1..];
+                let end = inner.find([',', ')']).unwrap_or(inner.len());
+                out.push(inner[..end].trim());
+            }
+            out
+        }
+
+        let lines: Vec<&str> = src.lines().collect();
+        let code: Vec<(usize, &str)> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| !l.trim_start().starts_with("//"))
+            .map(|(i, l)| (i + 1, *l))
+            .collect();
+
+        // Shape 2: this file's own consts, on top of the tree-wide table the caller supplies.
+        let mut consts = known_consts.clone();
+        consts.extend(env_name_consts_in(src));
+
+        // Shape 3: wrappers — a binding whose body reads the environment, so its own callers carry the
+        // key. `env_flag` is the crate-wide one; a local `let var = |k: &str| env::var(k)` is the same
+        // thing with a shorter life. Also collect the parameter names such a wrapper forwards, since
+        // `env::var(k)` inside the wrapper is a resolved read, not a blind one.
+        let mut wrappers: BTreeSet<&str> = BTreeSet::from(["env_flag"]);
+        let mut forwarded: BTreeSet<&str> = BTreeSet::new();
+        for (i, (_, line)) in code.iter().enumerate() {
+            if !line.contains("env::var(") {
+                continue;
+            }
+            // The binding or fn this read belongs to, looking back a few lines for a multi-line
+            // signature (`pub fn env_flag(name: &str, …)` reads on the line below its own header).
+            for (_, prev) in code[i.saturating_sub(3)..=i].iter() {
+                if let Some(rest) = prev.split_once("let ").map(|(_, r)| r) {
+                    if let Some((bind, _)) = rest.split_once('=') {
+                        let bind = bind.trim().trim_start_matches("mut ").trim();
+                        if !bind.is_empty() && bind.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                            wrappers.insert(bind);
+                        }
+                    }
+                }
+                if let Some(rest) = prev.split_once("fn ").map(|(_, r)| r) {
+                    if let Some((f, _)) = rest.split_once('(') {
+                        wrappers.insert(f.trim());
+                    }
+                }
+                // `|k: &str|` or `(name: &str,` — the parameter the wrapper forwards to `env::var`.
+                let mut hay = *prev;
+                while let Some(at) = hay.find(": &str") {
+                    let head = &hay[..at];
+                    let start = head
+                        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
+                    let ident = &head[start..];
+                    if !ident.is_empty() {
+                        forwarded.insert(ident);
+                    }
+                    hay = &hay[at + 6..];
+                }
+            }
+        }
+
+        let mut scan = EnvScan { keys: Vec::new(), blind: Vec::new() };
+        for (no, line) in &code {
+            for wrapper in wrappers.iter().chain(std::iter::once(&"env::var")) {
+                for arg in first_args(line, wrapper) {
+                    if let Some(lit) = arg.strip_prefix('"').and_then(|a| a.strip_suffix('"')) {
+                        if is_key(lit) {
+                            scan.keys.push((*no, lit.to_string()));
+                        }
+                    // A qualified path (`acl::STRIPE_WEBHOOK_SECRET_ENV`) names the same const as the
+                    // bare ident an import would give it, so resolve on the last segment.
+                    } else if let Some(key) = consts.get(arg.rsplit("::").next().unwrap_or(arg)) {
+                        scan.keys.push((*no, key.clone()));
+                    } else if *wrapper == "env::var" && !forwarded.contains(arg) {
+                        scan.blind.push((*no, arg.to_string()));
+                    }
+                }
+            }
+        }
+        scan
+    }
+
+    /// The gate must see a key read through a closure, a `*_ENV` const, and a plain literal alike —
+    /// and must refuse a read it cannot attribute.
+    ///
+    /// This exists because the closure case is not hypothetical: it is how
+    /// `OvhSmsClient::from_env` reads its four credentials, and the previous gate scanned for
+    /// `env::var("` so it reported all clear on six undeclared keys. Testing the scanner directly
+    /// (rather than only through the repo sweep) is what keeps that from regressing quietly once the
+    /// tree happens to be clean.
+    #[test]
+    fn the_drift_gate_sees_every_shape_of_environment_read() {
+        let none = BTreeMap::new();
+        let literal = env_reads_in(r#"let p = std::env::var("PORT").ok();"#, &none);
+        assert_eq!(literal.keys.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>(), ["PORT"]);
+        assert!(literal.blind.is_empty());
+
+        // Shape 3 — the OVH shape, verbatim. A gate anchored on `env::var("` sees nothing here.
+        let closure = env_reads_in(
+            r#"
+            pub fn from_env() -> Option<Self> {
+                let var = |k: &str| std::env::var(k).ok().filter(|s| !s.is_empty());
+                Some(Self { key: var("OVH_APPLICATION_KEY")?, sender: var("OVH_SMS_SENDER") })
+            }
+            "#,
+            &none,
+        );
+        let found: Vec<&str> = closure.keys.iter().map(|(_, k)| k.as_str()).collect();
+        assert!(
+            found.contains(&"OVH_APPLICATION_KEY") && found.contains(&"OVH_SMS_SENDER"),
+            "closure-wrapped reads must be attributed, got {found:?}"
+        );
+        assert!(
+            closure.blind.is_empty(),
+            "`env::var(k)` inside the wrapper forwards a parameter -- not a blind read: {:?}",
+            closure.blind
+        );
+
+        // Shape 2 — the adapter shape: the const's VALUE is the key, not its identifier.
+        let named = env_reads_in(
+            r#"
+            pub const AVELO37_API_KEY_ENV: &str = "AVELO37_API_KEY";
+            let key = std::env::var(AVELO37_API_KEY_ENV).ok()?;
+            "#,
+            &none,
+        );
+        assert_eq!(named.keys.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>(), ["AVELO37_API_KEY"]);
+        assert!(named.blind.is_empty());
+
+        // The same const declared in ANOTHER file — `stripe::acl` declares the name, `stripe::http`
+        // does the reading. Resolving this is why the const table is built tree-wide first.
+        let cross = BTreeMap::from([(
+            "STRIPE_WEBHOOK_SECRET_ENV".to_string(),
+            "STRIPE_WEBHOOK_SECRET".to_string(),
+        )]);
+        let elsewhere = env_reads_in(
+            r#"let secret = match std::env::var(STRIPE_WEBHOOK_SECRET_ENV) { Ok(s) => s, _ => return };"#,
+            &cross,
+        );
+        assert_eq!(
+            elsewhere.keys.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>(),
+            ["STRIPE_WEBHOOK_SECRET"]
+        );
+        assert!(elsewhere.blind.is_empty(), "a cross-file const is resolvable: {:?}", elsewhere.blind);
+
+        // The fourth shape: unresolvable. Reported rather than passed over in silence.
+        let computed =
+            env_reads_in(r#"let v = std::env::var(format!("PREFIX_{suffix}")).ok();"#, &none);
+        assert!(computed.keys.is_empty());
+        assert_eq!(computed.blind.len(), 1, "a computed key must be reported: {:?}", computed.blind);
+
+        // `env!` is a compile-time build fact, not runtime configuration — it must not be harvested.
+        let macro_read = env_reads_in(r#"let v = env!("CARGO_PKG_VERSION");"#, &none);
+        assert!(
+            macro_read.keys.is_empty() && macro_read.blind.is_empty(),
+            "env! is not a configuration read: {:?} {:?}",
+            macro_read.keys,
+            macro_read.blind
+        );
+    }
+
+    /// The `domain` and `application` layers must never reach the telemetry SDK (issue #191's
+    /// Definition of Done: "No business/domain crate depends on the telemetry SDK").
+    ///
+    /// Two different rules, because the layers are not equivalent:
+    ///
+    /// - `domain` gets NEITHER the SDK nor the `tracing` facade. It is pure DDD; an aggregate that can
+    ///   log is an aggregate whose decisions start being shaped by what is convenient to trace.
+    /// - `application` may have the `tracing` FACADE (so a saga leg's diagnostics are structured and
+    ///   correlated) but never `opentelemetry*` and never `crates/telemetry`. **It may say things; only
+    ///   boundaries may measure them.** `c4-l3.yaml` marks `command-handlers` `instrumented: false`, and
+    ///   this is what makes that flag true rather than aspirational.
+    ///
+    /// Enforced as a dependency test rather than left to review, because the failure is silent: adding
+    /// `telemetry` to `application` compiles, passes every other test, and quietly moves instrumentation
+    /// into the layer the whole architecture exists to keep clean.
+    #[test]
+    fn domain_and_application_never_depend_on_the_telemetry_sdk() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        // A guard that cannot find its target must FAIL, never silently pass.
+        let read = |crate_name: &str| -> String {
+            let path = root.join("crates").join(crate_name).join("Cargo.toml");
+            std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "cannot read {} ({e}) -- if the crate moved, fix this guard; do NOT let it pass",
+                    path.display()
+                )
+            })
+        };
+
+        // Dependency lines only: a `#`-comment or a doc sentence mentioning opentelemetry is prose,
+        // not an edge in the graph, and failing on it would train people to reword comments.
+        let dep_names = |manifest: &str| -> Vec<String> {
+            manifest
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.starts_with('#') && l.contains('='))
+                .filter_map(|l| l.split('=').next())
+                .map(|n| n.trim().trim_matches('"').to_string())
+                .filter(|n| !n.is_empty())
+                .collect()
+        };
+
+        let forbidden_everywhere = ["telemetry", "opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry", "tracing-subscriber"];
+
+        for (crate_name, facade_allowed) in [("domain", false), ("application", true)] {
+            let manifest = read(crate_name);
+            let deps = dep_names(&manifest);
+            for bad in forbidden_everywhere {
+                assert!(
+                    !deps.iter().any(|d| d == bad),
+                    "crates/{crate_name}/Cargo.toml depends on `{bad}`.\n\
+                     Fix: move the instrumentation to a FRAMEWORK boundary -- the command bus, event \
+                     store, publisher, projectors, saga runner, GraphQL gateway or middleware (the \
+                     components marked `instrumented: true` in specs/architecture/c4-l3.yaml).\n\
+                     Why: docs/claude/observability.md and issue #191's Definition of Done both require \
+                     the business layers to stay free of the telemetry SDK. Beyond architecture, an \
+                     aggregate that needs a subscriber to run is an aggregate that cannot be unit-tested."
+                );
+            }
+            let has_facade = deps.iter().any(|d| d == "tracing");
+            if !facade_allowed {
+                assert!(
+                    !has_facade,
+                    "crates/{crate_name}/Cargo.toml depends on `tracing`.\n\
+                     Fix: remove it. `domain` is pure DDD and logs nothing -- not even through a facade.\n\
+                     Why: the domain must be reasonable about entirely on its own terms. `application` \
+                     is the innermost layer permitted the facade, and only for events, never spans."
+                );
+            }
+        }
+    }
+
+    /// Every span and attribute the `command-acceptance` and `place-order` contracts declare REQUIRED
+    /// must actually be constructed somewhere in `crates/telemetry/src/spans.rs`, and every metric they
+    /// name must exist in `contract.rs`.
+    ///
+    /// This is the test that makes issue #191's Definition of Done checkable rather than a claim. The
+    /// failure it exists to catch is silent in both directions: a contract can gain a required span that
+    /// nothing emits (the observability-agent then reports a violation that looks like broken
+    /// instrumentation), and a span name can be typo'd at the call site (the span is still emitted, it
+    /// just no longer satisfies the contract naming it). Neither shows up in a compile or a normal test.
+    ///
+    /// Scoped to those two contracts deliberately: they are the ones the DoD names. The other nine
+    /// contracts are not yet emitted, and asserting them here would fail for work this issue does not
+    /// claim to have done.
+    #[test]
+    fn the_required_observability_contracts_are_actually_emitted() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let read = |rel: &str| -> String {
+            let path = root.join(rel);
+            std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!("cannot read {} ({e}) -- fix this guard rather than letting it pass", path.display())
+            })
+        };
+
+        let obs: serde_yaml::Value = serde_yaml::from_str(&read("specs/observability.yaml"))
+            .expect("specs/observability.yaml parses");
+        let contract_rs = read("crates/telemetry/src/contract.rs");
+
+        // Only the PRODUCTION half of spans.rs counts. Cutting the test module is not tidiness: the
+        // first version of this guard searched the whole file and passed when `command.journal` was
+        // renamed to `command.journalx`, because a `#[cfg(test)]` assertion still contained the old
+        // literal. A guard satisfied by a test asserting the thing it is meant to verify is worse than
+        // no guard at all.
+        let spans_all = read("crates/telemetry/src/spans.rs");
+        let spans_rs = spans_all.split("#[cfg(test)]").next().unwrap_or(&spans_all).to_string();
+
+        // The span names ACTUALLY CONSTRUCTED: the first string literal of each `info_span!` call.
+        // Matching construction sites rather than "the name appears somewhere in the file" is what makes
+        // a typo'd or renamed span fail here instead of silently violating its contract at runtime.
+        let constructed: std::collections::BTreeSet<String> = {
+            let mut out = std::collections::BTreeSet::new();
+            let mut rest = spans_rs.as_str();
+            while let Some(at) = rest.find("info_span!(") {
+                let tail = &rest[at + "info_span!(".len()..];
+                if let Some(open) = tail.find('"') {
+                    let after = &tail[open + 1..];
+                    if let Some(close) = after.find('"') {
+                        out.insert(after[..close].to_string());
+                    }
+                }
+                rest = tail;
+            }
+            out
+        };
+        assert!(
+            !constructed.is_empty(),
+            "parsed no info_span! call sites out of crates/telemetry/src/spans.rs -- the guard is \
+             broken, not the code. Fix the parser rather than deleting the test."
+        );
+
+        let mut missing: Vec<String> = Vec::new();
+        for feature in ["command-acceptance", "place-order"] {
+            let node = obs.get(feature).unwrap_or_else(|| {
+                panic!("specs/observability.yaml no longer declares the '{feature}' contract")
+            });
+
+            // Required spans: the span NAME must be built in spans.rs, and each of its required
+            // attribute KEYS must appear there too (as a declared field or a `record` target).
+            let spans = node.get("spans").and_then(|s| s.as_sequence()).unwrap_or_else(|| {
+                panic!("'{feature}' declares no spans")
+            });
+            for sp in spans {
+                let required = sp.get("required").and_then(|r| r.as_bool()).unwrap_or(false);
+                if !required {
+                    continue;
+                }
+                let name = sp.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+                if !constructed.contains(name) {
+                    missing.push(format!("  {feature}: span '{name}' is required but never constructed"));
+                    continue;
+                }
+                for at in sp.get("attributes").and_then(|a| a.as_sequence()).map(|s| s.as_slice()).unwrap_or(&[]) {
+                    if !at.get("required").and_then(|r| r.as_bool()).unwrap_or(false) {
+                        continue;
+                    }
+                    let key = at.get("key").and_then(|k| k.as_str()).unwrap_or_default();
+                    // Match a real tracing FIELD ASSIGNMENT (`business.foo = ...`) or an exactly-quoted
+                    // constant in contract.rs. Both need the delimiter: a bare `contains(key)` is
+                    // satisfied by any longer name that merely starts with it, so renaming
+                    // `business.dispatch_outcome` to `business.dispatch_outcomeX` slipped past the first
+                    // version of this check. Prefix matching is not name matching.
+                    let as_field = format!("{key} = ");
+                    if !spans_rs.contains(&as_field) && !contract_rs.contains(&format!("\"{key}\"")) {
+                        missing.push(format!(
+                            "  {feature}: span '{name}' requires attribute '{key}', which is set nowhere"
+                        ));
+                    }
+                }
+            }
+
+            // Metrics AND business_metrics: both blocks are part of the contract, and the split between
+            // them is itself required (technical vs BAM), so neither may be skipped.
+            for block in ["metrics", "business_metrics"] {
+                for m in node.get(block).and_then(|m| m.as_sequence()).map(|s| s.as_slice()).unwrap_or(&[]) {
+                    let name = m.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+                    if !contract_rs.contains(&format!("\"{name}\"")) {
+                        missing.push(format!(
+                            "  {feature}: {block} '{name}' has no constant in contract.rs"
+                        ));
+                    }
+                }
+            }
+        }
+
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "specs/observability.yaml requires telemetry that the code does not emit:\n{}\n\n\
+             Fix: add the span/attribute/metric in crates/telemetry (spans.rs + contract.rs) and emit it \
+             from the FRAMEWORK boundary that owns it.\n\
+             Why: an unemitted required span makes the observability-agent report a contract violation \
+             that reads as broken instrumentation, and a contract nothing satisfies is the state issue \
+             #191 was filed to end -- 898 lines of guarantees, none of them true.",
+            missing.join("\n")
+        );
+    }
+
     #[test]
     fn makefile_recipe_lines_are_ascii() {
         // CARGO_MANIFEST_DIR (= tools/codegen-rs) is the one anchor that holds both locally and

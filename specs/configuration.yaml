@@ -1,0 +1,808 @@
+version: 1
+description: >
+  Captain.Food runtime configuration — the single declaration of every setting the app needs, and the
+  source of truth for reading it, validating it, and documenting it (PROP-20260729-004500, issue #246).
+
+  Configuration used to be the one part of this system with NO source of truth: the DSL governed the
+  domain, the API, the screens and the observability contracts, while the ~21 environment variables the
+  app actually reads existed only as inline `std::env::var` calls scattered through the composition
+  root, plus a partial and stale mirror in a `render.yaml` that is not applied. The cost was real:
+  `RUN_SIRENE_WORKER` gated a paused pipeline and was set in NO file and no dashboard, so 6,649 staging
+  rows sat PENDING for four hours; `API_SECRET` was configured on the service and read by nothing; a
+  missing `STRIPE_WEBHOOK_SECRET` silently produced the worst failure mode this product has — a
+  captured payment that never reaches the domain.
+
+  From this file the codegen emits the typed reader (`Config::from_env`), and a drift test asserts that
+  every `env::var` / `env_flag` call site in `crates/**` corresponds to a key declared here. A variable
+  the code reads but does not declare is a build failure, not a discovery someone makes at 00:40.
+
+  Convention:
+    - key       : the environment variable name, SCREAMING_SNAKE_CASE (also the struct field, snake_cased).
+    - type      : bool | string | int | enum. `bool` accepts true/1/yes/on and false/0/no/off,
+                  case-insensitive, trimmed, quotes stripped (ADR-20260728-224500) — an unrecognised
+                  value falls back to `default` AND logs that it did.
+    - required  : list of PROFILES in which the key MUST be present. Absent/[] = never required.
+                  A missing required key is reported WITH EVERY OTHER missing key and the app STOPS.
+    - default   : value when unset. Required keys must not declare one (it would mask the requirement).
+    - secret    : true = the value is NEVER rendered — logs and status surfaces report `set`/`unset`.
+    - gates     : WHAT BREAKS without it, in one sentence. This is not a comment: it is printed next to
+                  the key in the fail-fast report, so it must read usefully to an operator who has never
+                  seen the Rust. A key without `gates` fails validation.
+    - scalar    : $ref into scalars.yaml. The generated reader VALIDATES the supplied value against the
+                  scalar's `pattern` at startup — "present" is not "usable". A live Stripe key in the
+                  test slot, a webhook secret with a pasted trailing newline, a 31-byte session key:
+                  each boots happily without this and fails later, at the worst moment, looking like a
+                  code bug. A malformed value is reported exactly like a missing one, and a SECRET's
+                  value is never printed — only the key name and the expected shape.
+    - mode_of   : optional. Names a secret whose MODE is derivable from its value prefix and safe to
+                  report (never the value itself) — e.g. Stripe `sk_test_` / `sk_live_`.
+    - deploy    : WHO SUPPLIES THE VALUE in each profile (PROP-20260729-014500, all five decisions
+                  approved 2026-07-29). Two forms, split by secrecy — see the block below.
+
+  ENFORCEMENT is decided by the profile, not by a separate toggle (product-owner directive,
+  2026-07-29 — "fast fail to avoid misconfiguration on production"):
+
+    - production / staging : any missing OR malformed key is logged in full and the app STOPS (exit 78).
+    - development          : the same report is printed, and the app continues.
+
+  Stopping is SAFE on Render, which is what makes it the right default rather than a brave one: a
+  container that exits fails the deploy and the PREVIOUS version keeps serving. A misconfigured build
+  cannot replace a working one — where booting into silent degradation, which is what happened before,
+  replaces it immediately and quietly.
+
+  Profiles (`APP_PROFILE`, default `development`): development | staging | production. The profile is
+  DECLARED, never inferred from the host or from a key's prefix — an inferred profile is wrong exactly
+  when it matters most (during a mode switch-over).
+
+  HOW A VALUE REACHES THE APP (PROP-20260729-014500 D5). Render has no per-deploy environment override
+  — its deploy API takes only clearCache/commitId/imageUrl/deployMode, so a deploy always runs with the
+  SERVICE's stored variables. Attaching configuration to the deployment therefore means putting it in
+  the artifact. Three categories, and the split is forced by secrecy, not preference:
+
+    1. NON-SECRET, per profile -> `deploy: { production: "true", … }`
+       BAKED INTO THE BINARY by the codegen as a per-profile table. The digest then determines
+       behaviour: redeploying `sha-abc123` next month behaves exactly as it did today, and a rollback
+       restores the configuration that shipped with that build. This is why it is baked rather than
+       stored on the service — deploys here are digest-pinned precisely so production never runs an
+       ambiguous artifact, and mutable service state re-opens that ambiguity through the back door.
+
+       A non-secret may NOT be sourced from a repo secret (directive, 2026-07-29). The point of
+       declaring configuration is that it is VISIBLE: a non-secret hidden in Actions secrets is as
+       opaque as one typed into the dashboard — you still cannot read the repo and know what production
+       runs. Validator-enforced (`config-nonsecret-from-secret`).
+
+    2. SECRET -> `deploy: { from_secret: { production: NAME_OF_GITHUB_SECRET, … } }`
+       Pushed by CI from GitHub repo secrets to the Render service env. NEVER baked: the GHCR package
+       is PUBLIC (it must be, so Render can pull it without credentials), and a baked `ENV` is readable
+       by anyone via `docker pull` + `docker history`.
+
+    3. THE PROFILE SELECTOR ITSELF (`APP_PROFILE`) -> service env, necessarily.
+       One image is promoted across environments by digest, so the thing that DISTINGUISHES those
+       environments cannot live inside it. Baking it per-profile would also be circular: the profile is
+       what selects the per-profile table.
+
+  PRECEDENCE, highest first: environment variable > baked profile value > `default`. The env var wins
+  so an operator keeps a seconds-fast override for an incident, while the reviewed, recorded value in
+  this file is what runs the rest of the time.
+
+# =====================================================================
+# Profile selector
+# =====================================================================
+
+keys:
+  APP_PROFILE:
+    type: enum
+    values: [development, staging, production]
+    default: development
+    gates: >
+      Which keys are REQUIRED at startup. Defaults to `development` so a local run needs no production
+      secrets; production must set it explicitly, or it inherits development's leniency.
+
+  # ===================================================================
+  # Persistence — without this nothing is durable
+  # ===================================================================
+
+  DATABASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/PostgresUrl'
+    secret: true
+    required: [staging, production]
+    gates: >
+      Postgres pool: the event store, every read model and every background worker. Unset, /health
+      reports `not_configured` (503) and no worker is constructed at all.
+    deploy:
+      from_secret:
+        production: DATABASE_URL
+        staging: DATABASE_URL
+
+  # ===================================================================
+  # Identity (Supabase, ADR-0015) — without these, auth is anonymous-only
+  #
+  # Values below are LITERAL and baked (2026-07-29), read off the production boot report. They are not
+  # secrets: a Supabase project URL and its JWKS endpoint are public addresses, and `sb_publishable_` is
+  # Supabase's own marker for a key designed to be shared — which retires the caveat this note used to
+  # carry about the older anon-key format.
+  #
+  # DECLARED FOR production/staging ONLY, deliberately: a developer running locally must not silently
+  # inherit the production Supabase project, so `development` is left to whatever the developer sets.
+  #
+  # ⚠️ FOR THESE TO GOVERN, the same three keys must be REMOVED from the Render service. Precedence is
+  # env > baked, so a leftover dashboard value silently wins and the digest stops determining behaviour.
+  # The sync is upsert-only (D1) and will never delete them for you — it reports them instead.
+  # ===================================================================
+
+  SUPABASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    required: [staging, production]
+    gates: >
+      Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is
+      the fail-closed stand-in and every login is refused.
+    deploy:
+      production: "https://zcshlzhiinwmpzujuiep.supabase.co"
+      staging: "https://zcshlzhiinwmpzujuiep.supabase.co"
+
+  SUPABASE_PUBLISHABLE_KEY:
+    type: string
+    required: [staging, production]
+    gates: >
+      Supabase anon key sent as the `apikey` header on OTP flows. Unset, identity is fail-closed
+      (auth stays anonymous-only).
+    deploy:
+      production: "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"
+      staging: "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"
+
+  SUPABASE_JWKS_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    required: [staging, production]
+    gates: >
+      JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every
+      authenticated request falls back to anonymous.
+    deploy:
+      production: "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"
+      staging: "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"
+
+  AUTH_SESSION_KEY:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/AuthSessionKey'
+    secret: true
+    required: [staging, production]
+    gates: >
+      AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest.
+      Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login
+      SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login.
+    deploy:
+      from_secret:
+        production: AUTH_SESSION_KEY
+        staging: AUTH_SESSION_KEY
+
+  SUPABASE_SMS_HOOK_SECRET:
+    type: string
+    secret: true
+    gates: >
+      Shared secret verifying Supabase's SMS send-hook callbacks. Unset, the hook endpoint fails closed.
+    deploy:
+      from_secret:
+        production: SUPABASE_SMS_HOOK_SECRET
+        staging: SUPABASE_SMS_HOOK_SECRET
+
+  # ===================================================================
+  # Payments (Stripe) — the money path
+  # ===================================================================
+
+  STRIPE_SECRET_KEY:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripeSecretKey'
+    secret: true
+    mode_of: stripe
+    required: [staging, production]
+    gates: >
+      Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no
+      checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported
+      (never the key) so "is production actually live?" is answerable.
+    deploy:
+      from_secret:
+        # Mode-suffixed by NAME on both sides (directive, 2026-07-29: "use the test key for test order
+        # and prod key for production order"). The unsuffixed STRIPE_SECRET_KEY repo secret is retired —
+        # a credential whose mode is not visible in its name is one nobody can audit. Its only consumer
+        # was prod-smoke, now reading STRIPE_SECRET_KEY_TEST explicitly.
+        #
+        # STRIPE_SECRET_KEY_PROD DOES NOT EXIST YET (V0 has not launched), so the sync reports production
+        # as SKIPPED and writes nothing: the service keeps what it has, today a test key, which the boot
+        # report renders `set [test mode]`. Declaration states the INTENT, report states the REALITY, and
+        # the two disagreeing IS the signal that go-live (issue #254) has not happened.
+        production: STRIPE_SECRET_KEY_PROD
+        staging: STRIPE_SECRET_KEY_TEST
+
+  STRIPE_WEBHOOK_SECRET:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/StripeWebhookSecret'
+    secret: true
+    required: [staging, production]
+    gates: >
+      HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails
+      closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the
+      restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched
+      together with STRIPE_SECRET_KEY.
+    deploy:
+      from_secret:
+        # ONE unsuffixed secret for both profiles (product-owner decision, 2026-07-29) — it is what
+        # exists, and it is correct while production is itself in test mode. NOT symmetric with the key
+        # above on purpose: this is the one place the two diverge, so it is the one place to look when
+        # go-live goes wrong. A webhook secret must match the MODE of the endpoint that signed the
+        # delivery, and Stripe issues a different `whsec_` per mode — so the day STRIPE_SECRET_KEY_PROD
+        # lands, this must become STRIPE_WEBHOOK_SECRET_PROD in the SAME change, or verification fails
+        # closed: the customer is charged and the restaurant is never told. Tracked as issue #254.
+        production: STRIPE_WEBHOOK_SECRET
+        staging: STRIPE_WEBHOOK_SECRET
+
+  # ===================================================================
+  # Telemetry (issue #191, PROP-170500 D1/D2) — without this, production is undiagnosable
+  #
+  # `specs/observability.yaml` declares 898 lines of REQUIRED spans, attributes, metrics and SLOs. None
+  # of it left the repo before #191: there was no OTel dependency and logging was 69 `println!` calls, so
+  # the mandatory `correlation_id` / `trace_id` in every contract's `run_identity` existed only on paper.
+  #
+  # The backend is Honeycomb, pinned to its **EU (eu1)** region. The region is not a default anyone can
+  # flip casually: ADR-0042 chose Frankfurt for compute AND data specifically for GDPR, and these traces
+  # carry `customerId` / `orderId`, which are personal data. Sending them to `api.honeycomb.io` (US)
+  # would move personal data out of the EU as a side effect of a telemetry setting.
+  #
+  # Telemetry DEGRADES, it never gates: absence of the key is the off switch, and the app then keeps
+  # emitting the same structured logs to stdout with no exporter attached. That asymmetry is deliberate.
+  # A missing payment secret must stop the boot, because money silently failing is the worst outcome this
+  # product has; a missing telemetry key must NOT, because refusing to serve orders in order to protest
+  # that it cannot describe itself is a self-inflicted outage. So no telemetry key is `required:`.
+  # ===================================================================
+
+  HONEYCOMB_API_KEY:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HoneycombIngestKey'
+    secret: true
+    gates: >
+      Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is
+      not constructed at all and the app runs with local structured logs only — every span is built and
+      dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation.
+      This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and
+      Query API use) has a different shape and is rejected at startup rather than failing as an opaque
+      401 on the first export.
+    deploy:
+      from_secret:
+        production: HONEYCOMB_API_KEY
+        staging: HONEYCOMB_API_KEY
+
+  HONEYCOMB_API_ENDPOINT:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    default: https://api.eu1.honeycomb.io
+    gates: >
+      OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the
+      US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and
+      order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an
+      account that does not hold the key and telemetry is silently absent.
+    deploy:
+      production: https://api.eu1.honeycomb.io
+      staging: https://api.eu1.honeycomb.io
+
+  HONEYCOMB_DATASET:
+    type: string
+    default: captain-food-dev
+    gates: >
+      The Honeycomb service/dataset traces land in, also reported as the OTel `service.name` resource
+      attribute. Baked per profile so staging traffic can never be read as production: sharing one dataset
+      makes a staging load test look like a Friday-night peak and corrupts every SLO computed from it.
+    deploy:
+      production: captain-food
+      staging: captain-food-staging
+
+  OTEL_TRACES_SAMPLE_RATIO:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/TraceSampleRatio'
+    default: "1.0"
+    gates: >
+      Head-sampling probability, parent-respecting. Baked at `1.0` (keep everything) because PROP-170500
+      D2's reasoning holds at V0 volume: "head-sampling would mostly discard the interesting traces".
+      This is the dial to turn DOWN if ingest cost becomes real — turning it down before there is volume
+      buys nothing and loses the traces that explain the incidents. Set to 0 and traces stop; the metrics
+      and logs continue, so the app looks healthy while being undiagnosable.
+    deploy:
+      production: "1.0"
+      staging: "1.0"
+
+  LOG_LEVEL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/LogLevel'
+    default: info
+    gates: >
+      Minimum severity for the structured JSON log layer. At `error` the boot report and every worker
+      lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the
+      baked value stays `info` and `debug` is an incident tool, not a default.
+    deploy:
+      production: info
+      staging: info
+
+  # ===================================================================
+  # Integrations — feature-scoped, degrade to "unavailable", not "broken"
+  # ===================================================================
+
+  HUBRISE_CLIENT_ID:
+    type: string
+    gates: >
+      HubRise app client id for the OAuth connect flow. OPTIONAL in every profile and CURRENTLY UNSET —
+      we do not have one yet (2026-07-29). Unset, restaurants cannot START a HubRise connection; already
+      connected locations are unaffected, since the worker uses their per-connection tokens. When a
+      client id is obtained it is NOT a secret (an OAuth client id is public by construction), so it gets
+      literal per-profile `deploy` values here rather than a repo secret.
+
+  HUBRISE_WEBHOOK_SECRET:
+    type: string
+    secret: true
+    gates: >
+      HMAC key verifying `X-HubRise-Hmac-SHA256` on HubRise callbacks. Unset, the endpoint fails closed.
+    deploy:
+      from_secret:
+        production: HUBRISE_WEBHOOK_SECRET
+        staging: HUBRISE_WEBHOOK_SECRET
+
+  EXTERNAL_API_TOKENS:
+    type: string
+    secret: true
+    gates: >
+      Comma-separated pre-shared tokens for EXTERNAL machine callers (`X-External-Api-Key`, ADR-0047).
+      Unset, only a Supabase JWT with captain_role EXTERNAL reaches /external.
+    deploy:
+      from_secret:
+        production: EXTERNAL_API_TOKENS
+        staging: EXTERNAL_API_TOKENS
+
+  INTERNAL_TRIGGER_TOKEN:
+    type: string
+    secret: true
+    gates: >
+      Shared secret for `POST /internal/sirene/drain` and `/internal/inbound/drain` (`x-internal-token`).
+      Unset, both fail closed (503) and the CI sweep cannot wake the worker — the drain then waits for
+      its hourly poll instead of starting in seconds.
+    deploy:
+      from_secret:
+        production: INTERNAL_TRIGGER_TOKEN
+        staging: INTERNAL_TRIGGER_TOKEN
+
+  DELIVERY_OFFER_MAX_TTL_SECONDS:
+    type: int
+    default: 900
+    gates: >
+      Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout
+      worker escalates to the next ranked channel. Set it too high and a channel that never answers
+      holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner
+      that would have accepted gets pulled off the job.
+
+      NOT a repo secret, deliberately, though it was asked for as one (2026-07-29). It is a NON-SECRET
+      tuning number, and a non-secret in Actions secrets is unreadable configuration — you could not
+      open this repo and learn what ceiling production applies, which is the whole failure this file
+      exists to end (and `config-nonsecret-from-secret` rejects it). The `default` here IS the
+      CI-supplied value: it is baked into the artifact, printed in the boot report, and overridable per
+      profile by adding a `deploy:` block, or in seconds during an incident by setting the env var.
+      Everything a repo secret would have given, minus the opacity.
+
+  # ===================================================================
+  # Worker toggles — each pauses a pipeline (ADR-20260728-224500)
+  # ===================================================================
+
+  RUN_PROJECTOR:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      In-process projection worker (ADR-0040). OFF, no read model advances — queries serve stale data
+      indefinitely. Readiness at GET /projector.
+    deploy:
+      production: "true"
+      staging: "true"
+
+  RUN_PROCESS_MANAGERS:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires.
+      Readiness at GET /saga.
+    deploy:
+      production: "true"
+      staging: "true"
+
+  RUN_INBOUND_DRAIN:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      Inbound-events drain (ADR-20260720-015400) delivering adapter-staged facts through the write path,
+      plus the command_journal stale sweep. OFF, every webhook-staged fact accumulates undelivered.
+    deploy:
+      production: "true"
+      staging: "true"
+
+  RUN_RETENTION_SWEEP:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without
+      bound.
+    deploy:
+      production: "true"
+      staging: "true"
+
+  RUN_SIRENE_WORKER:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and
+      releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF,
+      staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen.
+      Readiness at GET /sirene.
+    deploy:
+      production: "true"
+      staging: "true"
+
+  RUN_DELIVERY_OFFER_TIMEOUT:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on
+      a rider who is not coming.
+    deploy:
+      production: "true"
+      staging: "true"
+
+  # ===================================================================
+  # SMS delivery (OVH, #118 / ADR-20260722-174500) — the Supabase Send-SMS hook's sender
+  #
+  # These were READ BY THE CODE AND DECLARED NOWHERE until 2026-07-29 — invisible to the startup
+  # validation, to the boot report and to the sync manifest. The drift gate missed them because
+  # `OvhSmsClient::from_env` reads through a closure (`var("OVH_APPLICATION_KEY")`) rather than a
+  # literal `env::var("…")` call, which string matching cannot see. The gate now catches that shape.
+  #
+  # ALL OPTIONAL: phone-OTP delivery is not the live login path. But they are all-or-nothing —
+  # `from_env` returns None unless the full credential set is present, and `/auth/sms-hook` then
+  # answers 503 (fail-closed: never a half-configured send path). So a partial set delivers nothing
+  # while looking configured, which is why the `gates` text below says so per key.
+  # ===================================================================
+
+  OVH_APPLICATION_KEY:
+    type: string
+    secret: true
+    gates: >
+      OVH API application key — one of the THREE values the v1 signature needs (`X-Ovh-Application`).
+      Missing any one of the three and the SMS client is None, so the Send-SMS hook 503s and Supabase
+      surfaces an OTP delivery error to the customer.
+    deploy:
+      from_secret:
+        production: OVH_APPLICATION_KEY
+        staging: OVH_APPLICATION_KEY
+
+  OVH_APPLICATION_SECRET:
+    type: string
+    secret: true
+    gates: >
+      OVH API application secret — the HMAC key for `X-Ovh-Signature`
+      (`sha1(secret + "+" + consumerKey + "+" + METHOD + "+" + URL + "+" + BODY + "+" + timestamp)`).
+      The one value here that grants send capability; treat it as a payment credential.
+    deploy:
+      from_secret:
+        production: OVH_APPLICATION_SECRET
+        staging: OVH_APPLICATION_SECRET
+
+  OVH_CONSUMER_KEY:
+    type: string
+    secret: true
+    gates: >
+      OVH API consumer key — binds the application credentials to the authorised access rules
+      (`POST /sms/*/jobs`). A key whose rules omit that path authenticates fine and then fails the
+      send, which is why the rule set matters as much as the value.
+    deploy:
+      from_secret:
+        production: OVH_CONSUMER_KEY
+        staging: OVH_CONSUMER_KEY
+
+  OVH_SMS_SERVICE_NAME:
+    type: string
+    secret: true
+    gates: >
+      The OVH SMS account the messages are billed to (e.g. `sms-ab12345-1`), used as
+      `POST /sms/{serviceName}/jobs`. BORDERLINE as a secret: it grants nothing on its own — the
+      credential triplet does that — but it embeds the OVH account identifier. Declared `secret: true`
+      because it is already held as a repo secret and its literal value is not in this repository; if
+      you would rather it be readable, give it literal per-profile `deploy` values instead and drop
+      `secret`. Also note the account must hold SMS CREDITS: with none, the credentials authenticate
+      and the send still fails at OVH.
+    deploy:
+      from_secret:
+        production: OVH_SMS_SERVICE_NAME
+        staging: OVH_SMS_SERVICE_NAME
+
+  OVH_SMS_SENDER:
+    type: string
+    gates: >
+      The sender name shown on the SMS. Unset, the client substitutes `CaptainFood`. Declares NO
+      `default` deliberately: the fallback lives in `OvhSmsClient::from_env`, and a second copy here
+      would be two sources of truth for one value. OVH requires a sender to be REGISTERED and approved
+      before it can be used, so an unapproved name fails at send time, not at startup.
+
+  OVH_ENDPOINT:
+    type: string
+    gates: >
+      OVH API base URL. Unset, the client substitutes `https://eu.api.ovh.com/1.0` — the EU region,
+      which is the deliberate choice for data residency (ADR-20260722-174500) and must match the
+      region the API credentials were created in. Declares NO `default` for the same reason as
+      OVH_SMS_SENDER: the fallback is the client's.
+
+  # ===================================================================
+  # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
+  #
+  # Declared here so the drift gate and the docs cover them, but `consumer` keeps them OUT of the
+  # server's typed Config: the server never reads them, and a boot report listing settings the process
+  # ignores is noise that trains people to skim it.
+  # ===================================================================
+
+  INSEE_API_TOKEN:
+    type: string
+    secret: true
+    consumer: sirene_ingest
+    gates: >
+      INSEE portal API key, sent as `X-INSEE-Api-Key-Integration` (no OAuth2 on the 2024+ portal).
+      `SireneClient::from_env` FAILS when it is unset, so a sweep with no token does not silently ingest
+      zero établissements — it refuses. No `deploy` block: this consumer runs in GitHub Actions, which
+      injects the repo secret of the same name directly; the Render sync (which only carries the server
+      service) has nothing to do with it.
+
+  INSEE_API_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: sirene_ingest
+    gates: >
+      Override of the version-pinned Sirene base URL. Exists because the version is IN the path
+      (`/api-sirene/3.11`): when INSEE bumps it, a sweep can be redirected without a release. Unset, the
+      client uses its own pinned constant -- so no `default` here, which would be a second copy of it.
+
+  SIRENE_DEPARTMENTS:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/DepartmentList'
+    consumer: sirene_ingest
+    gates: >
+      Comma-separated departments to sweep, honoured VERBATIM and in order (e.g. `37` for Tours only).
+      Blank = stalest-first across all of France (#218). Set per workflow_dispatch run, not persisted.
+
+  SIRENE_BUDGET_MINUTES:
+    type: string
+    consumer: sirene_ingest
+    gates: >
+      Wall-clock a sweep may spend before stopping cleanly at a department boundary. Blank = the binary
+      default (75 sweep / 60 compact); the run resumes where it stopped on the next invocation.
+
+  INTERNAL_TRIGGER_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    consumer: sirene_ingest
+    gates: >
+      The deployed server's drain endpoint, pinged at the end of a sweep so the worker starts in seconds
+      instead of waiting for its hourly poll. Unset, the sweep logs that it skipped the ping — which is
+      how department 37's 6,649 rows stayed PENDING after a successful ingestion.
+
+  # ===================================================================
+  # Integration adapters — read by the SERVER, in-process
+  #
+  # `crates/adapters/*` each ship a standalone webhook binary, but the SERVER links them all and is the
+  # deployable that actually runs them: `router()` calls `CoopCycleRegistry::from_env`,
+  # `UberDirectConfig::from_env` and `Avelo37DeliveryGateway::from_env`, then merges all four adapter
+  # route sets. So these are plain server keys — no `consumer:` — and they appear in the boot report,
+  # which is the point: "is the Uber Direct channel actually configured in production?" is a question an
+  # operator must be able to answer from one curl, not by reading the composition root.
+  #
+  # All 17 keys in this file's adapter + INSEE sections were invisible until the drift gate learned to
+  # follow a `*_ENV` const and a closure-wrapped read. That is a third of the inventory that no boot
+  # report, no manifest and no document would have mentioned.
+  #
+  # None is `required:`, in any profile: each adapter is fail-closed by construction. Unconfigured, the
+  # composition root keeps the no-op stand-in and delivery jobs stay open to the next ranked channel —
+  # which is the correct posture for a channel we have not signed. A PARTIAL config is the dangerous
+  # case, and the adapters already reject it (`UberDirectConfig::from_env` returns `Err`, not a silent
+  # no-op) rather than half-wiring a send path.
+  #
+  # MILESTONE (product-owner directive, 2026-07-29): Avelo37 and CoopCycle stay optional and unset until
+  # there is enough traffic in the area to justify a partner channel — a later milestone, not V0. They
+  # are declared now so that switching them on is a configuration change with a visible before/after,
+  # rather than a code change discovered during the first busy Friday.
+  # ===================================================================
+
+  AVELO37_API_KEY:
+    type: string
+    secret: true
+    gates: >
+      Static bearer key for the Avelo37 partner API. Unset, the outbound gateway is not built and jobs
+      reach independent riders only — no delivery is lost, but the partner channel is silently absent,
+      so an operator expecting Avelo37 coverage sees none.
+
+  AVELO37_API_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    gates: >
+      Base-URL override pointing the client at a staging or mock Avelo37. Unset, the client uses its own
+      production constant -- hence no `default` here, which would duplicate it.
+
+  AVELO37_WEBHOOK_SECRET:
+    type: string
+    secret: true
+    gates: >
+      HMAC key verifying inbound Avelo37 delivery-status callbacks. Unset, the webhook route fails
+      closed: `DeliveryStatusUpdated` facts stop arriving and a delivery's tracking freezes at its last
+      known state while the courier is in fact moving.
+
+  # Uber Direct credentials, sourced per profile from mode-suffixed repo secrets exactly as Stripe is
+  # (product-owner directive, 2026-07-29: "do like for the stripe, have both environment keys").
+  #
+  # TODAY BOTH PROFILES POINT AT THE `_TEST` SECRETS, on purpose. The Uber app is a test app, and the
+  # directive is to exercise it WITH TEST KEYS ON PRODUCTION until a live app exists. This is a
+  # deliberate, recorded state, not an oversight: production genuinely runs the test credential, so the
+  # declaration says so rather than pointing at a `_PROD` secret that does not exist and silently
+  # SKIPping. When the live app arrives, production flips to `_PROD` here and nowhere else.
+  #
+  # Note the difference from Stripe: Stripe's mode is READABLE FROM THE KEY (`sk_test_` / `sk_live_`), so
+  # `mode_of: stripe` lets the boot report state which mode is live. Uber Direct credentials carry no
+  # such marker, so nothing can report it — which is exactly why the per-profile secret NAME has to
+  # carry the mode instead. Choosing the credential per ORDER (a test order on a live restaurant) is a
+  # different mechanism and is not built yet: that is issue #257, which needs both sets loaded at once.
+  UBER_DIRECT_CUSTOMER_ID:
+    type: string
+    secret: true
+    gates: >
+      Uber Direct customer/organization id — the `{customer_id}` path segment on every API call. Grants
+      nothing on its own, but it identifies our Uber account, so it is treated as a credential rather
+      than published in the repo (the same call made for OVH_SMS_SERVICE_NAME). One of the four the
+      adapter requires TOGETHER; missing any one of them is reported as a misconfiguration rather than
+      downgraded to a silent no-op.
+    deploy:
+      from_secret:
+        production: UBER_DIRECT_CUSTOMER_ID_TEST
+        staging: UBER_DIRECT_CUSTOMER_ID_TEST
+
+  UBER_DIRECT_CLIENT_ID:
+    type: string
+    secret: true
+    gates: >
+      OAuth2 client-credentials client id — Uber's dashboard also calls this the application id. Public
+      by construction, like any OAuth client id, but it is per-app and per-mode, so it travels with its
+      secret rather than being baked as a literal. Required with the other three; unset, no Uber Direct
+      channel and jobs fall through to the next ranked one.
+    deploy:
+      from_secret:
+        production: UBER_DIRECT_CLIENT_ID_TEST
+        staging: UBER_DIRECT_CLIENT_ID_TEST
+
+  UBER_DIRECT_CLIENT_SECRET:
+    type: string
+    secret: true
+    gates: >
+      OAuth2 client-credentials client secret — the token manager cannot mint an access token without
+      it, so every create-delivery call fails at authentication. This is the one value here that grants
+      the ability to dispatch deliveries and be billed for them.
+    deploy:
+      from_secret:
+        production: UBER_DIRECT_CLIENT_SECRET_TEST
+        staging: UBER_DIRECT_CLIENT_SECRET_TEST
+
+  UBER_DIRECT_WEBHOOK_SECRET:
+    type: string
+    secret: true
+    gates: >
+      Raw-body HMAC-SHA256 key verifying `X-Uber-Signature` on inbound callbacks. Unset, the webhook
+      fails closed and delivery progress stops updating mid-delivery — the customer watches a courier
+      that has in fact already arrived. Issued separately from the OAuth credentials, on Uber's webhook
+      configuration page, and it is per-app: a test app and a live app do not share it.
+    deploy:
+      from_secret:
+        production: UBER_DIRECT_WEBHOOK_SECRET_TEST
+        staging: UBER_DIRECT_WEBHOOK_SECRET_TEST
+
+  UBER_DIRECT_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    gates: >
+      API base-URL override (tests point this at a local mock). Unset, the adapter's own production
+      constant applies -- no `default` here for the same reason.
+
+  UBER_DIRECT_TOKEN_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    gates: >
+      OAuth2 token-endpoint override. Unset, the adapter's own constant applies.
+
+  UBER_DIRECT_SCOPE:
+    type: string
+    gates: >
+      OAuth2 scope override. Unset, the adapter requests its default delivery scope; too narrow a scope
+      here surfaces as an authorization failure on create-delivery, not at startup.
+
+  COOPCYCLE_INSTANCES:
+    type: string
+    gates: >
+      JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a
+      federation registry rather than one endpoint, which is why it is a JSON document and not a set of
+      scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the
+      operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop
+      a whole delivery channel.
+
+  HUBRISE_API_BASE_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    gates: >
+      HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies.
+
+  HUBRISE_CONNECT_REDIRECT_URL:
+    type: string
+    scalar:
+      $ref: 'scalars.yaml#/HttpsUrl'
+    gates: >
+      Public URL HubRise redirects back to after consent (this deployable's
+      `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an
+      OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app
+      EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent.
+
+  HUBRISE_OAUTH_SCOPE:
+    type: string
+    gates: >
+      Scope requested on connect. Unset, the adapter asks for account-wide catalog + inventory read, so
+      one token covers every location of the account. Narrowing it means a connected restaurant's
+      catalog or stock silently stops syncing for the locations the scope no longer covers.
+
+  # ===================================================================
+  # Runtime / build identity
+  # ===================================================================
+
+  PORT:
+    type: int
+    default: 8080
+    gates: >
+      TCP port the HTTP server binds. Render injects this; a mismatch means the platform health check
+      never reaches the app and the deploy fails.
+
+  WEB_ASSETS_DIR:
+    type: string
+    default: /app/web-assets
+    gates: >
+      Directory served for the Leptos/WASM bundle. Wrong path, the storefront loads no assets.
+
+  CAPTAIN_BUILD_VERSION:
+    type: string
+    gates: >
+      Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and
+      the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and
+      uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately
+      declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec
+      default of plain `dev` would state a value the runtime never produces — a false declaration is
+      worse than an absent one.

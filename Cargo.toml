@@ -17,6 +17,10 @@ members = [
     "crates/adapters/avelo37",  # Avelo37 delivery-partner adapter (ADR-20260718-213352, issue #28) — ACL + webhook shell + outbound + standalone bin
     "crates/adapters/coopcycle", # CoopCycle delivery-partner adapter (ADR-20260721-122910, issue #58) — federated per-instance ACL + webhook shell + outbound + standalone bin
     "crates/adapters/uber_direct", # Uber Direct delivery-partner adapter (ADR-20260721-172500, issue #57) — OAuth2 outbound + X-Uber-Signature ACL + webhook shell + standalone bin
+    "crates/telemetry",        # OTel emission + structured logging (issue #191) — a FRAMEWORK-boundary
+                               # crate. Sits OUTSIDE the domain graph on purpose: `domain` and
+                               # `application` must not depend on it (enforced by a test), because
+                               # instrumentation belongs at boundaries, never in an aggregate.
     "crates/shared_types",     # serde DTOs (+ UniFFI later)
     "crates/core",             # Crux core over domain — depends on domain, shared_types
     "crates/server",           # Axum BFF — depends on application, infrastructure, shared_types

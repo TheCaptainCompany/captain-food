@@ -1,7 +1,173 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-28. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-07-30. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 📋 **2026-07-30 — Uber Eats Marketplace is a NEW integration, and it is specified now rather than
+> discovered later ([#260](https://github.com/TheCaptainCompany/captain-food/issues/260),
+> PROP-20260730-032306, ADR-20260730-032306).**
+> The product owner registered **Captain Food Restaurant** on the Uber **Eats Marketplace** suite and
+> accepted the API Licensing Agreement with all seven APIs — a real commercial commitment to an
+> integration the specs did not contain. Note the three distinct Uber concerns the repo now holds:
+> Uber **Direct** = delivery (`crates/adapters/uber_direct`, ✅ #57); Uber Eats **price comparison** =
+> display only (ADR-0022/0023/0024/0025/0030, ✅); Uber Eats **Marketplace** = order centralization +
+> menu sync (📋 new, nothing built).
+> **Decided** (ADR-20260730-032306): app auth is **asymmetric** (application id + key id + private key,
+> retiring `UBER_DIRECT_CLIENT_SECRET`/`SCOPE` and its token manager); private keys stored **base64**
+> so a mangled PEM fails validation rather than first-signature; webhook HMAC accepts **either** of two
+> signing keys so rotation never drops an order notification; **two Uber Direct organizations** split by
+> acquisition surface (storefront first); delivery channels keyed `uber_direct:<surface>` so an
+> unconfigured surface is an *unwired channel* that times out and escalates rather than dispatching on
+> the wrong org's credentials; per-tenant values (Uber store ids, merchant consent) live in
+> `uber_eats_connections`, never in configuration.
+> **This forces two things into the open.** The catalog would flow **outbound** for the first time
+> (today it only ever flows in, HubRise → `ImportCatalog`), raising menu ownership and price parity —
+> restaurants mark Uber prices up to absorb Uber's commission, which is exactly what ADR-0024's
+> comparison coefficients assume. And an Uber-originated order **was already paid, on Uber's rails**,
+> while `OrderPlaced` implies a Captain PaymentIntent — a money assumption, so it pairs with the payout
+> posture in DECISIONS §1.
+> **Contractual, not optional**: the Order API clause makes the Provider *"wholly responsible for
+> correctly relaying all information … including but not limited to allergy information and special
+> instructions"* — with EU FIC 1169/2011 that becomes a `rules.yaml` rule with a test. The Reporting API
+> needs a per-restaurant consent record. And licensed data serves the merchant *on Uber*: it must never
+> seed the Captain marketplace catalog.
+> **Open** (DECISIONS §11): D4 order representation · D5 menu ownership/parity · **D7 — the agreement
+> was signed by *Caring Hope Foundation* (RNA W372020229, a loi-1901 association), not
+> `TheCaptainCompany`; an API licence follows the entity, so this needs legal input.** Nothing is built
+> yet: no adapter, no `UBER_EATS_*` keys declared (deliberately — a declared key with no reader is drift
+> too). Five `UBER_EATS_*` repository secrets exist on the GitHub side, `_TEST`-suffixed.
+
+> ✅ **2026-07-29 — the observability contracts finally leave the repo: OpenTelemetry to Honeycomb EU
+> ([#191](https://github.com/TheCaptainCompany/captain-food/issues/191), PROP-20260726-170500 D1+D2,
+> ADR-20260729-183000).**
+> `specs/observability.yaml` had reached 898 lines of contracts — required spans, run identities,
+> attributes, metrics and SLOs across eleven workflows — and **none of it was emitted**: no
+> `opentelemetry`/`tracing` dependency, no subscriber, and 69 `println!` calls. `correlation_id` and
+> `trace_id` are *mandatory* in every contract's `run_identity` and neither existed at runtime, so on the
+> acceptance-first write path the whole async half of a command (handler, event append, Stripe call,
+> projection) ran with nothing tying it to the request that caused it.
+> Now: **`crates/telemetry`** (a new leaf crate) exports OTLP/HTTP to **Honeycomb, pinned to `eu1`** —
+> a **GDPR constraint, not a default**, since spans carry `customerId`/`orderId` and ADR-0042 pinned data
+> to Frankfurt. The `command-acceptance` contract's three spans + four metrics are emitted from **every**
+> generated mutation resolver (via the codegen, not hand-written), and the `place-order` boundaries are
+> instrumented: `event.store.append`, `event.publish` (per envelope), `event.consume.projection` (per
+> projector) and `payment.intent.create`. Logging is structured/levelled/correlated throughout.
+> **Telemetry degrades, never gates**: no telemetry key is `required:`, so a missing ingest key drops the
+> exporter and keeps logs rather than refusing to serve orders — the deliberate opposite of a missing
+> payment secret, which must stop the boot. The boot report distinguishes `exporting` / `logs-only` /
+> `exporter-unavailable`, because an operator who thinks traces are flowing when they are not loses the
+> first ten minutes of an incident.
+> **D2 answered but NARROWED, against the recommendation**: parent-based **head** sampling at `1.0`, not
+> tail-based — tail sampling needs Refinery (a service to run and pay for), contradicting ADR-0042's
+> minimal-ops-pre-PMF stance, and D2's own reasoning says the volume is not there yet.
+> Layer rule, now **enforced by a dependency test**: `domain` gets neither the OTel SDK nor the `tracing`
+> facade; `application` gets the facade only. *It may say things; only boundaries may measure them.*
+> A second test reads `observability.yaml` and asserts every required span/attribute/metric of the two
+> named contracts is really constructed. **Both guards were validated by breaking them**, which caught two
+> vacuous passes (a span rename satisfied by a `#[cfg(test)]` literal; an attribute rename satisfied by a
+> substring prefix) — a guard is finished when it has been seen to fail, not when it passes.
+> **Known remaining**: the other **nine** contracts are still unemitted; `payment.intent.create` records
+> `created`, not the contract's `captured` (capture is an inbound webhook fact, and conflating them would
+> make a created-but-never-captured payment look successful); and trace **retention / GDPR erasure reaching
+> Honeycomb** is unresolved, belonging with PROP-170000's erasure work.
+> [#179](https://github.com/TheCaptainCompany/captain-food/issues/179) (GraphQL hardening) and
+> [#193](https://github.com/TheCaptainCompany/captain-food/issues/193) (advisory locks + the missing index)
+> are untouched, so PROP-170500 **D3/D4/D5 remain open**.
+
+> ✅ **2026-07-29 — watchdog: `render-config-sync` dry-run fixed at the source (`limit=200 -> 100`).**
+> [#252](https://github.com/TheCaptainCompany/captain-food/issues/252) hardened the env-vars parser to be
+> shape-agnostic and to fail loud, but kept `?limit=200` — which is the actual cause. Render's env-vars
+> endpoint caps page size at 100 and rejects `limit=200` with **HTTP 400** `{"message":"invalid limit:
+> too large"}`; that error object (not a real env-vars shape) is what the parser then read as "an object
+> wrapper", finding 0 vars and exiting 1. So `main` was still failing the dry-run. Fix: `limit=200 -> 100`
+> (the service has ~10 keys, one page covers all), verified against the live Render API — the read now
+> returns all 10 vars and the whole dry-run loop runs with zero jq errors, exit 0. `prod-smoke.sh` already
+> used `limit=100`, so no other reader was affected. CI-config only; no `specs/**` or generated files touched.
+
+> ✅ **2026-07-29 — configuration RIDES THE ARTIFACT; secrets ride CI; the dashboard owns nothing
+> ([#248](https://github.com/TheCaptainCompany/captain-food/issues/248), PROP-20260729-014500,
+> ADR-20260729-020000).** All five decisions approved in-session.
+> #246 declared configuration; it did not give it an OWNER — values were still typed into the Render
+> dashboard, which is how `RUN_SIRENE_WORKER` gated a paused pipeline while written down nowhere and
+> `API_SECRET` sat on the service read by nothing. The product owner's question — *"is it possible to
+> configure the deployment, not the Render service?"* — reframed it. Render has **no per-deploy env
+> override** (its deploy API takes only clearCache/commitId/imageUrl/deployMode), so attaching config to
+> the deployment means putting it **inside the artifact**. Now: **non-secret values are BAKED** into the
+> binary per profile by the codegen — the digest determines behaviour, and a rollback restores the
+> configuration that shipped with that build; **secrets are pushed by CI** from GitHub repo secrets to
+> the service env (never baked — the GHCR package is PUBLIC, so a baked `ENV` is world-readable); and
+> **`APP_PROFILE` stays service env**, since one image is promoted across environments by digest and
+> baking the selector would be circular. Precedence: env var > baked > default, so an operator keeps a
+> seconds-fast override for incidents.
+> The sync workflow (`render-config-sync.yml`) is **upsert-only** (it cannot delete, so a bad manifest
+> can never wipe config; undeclared keys are REPORTED) and **dry-run by default** (it cannot be tested
+> outside CI, so its first real run would otherwise be an untested write against live production).
+> Validator-enforced: a secret may never declare baked values; a baked value must satisfy its scalar;
+> `APP_PROFILE` may not be baked. **Consequence to know**: pausing a pipeline is now a PR + build
+> (~minutes), not a dashboard edit — for a flag that stops a production pipeline, reviewed and recorded
+> is the point. **Still manual by design**: the first `apply: true` run, and setting
+> `APP_PROFILE=production`, which is what arms fail-fast.
+
+> ✅ **2026-07-29 — configuration is DECLARED in the DSL and validated at startup
+> ([#246](https://github.com/TheCaptainCompany/captain-food/issues/246), PROP-20260729-004500,
+> ADR-20260729-010500).**
+> Product-owner directive, approved in-session (*"Fail-fast: approved"*). Configuration was the one part
+> of this system with no source of truth — ~21 env vars existing only as scattered `env::var` calls plus
+> a stale, unapplied `render.yaml` mirror of 9. That gap is what let `RUN_SIRENE_WORKER` gate a paused
+> pipeline while being written down **nowhere** (6,649 rows PENDING for 4h), left `API_SECRET`
+> configured on production and read by nothing, and made an unset `STRIPE_WEBHOOK_SECRET` silently
+> produce the worst failure this product has (payment captured, domain never told).
+> Now: **`specs/configuration.yaml`** declares every key — type, per-profile `required`, `default`,
+> `secret`, `consumer`, and **`gates`** (what breaks without it, *printed* in the failure report, so a
+> key without one fails validation). Codegen emits the typed reader; startup reports **every** missing
+> required key with its purpose and exits `78` (`EX_CONFIG`); a boot report shows what resolved —
+> secrets as `set`/`unset`, `STRIPE_SECRET_KEY` additionally as **test/live mode**. The rule that keeps
+> it honest is a **drift test**: every `env::var`/`env_flag` call site in `crates/**` must be declared,
+> or the build fails — it immediately caught three undeclared `sirene_ingest` keys, and a sixth `RUN_*`
+> toggle (`RUN_DELIVERY_OFFER_TIMEOUT`) still on the old strict parsing.
+> Reconciles with ADR-0043 rather than contradicting it: **missing configuration cannot self-heal
+> (refuse to start); an unavailable dependency can (start, report 503)**. On Render this is strictly
+> safer — an exiting container fails the deploy, so a misconfigured build cannot replace a working one.
+> **Values are TYPED too** (product-owner directive, same day): each key binds a `scalars.yaml` scalar
+> whose `pattern` the reader enforces at startup — *present is not usable*. `ConfigBoolean`
+> (true/yes/1/on, case-insensitive), `StripeSecretKeyTest`/`-Live` (a LIVE key in the test slot is now a
+> startup failure, not a way to move real money), `StripeWebhookSecret`, `AuthSessionKey` (32 bytes hex
+> or base64 — a 31-byte key no longer silently disables login), `PostgresUrl`, `HttpsUrl`,
+> `DepartmentList`. The report groups **MISSING** (absent) and **INVALID** (malformed) separately —
+> different problems, different fixes — and a secret's value is never printed, only its expected shape.
+> **Enforcement follows the PROFILE**: production and staging STOP, development reports and continues.
+> The warn-only rollout was dropped rather than deferred: it hedged against a first enforced deploy
+> failing, but an exiting container fails the DEPLOY and the previous version keeps serving, so the
+> feared outcome is the desired one. Deferred by design: injecting `Config` into `router()` (the drift
+> gate already makes every read *declared*, just not yet *injected*) and the presence-only `/config`
+> endpoint (PROP D4).
+
+> ✅ **2026-07-28 — the SIRENE mirror's disk is RECLAIMED (655 MB → 14 MB), department 37 is re-swept,
+> and every background loop now publishes readiness
+> ([#238](https://github.com/TheCaptainCompany/captain-food/issues/238) /
+> [#244](https://github.com/TheCaptainCompany/captain-food/issues/244), ADR-20260728-224500).**
+> Product-owner decision: **`TRUNCATE external_sirene_restaurants`** rather than compact-and-re-sync in
+> place. The mirror is a cache of INSEE (the system of record), nothing domain-side reads it, and the
+> only designed dependency on row existence — detect-by-absence — is bounded to prospects and recovered
+> by [#243](https://github.com/TheCaptainCompany/captain-food/issues/243) once France is re-swept. The
+> truncate returned ~655 MB (table + indexes + TOAST) to the OS **instantly**: no `VACUUM FULL`, no
+> dead-tuple churn, and it collapsed most of the #238 runbook. Measured after re-sweeping Tours:
+> **6,649 rows / 14 MB** (of which 9,727 kB is payload still awaiting release — steady state ~4 MB).
+> The `payload_hash → bytea` migration (PROP-20260728-120931 D2) is now trivial and should land BEFORE
+> France repopulates.
+>
+> The pilot then exposed two operational holes, both now fixed in code (#244): the SIRENE worker was the
+> **one in-process loop with no status endpoint** — 6,649 rows sat `PENDING` for four hours and nothing
+> outside the process could tell a paused loop from a crashing one — and its `RUN_SIRENE_WORKER` gate was
+> an exact `== "true"`, so `TRUE`/`True`/a quoted value silently meant PAUSED. Now `GET /sirene` joins
+> `/projector` and `/saga` (`running`/`lastTickAt`/`lastError`/`lastSummary`, with `503` +
+> `poll_loop_not_started` vs `sirene_worker_not_available` naming WHICH stopped state it is), and all
+> five `RUN_*` toggles share one lenient parser (`true/1/yes/on`, `false/0/no/off`, case-insensitive,
+> trimmed, unrecognised → documented default **and a log line**). Note `RUN_INBOUND_DRAIN=0` now means
+> OFF (the old `!= "false"` read it as ON). Still config, not code: `INTERNAL_TRIGGER_URL` /
+> `INTERNAL_TRIGGER_TOKEN` are unset in BOTH the CI secrets and the Render env, so
+> `POST /internal/sirene/drain` answers `503 internal trigger not configured` — until they are set,
+> `RUN_SIRENE_WORKER=true` is required and sync latency is the 1-hour poll.
 
 > ✅ **2026-07-28 — enum columns now store the TEXT value verbatim; the `ref_<enum>` lookup tables are
 > gone (ADR-20260728-170000, product-owner directive; supersedes the ADR-0037 ordinal scheme).**

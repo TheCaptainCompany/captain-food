@@ -2596,3 +2596,185 @@ impl From<ClaimTimelineEventKind> for ds::ClaimTimelineEventKind {
         }
     }
 }
+
+/// A boolean configuration value. Accepts true/yes/1/on and false/no/0/off, CASE-INSENSITIVE, with surrounding whitespace and wrapping quotes trimmed before matching (ADR-20260728-224500). Deliberately generous, because the failure it prevents was real: `RUN_SIRENE_WORKER=TRUE` silently meant PAUSED under an exact `== "true"` gate, and 6,649 rows sat unprocessed for four hours. Anything NOT in this set is a misconfiguration, not a false — it is reported, never guessed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ConfigBoolean(pub String);
+async_graphql::scalar!(ConfigBoolean, "ConfigBoolean", "A boolean configuration value. Accepts true/yes/1/on and false/no/0/off, CASE-INSENSITIVE, with surrounding whitespace and wrapping quotes trimmed before matching (ADR-20260728-224500). Deliberately generous, because the failure it prevents was real: `RUN_SIRENE_WORKER=TRUE` silently meant PAUSED under an exact `== \"true\"` gate, and 6,649 rows sat unprocessed for four hours. Anything NOT in this set is a misconfiguration, not a false — it is reported, never guessed.");
+impl From<ds::ConfigBoolean> for ConfigBoolean {
+    fn from(v: ds::ConfigBoolean) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ConfigBoolean> for ds::ConfigBoolean {
+    fn from(v: ConfigBoolean) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A Stripe secret API key, either mode. The app is mode-agnostic by design: the deployed value decides, and its `sk_test_` / `sk_live_` prefix is what the boot report renders as the MODE (never the key). Accepting both is deliberate for now — V0 runs TEST keys on production pre-launch. At go-live, swapping this key's scalar to StripeSecretKeyLive makes "production must be live mode" a startup guarantee instead of a thing someone remembers to check.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct StripeSecretKey(pub String);
+async_graphql::scalar!(StripeSecretKey, "StripeSecretKey", "A Stripe secret API key, either mode. The app is mode-agnostic by design: the deployed value decides, and its `sk_test_` / `sk_live_` prefix is what the boot report renders as the MODE (never the key). Accepting both is deliberate for now — V0 runs TEST keys on production pre-launch. At go-live, swapping this key's scalar to StripeSecretKeyLive makes \"production must be live mode\" a startup guarantee instead of a thing someone remembers to check.");
+impl From<ds::StripeSecretKey> for StripeSecretKey {
+    fn from(v: ds::StripeSecretKey) -> Self {
+        Self(v.0)
+    }
+}
+impl From<StripeSecretKey> for ds::StripeSecretKey {
+    fn from(v: StripeSecretKey) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A Stripe TEST-mode secret key. Typing the test slot separately is what stops a LIVE key being pasted into it — which would move real money from a job whose entire premise is that it cannot (`prod-smoke.sh` already refuses to confirm a payment unless the key is `sk_test_`; this makes the same rule declarative and checked at startup rather than only in one script).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct StripeSecretKeyTest(pub String);
+async_graphql::scalar!(StripeSecretKeyTest, "StripeSecretKeyTest", "A Stripe TEST-mode secret key. Typing the test slot separately is what stops a LIVE key being pasted into it — which would move real money from a job whose entire premise is that it cannot (`prod-smoke.sh` already refuses to confirm a payment unless the key is `sk_test_`; this makes the same rule declarative and checked at startup rather than only in one script).");
+impl From<ds::StripeSecretKeyTest> for StripeSecretKeyTest {
+    fn from(v: ds::StripeSecretKeyTest) -> Self {
+        Self(v.0)
+    }
+}
+impl From<StripeSecretKeyTest> for ds::StripeSecretKeyTest {
+    fn from(v: StripeSecretKeyTest) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A Stripe LIVE-mode secret key. The counterpart slot: it rejects a test key, so a go-live that silently kept test credentials cannot boot as if it were taking real payments.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct StripeSecretKeyLive(pub String);
+async_graphql::scalar!(StripeSecretKeyLive, "StripeSecretKeyLive", "A Stripe LIVE-mode secret key. The counterpart slot: it rejects a test key, so a go-live that silently kept test credentials cannot boot as if it were taking real payments.");
+impl From<ds::StripeSecretKeyLive> for StripeSecretKeyLive {
+    fn from(v: ds::StripeSecretKeyLive) -> Self {
+        Self(v.0)
+    }
+}
+impl From<StripeSecretKeyLive> for ds::StripeSecretKeyLive {
+    fn from(v: StripeSecretKeyLive) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A Stripe webhook signing secret. Stripe issues a DIFFERENT one per mode, so it must be switched together with the secret key; a mismatched pair verifies nothing and the endpoint fails closed — the customer is charged and the restaurant is never told.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct StripeWebhookSecret(pub String);
+async_graphql::scalar!(StripeWebhookSecret, "StripeWebhookSecret", "A Stripe webhook signing secret. Stripe issues a DIFFERENT one per mode, so it must be switched together with the secret key; a mismatched pair verifies nothing and the endpoint fails closed — the customer is charged and the restaurant is never told.");
+impl From<ds::StripeWebhookSecret> for StripeWebhookSecret {
+    fn from(v: ds::StripeWebhookSecret) -> Self {
+        Self(v.0)
+    }
+}
+impl From<StripeWebhookSecret> for ds::StripeWebhookSecret {
+    fn from(v: StripeWebhookSecret) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The AES-256-GCM key encrypting parked auth sessions: exactly 32 bytes, as 64 hex chars or standard base64. A key of the wrong length currently makes the store fall back to the no-op, so login SILENTLY degrades to anonymous-only — the pattern turns that into a startup failure.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AuthSessionKey(pub String);
+async_graphql::scalar!(AuthSessionKey, "AuthSessionKey", "The AES-256-GCM key encrypting parked auth sessions: exactly 32 bytes, as 64 hex chars or standard base64. A key of the wrong length currently makes the store fall back to the no-op, so login SILENTLY degrades to anonymous-only — the pattern turns that into a startup failure.");
+impl From<ds::AuthSessionKey> for AuthSessionKey {
+    fn from(v: ds::AuthSessionKey) -> Self {
+        Self(v.0)
+    }
+}
+impl From<AuthSessionKey> for ds::AuthSessionKey {
+    fn from(v: AuthSessionKey) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A PostgreSQL connection string. On Supabase this must be the SESSION POOLER host (IPv4); the direct `db.<ref>.supabase.co` host is IPv6-only and unreachable from Render — a distinction the URL shape cannot express, so it stays documented in the key's `gates`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct PostgresUrl(pub String);
+async_graphql::scalar!(PostgresUrl, "PostgresUrl", "A PostgreSQL connection string. On Supabase this must be the SESSION POOLER host (IPv4); the direct `db.<ref>.supabase.co` host is IPv6-only and unreachable from Render — a distinction the URL shape cannot express, so it stays documented in the key's `gates`.");
+impl From<ds::PostgresUrl> for PostgresUrl {
+    fn from(v: ds::PostgresUrl) -> Self {
+        Self(v.0)
+    }
+}
+impl From<PostgresUrl> for ds::PostgresUrl {
+    fn from(v: PostgresUrl) -> Self {
+        Self(v.0)
+    }
+}
+
+/// An absolute HTTP(S) endpoint. Catches the common paste error of a bare host, which fails later as an opaque request error rather than at startup.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct HttpsUrl(pub String);
+async_graphql::scalar!(HttpsUrl, "HttpsUrl", "An absolute HTTP(S) endpoint. Catches the common paste error of a bare host, which fails later as an opaque request error rather than at startup.");
+impl From<ds::HttpsUrl> for HttpsUrl {
+    fn from(v: ds::HttpsUrl) -> Self {
+        Self(v.0)
+    }
+}
+impl From<HttpsUrl> for ds::HttpsUrl {
+    fn from(v: HttpsUrl) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A comma-separated INSEE department list for a scoped SIRENE sweep (e.g. `37`, `37,41`). Allows the Corsican `2A`/`2B` codes, which a naive numeric check would reject.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DepartmentList(pub String);
+async_graphql::scalar!(DepartmentList, "DepartmentList", "A comma-separated INSEE department list for a scoped SIRENE sweep (e.g. `37`, `37,41`). Allows the Corsican `2A`/`2B` codes, which a naive numeric check would reject.");
+impl From<ds::DepartmentList> for DepartmentList {
+    fn from(v: ds::DepartmentList) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DepartmentList> for ds::DepartmentList {
+    fn from(v: DepartmentList) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A Honeycomb INGEST key — the credential the OTLP exporter sends as `x-honeycomb-team` (ADR-20260729 telemetry backend, issue #191).
+/// Deliberately PERMISSIVE on charset and length, and that is a considered choice rather than laziness. Honeycomb has shipped several ingest-key formats (32-char hex "classic" keys, and the newer `hc?ik_`-prefixed keys), and this value gates STARTUP: on production a pattern that is stricter than reality turns a perfectly good key into `exit 78` and a failed deploy. An over-tight regex here would manufacture exactly the outage this file exists to prevent, so the rule encodes only what is genuinely invariant across formats.
+/// What it does still catch is the mistake people actually make: a **management** key (`<Key ID>:<Secret Key>`, used by the Honeycomb MCP server and the Query API) pasted into the ingest slot. Management keys contain a colon, ingest keys never do — so the colon exclusion is the load- bearing part of this pattern, in the same spirit as rejecting a `pk_` publishable key in a `StripeSecretKey` slot. It also rejects the empty, whitespace-padded and obviously-truncated value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct HoneycombIngestKey(pub String);
+async_graphql::scalar!(HoneycombIngestKey, "HoneycombIngestKey", "A Honeycomb INGEST key — the credential the OTLP exporter sends as `x-honeycomb-team` (ADR-20260729 telemetry backend, issue #191). Deliberately PERMISSIVE on charset and length, and that is a considered choice rather than laziness. Honeycomb has shipped several ingest-key formats (32-char hex \"classic\" keys, and the newer `hc?ik_`-prefixed keys), and this value gates STARTUP: on production a pattern that is stricter than reality turns a perfectly good key into `exit 78` and a failed deploy. An over-tight regex here would manufacture exactly the outage this file exists to prevent, so the rule encodes only what is genuinely invariant across formats. What it does still catch is the mistake people actually make: a **management** key (`<Key ID>:<Secret Key>`, used by the Honeycomb MCP server and the Query API) pasted into the ingest slot. Management keys contain a colon, ingest keys never do — so the colon exclusion is the load- bearing part of this pattern, in the same spirit as rejecting a `pk_` publishable key in a `StripeSecretKey` slot. It also rejects the empty, whitespace-padded and obviously-truncated value.");
+impl From<ds::HoneycombIngestKey> for HoneycombIngestKey {
+    fn from(v: ds::HoneycombIngestKey) -> Self {
+        Self(v.0)
+    }
+}
+impl From<HoneycombIngestKey> for ds::HoneycombIngestKey {
+    fn from(v: HoneycombIngestKey) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The head-sampling probability for traces, as a decimal in [0, 1] — `1.0` keeps every trace, `0.1` keeps a tenth. Rejects the two plausible mistakes that would otherwise be discovered as missing data weeks later: a percentage (`50`, `50%`) silently read as "way out of range", and a ratio above 1.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TraceSampleRatio(pub String);
+async_graphql::scalar!(TraceSampleRatio, "TraceSampleRatio", "The head-sampling probability for traces, as a decimal in [0, 1] — `1.0` keeps every trace, `0.1` keeps a tenth. Rejects the two plausible mistakes that would otherwise be discovered as missing data weeks later: a percentage (`50`, `50%`) silently read as \"way out of range\", and a ratio above 1.");
+impl From<ds::TraceSampleRatio> for TraceSampleRatio {
+    fn from(v: ds::TraceSampleRatio) -> Self {
+        Self(v.0)
+    }
+}
+impl From<TraceSampleRatio> for ds::TraceSampleRatio {
+    fn from(v: TraceSampleRatio) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The minimum severity emitted by the structured-logging layer, case-insensitive. A closed set rather than a free-form `RUST_LOG` filter, because the failure mode of a typo'd directive is silence — the logs simply stop, which reads as a healthy quiet system.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct LogLevel(pub String);
+async_graphql::scalar!(LogLevel, "LogLevel", "The minimum severity emitted by the structured-logging layer, case-insensitive. A closed set rather than a free-form `RUST_LOG` filter, because the failure mode of a typo'd directive is silence — the logs simply stop, which reads as a healthy quiet system.");
+impl From<ds::LogLevel> for LogLevel {
+    fn from(v: ds::LogLevel) -> Self {
+        Self(v.0)
+    }
+}
+impl From<LogLevel> for ds::LogLevel {
+    fn from(v: LogLevel) -> Self {
+        Self(v.0)
+    }
+}

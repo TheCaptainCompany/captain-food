@@ -80,8 +80,8 @@ async fn sirene_drain(
     // Drain in the background; an already-running pass is fine (it will pick the same rows up).
     tokio::spawn(async move {
         match worker.run_once().await {
-            Ok(summary) => println!("sirene sync worker (ping-triggered): {summary:?}"),
-            Err(e) => eprintln!("sirene sync worker (ping-triggered): {e}"),
+            Ok(summary) => tracing::info!(worker = "sirene_sync", trigger = "ping", summary = ?summary, "drain pass complete"),
+            Err(e) => tracing::error!(worker = "sirene_sync", trigger = "ping", error = %e, "drain pass failed"),
         }
     });
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "draining" }))).into_response()
@@ -123,7 +123,7 @@ async fn inbound_drain(
     };
     tokio::spawn(async move {
         if let Some(summary) = worker.run_once().await {
-            println!("inbound drain worker (ping-triggered): {summary:?}");
+            tracing::info!(worker = "inbound_drain", trigger = "ping", summary = ?summary, "drain pass complete");
         }
     });
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "draining" }))).into_response()

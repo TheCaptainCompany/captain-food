@@ -17,7 +17,9 @@
 # idempotent fixtures, fresh cart/order ids per run.
 #
 # Required env:
-#   STRIPE_SECRET_KEY   sk_test_... (refused otherwise — this script must never move live money)
+#   STRIPE_SECRET_KEY   sk_test_... (refused otherwise — this script must never move live money).
+#                       CI supplies it from the repo secret STRIPE_SECRET_KEY_TEST; the unsuffixed
+#                       repo secret was retired 2026-07-29 because its mode was not visible in its name.
 #   RENDER_API_KEY      used to read the deployed Supabase URL/secret so role JWTs can be minted
 #                       through the deployment's own auth provider (Supabase admin API).
 #                       Alternatively set SUPABASE_URL + SUPABASE_SECRET_KEY directly and
@@ -110,8 +112,15 @@ load_supabase_creds() {
   [ -n "$sid" ] || fail "L3: Render service '${RENDER_SERVICE_NAME}' not found"
   ev=$(curl -sS -m 20 "https://api.render.com/v1/services/${sid}/env-vars?limit=100" \
     -H "Authorization: Bearer $RENDER_API_KEY")
-  SB_URL=$(printf '%s' "$ev" | jq -r '.[].envVar | select(.key=="SUPABASE_URL") | .value')
-  SB_KEY=$(printf '%s' "$ev" | jq -r '.[].envVar | select(.key=="SUPABASE_SECRET_KEY") | .value')
+  # SHAPE-AGNOSTIC (2026-07-29): this used `.[].envVar | select(...)`, which assumes Render returns an
+  # array of {envVar:{key,value}}. It also returns an object wrapper over the same records, and the docs
+  # publish neither shape — the assumption died with `Cannot index string with string "envVar"` the first
+  # time render-config-sync.yml ran against production. Pull any object carrying key+value, wherever it
+  # sits, so either shape works.
+  local vars
+  vars=$(printf '%s' "$ev" | jq -c '[.. | objects | select(has("key") and has("value"))]')
+  SB_URL=$(printf '%s' "$vars" | jq -r 'map(select(.key=="SUPABASE_URL")) | .[0].value // empty')
+  SB_KEY=$(printf '%s' "$vars" | jq -r 'map(select(.key=="SUPABASE_SECRET_KEY")) | .[0].value // empty')
   [ -n "$SB_URL" ] && [ -n "$SB_KEY" ] || fail "L3: SUPABASE_URL/SUPABASE_SECRET_KEY not configured on the Render service"
 }
 

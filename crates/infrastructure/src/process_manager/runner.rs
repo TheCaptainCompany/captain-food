@@ -200,7 +200,7 @@ impl ProcessManagerRunner {
             // Errors are recorded on the status snapshot by run_once; the loop keeps polling.
             let r = std::sync::Arc::clone(&runner);
             if let Err(join) = tokio::spawn(async move { let _ = r.run_once().await; }).await {
-                eprintln!("saga runner: tick panicked — resuming next tick: {join}");
+                tracing::error!(worker = "saga_runner", error = %join, "tick panicked -- resuming next tick");
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -254,9 +254,11 @@ impl ProcessManagerRunner {
                 Ok(Outcome::Skipped(reason)) => {
                     // Benign expected alternative (idempotent re-delivery, COLLECTION no-op, failed
                     // state.expect) — logged, never an error.
-                    eprintln!(
-                        "saga[{}]: position {position} skipped — {reason}",
-                        group.checkpoint
+                    tracing::warn!(
+                        saga_group = group.checkpoint,
+                        position,
+                        %reason,
+                        "position skipped"
                     );
                 }
                 // Lost optimistic-concurrency race: retry the WHOLE leg next tick (the state row's
@@ -271,7 +273,7 @@ impl ProcessManagerRunner {
                         "saga[{}]: position {position} ({event_type}) aborted: {e}",
                         group.checkpoint
                     );
-                    eprintln!("{msg}");
+                    tracing::error!(saga_group = group.checkpoint, position, "{msg}");
                     surfaced.push(msg);
                 }
             }

@@ -113,10 +113,11 @@ impl crate::generated::services::DeliveryService for NoopDeliveryService {
         input: crate::generated::services::DeliveryOfferJobInput,
         _meta: &crate::generated::services::ServiceCallMeta,
     ) -> Result<(), DomainError> {
-        eprintln!(
-            "delivery-partner[noop]: job {} (order {}) offered nowhere — the avelo37 ACL is the \
-             integration workstream's; independent riders can still accept from the job stream",
-            input.job.delivery_job_id.0, input.job.order_id.0
+        tracing::warn!(
+            delivery_job_id = %input.job.delivery_job_id.0,
+            order_id = %input.job.order_id.0,
+            "delivery-partner[noop]: job offered nowhere -- the avelo37 ACL is the integration \
+             workstream's; independent riders can still accept from the job stream"
         );
         Ok(())
     }

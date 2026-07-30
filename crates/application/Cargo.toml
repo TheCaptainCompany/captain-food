@@ -20,6 +20,17 @@ uuid = { workspace = true, features = ["v5", "v7"] }
 # Canonical command payload hash (journal duplicate-vs-conflict discriminator, ADR-20260720-015300).
 sha2 = "0.10"
 hex = "0.4"
+# The `tracing` FACADE ONLY (issue #191) — deliberately NOT `crates/telemetry`, and NOT any
+# `opentelemetry*` crate. The line this layer sits on: **it may say things, only boundaries may measure
+# them.** So process managers and handlers emit levelled, structured EVENTS (which inherit the ambient
+# span opened by the saga runner or the GraphQL dispatch, and so arrive already carrying
+# `correlation_id`), but never open a span, record a metric, or know that OpenTelemetry exists.
+#
+# The alternative was leaving these as `eprintln!`. That would have kept exactly the output issue #191
+# exists to end: a saga leg skipping a Stripe refund, printed to stdout with nothing to correlate it to
+# the order it belongs to. A dependency test enforces both halves — the facade is allowed here, the SDK
+# is not, and `domain` gets neither.
+tracing = "0.1"
 
 [dev-dependencies]
 # Async runtime for the behaviour tests (tests.yaml Given/When/Then over the command handlers).
