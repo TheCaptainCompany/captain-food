@@ -138,6 +138,17 @@ conversation.schedule(Envelope::new(post_message, principal), at).await?; // -> 
 - **Status reads are symmetric**: a generic `OperationStatusClient` (`status(message_id)` /
   `watch(message_id)`) backs the `operationStatus` query and the `operationStatusChanged`
   subscription — nobody SELECTs the table either.
+- **Responses ride a queue too** (product-owner directive, 2026-07-30): every completion —
+  SUCCEEDED / REJECTED {errorCode} / FAILED / IGNORED / DUPLICATE — is **published post-commit
+  onto a response bus keyed by `message_id`** (the `OperationStatusBus`, generalized), so a
+  caller *subscribes to the response of its message* instead of polling. This is what
+  `watch(message_id)` consumes, and it gives the typed client an **ask pattern**:
+  `ask(envelope) = send + await the first terminal response` — request/response over the mailbox
+  for the callers that want it (a PM awaiting an aggregate's outcome, an edge flow that must
+  render the result). The durable truth stays the mailbox row: a late or reconnecting subscriber
+  re-syncs by pull first, then streams — the same first-value-then-transitions contract
+  `operationStatusChanged` already has (ADR-20260720-015500), now stated as the general rule for
+  every response consumer.
 - A GraphQL resolver collapses to three generated lines: build the client from the input's
   identity, `send`, return the acceptance. The worker-side channels (HubRise enricher, SIRENE
   ACL, PM emissions) use the same clients with `channel: WORKER | EXTERNAL` — one insertion
@@ -566,16 +577,20 @@ impl ConversationActor {
         self.apply_events([MessagePosted { .. }]);  // stage + apply eagerly
         Ok(())
     }
-    fn apply_events(&mut self, events: Vec<ConversationEvent>) {   // framework base
-        for e in &events {
-            self.state = Conversation::apply(self.state, e);       // companion §2.3, same fold
+    fn apply_events(&mut self, events: Vec<ConversationEvent>) {   // framework base: STAGE only
+        self.staged.extend(events);                                // held state untouched here
+    }
+    fn promote(&mut self) {                                        // framework, called POST-COMMIT
+        for e in self.staged.drain(..) {
+            self.state = Conversation::apply(self.state, &e);      // companion §2.3, same fold
         }
-        self.staged.extend(events);
+        self.version.advance();
     }
 }
 // dispatch: drain `staged` into the §3.4 four-effect transaction
-//   commit OK  -> activation keeps its state, version advances
-//   any failure -> EVICT the activation (dirty state must not survive a failed persist)
+//   commit OK  -> promote(): staged events applied to the held state, version advances
+//   any failure -> staged discarded, held state UNCHANGED — the activation stays clean,
+//                  no eviction needed (eviction remains for ownership/idle signals only)
 ```
 
 The per-event `Apply` overloads of the sketch (`State.MessageCount++` on `MessagePosted`) ARE the
@@ -585,13 +600,23 @@ rehydration and by the hot path.
 **Cache discipline** (each rule earns its place):
 
 - **The invariant, stated once**: *the state the NEXT message sees must equal the fold of
-  COMMITTED events.* Two compliant strategies: **eager-apply + evict-on-failure** ✅ (the sketch's
-  shape, chosen: `ApplyEvents` mutates the working state as it stages, so logic later in the same
-  handler — and the next decided event of a multi-event decision — reads up-to-date state; a
-  failed commit evicts the activation, discarding the dirty state — the Akka-persistence
-  "restart on persist failure" rule), or apply-after-commit (stricter, no eviction needed, but
-  the handler reads stale state mid-decision). Either way, a rollback can never leave a
-  half-applied activation alive.
+  COMMITTED events.* Chosen strategy (product owner, 2026-07-30: "if we can apply after the
+  commit, it's awesome"): **apply-after-commit** ✅ — `apply_events` only *stages*; the framework
+  `promote()`s the staged events onto the held state once the §3.4 transaction commits. The
+  activation can never hold dirty state, so a rollback needs no cleanup at all. A handler that
+  needs to see its own intermediate state within one multi-event decision folds locally over its
+  staged list (pure and cheap). The alternative — eager-apply + evict-on-failure, the classic
+  Akka/Vernon shape — stays documented but not chosen.
+- **Single-flight per actor — the activation micro-mailbox** (product-owner directive,
+  2026-07-30): each activation owns a **small bounded in-memory FIFO**; every invocation — lane
+  delivery, promoted reminder, internal state query (§3.5 gRPC door) — *enqueues*, and one
+  consumer drains, so **the same actor instance is never called twice concurrently**, whatever
+  the caller. Within today's sequential partition lane this is redundancy by design; it becomes
+  load-bearing the day different `actor_id`s of one partition process concurrently (head-of-line
+  per ACTOR instead of per partition — a later throughput knob), and it is what keeps a state
+  query from racing a mutation. Discipline per D2.1's Proto.Actor mailbox study: control
+  messages drain before user messages, and a per-drain budget stops one hot actor starving its
+  partition.
 - **Eviction**: version conflict on append → evict and refold (the state was stale — the one
   signal that is never wrong); lease lost / `ownership_version` bump observed → drop ALL
   activations of that partition; idle timeout + LRU bound → passivate (the Proto.Actor
