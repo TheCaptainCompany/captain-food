@@ -39,7 +39,7 @@ inbound_messages:
     actor_type:     { type: text, index: true, note: "The addressed actors.yaml actor (aggregate or process manager) — validated against the catalog." }
     actor_id:       { type: uuid, index: true, note: "The addressed instance (= stream id), extracted via the actor's declared `identity` property." }
     partition:      { type: smallint, note: "stable_hash(actor_id) mod the actor's mailbox.partitions — stamped at insert so consumption filters cheaply." }
-    message_type:   { type: text, note: "commands.yaml / events.yaml / messages.yaml key — validated: in the addressed actor's receives." }
+    message_type:   { type: text, note: "commands.yaml / events.yaml key, or a per-actor message declared ON the addressed actor (ADR-20260731-120825 — no third catalog) — validated: in the addressed actor's receives." }
     payload:        { type: jsonb, note: "The BUSINESS payload only — the envelope is the columns (ADR-0041)." }
     payload_hash:   { type: text, note: "sha256 hex over the canonical payload — the duplicate-vs-conflict discriminator (commands)." }
     channel:        { type: { $ref: 'scalars.yaml#/InboundMessageChannel' }, note: "GRAPHQL | WORKER | EXTERNAL." }

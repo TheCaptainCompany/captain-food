@@ -14,8 +14,12 @@ Last reconciled: **2026-07-28** · 12 proposals `Proposed` · **66 open decision
 > [PROP-20260728-135632 "Aggregate state as spec"](PROP-20260728-135632-aggregate-state-as-spec.md) (D1–D5),
 > [PROP-20260728-152752 "The write path becomes an actor mailbox"](PROP-20260728-152752-actor-mailbox-write-path.md) (D1–D7),
 > [PROP-20260730-230803 "Projection runtime"](PROP-20260730-230803-projection-runtime-batched-partitioned.md) (D1–D3)
-> — all recommended options stand; one approved-by-default flag with an open veto window:
-> `messages.yaml` as the third payload catalog. Build starts at
+> — all recommended options stand. The one approved-by-default flag (`messages.yaml` as the third
+> payload catalog) was **VETOED 2026-07-31** (product owner, in-session): reminder messages are
+> typed INSIDE the actor with a validator-proven `receives` handler, and deferred until the first
+> real use case —
+> [ADR-20260731-120825](../adr/ADR-20260731-120825-actor-messages-typed-inside-the-actor.md).
+> The set is now fully decided. Build starts at
 > [#242](https://github.com/TheCaptainCompany/captain-food/issues/242)'s foundation slice.
 
 ---
