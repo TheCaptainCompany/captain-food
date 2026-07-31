@@ -617,7 +617,28 @@ pub fn router() -> Router {
                         .expect("identity service binding (services.yaml)"),
                         customers: Arc::new(PgCustomerRepository::new(pool.clone())),
                         sessions: auth_sessions.clone(),
-                        payments: Arc::new(FailClosedPaymentGateway),
+                        // The SAME conditional Stripe binding the resolver side and the saga runner
+                        // use (#272 Runtime D1): the mailbox workers will execute the payment-
+                        // dependent PM legs once the PlaceOrderProcess/RefundProcess mailboxes land,
+                        // and a hard-wired fail-closed stand-in here would silently decline every
+                        // checkout the moment the generated addressing flips them.
+                        payments: infrastructure::generated::service_bindings::payment_service(|| {
+                            match std::env::var("STRIPE_SECRET_KEY") {
+                                Ok(key) if !key.is_empty() => {
+                                    Arc::new(stripe_adapter::StripePaymentGateway::new(key))
+                                }
+                                _ => {
+                                    tracing::warn!(
+                                        binding = "payments",
+                                        site = "mailbox_workers",
+                                        impl_ = "FailClosedPaymentGateway",
+                                        "STRIPE_SECRET_KEY unset -- payment-dependent deliveries will decline"
+                                    );
+                                    Arc::new(FailClosedPaymentGateway)
+                                }
+                            }
+                        })
+                        .expect("payment service binding (services.yaml)"),
                         pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(
                             pool.clone(),
                         )),
