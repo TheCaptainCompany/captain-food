@@ -189,6 +189,11 @@ mutation/query is reached by a story step, and every test↔rule link holds both
   **GitHub is never the record**: issue bodies, PR bodies and PR/issue comments carry LINKS into
   docs/proposals + docs/adr (and a tracking checklist at most) — never the design content itself;
   content drafted in a GitHub surface must land in the repo in the same change.
+  **Proportionality** (product-owner directive, 2026-07-31): the record matches the size of the
+  decision — a real option space needing arbitration gets a proposal (+ tracking issue); a
+  decision without alternatives gets an ADR (inline "options considered" at most); a small
+  subject with no real decision needs NEITHER — the commit message and the PR's one-paragraph
+  body are enough. Issues and PR bodies stay one paragraph + links + a checklist.
   **Every proposal MUST include** (product-owner directive, 2026-07-26): **per-use-case screen
   mockups**, **per-flow sequence diagrams** (mermaid, hexagonal-faithful), and **per-option pros/cons**
   for every decision it surfaces (a bare "A vs B" without trade-offs is incomplete) — see
