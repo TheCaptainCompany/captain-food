@@ -85,6 +85,22 @@ pub mod mem {
         rows: Mutex<HashMap<uuid::Uuid, (MailboxEntry, InboundMessageStatus, Option<serde_json::Value>)>>,
     }
 
+    impl MemMailbox {
+        /// Snapshot of every stored entry, insertion-order-independent (test assertions).
+        pub fn entries(&self) -> Vec<MailboxEntry> {
+            self.rows.lock().expect("mem mailbox poisoned").values().map(|(e, _, _)| e.clone()).collect()
+        }
+
+        /// One entry by message id (test assertions).
+        pub fn entry(&self, message_id: uuid::Uuid) -> Option<MailboxEntry> {
+            self.rows
+                .lock()
+                .expect("mem mailbox poisoned")
+                .get(&message_id)
+                .map(|(e, _, _)| e.clone())
+        }
+    }
+
     #[async_trait]
     impl Mailbox for MemMailbox {
         async fn insert(&self, entry: &MailboxEntry) -> Result<MailboxInsertOutcome, DomainError> {

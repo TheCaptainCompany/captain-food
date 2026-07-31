@@ -729,22 +729,21 @@ pub fn router() -> Router {
                 hubrise_state.raw =
                     Some(Arc::new(hubrise_adapter::PgRawHubRiseCallbacks::new(pool.clone())));
                 {
-                    let hubrise_store =
-                        Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone()));
-                    let hubrise_journal = Arc::new(infrastructure::PgCommandJournal::new(pool.clone()));
+                    let hubrise_mailbox = Arc::new(
+                        infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()),
+                    );
                     let hubrise_connections =
                         Arc::new(hubrise_adapter::PgHubRiseConnections::new(pool.clone()));
-                    // Enricher/connect sends journal on the WORKER channel (ADR-20260720-015300, #15):
-                    // callback redeliveries dedupe on command_journal instead of double-applying.
+                    // Enricher/connect sends are fire-and-forget mailbox enqueues on the WORKER
+                    // channel (ADR-20260731-122500): callback redeliveries dedupe on the mailbox pk
+                    // instead of double-applying; the mailbox worker delivers.
                     hubrise_state.enricher = Some(Arc::new(hubrise_adapter::HubRiseEnricher::new(
-                        hubrise_store.clone(),
-                        hubrise_journal.clone(),
+                        hubrise_mailbox.clone(),
                         hubrise_connections.clone(),
                         hubrise_adapter::api::HubRiseApi::from_env(),
                     )));
                     hubrise_state.connect = Some(Arc::new(hubrise_adapter::HubRiseConnectFlow::new(
-                        hubrise_store,
-                        hubrise_journal,
+                        hubrise_mailbox,
                         hubrise_restaurants,
                         hubrise_connections,
                         hubrise_adapter::connect::HttpHubRiseConnectGateway {

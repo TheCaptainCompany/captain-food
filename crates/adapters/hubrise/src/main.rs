@@ -32,12 +32,11 @@ async fn main() {
             let store = Arc::new(PgEventStore::new(pool.clone()));
             // WORKER-channel command journal (ADR-20260720-015300): every enricher/connect send is
             // journaled before handling, so redeliveries dedupe instead of double-applying.
-            let journal = Arc::new(PgCommandJournal::new(pool.clone()));
+            let mailbox = Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()));
             let connections = Arc::new(PgHubRiseConnections::new(pool.clone()));
             let restaurants = Arc::new(PgRestaurantRepository::new(pool));
             state.enricher = Some(Arc::new(HubRiseEnricher::new(
-                store.clone(),
-                journal.clone(),
+                mailbox.clone(),
                 connections.clone(),
                 HubRiseApi::from_env(),
             )));
@@ -45,8 +44,7 @@ async fn main() {
             // HUBRISE_WEBHOOK_SECRET + HUBRISE_CONNECT_REDIRECT_URL) — checked per request,
             // fail-closed in http.rs.
             state.connect = Some(Arc::new(HubRiseConnectFlow::new(
-                store,
-                journal,
+                mailbox,
                 restaurants,
                 connections,
                 HttpHubRiseConnectGateway {

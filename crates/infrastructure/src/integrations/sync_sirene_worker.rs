@@ -132,15 +132,16 @@ fn journal_entry(
     }
 }
 
-/// Envelope → `Actor` (ADR-0041): events appended by this journaled send carry
-/// `cause_id = message_id`, exactly like the GraphQL dispatch.
+/// Envelope → `Actor` (ADR-0041) for the ENQUEUE: the mailbox row's `cause_id` is the PARENT
+/// (the staging-mirror row's identity) — the delivery side rebuilds the event-append actor with
+/// `cause_id = message_id` itself, exactly like the GraphQL dispatch.
 fn send_actor(entry: &CommandJournalEntry) -> Actor {
     Actor {
         user_id: sirene_system_user_id(),
         user_type: EXTERNAL_USER_TYPE.to_string(),
         domain_id: None,
         correlation_id: entry.correlation_id,
-        cause_id: Some(entry.message_id),
+        cause_id: entry.cause_id,
     }
 }
 
