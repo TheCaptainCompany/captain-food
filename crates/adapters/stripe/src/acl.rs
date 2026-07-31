@@ -474,7 +474,6 @@ impl StripeWebhookIngestor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use application::journal::InboundEvents;
     use domain::shared::errors::DomainError;
 
     const SECRET: &str = "whsec_test_secret";

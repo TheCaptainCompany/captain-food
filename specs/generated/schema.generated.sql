@@ -208,25 +208,6 @@ CREATE INDEX ON command_journal (command_type);
 CREATE INDEX ON command_journal (status);
 CREATE INDEX ON command_journal (received_at);
 
-CREATE TABLE inbound_events (
-  inbound_event_id UUID PRIMARY KEY,
-  source TEXT NOT NULL,
-  external_id TEXT NOT NULL,
-  correlation_id UUID NOT NULL,
-  event_type TEXT NOT NULL,
-  payload JSONB NOT NULL,
-  status TEXT NOT NULL,
-  error JSONB NULL,
-  received_at TIMESTAMPTZ NOT NULL,
-  delivered_at TIMESTAMPTZ NULL,
-  UNIQUE (source, external_id)
-);
-CREATE INDEX ON inbound_events (source);
-CREATE INDEX ON inbound_events (correlation_id);
-CREATE INDEX ON inbound_events (event_type);
-CREATE INDEX ON inbound_events (status);
-CREATE INDEX ON inbound_events (received_at);
-
 CREATE TABLE payment_process_manager (
   cart_id UUID PRIMARY KEY,
   order_id UUID NOT NULL,

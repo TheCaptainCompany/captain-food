@@ -114,34 +114,3 @@ command_journal:
     received_at:    { type: timestamptz, index: true }
     completed_at:   { type: timestamptz, nullable: true, note: "Terminal transition time; null while RECEIVED." }
 
-inbound_events:
-  description: >
-    DEPRECATED — end-of-life once #242 slice 3 migrates it into inbound_messages
-    (ADR-20260730-231500); stays the LIVE inbound inbox until then.
-    Adapted inbound BUSINESS events (events.yaml vocabulary only — no external shapes) staged by
-    adapter ACLs after signature verification and raw external_* staging (integration_staging.yaml),
-    drained by the InboundEventsDrainWorker through the normal write path (Repository append; the
-    aggregate's fold-based dedupe stays authoritative, and its verdict is now PERSISTED rather than
-    collapsed — a no-change decision lands IGNORED and a redelivered fact lands DUPLICATE, per
-    ADR-20260728-011344 D6. Previously both were flattened into DELIVERED, so a sweep could not tell
-    work from no-work).
-    (source, external_id) is the delivery-level dedupe; inbound_event_id becomes
-    domain_events.cause_id for the appended fact.
-  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
-    max_age: '30 days'
-    applies_to: >
-      DELIVERED rows only, aged from delivered_at (the fact already lives forever in domain_events).
-      FAILED rows are kept until resolved and RECEIVED rows are pending work — neither is ever swept.
-  columns:
-    inbound_event_id: { type: uuid, pk: true, note: "UUIDv7 minted at staging — the causality link into domain_events.cause_id." }
-    source:           { type: text, index: true, note: "Owning adapter: 'stripe', 'avelo37' (others as they adopt the inbox, ADR-20260720-015400)." }
-    external_id:      { type: text, note: "Provider event id (e.g. Stripe 'evt_…'); UNIQUE with source (constraints below)." }
-    correlation_id:   { type: { $ref: 'scalars.yaml#/CorrelationId' }, index: true, note: "UUIDv5 of the provider event id — the established ACL convention; matches domain_events.correlation_id on delivery." }
-    event_type:       { type: text, index: true, note: "events.yaml key, e.g. 'PaymentCaptured'." }
-    payload:          { type: jsonb, note: "The serialized domain event — business vocabulary only (the ACL already translated)." }
-    status:           { type: { $ref: 'scalars.yaml#/InboundEventStatus' }, index: true, note: "RECEIVED -> DELIVERED | IGNORED | DUPLICATE | FAILED. GROUP BY this column IS the per-sweep report (created+updated / no-change / redelivered / failed)." }
-    error:            { type: jsonb, nullable: true, note: "Delivery failure detail; FAILED rows are retryable/inspectable." }
-    received_at:      { type: timestamptz, index: true }
-    delivered_at:     { type: timestamptz, nullable: true }
-  constraints:
-    - unique: [source, external_id]    # delivery-level dedupe: one row per provider event

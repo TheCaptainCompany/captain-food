@@ -447,7 +447,6 @@ impl Avelo37WebhookIngestor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use application::journal::InboundEvents;
     use domain::shared::errors::DomainError;
 
     const SECRET: &str = "avwh_test_secret";

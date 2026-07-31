@@ -312,7 +312,6 @@ pub fn router() -> Router {
         None
     });
     let mut hubrise_state = hubrise_adapter::HubRiseWebhookState::default();
-    let mut inbound_drain: Option<Arc<infrastructure::InboundEventsDrainWorker>> = None;
 
     match std::env::var("DATABASE_URL") {
         Ok(url) if !url.is_empty() => match PgPoolOptions::new()
@@ -566,22 +565,24 @@ pub fn router() -> Router {
                 // table through the ACL into the ordinary write path. Always constructed (the
                 // /internal/sirene/drain ping needs it); the slow safety-net poll loop is gated by
                 // RUN_SIRENE_WORKER — default OFF since 2026-07-28 (paused, issue #220).
-                // Inbound-events drain worker (ADR-20260720-015400): delivers adapter-staged
-                // business events through the normal write path, and runs the command_journal
-                // stale-RECEIVED sweep (ADR-20260720-015300). Always constructed (the webhook nudge
-                // + /internal/inbound/drain need it); the safety-net poll loop is gated by
-                // RUN_INBOUND_DRAIN (default on) like the projector.
-                let drain = Arc::new(infrastructure::InboundEventsDrainWorker::new(
-                    Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
-                    Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
-                ));
-                inbound_drain = Some(drain.clone());
-                if config.run_inbound_drain {
-                    tokio::spawn(drain.clone().run_loop());
-                    tracing::info!(worker = "inbound_drain", running = true, toggle = "RUN_INBOUND_DRAIN", "worker running in-process");
-                } else {
-                    tracing::warn!(worker = "inbound_drain", running = false, toggle = "RUN_INBOUND_DRAIN", "poll loop NOT started -- webhook-staged facts accumulate undelivered (nudge trigger stays active)");
+                // The command_journal stale-RECEIVED sweep (ADR-20260720-015300) SURVIVES the
+                // drain worker's retirement (ADR-20260731-122500): the journal is still the PM
+                // legs' door until Runtime D, and a crashed spawned run must still flip to FAILED
+                // so operationStatus never reports a dead run as pending forever. Always-on with a
+                // DB, slow tick; retires WITH command_journal itself.
+                {
+                    let sweep_journal = infrastructure::PgCommandJournal::new(pool.clone());
+                    tokio::spawn(async move {
+                        use application::journal::CommandJournal as _;
+                        loop {
+                            match sweep_journal.sweep_stale_received(chrono::Duration::minutes(10)).await {
+                                Ok(0) => {}
+                                Ok(n) => tracing::warn!(worker = "journal_sweep", swept = n, "stale RECEIVED commands flipped to FAILED"),
+                                Err(e) => tracing::error!(worker = "journal_sweep", error = %e, "stale-command sweep failed"),
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                        }
+                    });
                 }
 
                 // THE MAILBOX WORKERS (#242 Runtime C3, PROP-20260728-152752): one per actor type
@@ -805,7 +806,6 @@ pub fn router() -> Router {
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))
         // Internal trigger (ADR-20260720-015400): ops ping to wake the inbound-events drain worker.
-        .merge(graphql::routes::inbound_internal_routes(inbound_drain))
         // Partner webhook adapters (ADR-20260718-213352): self-contained crates under crates/adapters/*,
         // each mountable here (monolith) or deployable as its own web service. `POST /adapters/stripe/webhooks`
         // (signature-verified inbound payment facts), `POST /adapters/avelo37/webhooks` (signature-verified
@@ -1027,7 +1027,7 @@ mod tests {
             assert!(parse_flag(Some(on), "RUN_SIRENE_WORKER", false), "{on:?} should enable");
         }
         for off in ["false", "FALSE", " False ", "\"false\"", "0", "no", "OFF"] {
-            assert!(!parse_flag(Some(off), "RUN_INBOUND_DRAIN", true), "{off:?} should disable");
+            assert!(!parse_flag(Some(off), "RUN_PROJECTOR", true), "{off:?} should disable");
         }
     }
 

@@ -10,7 +10,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use domain::generated::scalars::{CommandChannel, CommandJournalStatus, InboundEventStatus};
+use domain::generated::scalars::{CommandChannel, CommandJournalStatus};
 use domain::shared::errors::DomainError;
 
 /// What the dispatch layer knows at acceptance time — everything but the lifecycle columns.
@@ -87,64 +87,6 @@ pub trait CommandJournal: Send + Sync {
     async fn sweep_stale_received(&self, older_than: Duration) -> Result<u64, DomainError>;
 }
 
-/// One `inbound_events` row: an adapted inbound BUSINESS event (events.yaml vocabulary only) staged
-/// by an adapter ACL, awaiting delivery through the normal write path.
-#[derive(Debug, Clone, PartialEq)]
-pub struct InboundEventRow {
-    /// UUIDv7 minted at staging — becomes `domain_events.cause_id` on delivery.
-    pub inbound_event_id: uuid::Uuid,
-    /// Owning adapter, e.g. `stripe`.
-    pub source: String,
-    /// Provider event id (e.g. Stripe `evt_…`); UNIQUE with `source`.
-    pub external_id: String,
-    /// UUIDv5 of the provider event id (the established ACL convention).
-    pub correlation_id: uuid::Uuid,
-    /// events.yaml key, e.g. `PaymentCaptured`.
-    pub event_type: String,
-    /// The serialized domain event — business vocabulary only (the ACL already translated).
-    pub payload: serde_json::Value,
-    pub status: InboundEventStatus,
-    pub error: Option<serde_json::Value>,
-    pub received_at: DateTime<Utc>,
-    pub delivered_at: Option<DateTime<Utc>>,
-}
-
-/// Outcome of [`InboundEvents::stage`]: `Duplicate` = this `(source, external_id)` was already
-/// staged (webhook redelivery) — a no-op, the original row keeps its lifecycle.
-#[derive(Debug, Clone, PartialEq)]
-pub enum StageOutcome {
-    Staged,
-    Duplicate,
-}
-
-/// Durable inbound-event inbox (`inbound_events`, ADR-20260720-015400).
-#[async_trait]
-pub trait InboundEvents: Send + Sync {
-    /// Stage an adapted business event as RECEIVED; `(source, external_id)` dedupes redelivery.
-    async fn stage(&self, row: &InboundEventRow) -> Result<StageOutcome, DomainError>;
-
-    /// The oldest RECEIVED rows (by `received_at`, then id), at most `limit` — the drain's batch.
-    async fn pending(&self, limit: i64) -> Result<Vec<InboundEventRow>, DomainError>;
-
-    /// Delivery succeeded (including the aggregate's already-recorded no-op): RECEIVED → DELIVERED.
-    async fn mark_delivered(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError>;
-
-    /// The aggregate decided the fact changes NOTHING: RECEIVED → IGNORED (ADR-20260728-011344 D6).
-    /// Terminal and successful — no event was appended because none was warranted.
-    async fn mark_ignored(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError>;
-
-    /// The fact was ALREADY in the aggregate's stream: RECEIVED → DUPLICATE. Terminal and successful,
-    /// but distinct from IGNORED — this is a redelivery of something we recorded before, not a report
-    /// that happens to be inert.
-    async fn mark_duplicate(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError>;
-
-    /// Delivery failed: RECEIVED → FAILED with the error detail (retryable/inspectable).
-    async fn mark_failed(
-        &self,
-        inbound_event_id: uuid::Uuid,
-        error: serde_json::Value,
-    ) -> Result<(), DomainError>;
-}
 
 /// In-memory implementations (plain `Mutex` state) mirroring the Postgres semantics, for
 /// dispatch/drain tests.
@@ -225,87 +167,6 @@ pub mod mem {
         }
     }
 
-    /// In-memory [`InboundEvents`], deduped on `(source, external_id)`.
-    #[derive(Default)]
-    pub struct MemInboundEvents {
-        rows: Mutex<Vec<InboundEventRow>>,
-    }
-
-    #[async_trait]
-    impl InboundEvents for MemInboundEvents {
-        async fn stage(&self, row: &InboundEventRow) -> Result<StageOutcome, DomainError> {
-            let mut rows = self.rows.lock().unwrap();
-            if rows.iter().any(|r| r.source == row.source && r.external_id == row.external_id) {
-                return Ok(StageOutcome::Duplicate);
-            }
-            let mut stamped = row.clone();
-            stamped.status = InboundEventStatus::RECEIVED;
-            stamped.received_at = Utc::now();
-            stamped.delivered_at = None;
-            rows.push(stamped);
-            Ok(StageOutcome::Staged)
-        }
-
-        async fn pending(&self, limit: i64) -> Result<Vec<InboundEventRow>, DomainError> {
-            let rows = self.rows.lock().unwrap();
-            let mut pending: Vec<InboundEventRow> = rows
-                .iter()
-                .filter(|r| r.status == InboundEventStatus::RECEIVED)
-                .cloned()
-                .collect();
-            pending.sort_by(|a, b| {
-                (a.received_at, a.inbound_event_id).cmp(&(b.received_at, b.inbound_event_id))
-            });
-            pending.truncate(limit.max(0) as usize);
-            Ok(pending)
-        }
-
-        async fn mark_delivered(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError> {
-            for row in self.rows.lock().unwrap().iter_mut() {
-                if row.inbound_event_id == inbound_event_id {
-                    row.status = InboundEventStatus::DELIVERED;
-                    row.delivered_at = Some(Utc::now());
-                }
-            }
-            Ok(())
-        }
-
-        async fn mark_ignored(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError> {
-            for row in self.rows.lock().unwrap().iter_mut() {
-                if row.inbound_event_id == inbound_event_id {
-                    row.status = InboundEventStatus::IGNORED;
-                    // Stamped like a delivery: the row reached a terminal SUCCESS state, and the
-                    // retention sweep ages IGNORED rows the same way (nothing is pending here).
-                    row.delivered_at = Some(Utc::now());
-                }
-            }
-            Ok(())
-        }
-
-        async fn mark_duplicate(&self, inbound_event_id: uuid::Uuid) -> Result<(), DomainError> {
-            for row in self.rows.lock().unwrap().iter_mut() {
-                if row.inbound_event_id == inbound_event_id {
-                    row.status = InboundEventStatus::DUPLICATE;
-                    row.delivered_at = Some(Utc::now());
-                }
-            }
-            Ok(())
-        }
-
-        async fn mark_failed(
-            &self,
-            inbound_event_id: uuid::Uuid,
-            error: serde_json::Value,
-        ) -> Result<(), DomainError> {
-            for row in self.rows.lock().unwrap().iter_mut() {
-                if row.inbound_event_id == inbound_event_id {
-                    row.status = InboundEventStatus::FAILED;
-                    row.error = Some(error.clone());
-                }
-            }
-            Ok(())
-        }
-    }
 }
 
 /// Canonical payload hash: sha256 hex over the serde_json serialization. The SAME function must be
@@ -381,43 +242,6 @@ mod tests {
         assert_eq!(journal.sweep_stale_received(Duration::zero()).await.unwrap(), 1);
         let row = journal.by_message(id).await.unwrap().unwrap();
         assert_eq!(row.status, CommandJournalStatus::FAILED);
-    }
-
-    #[tokio::test]
-    async fn inbound_stage_dedupes_and_drains_in_order() {
-        let inbox = MemInboundEvents::default();
-        let mk = |ext: &str| InboundEventRow {
-            inbound_event_id: uuid::Uuid::new_v4(),
-            source: "stripe".into(),
-            external_id: ext.into(),
-            correlation_id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, ext.as_bytes()),
-            event_type: "PaymentCaptured".into(),
-            payload: json!({ "paymentIntentId": "pi_1" }),
-            status: InboundEventStatus::RECEIVED,
-            error: None,
-            received_at: Utc::now(),
-            delivered_at: None,
-        };
-
-        let first = mk("evt_1");
-        assert_eq!(inbox.stage(&first).await.unwrap(), StageOutcome::Staged);
-        assert_eq!(inbox.stage(&mk("evt_1")).await.unwrap(), StageOutcome::Duplicate);
-        assert_eq!(inbox.stage(&mk("evt_2")).await.unwrap(), StageOutcome::Staged);
-
-        let pending = inbox.pending(10).await.unwrap();
-        assert_eq!(pending.len(), 2);
-        assert_eq!(pending[0].external_id, "evt_1");
-
-        inbox.mark_delivered(first.inbound_event_id).await.unwrap();
-        let pending = inbox.pending(10).await.unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].external_id, "evt_2");
-
-        inbox
-            .mark_failed(pending[0].inbound_event_id, json!({ "detail": "boom" }))
-            .await
-            .unwrap();
-        assert!(inbox.pending(10).await.unwrap().is_empty());
     }
 
     #[test]

@@ -486,18 +486,6 @@ keys:
       production: "true"
       staging: "true"
 
-  RUN_INBOUND_DRAIN:
-    type: bool
-    scalar:
-      $ref: 'scalars.yaml#/ConfigBoolean'
-    default: true
-    gates: >
-      Inbound-events drain (ADR-20260720-015400) delivering adapter-staged facts through the write path,
-      plus the command_journal stale sweep. OFF, every webhook-staged fact accumulates undelivered.
-    deploy:
-      production: "true"
-      staging: "true"
-
   RUN_RETENTION_SWEEP:
     type: bool
     scalar:

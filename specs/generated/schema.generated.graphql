@@ -255,14 +255,6 @@ enum CommandChannel {
   INTERNAL
 }
 
-enum InboundEventStatus {
-  RECEIVED
-  DELIVERED
-  FAILED
-  IGNORED
-  DUPLICATE
-}
-
 enum InboundMessageKind {
   COMMAND
   EVENT

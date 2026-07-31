@@ -17,7 +17,6 @@ pub mod delivery_satisfaction;
 pub mod enum_sql;
 pub mod event_bus;
 pub mod event_store;
-pub mod inbound_events;
 pub mod mailbox_lanes;
 pub mod mailbox_store;
 pub mod order;
@@ -46,7 +45,6 @@ pub use delivery::PgDeliveryRepository;
 pub use delivery_satisfaction::PgDeliverySatisfactionRepository;
 pub use event_bus::{AppendedEvent, EventBus};
 pub use event_store::PgEventStore;
-pub use inbound_events::PgInboundEvents;
 pub use order::PgOrderRepository;
 pub use order_conversation::PgOrderConversationRepository;
 // The Postgres PM state stores are GENERATED from specs/database/tables/process_managers.yaml

@@ -11,7 +11,7 @@ use domain::generated::scalars::{
     CartStatus, CityAvailabilityStatus, CommandChannel, CommandJournalStatus, ComparisonBasis,
     CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus,
     DeliveryTimeliness, GbpLinkStatus,
-    InboundEventStatus, InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
+    InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
     RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
     RestaurantStatus, ServiceType, ThumbRating,
@@ -115,7 +115,6 @@ enum_text!(ReclamationResolution {
 });
 enum_text!(CommandJournalStatus { RECEIVED, SUCCEEDED, REJECTED, FAILED });
 enum_text!(CommandChannel { GRAPHQL, WORKER, INTERNAL });
-enum_text!(InboundEventStatus { RECEIVED, DELIVERED, FAILED, IGNORED, DUPLICATE });
 
 /// `to_text` through an `Option` (nullable enum column).
 pub fn opt_to_text<E: EnumText>(v: &Option<E>) -> Option<&'static str> {
@@ -183,8 +182,6 @@ mod tests {
         );
         assert_eq!(CommandChannel::INTERNAL.to_text(), "INTERNAL");
         assert_eq!(CommandChannel::from_text("WORKER").unwrap(), CommandChannel::WORKER);
-        assert_eq!(InboundEventStatus::DELIVERED.to_text(), "DELIVERED");
-        assert_eq!(InboundEventStatus::from_text("FAILED").unwrap(), InboundEventStatus::FAILED);
         assert!(RestaurantStatus::from_text("BOGUS").is_err());
     }
 }

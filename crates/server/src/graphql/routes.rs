@@ -87,48 +87,6 @@ async fn sirene_drain(
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "draining" }))).into_response()
 }
 
-/// Internal trigger for the inbound-events drain worker (ADR-20260720-015400) — same auth and
-/// fire-and-forget semantics as the SIRENE trigger above. The webhook nudge is the primary wake
-/// signal; this ping is the ops/backfill lever.
-pub fn inbound_internal_routes(
-    worker: Option<Arc<infrastructure::InboundEventsDrainWorker>>,
-) -> Router {
-    Router::new().route("/internal/inbound/drain", post(inbound_drain)).with_state(worker)
-}
-
-async fn inbound_drain(
-    State(worker): State<Option<Arc<infrastructure::InboundEventsDrainWorker>>>,
-    headers: HeaderMap,
-) -> Response {
-    let expected = match std::env::var("INTERNAL_TRIGGER_TOKEN") {
-        Ok(token) if !token.trim().is_empty() => token.trim().to_string(),
-        _ => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "internal trigger not configured (INTERNAL_TRIGGER_TOKEN unset)",
-            )
-                .into_response()
-        }
-    };
-    let presented = headers.get("x-internal-token").and_then(|v| v.to_str().ok());
-    if presented != Some(expected.as_str()) {
-        return (StatusCode::UNAUTHORIZED, "invalid or missing x-internal-token").into_response();
-    }
-    let Some(worker) = worker else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "inbound drain worker not available (no database configured)",
-        )
-            .into_response();
-    };
-    tokio::spawn(async move {
-        if let Some(summary) = worker.run_once().await {
-            tracing::info!(worker = "inbound_drain", trigger = "ping", summary = ?summary, "drain pass complete");
-        }
-    });
-    (StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "draining" }))).into_response()
-}
-
 async fn graphql_handler(
     State(schema): State<CaptainSchema>,
     Extension(auth): Extension<Arc<AuthContext>>,
