@@ -2,20 +2,22 @@ version: 4
 description: >
   WRITE-PATH JOURNALS (ADR-20260720-015300 / -015400) — a fifth table category alongside the event
   store, the projections, the seeded referential tables and the raw integration staging: durable
-  records of REQUESTS entering the system (command_journal) and of ADAPTED FACTS entering from
-  outside (inbound_events). Journals NEVER write domain_events (aggregates own the log via the
-  write-side Repository) and are never replayed as state — the event log stays the single source of
-  truth. command_journal backs the MutationAcceptance contract, write-path idempotency and the
-  operationStatus query/subscription; inbound_events is the adapters' handoff, drained by the
-  InboundEventsDrainWorker through the normal write path. Neither is projected nor a GraphQL
+  records of every write intent as an addressed actor message (inbound_messages, THE MAILBOX —
+  ADR-20260731-122500 "the mailbox is the only door": commands, adapted inbound facts and, later,
+  reminders) plus the residual command_journal (the PM legs' door until #242 Runtime D). Journals
+  NEVER write domain_events (aggregates own the log via the write-side Repository) and are never
+  replayed as state — the event log stays the single source of truth. command_journal backs the
+  pre-flip operationStatus history and PM-leg idempotency; the retired inbound_events table
+  (the drained adapters' handoff) is backfilled into the mailbox and DROPPED by the
+  20260731143000 migration. Neither is projected nor a GraphQL
   `reads` target — the operationStatus resolver serves the journal directly (transient Operation
   type, no View_*).
 
 inbound_messages:
   description: >
     THE ACTOR MAILBOX (ADR-20260730-231500, PROP-20260728-152752) — one row per message to one
-    actor, unifying command_journal (requests) and inbound_events (adapted facts) and adding
-    reminders (kind MESSAGE + scheduled_at): every write intent, whatever the channel, addressed
+    actor, unifying command_journal (requests) and the retired inbound_events (adapted facts) and
+    adding reminders (kind MESSAGE + scheduled_at): every write intent, whatever the channel, addressed
     by (actor_type, actor_id) with actor_type an actors.yaml actor and actor_id the instance
     (= stream id). `position` (one sequence) is the consumption/checkpoint axis — assigned at
     insert for immediate rows, at PROMOTION for scheduled ones, hence nullable. `partition` =
@@ -24,8 +26,9 @@ inbound_messages:
     append and this row's terminal flip commit in ONE transaction under the partition's
     ownership_version guard. operationStatus reads kind = COMMAND rows by message_id — the
     acceptance contract (ADR-20260720-015500) is unchanged. Events appended by a delivery carry
-    message_id as domain_events.cause_id. REALIZATION NOTE: lands with #242 slice 3 (worker +
-    migration); until then command_journal / inbound_events below remain the live tables.
+    message_id as domain_events.cause_id. REALIZATION NOTE: live since #242 Runtime C (workers +
+    migrations + the resolver flip); inbound_events is backfilled and dropped; command_journal
+    below remains the PM legs' door until Runtime D.
   retention:   # documentary — the executable policy is functions/sweep_retention.sql (#18 pattern)
     max_age: '90 days'
     applies_to: >
@@ -114,34 +117,3 @@ command_journal:
     received_at:    { type: timestamptz, index: true }
     completed_at:   { type: timestamptz, nullable: true, note: "Terminal transition time; null while RECEIVED." }
 
-inbound_events:
-  description: >
-    DEPRECATED — end-of-life once #242 slice 3 migrates it into inbound_messages
-    (ADR-20260730-231500); stays the LIVE inbound inbox until then.
-    Adapted inbound BUSINESS events (events.yaml vocabulary only — no external shapes) staged by
-    adapter ACLs after signature verification and raw external_* staging (integration_staging.yaml),
-    drained by the InboundEventsDrainWorker through the normal write path (Repository append; the
-    aggregate's fold-based dedupe stays authoritative, and its verdict is now PERSISTED rather than
-    collapsed — a no-change decision lands IGNORED and a redelivered fact lands DUPLICATE, per
-    ADR-20260728-011344 D6. Previously both were flattened into DELIVERED, so a sweep could not tell
-    work from no-work).
-    (source, external_id) is the delivery-level dedupe; inbound_event_id becomes
-    domain_events.cause_id for the appended fact.
-  retention:   # documentary — the executable policy is functions/sweep_retention.sql (ADR-20260721-025159)
-    max_age: '30 days'
-    applies_to: >
-      DELIVERED rows only, aged from delivered_at (the fact already lives forever in domain_events).
-      FAILED rows are kept until resolved and RECEIVED rows are pending work — neither is ever swept.
-  columns:
-    inbound_event_id: { type: uuid, pk: true, note: "UUIDv7 minted at staging — the causality link into domain_events.cause_id." }
-    source:           { type: text, index: true, note: "Owning adapter: 'stripe', 'avelo37' (others as they adopt the inbox, ADR-20260720-015400)." }
-    external_id:      { type: text, note: "Provider event id (e.g. Stripe 'evt_…'); UNIQUE with source (constraints below)." }
-    correlation_id:   { type: { $ref: 'scalars.yaml#/CorrelationId' }, index: true, note: "UUIDv5 of the provider event id — the established ACL convention; matches domain_events.correlation_id on delivery." }
-    event_type:       { type: text, index: true, note: "events.yaml key, e.g. 'PaymentCaptured'." }
-    payload:          { type: jsonb, note: "The serialized domain event — business vocabulary only (the ACL already translated)." }
-    status:           { type: { $ref: 'scalars.yaml#/InboundEventStatus' }, index: true, note: "RECEIVED -> DELIVERED | IGNORED | DUPLICATE | FAILED. GROUP BY this column IS the per-sweep report (created+updated / no-change / redelivered / failed)." }
-    error:            { type: jsonb, nullable: true, note: "Delivery failure detail; FAILED rows are retryable/inspectable." }
-    received_at:      { type: timestamptz, index: true }
-    delivered_at:     { type: timestamptz, nullable: true }
-  constraints:
-    - unique: [source, external_id]    # delivery-level dedupe: one row per provider event

@@ -1,0 +1,94 @@
+# ==============================================================================
+# Captain.Food — System UI Specification (Spec-Driven Server-Driven UI)
+# ------------------------------------------------------------------------------
+# The SYSTEM surface: internal operations screens for the platform team — audience role ADMIN only.
+# First screen: the ACTOR MAILBOX supervision page (#242 Runtime B, ADR-20260730-231500,
+# PROP-20260728-152752 §3.2 "the ops surface: the mailbox lane monitor") — one row per
+# (actor_type, partition) lane out of `mailbox_partitions` joined with the pending/scheduled
+# backlog in `inbound_messages`, served by the ADMIN-only `mailboxLanes` query. This refines
+# ADR-0037's impersonation-only stance exactly as CLAUDE.md anticipated ("a `system`/admin screen
+# set may follow"): supervision needs a first-class read surface, not an impersonated one.
+#
+# Same two-layer contract as every SDUI file (ADR-0033): layout here, data via the `resolvers`
+# allowlist $ref-bound to api.yaml. Strings live in the co-located sidecar
+# `system.translations.yaml` (ADR-20260722-101500). The SDUI component allowlist
+# (`component_registry`) is declared once in `restaurant_frontoffice.yaml`; this file only uses
+# kinds from that shared registry.
+# ==============================================================================
+
+version: 1
+spec_version: "1.0.0"
+app_id: system.captain.food
+app_name: "Captain.Food System"
+base_url: "https://system.captain.food"
+default_locale: en
+supported_locales: [en, fr]
+app_types: [web]   # ops tooling is web-only; no mobile shell planned
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATA LAYER — RESOLVERS (reads). ADMIN-only supervision reads.
+# ──────────────────────────────────────────────────────────────────────────────
+resolvers:
+  mailbox.lanes: { query: { $ref: 'api.yaml#/queries/mailboxLanes' } }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATA LAYER — ACTIONS. Read-only surface for now: navigation + refresh only. Lane
+# interventions (force-release a lease, requeue a FAILED message) are Runtime C+ work and
+# will arrive as spec'd mutations, never as raw SQL buttons.
+# ──────────────────────────────────────────────────────────────────────────────
+actions:
+  navigate: { kind: client }
+  refresh:  { kind: client, note: "Re-runs the screen's data_requirements; no mutation involved." }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SCREENS
+# ──────────────────────────────────────────────────────────────────────────────
+screens:
+
+  # SCREEN 1 — Actor mailbox lanes (supervision)
+  - id: mailbox_lanes
+    roles: [ADMIN]   # which UserTypes may see this screen (ADR-0037)
+    route: "/system/mailbox"
+    title: { $ref: 'system.translations.yaml#/mailbox.title' }
+    sdui: true
+    data_requirements: [mailbox.lanes]
+    components:
+      - { type: page_header, title: { $ref: 'system.translations.yaml#/mailbox.title' }, subtitle: { $ref: 'system.translations.yaml#/mailbox.subtitle' } }
+      - type: section
+        id: lanes
+        title: { $ref: 'system.translations.yaml#/mailbox.lanes' }
+        content:
+          - type: list
+            id: lane_list
+            items: "{{ mailbox_lanes }}"
+            empty_state: { icon: inbox, title: { $ref: 'system.translations.yaml#/mailbox.empty.title' }, body: { $ref: 'system.translations.yaml#/mailbox.empty.body' } }
+            item_components:
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.lane' },       value: "{{ item.actorType }} / {{ item.partition }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.owner' },      value: "{{ item.claimedBy }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.lease' },      value: "{{ item.leaseUntil }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.ownership' },  value: "{{ item.ownershipVersion }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.checkpoint' }, value: "{{ item.checkpoint }}" }
+              - { type: badge, label: { $ref: 'system.translations.yaml#/mailbox.pending' },   value: "{{ item.pending }}", variant_when: { warning: "item.pending > 0" } }
+              - { type: badge, label: { $ref: 'system.translations.yaml#/mailbox.scheduled' }, value: "{{ item.scheduled }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.oldest_pending' }, value: "{{ item.oldestPendingAt }}", visible_when: "item.oldestPendingAt != null" }
+      - type: section
+        id: reading_guide
+        title: { $ref: 'system.translations.yaml#/mailbox.guide.title' }
+        content:
+          - { type: text, value: { $ref: 'system.translations.yaml#/mailbox.guide.body' } }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PERFORMANCE & ACCESSIBILITY (contracts — ops surface, same floor as customer)
+# ──────────────────────────────────────────────────────────────────────────────
+performance:
+  target_lighthouse_mobile: 80
+  rendering_strategy: SSR_first
+  max_ttfb_ms: 800
+  max_fcp_ms: 2000
+  max_lcp_ms: 3000
+accessibility:
+  wcag_target: "AA"
+  requirements:
+    - "All interactive elements have visible focus rings"
+    - "Color contrast ratio >= 4.5:1 for body text"
+    - "Tables/lists readable by screen readers (labels on every value)"

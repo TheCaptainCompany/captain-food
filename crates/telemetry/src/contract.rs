@@ -86,4 +86,7 @@ pub mod journal_status {
 pub mod dispatch_outcome {
     pub const SPAWNED: &str = "spawned";
     pub const DUPLICATE_SKIPPED: &str = "duplicate_skipped";
+    /// The mailbox era (#242): the command was ENQUEUED on the actor mailbox — the partitioned
+    /// worker delivers it; nothing is spawned in the request path.
+    pub const ENQUEUED: &str = "enqueued";
 }

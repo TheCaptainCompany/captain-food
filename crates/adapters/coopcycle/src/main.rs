@@ -11,7 +11,7 @@ use std::time::Duration;
 use coopcycle_adapter::{
     routes, CoopCycleRegistry, CoopCycleWebhookIngestor, CoopCycleWebhookState, PgRawCoopCycleEvents,
 };
-use infrastructure::{PgCommandJournal, PgEventStore, PgInboundEvents};
+use infrastructure::persistence::mailbox_store::PgMailbox;
 
 #[tokio::main]
 async fn main() {
@@ -26,24 +26,10 @@ async fn main() {
         .acquire_timeout(Duration::from_secs(10))
         .connect_lazy(&url)
         .unwrap_or_else(|e| panic!("DATABASE_URL pool init failed: {e}"));
-    // Standalone deployment: mirror + stage on ingest, and run our OWN drain worker delivering staged
-    // facts through the normal write path.
-    let inbox = Arc::new(PgInboundEvents::new(pool.clone()));
-    let drain = Arc::new(infrastructure::InboundEventsDrainWorker::new(
-        inbox.clone(),
-        Arc::new(PgCommandJournal::new(pool.clone())),
-        Arc::new(PgEventStore::new(pool.clone())),
-    ));
-    tokio::spawn(drain.clone().run_loop());
-    let nudge_worker = drain.clone();
-    let ingestor = Arc::new(
-        CoopCycleWebhookIngestor::new(Arc::new(PgRawCoopCycleEvents::new(pool)), inbox).with_nudge(
-            Arc::new(move || {
-                let w = nudge_worker.clone();
-                tokio::spawn(async move { w.run_once().await });
-            }),
-        ),
-    );
+    // Standalone deployment (ADR-20260731-122500): mirror + ENQUEUE on the shared mailbox;
+    // the monolith's per-actor-type MailboxWorkers deliver (same database, lease-competed).
+    let mailbox = Arc::new(PgMailbox::new(pool.clone()));
+    let ingestor = Arc::new(CoopCycleWebhookIngestor::new(Arc::new(PgRawCoopCycleEvents::new(pool)), mailbox));
     let state = CoopCycleWebhookState { ingestor: Some(ingestor), registry: Arc::new(registry) };
 
     let addr = format!("0.0.0.0:{port}");

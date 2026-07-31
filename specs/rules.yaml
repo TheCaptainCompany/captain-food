@@ -202,6 +202,10 @@ RiderLifecycle:
 # --- Order conversations / messaging (#129) ---
 ConversationIdentityIsTheOrder:
   description: "A conversation is opened once per order (id = orderId); a second open is rejected, and posting a message before the conversation is opened is rejected (#129)."
+OnlyParticipantsWriteToAnAggregate:
+  description: "A write to an existing aggregate instance is accepted only from a principal the aggregate's own folded state names as a participant (or an explicitly exempt role) — enforced in the actor, against the fold, with zero projection lag (#235, PROP-20260728-135632)."
+AuthorRoleIsPinnedToThePrincipal:
+  description: "A payload field claiming a business role (e.g. a conversation message's authorRole) must match the verified acting principal — a customer can never forge a staff note (#235, requires.claims)."
 CustomerChatRequiresRestaurantOptIn:
   description: "A CUSTOMER may post to the order thread only when the restaurant has customer chat enabled for that order; otherwise the post is rejected (#129)."
 MessagesCarryVisibility:

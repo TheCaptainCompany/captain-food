@@ -763,6 +763,29 @@ ConversationNotFound:
     en: "No conversation exists for this order."
     fr: "Aucune conversation n'existe pour cette commande."
 
+NotAParticipant:
+  description: >
+    The acting principal is not a participant of the aggregate instance it tried to write to — the
+    aggregate's own folded state names its participants and the caller is not among them
+    (write-side per-instance authorization, #235 / PROP-20260728-135632 requires.acting). The
+    instance's existence is NOT disclosed beyond this rejection.
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "You are not a participant in this conversation."
+    fr: "Vous ne participez pas à cette conversation."
+
+RoleMismatch:
+  description: >
+    The role claimed in the payload does not match the verified acting principal — e.g. a CUSTOMER
+    posting authorRole RESTAURANT to forge a staff note (write-side anti-forgery, #235 /
+    PROP-20260728-135632 requires.claims).
+  context:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+  messages:
+    en: "The author role does not match your account."
+    fr: "Le rôle d'auteur ne correspond pas à votre compte."
+
 CustomerChatDisabled:
   description: >
     A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only

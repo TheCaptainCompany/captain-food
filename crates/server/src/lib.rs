@@ -46,7 +46,7 @@ use sqlx::{PgPool, Row};
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
-    DeliveryReadRepository, OrderReadRepository,
+    DeliveryReadRepository, MailboxLaneRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
     RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
     UberSplitPolicyReadRepository,
@@ -281,6 +281,17 @@ pub fn router() -> Router {
     // every command_journal transition here; operationStatusChanged streams it. Like the event bus,
     // constructed unconditionally so the schema always carries one.
     let operation_status_bus = infrastructure::OperationStatusBus::default();
+    // The enqueue→worker wake registry (one Notify per mailbox actor type): every in-process
+    // PgMailbox insert nudges the actor type's worker, cutting delivery latency from the
+    // heartbeat poll (~10s) to ~immediate. Registered up-front from the SAME generated table the
+    // workers spawn from.
+    let mailbox_nudges = {
+        let mut nudges = infrastructure::persistence::mailbox_store::MailboxNudges::default();
+        for (actor_type, _) in infrastructure::generated::command_router::ACTOR_MAILBOXES {
+            nudges.register(actor_type);
+        }
+        Arc::new(nudges)
+    };
     let mut read_deps: Option<ReadDeps> = None;
     // The host fallback's tenant lookup (#98): decides registered-vs-unclaimed for {slug} hosts.
     let mut tenant_lookup = hosts::TenantLookup(None);
@@ -312,7 +323,6 @@ pub fn router() -> Router {
         None
     });
     let mut hubrise_state = hubrise_adapter::HubRiseWebhookState::default();
-    let mut inbound_drain: Option<Arc<infrastructure::InboundEventsDrainWorker>> = None;
 
     match std::env::var("DATABASE_URL") {
         Ok(url) if !url.is_empty() => match PgPoolOptions::new()
@@ -365,6 +375,11 @@ pub fn router() -> Router {
                     Arc::new(PgReclamationRepository::new(pool.clone()));
                 let customer_credit: Arc<dyn CustomerCreditReadRepository> =
                     Arc::new(PgCustomerCreditRepository::new(pool.clone()));
+                let mailbox_lanes: Arc<dyn MailboxLaneRepository> = Arc::new(
+                    infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository::new(
+                        pool.clone(),
+                    ),
+                );
                 read_deps = Some(ReadDeps {
                     restaurants,
                     prospection,
@@ -382,6 +397,7 @@ pub fn router() -> Router {
                     delivery_partner_availabilities,
                     reclamations,
                     customer_credit,
+                    mailbox_lanes,
                 });
 
                 // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
@@ -432,6 +448,12 @@ pub fn router() -> Router {
                     // Acceptance-first dispatch (ADR-20260720-015300/-015500): the durable command
                     // journal + the journal-transition broadcast behind operationStatus(+Changed).
                     journal: Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
+                    // The actor mailbox (#242 flip): the aggregate-routed mutations enqueue here;
+                    // the partitioned workers spawned below deliver.
+                    mailbox: Arc::new(
+                        infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())
+                            .with_nudges(mailbox_nudges.clone()),
+                    ),
                     status_bus: operation_status_bus.clone(),
                     slug_reservations: Arc::new(
                         infrastructure::PgSlugReservationRepository::new(pool.clone()),
@@ -555,90 +577,189 @@ pub fn router() -> Router {
                 // table through the ACL into the ordinary write path. Always constructed (the
                 // /internal/sirene/drain ping needs it); the slow safety-net poll loop is gated by
                 // RUN_SIRENE_WORKER — default OFF since 2026-07-28 (paused, issue #220).
-                // Inbound-events drain worker (ADR-20260720-015400): delivers adapter-staged
-                // business events through the normal write path, and runs the command_journal
-                // stale-RECEIVED sweep (ADR-20260720-015300). Always constructed (the webhook nudge
-                // + /internal/inbound/drain need it); the safety-net poll loop is gated by
-                // RUN_INBOUND_DRAIN (default on) like the projector.
-                let drain = Arc::new(infrastructure::InboundEventsDrainWorker::new(
-                    Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
-                    Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
-                ));
-                inbound_drain = Some(drain.clone());
-                if config.run_inbound_drain {
-                    tokio::spawn(drain.clone().run_loop());
-                    tracing::info!(worker = "inbound_drain", running = true, toggle = "RUN_INBOUND_DRAIN", "worker running in-process");
-                } else {
-                    tracing::warn!(worker = "inbound_drain", running = false, toggle = "RUN_INBOUND_DRAIN", "poll loop NOT started -- webhook-staged facts accumulate undelivered (nudge trigger stays active)");
+                // The command_journal stale-RECEIVED sweep (ADR-20260720-015300) SURVIVES the
+                // drain worker's retirement (ADR-20260731-122500): the journal is still the PM
+                // legs' door until Runtime D, and a crashed spawned run must still flip to FAILED
+                // so operationStatus never reports a dead run as pending forever. Always-on with a
+                // DB, slow tick; retires WITH command_journal itself.
+                {
+                    let sweep_journal = infrastructure::PgCommandJournal::new(pool.clone());
+                    tokio::spawn(async move {
+                        use application::journal::CommandJournal as _;
+                        loop {
+                            match sweep_journal.sweep_stale_received(chrono::Duration::minutes(10)).await {
+                                Ok(0) => {}
+                                Ok(n) => tracing::warn!(worker = "journal_sweep", swept = n, "stale RECEIVED commands flipped to FAILED"),
+                                Err(e) => tracing::error!(worker = "journal_sweep", error = %e, "stale-command sweep failed"),
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                        }
+                    });
                 }
 
-                // Stripe webhook ingestor (ADR-20260720-015400 inbound event sourcing): verify →
-                // mirror the verbatim delivery into external_stripe_events → ACL → stage the adapted
-                // business event in inbound_events → ACK, nudging the drain worker. The HTTP endpoint
-                // (`POST /adapters/stripe/webhooks`) is mounted below with the other non-GraphQL routes.
-                let nudge_worker = drain.clone();
-                stripe_ingestor = Some(Arc::new(
-                    StripeWebhookIngestor::new(
-                        Arc::new(stripe_adapter::PgRawStripeEvents::new(pool.clone())),
-                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    )
-                    .with_nudge(Arc::new(move || {
-                        let w = nudge_worker.clone();
-                        tokio::spawn(async move { w.run_once().await });
-                    })),
-                ));
+                // THE MAILBOX WORKERS (#242 Runtime C3, PROP-20260728-152752): one per actor type
+                // with a declared mailbox — claim partition lanes, drain head-of-line, deliver
+                // through the generated command router, commit fenced. ALWAYS running when a DB is
+                // configured: the flipped resolvers only enqueue, so without these workers every
+                // aggregate-routed mutation would accept and then hang PENDING forever.
+                {
+                    let deps = infrastructure::generated::command_router::CommandDeps {
+                        store: Arc::new(PgEventStore::new(pool.clone())),
+                        restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
+                        slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
+                        ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
+                        probe: Arc::new(UnverifiedGbpOrderLinkProbe),
+                        prospection: Arc::new(PgProspectionRepository::new(pool.clone())),
+                        catalogs: Arc::new(PgCatalogRepository::new(pool.clone())),
+                        auth: infrastructure::generated::service_bindings::identity_service(
+                            || identity_service_impl(),
+                        )
+                        .expect("identity service binding (services.yaml)"),
+                        customers: Arc::new(PgCustomerRepository::new(pool.clone())),
+                        sessions: auth_sessions.clone(),
+                        payments: Arc::new(FailClosedPaymentGateway),
+                        pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(
+                            pool.clone(),
+                        )),
+                        refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(
+                            pool.clone(),
+                        )),
+                    };
+                    let handler = Arc::new(
+                        infrastructure::mailbox::MailboxCommandHandler::new(deps)
+                            .with_event_bus(event_bus.clone()),
+                    );
+                    let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(
+                        operation_status_bus.clone(),
+                    ));
+                    // Unique per PROCESS (pid alone collides across hosts; hostname is an env
+                    // read the configuration gate would demand a declaration for). Only
+                    // uniqueness matters: claimed_by is a fencing identity plus a diagnostic.
+                    let worker_id =
+                        format!("w-{}-{}", std::process::id(), &uuid::Uuid::new_v4().simple().to_string()[..8]);
+                    // ONE shutdown channel for every worker, flipped by the signal task below —
+                    // the SENDER MUST STAY ALIVE: a dropped sender cannot deliver a shutdown, and
+                    // (PR #270 review C1) the workers' graceful lane release would be dead code,
+                    // stalling every lane for a full lease on each deploy.
+                    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+                    tokio::spawn(async move {
+                        let ctrl_c = async {
+                            let _ = tokio::signal::ctrl_c().await;
+                        };
+                        #[cfg(unix)]
+                        let terminate = async {
+                            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                                Ok(mut sig) => {
+                                    sig.recv().await;
+                                }
+                                Err(_) => std::future::pending().await,
+                            }
+                        };
+                        #[cfg(not(unix))]
+                        let terminate = std::future::pending::<()>();
+                        tokio::select! {
+                            _ = ctrl_c => {}
+                            _ = terminate => {}
+                        }
+                        tracing::info!("mailbox: shutdown signal -- draining workers");
+                        let _ = shutdown_tx.send(true);
+                        // Hold the sender until the process ends: dropping it here would turn the
+                        // receivers' `changed()` into an instant wake again.
+                        std::future::pending::<()>().await;
+                    });
+                    for (actor_type, width) in
+                        infrastructure::generated::command_router::ACTOR_MAILBOXES
+                    {
+                        let worker = Arc::new(
+                            {
+                                let mut w = actor_runtime::MailboxWorker::new(
+                                    pool.clone(),
+                                    worker_id.clone(),
+                                    *actor_type,
+                                    actor_runtime::WorkerConfig::default(),
+                                    handler.clone(),
+                                )
+                                .with_observer(observer.clone());
+                                if let Some(nudge) = mailbox_nudges.get(actor_type) {
+                                    w = w.with_nudge(nudge);
+                                }
+                                w
+                            },
+                        );
+                        let width = *width as i16;
+                        let rx = shutdown_rx.clone();
+                        // SUPERVISED: the loop itself retries transient errors, but a handler
+                        // panic unwinds through the task — the supervisor respawns it (with
+                        // backoff) so one poisoned delivery cannot permanently end an actor
+                        // type's consumption.
+                        tokio::spawn(async move {
+                            if let Err(e) = worker.seed(width).await {
+                                tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %e, "mailbox: seed failed -- worker not started");
+                                return;
+                            }
+                            loop {
+                                let run = {
+                                    let w = worker.clone();
+                                    let rx = rx.clone();
+                                    tokio::spawn(async move { w.run(rx).await })
+                                };
+                                match run.await {
+                                    Ok(Ok(())) => break, // graceful shutdown
+                                    Ok(Err(e)) => {
+                                        tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %e, "mailbox: worker loop exited -- respawning");
+                                    }
+                                    Err(join_err) => {
+                                        tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %join_err, "mailbox: worker loop panicked -- respawning");
+                                    }
+                                }
+                                if *rx.borrow() {
+                                    break;
+                                }
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            }
+                        });
+                    }
+                    tracing::info!(
+                        workers = infrastructure::generated::command_router::ACTOR_MAILBOXES.len(),
+                        "mailbox: per-actor-type workers running in-process"
+                    );
+                }
+
+                // Stripe webhook ingestor (ADR-20260731-122500 — the mailbox is the only door):
+                // verify → mirror the verbatim delivery into external_stripe_events → ACL → ENQUEUE
+                // the adapted fact on its Payment lane → ACK; the mailbox workers above deliver.
+                // Mounted at `POST /adapters/stripe/webhooks` below.
+                stripe_ingestor = Some(Arc::new(StripeWebhookIngestor::new(
+                    Arc::new(stripe_adapter::PgRawStripeEvents::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()).with_nudges(mailbox_nudges.clone())),
+                )));
 
                 // Avelo37 delivery-partner webhook ingestor (issue #28, same two-layer inbox as
-                // Stripe): verify → mirror the verbatim delivery into external_avelo37_events → ACL
-                // → stage the adapted DeliveryAcceptedByPartner/RejectedByPartner/StatusUpdated fact
-                // in inbound_events → ACK, nudging the drain worker (which now routes delivery facts
-                // onto the DeliveryJob stream). Mounted at `POST /adapters/avelo37/webhooks` below.
-                let nudge_worker = drain.clone();
-                avelo37_ingestor = Some(Arc::new(
-                    Avelo37WebhookIngestor::new(
-                        Arc::new(avelo37_adapter::PgRawAvelo37Events::new(pool.clone())),
-                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    )
-                    .with_nudge(Arc::new(move || {
-                        let w = nudge_worker.clone();
-                        tokio::spawn(async move { w.run_once().await });
-                    })),
-                ));
+                // Stripe): verify → mirror → ACL → ENQUEUE the adapted delivery fact on its
+                // DeliveryJob lane → ACK. Mounted at `POST /adapters/avelo37/webhooks` below.
+                avelo37_ingestor = Some(Arc::new(Avelo37WebhookIngestor::new(
+                    Arc::new(avelo37_adapter::PgRawAvelo37Events::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()).with_nudges(mailbox_nudges.clone())),
+                )));
 
                 // CoopCycle delivery-partner webhook ingestor (issue #58, same two-layer inbox): the
                 // federation twist is that the verified webhook arrives per-instance at
                 // `POST /adapters/coopcycle/{instance}/webhooks` and is namespaced by instance; the
-                // ingestor itself is provider-shaped like Avelo37's (mirror → ACL → inbound_events →
-                // drain routes onto the DeliveryJob stream). Mounted below with the registry (secrets).
-                let nudge_worker = drain.clone();
-                coopcycle_ingestor = Some(Arc::new(
-                    CoopCycleWebhookIngestor::new(
-                        Arc::new(coopcycle_adapter::PgRawCoopCycleEvents::new(pool.clone())),
-                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    )
-                    .with_nudge(Arc::new(move || {
-                        let w = nudge_worker.clone();
-                        tokio::spawn(async move { w.run_once().await });
-                    })),
-                ));
+                // ingestor itself is provider-shaped like Avelo37's (mirror → ACL → mailbox lane).
+                // Mounted below with the registry (secrets).
+                coopcycle_ingestor = Some(Arc::new(CoopCycleWebhookIngestor::new(
+                    Arc::new(coopcycle_adapter::PgRawCoopCycleEvents::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()).with_nudges(mailbox_nudges.clone())),
+                )));
 
                 // Uber Direct delivery-partner webhook ingestor (issue #57, same two-layer inbox as
-                // Avelo37/CoopCycle): verify the X-Uber-Signature → mirror the verbatim delivery into
-                // external_uber_direct_events → ACL → stage the adapted DeliveryAcceptedByPartner/
-                // RejectedByPartner/StatusUpdated fact in inbound_events → ACK, nudging the drain
-                // worker. Mounted at `POST /adapters/uber-direct/webhooks` below with the signing secret.
-                let nudge_worker = drain.clone();
-                uber_direct_ingestor = Some(Arc::new(
-                    UberDirectWebhookIngestor::new(
-                        Arc::new(uber_direct_adapter::PgRawUberDirectEvents::new(pool.clone())),
-                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    )
-                    .with_nudge(Arc::new(move || {
-                        let w = nudge_worker.clone();
-                        tokio::spawn(async move { w.run_once().await });
-                    })),
-                ));
+                // Avelo37/CoopCycle): verify the X-Uber-Signature → mirror → ACL → ENQUEUE the
+                // adapted delivery fact on its DeliveryJob lane → ACK. Mounted at
+                // `POST /adapters/uber-direct/webhooks` below with the signing secret.
+                uber_direct_ingestor = Some(Arc::new(UberDirectWebhookIngestor::new(
+                    Arc::new(uber_direct_adapter::PgRawUberDirectEvents::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()).with_nudges(mailbox_nudges.clone())),
+                )));
 
                 // HubRise wiring (issue #20): the raw mirror (external_hubrise_callbacks), the
                 // enrichment, AND the connect flow all need only the database — the pull token is
@@ -649,22 +770,22 @@ pub fn router() -> Router {
                 hubrise_state.raw =
                     Some(Arc::new(hubrise_adapter::PgRawHubRiseCallbacks::new(pool.clone())));
                 {
-                    let hubrise_store =
-                        Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone()));
-                    let hubrise_journal = Arc::new(infrastructure::PgCommandJournal::new(pool.clone()));
+                    let hubrise_mailbox = Arc::new(
+                        infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())
+                            .with_nudges(mailbox_nudges.clone()),
+                    );
                     let hubrise_connections =
                         Arc::new(hubrise_adapter::PgHubRiseConnections::new(pool.clone()));
-                    // Enricher/connect sends journal on the WORKER channel (ADR-20260720-015300, #15):
-                    // callback redeliveries dedupe on command_journal instead of double-applying.
+                    // Enricher/connect sends are fire-and-forget mailbox enqueues on the WORKER
+                    // channel (ADR-20260731-122500): callback redeliveries dedupe on the mailbox pk
+                    // instead of double-applying; the mailbox worker delivers.
                     hubrise_state.enricher = Some(Arc::new(hubrise_adapter::HubRiseEnricher::new(
-                        hubrise_store.clone(),
-                        hubrise_journal.clone(),
+                        hubrise_mailbox.clone(),
                         hubrise_connections.clone(),
                         hubrise_adapter::api::HubRiseApi::from_env(),
                     )));
                     hubrise_state.connect = Some(Arc::new(hubrise_adapter::HubRiseConnectFlow::new(
-                        hubrise_store,
-                        hubrise_journal,
+                        hubrise_mailbox,
                         hubrise_restaurants,
                         hubrise_connections,
                         hubrise_adapter::connect::HttpHubRiseConnectGateway {
@@ -757,7 +878,6 @@ pub fn router() -> Router {
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))
         // Internal trigger (ADR-20260720-015400): ops ping to wake the inbound-events drain worker.
-        .merge(graphql::routes::inbound_internal_routes(inbound_drain))
         // Partner webhook adapters (ADR-20260718-213352): self-contained crates under crates/adapters/*,
         // each mountable here (monolith) or deployable as its own web service. `POST /adapters/stripe/webhooks`
         // (signature-verified inbound payment facts), `POST /adapters/avelo37/webhooks` (signature-verified
@@ -979,7 +1099,7 @@ mod tests {
             assert!(parse_flag(Some(on), "RUN_SIRENE_WORKER", false), "{on:?} should enable");
         }
         for off in ["false", "FALSE", " False ", "\"false\"", "0", "no", "OFF"] {
-            assert!(!parse_flag(Some(off), "RUN_INBOUND_DRAIN", true), "{off:?} should disable");
+            assert!(!parse_flag(Some(off), "RUN_PROJECTOR", true), "{off:?} should disable");
         }
     }
 

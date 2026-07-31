@@ -15,6 +15,13 @@ pub struct Actor {
     pub user_id: uuid::Uuid,
     /// `UserType` TEXT value, stored verbatim (ADR-20260728).
     pub user_type: String,
+    /// The RESOLVED domain identity of the acting principal (#235 consequence B,
+    /// PROP-20260728-135632): for a CUSTOMER, the CustomerId resolved from the auth subject via
+    /// `by_auth_ref` at the edge — the value `requires.acting` compares against the aggregate's
+    /// folded participants. `None` for roles whose bridge has not landed (RESTAURANT/RIDER — #144)
+    /// and for system/worker actors. NEVER the raw auth subject: those are different value spaces,
+    /// and comparing them would silently always deny.
+    pub domain_id: Option<uuid::Uuid>,
     pub correlation_id: uuid::Uuid,
     pub cause_id: Option<uuid::Uuid>,
 }

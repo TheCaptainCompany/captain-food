@@ -10,6 +10,7 @@
 
 pub mod generated;
 pub mod integrations;
+pub mod mailbox;
 pub mod persistence;
 pub mod process_manager;
 pub mod projection;
@@ -20,7 +21,6 @@ pub use integrations::payments::FailClosedPaymentGateway;
 pub use integrations::ovh_sms::OvhSmsClient;
 pub use integrations::supabase_sms_hook;
 pub use integrations::supabase_auth::{FailClosedIdentityService, SupabaseIdentityService};
-pub use integrations::inbound_drain_worker::{InboundDrainSummary, InboundEventsDrainWorker};
 pub use integrations::delivery_gateway::CompositeDeliveryGateway;
 pub use integrations::delivery_offer_timeout_worker::DeliveryOfferTimeoutWorker;
 pub use integrations::retention_sweep_worker::{RetentionSweepSummary, RetentionSweepWorker};
@@ -30,7 +30,7 @@ pub use persistence::{
     PgAuthSessionStore, PgCatalogRepository, PgCommandJournal, PgCustomerCreditRepository,
     PgCustomerRepository,
     PgDeliveryPartnerAvailabilityRepository, PgDeliveryRepository, PgDeliverySatisfactionRepository,
-    PgEventStore, PgInboundEvents, PgOrderConversationRepository, PgOrderRepository,
+    PgEventStore, PgOrderConversationRepository, PgOrderRepository,
     PgPricingPolicyRepository,
     PgProspectionRepository, PgReclamationRepository, PgRefundQueueRepository,
     PgRestaurantRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,

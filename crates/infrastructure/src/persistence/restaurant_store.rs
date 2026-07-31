@@ -14,7 +14,7 @@ use domain::generated::scalars::{
 use domain::generated::scalars::CurrencyCode;
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use super::db_err;
 use super::enum_sql::{opt_from_text, opt_to_text, EnumText};
@@ -89,14 +89,14 @@ pub(crate) fn decode(row: &PgRow) -> Result<RestaurantRow, DomainError> {
 }
 
 /// Load the current projected state for one restaurant, or `None` before its creation event.
-pub async fn load(pool: &PgPool, id: RestaurantId) -> Result<Option<RestaurantRow>, DomainError> {
+pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: RestaurantId) -> Result<Option<RestaurantRow>, DomainError> {
     let sql = format!("SELECT {COLUMNS} FROM restaurant WHERE restaurant_id = $1");
-    let row = sqlx::query(&sql).bind(id.0).fetch_optional(pool).await.map_err(db_err)?;
+    let row = sqlx::query(&sql).bind(id.0).fetch_optional(exec).await.map_err(db_err)?;
     row.as_ref().map(decode).transpose()
 }
 
 /// Write the folded row: `INSERT … ON CONFLICT (restaurant_id) DO UPDATE` over all 27 columns.
-pub async fn upsert(pool: &PgPool, row: &RestaurantRow) -> Result<(), DomainError> {
+pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &RestaurantRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO restaurant ({COLUMNS}) VALUES \
          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) \
@@ -156,7 +156,7 @@ pub async fn upsert(pool: &PgPool, row: &RestaurantRow) -> Result<(), DomainErro
         .bind(row.preparation_time_minutes.map(|v| v as i32))
         .bind(row.created_at)
         .bind(row.updated_at)
-        .execute(pool)
+        .execute(exec)
         .await
         .map_err(db_err)?;
     Ok(())

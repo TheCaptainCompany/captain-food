@@ -10,7 +10,7 @@ use application::queries::CustomerCreditBalanceRow;
 use domain::generated::scalars::{CurrencyCode, CustomerId, MoneyCents};
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use super::db_err;
 
@@ -29,14 +29,14 @@ pub(crate) fn decode(row: &PgRow) -> Result<CustomerCreditBalanceRow, DomainErro
 }
 
 /// Load the current projected balance for one customer, or `None` before their first CustomerCreditGranted.
-pub async fn load(pool: &PgPool, id: CustomerId) -> Result<Option<CustomerCreditBalanceRow>, DomainError> {
+pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: CustomerId) -> Result<Option<CustomerCreditBalanceRow>, DomainError> {
     let sql = format!("SELECT {COLUMNS} FROM customercreditbalance WHERE customer_id = $1");
-    let row = sqlx::query(&sql).bind(id.0).fetch_optional(pool).await.map_err(db_err)?;
+    let row = sqlx::query(&sql).bind(id.0).fetch_optional(exec).await.map_err(db_err)?;
     row.as_ref().map(decode).transpose()
 }
 
 /// Write the folded row: `INSERT … ON CONFLICT (customer_id) DO UPDATE` over the computed columns.
-pub async fn upsert(pool: &PgPool, row: &CustomerCreditBalanceRow) -> Result<(), DomainError> {
+pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &CustomerCreditBalanceRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO customercreditbalance ({COLUMNS}) VALUES ($1,$2,$3,$4,$5) \
          ON CONFLICT (customer_id) DO UPDATE SET \
@@ -51,7 +51,7 @@ pub async fn upsert(pool: &PgPool, row: &CustomerCreditBalanceRow) -> Result<(),
         .bind(row.currency.0.clone())
         .bind(row.created_at)
         .bind(row.updated_at)
-        .execute(pool)
+        .execute(exec)
         .await
         .map_err(db_err)?;
     Ok(())

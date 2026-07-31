@@ -133,6 +133,7 @@ async fn sirene_mapped_command_flows_through_the_write_path_idempotently() {
     let actor = Actor {
         user_id: sirene_system_user_id(),
         user_type: "EXTERNAL".to_string(),
+        domain_id: None,
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     };

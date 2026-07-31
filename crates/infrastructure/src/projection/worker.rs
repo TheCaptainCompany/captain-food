@@ -48,10 +48,13 @@ use crate::persistence::{
 use crate::projection::ProjectionStatus;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(1500);
-// NOTE: the drain fetches ALL pending events per tick (no LIMIT) and loops, so there is no
-// batch cap. If projection appears stuck below the event count, the cause is the app being idle
-// (Render free-tier spin-down pauses the in-process worker after ~15 min) — keep it warm with a
-// periodic /ping — or, historically, a poison event that wedged the loop (now log-skipped below).
+/// Events folded per BATCH TRANSACTION (PROP-20260730-230803: "process a group of messages in
+/// memory then commit the changes to the database in one transaction for the batch"). Overridable
+/// via `PROJECTION_BATCH_SIZE` (specs/configuration.yaml) and per-instance for tests.
+const DEFAULT_BATCH_SIZE: i64 = 500;
+// If projection appears stuck below the event count, the cause is the app being idle (Render
+// free-tier spin-down pauses the in-process worker after ~15 min) — keep it warm with a periodic
+// /ping — or, historically, a poison event that wedged the loop (now log-skipped below).
 
 /// One materialized read model: resolves the aggregate id from the envelope, loads the current row via
 /// its store, folds the event through its generated `project_*` dispatch + hand-written `…Compute` impl,
@@ -86,47 +89,50 @@ impl ReadModelProjector {
     /// `multiplicity: ">= 1"` for this span, i.e. one per projection touched, and the group for an
     /// `Order-` event fans out to several projectors. A batch-level span would collapse all of them
     /// into one and lose which read model was slow or failing — the only thing the span is for.
-    async fn apply(&self, pool: &PgPool, env: &Envelope) -> Result<(), DomainError> {
+    async fn apply(&self, conn: &mut sqlx::PgConnection, env: &Envelope) -> Result<(), DomainError> {
         let span = telemetry::spans::event_consume_projection(&self.projection_name());
-        self.apply_inner(pool, env).instrument(span).await
+        self.apply_inner(conn, env).instrument(span).await
     }
 
-    async fn apply_inner(&self, pool: &PgPool, env: &Envelope) -> Result<(), DomainError> {
+    /// Runs on the BATCH TRANSACTION's connection: loads see the batch's own uncommitted upserts
+    /// (read-your-writes within a batch — event N+1 for a row folds over event N's result), and
+    /// every upsert commits (or rolls back) with the batch checkpoint.
+    async fn apply_inner(&self, conn: &mut sqlx::PgConnection, env: &Envelope) -> Result<(), DomainError> {
         match self {
             Self::Restaurant => {
                 let id = RestaurantId(aggregate_uuid_of(env, "Restaurant-", "restaurantId")?);
-                let state = restaurant_store::load(pool, id).await?;
+                let state = restaurant_store::load(&mut *conn, id).await?;
                 if let Some(next) = project_restaurant(&RestaurantProjector, state, env) {
-                    restaurant_store::upsert(pool, &next).await?;
+                    restaurant_store::upsert(&mut *conn, &next).await?;
                 }
             }
             Self::ProspectionPipeline => {
                 let id = RestaurantId(aggregate_uuid_of(env, "Restaurant-", "restaurantId")?);
-                let state = prospection_store::load(pool, id).await?;
+                let state = prospection_store::load(&mut *conn, id).await?;
                 if let Some(next) = project_prospection_pipeline(&ProspectionPipelineProjector, state, env)
                 {
-                    prospection_store::upsert(pool, &next).await?;
+                    prospection_store::upsert(&mut *conn, &next).await?;
                 }
             }
             Self::Customer => {
                 let id = CustomerId(aggregate_uuid_of(env, "Customer-", "customerId")?);
-                let state = customer_store::load(pool, id).await?;
+                let state = customer_store::load(&mut *conn, id).await?;
                 if let Some(next) = project_customer(&CustomerProjector, state, env) {
-                    customer_store::upsert(pool, &next).await?;
+                    customer_store::upsert(&mut *conn, &next).await?;
                 }
             }
             Self::Catalog => {
                 let id = CatalogId(aggregate_uuid_of(env, "Catalog-", "catalogId")?);
-                let state = catalog_store::load(pool, id).await?;
+                let state = catalog_store::load(&mut *conn, id).await?;
                 if let Some(next) = project_catalog(&CatalogProjector, state, env) {
-                    catalog_store::upsert(pool, &next).await?;
+                    catalog_store::upsert(&mut *conn, &next).await?;
                 }
             }
             Self::Cart => {
                 let id = CartId(aggregate_uuid_of(env, "Cart-", "cartId")?);
-                let state = cart_store::load(pool, id).await?;
+                let state = cart_store::load(&mut *conn, id).await?;
                 if let Some(next) = project_cart(&CartProjector, state, env) {
-                    cart_store::upsert(pool, &next).await?;
+                    cart_store::upsert(&mut *conn, &next).await?;
                 }
             }
             Self::OrderTracking => {
@@ -151,9 +157,9 @@ impl ReadModelProjector {
                     }
                 };
                 let id = OrderId(uuid);
-                let state = order_tracking_store::load(pool, id).await?;
+                let state = order_tracking_store::load(&mut *conn, id).await?;
                 if let Some(next) = project_order_tracking(&OrderTrackingProjector, state, env) {
-                    order_tracking_store::upsert(pool, &next).await?;
+                    order_tracking_store::upsert(&mut *conn, &next).await?;
                 }
             }
             Self::OrderConversation => {
@@ -181,9 +187,9 @@ impl ReadModelProjector {
                     }
                 };
                 let id = OrderId(uuid);
-                let state = order_conversation_store::load(pool, id).await?;
+                let state = order_conversation_store::load(&mut *conn, id).await?;
                 if let Some(next) = project_order_conversation(&OrderConversationProjector, state, env) {
-                    order_conversation_store::upsert(pool, &next).await?;
+                    order_conversation_store::upsert(&mut *conn, &next).await?;
                 }
             }
             Self::SlugAlias => {
@@ -193,20 +199,20 @@ impl ReadModelProjector {
                     DomainEvent::RestaurantSlugReconfigured(e) => e.previous_slug.clone(),
                     _ => return Ok(()),
                 };
-                let state = slug_alias_store::load(pool, previous_slug).await?;
+                let state = slug_alias_store::load(&mut *conn, previous_slug).await?;
                 if let Some(next) = project_slug_alias(&SlugAliasProjector, state, env) {
-                    slug_alias_store::upsert(pool, &next).await?;
+                    slug_alias_store::upsert(&mut *conn, &next).await?;
                 }
             }
             Self::CustomerCreditBalance => {
                 // Single-stream: the ledger lives on `CustomerCredit-{customerId}`; both fed events
                 // carry customerId, so the row key resolves from the stream uuid (payload fallback).
                 let id = CustomerId(aggregate_uuid_of(env, "CustomerCredit-", "customerId")?);
-                let state = customer_credit_balance_store::load(pool, id).await?;
+                let state = customer_credit_balance_store::load(&mut *conn, id).await?;
                 if let Some(next) =
                     project_customer_credit_balance(&CustomerCreditBalanceProjector, state, env)
                 {
-                    customer_credit_balance_store::upsert(pool, &next).await?;
+                    customer_credit_balance_store::upsert(&mut *conn, &next).await?;
                 }
             }
         }
@@ -291,11 +297,24 @@ const REGISTRY: &[ProjectorGroup] = &[
 pub struct ProjectionWorker {
     pool: PgPool,
     status: Arc<Mutex<ProjectionStatus>>,
+    /// Events per batch transaction — `PROJECTION_BATCH_SIZE` (declared, specs/configuration.yaml).
+    batch_size: i64,
 }
 
 impl ProjectionWorker {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool, status: Arc::new(Mutex::new(ProjectionStatus::default())) }
+        let batch_size = std::env::var("PROJECTION_BATCH_SIZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(DEFAULT_BATCH_SIZE);
+        Self { pool, status: Arc::new(Mutex::new(ProjectionStatus::default())), batch_size }
+    }
+
+    /// Test/tuning override of the per-transaction batch bound.
+    pub fn with_batch_size(mut self, batch_size: i64) -> Self {
+        self.batch_size = batch_size.max(1);
+        self
     }
 
     /// Shared status handle — the server reads this for its `/projector` health endpoint.
@@ -357,10 +376,15 @@ impl ProjectionWorker {
         Ok((head, head))
     }
 
-    /// Drain one group's pending slice, folding each event into every read model the group feeds and
-    /// committing the group's checkpoint after each event.
+    /// Drain one group's pending slice in BATCH TRANSACTIONS (PROP-20260730-230803): each batch
+    /// (`batch_size`-bounded scan, global `position` order) folds in one `BEGIN … COMMIT` carrying
+    /// every upsert AND the checkpoint advance — the batch lands whole or not at all, so a crash
+    /// mid-batch replays the whole batch (idempotent folds) instead of leaving rows ahead of the
+    /// checkpoint. Loads run on the same transaction, so within a batch the fold reads its own
+    /// uncommitted writes (the unit-of-work property; the generated identity map — load each row
+    /// ONCE per batch — is the #267 follow-up, an optimization not a correctness change).
     async fn drain_group(&self, group: &ProjectorGroup) -> Result<(), DomainError> {
-        let checkpoint: i64 =
+        let mut checkpoint: i64 =
             sqlx::query_scalar("SELECT position FROM projection_checkpoint WHERE projector = $1")
                 .bind(group.checkpoint)
                 .fetch_optional(&self.pool)
@@ -370,46 +394,87 @@ impl ProjectionWorker {
 
         let patterns: Vec<String> =
             group.stream_prefixes.iter().map(|prefix| format!("{prefix}%")).collect();
-        let pending = sqlx::query(
-            "SELECT position, stream_name, event_type, payload, occurred_at FROM domain_events \
-             WHERE position > $1 AND stream_name LIKE ANY($2) ORDER BY position",
-        )
-        .bind(checkpoint)
-        .bind(&patterns)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(db_err)?;
-
-        for record in pending {
-            let position: i64 = record.try_get("position").map_err(db_err)?;
-            // A per-event failure (unparseable payload, fold/upsert error) is LOGGED and SKIPPED rather
-            // than wedging the whole group: with the old `?` a single poison event re-failed every tick
-            // and halted ALL further projection (one bad SIRENE record could freeze the other ~800). The
-            // checkpoint still advances so the pipeline makes progress; the event stays in domain_events
-            // for a future full reprojection. A failure committing the checkpoint itself DOES propagate —
-            // that's a transient DB error worth retrying next tick, not a poison record.
-            if let Err(e) = self.apply_record(group, &record).await {
-                let event_type: String = record.try_get("event_type").unwrap_or_default();
-                // A skipped event means the read model is now permanently behind the log for this
-                // record until a full reprojection. That is a deliberate liveness choice, not a
-                // non-event -- so it is an ERROR, and it names the position needed to replay it.
-                tracing::error!(
-                    projection_group = group.checkpoint,
-                    position,
-                    event_type = %event_type,
-                    error = %e,
-                    "event skipped -- read model is behind the log at this position until reprojection"
-                );
+        loop {
+            let pending = sqlx::query(
+                "SELECT position, stream_name, event_type, payload, occurred_at FROM domain_events \
+                 WHERE position > $1 AND stream_name LIKE ANY($2) ORDER BY position LIMIT $3",
+            )
+            .bind(checkpoint)
+            .bind(&patterns)
+            .bind(self.batch_size)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_err)?;
+            if pending.is_empty() {
+                return Ok(());
             }
-            self.commit_checkpoint(group.checkpoint, position).await?;
+            let batch_len = pending.len() as i64;
+
+            let mut tx = self.pool.begin().await.map_err(db_err)?;
+            let mut last_position = checkpoint;
+            for record in &pending {
+                let position: i64 = record.try_get("position").map_err(db_err)?;
+                // A per-event failure (unparseable payload, fold/upsert error, PANIC) is LOGGED and
+                // SKIPPED rather than wedging the whole group: with the old `?` a single poison event
+                // re-failed every tick and halted ALL further projection. The batch (and with it the
+                // checkpoint) still advances; the event stays in domain_events for a future full
+                // reprojection. A failure on the batch commit itself DOES propagate — that's a
+                // transient DB error worth retrying next tick, not a poison record.
+                // Each event folds inside a SAVEPOINT (a nested sqlx transaction): a SQL-level
+                // failure (constraint violation, cast error) aborts ONLY the savepoint, not the
+                // batch — without it, PostgreSQL poisons the whole batch transaction on the first
+                // failed statement and every later event (and the checkpoint) would fail with
+                // "current transaction is aborted", turning one poison record into a wedge again.
+                let applied = match sqlx::Acquire::begin(&mut *tx).await {
+                    Ok(mut sp) => match self.apply_record(&mut sp, group, record).await {
+                        Ok(()) => sp.commit().await.map_err(db_err),
+                        Err(e) => {
+                            let _ = sp.rollback().await;
+                            Err(e)
+                        }
+                    },
+                    Err(e) => Err(db_err(e)),
+                };
+                if let Err(e) = applied {
+                    let event_type: String = record.try_get("event_type").unwrap_or_default();
+                    // A skipped event means the read model is now permanently behind the log for this
+                    // record until a full reprojection. That is a deliberate liveness choice, not a
+                    // non-event -- so it is an ERROR, and it names the position needed to replay it.
+                    tracing::error!(
+                        projection_group = group.checkpoint,
+                        position,
+                        event_type = %event_type,
+                        error = %e,
+                        "event skipped -- read model is behind the log at this position until reprojection"
+                    );
+                }
+                last_position = position;
+            }
+            // The checkpoint advance rides the SAME transaction as the batch's upserts — the
+            // unit-of-work boundary.
+            sqlx::query(
+                "INSERT INTO projection_checkpoint (projector, position, updated_at) VALUES ($1, $2, now()) \
+                 ON CONFLICT (projector) DO UPDATE SET position = EXCLUDED.position, updated_at = now()",
+            )
+            .bind(group.checkpoint)
+            .bind(last_position)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+            tx.commit().await.map_err(db_err)?;
+            checkpoint = last_position;
+            if batch_len < self.batch_size {
+                return Ok(());
+            }
         }
-        Ok(())
     }
 
-    /// Fold one `domain_events` row into every read model the group feeds. Returns a per-event error so
-    /// the caller can log-and-skip a poison record without halting the group.
+    /// Fold one `domain_events` row into every read model the group feeds, ON the batch
+    /// transaction. Returns a per-event error so the caller can log-and-skip a poison record
+    /// without halting the group.
     async fn apply_record(
         &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         group: &ProjectorGroup,
         record: &sqlx::postgres::PgRow,
     ) -> Result<(), DomainError> {
@@ -427,40 +492,31 @@ impl ProjectionWorker {
         .map_err(|e| db_err(format!("position {position} ({event_type}): {e}")))?;
 
         let env = Envelope { stream_name, position, occurred_at, event };
-        // Spawned so a PANIC inside a fold degrades to a per-event error the caller log-skips —
-        // an unwinding panic would otherwise kill the whole worker task and freeze projection at
-        // this position forever (the production refold wedge: a legacy payload hitting a panicking
-        // accessor on every boot). The JoinError carries the panic; checkpointing then proceeds.
-        let pool = self.pool.clone();
-        let projectors = group.projectors;
-        let spawned_env = env.clone();
-        match tokio::spawn(async move {
-            for projector in projectors {
-                projector.apply(&pool, &spawned_env).await?;
+        // catch_unwind (not tokio::spawn — a spawned task cannot borrow the batch transaction) so
+        // a PANIC inside a fold degrades to a per-event error the caller log-skips: an unwinding
+        // panic would otherwise kill the tick and freeze projection at this position forever (the
+        // production refold wedge: a legacy payload hitting a panicking accessor on every boot).
+        // AssertUnwindSafe is sound here: on a caught panic the whole batch transaction is either
+        // continued (this event skipped) or rolled back — no state written by the panicking fold
+        // survives outside the transaction.
+        use futures::FutureExt as _;
+        let conn: &mut sqlx::PgConnection = &mut *tx;
+        match std::panic::AssertUnwindSafe(async move {
+            for projector in group.projectors {
+                projector.apply(conn, &env).await?;
             }
             Ok::<(), DomainError>(())
         })
+        .catch_unwind()
         .await
         {
             Ok(result) => result,
-            Err(join) => Err(DomainError::Repository(format!(
-                "projector panicked at position {position}: {join}"
+            Err(_panic) => Err(DomainError::Repository(format!(
+                "projector panicked at position {position}"
             ))),
         }
     }
 
-    async fn commit_checkpoint(&self, projector: &str, position: i64) -> Result<(), DomainError> {
-        sqlx::query(
-            "INSERT INTO projection_checkpoint (projector, position, updated_at) VALUES ($1, $2, now()) \
-             ON CONFLICT (projector) DO UPDATE SET position = EXCLUDED.position, updated_at = now()",
-        )
-        .bind(projector)
-        .bind(position)
-        .execute(&self.pool)
-        .await
-        .map_err(db_err)?;
-        Ok(())
-    }
 }
 
 /// The aggregate id an event belongs to: parsed from the `<Category>-<uuid>` stream name, falling back

@@ -611,3 +611,36 @@ pub trait UberSplitPolicyReadRepository: Send + Sync {
     /// The active split/fee assumption rows (one per currency), stable order.
     async fn list(&self) -> Result<Vec<UberSplitPolicyRow>, DomainError>;
 }
+
+/// One actor-supervision lane (#242 Runtime B, PROP-20260728-152752): a `(actor_type, partition)`
+/// row from the `mailbox_partitions` registry joined with the live pending/scheduled backlog counted
+/// out of `inbound_messages`. Write-path infrastructure, not a business read model — served by the
+/// ADMIN-only `mailboxLanes` query, no backing `View_*`.
+#[derive(Debug, Clone)]
+pub struct MailboxLaneRow {
+    pub actor_type: String,
+    /// 0 .. the actor's declared mailbox.partitions - 1 (SMALLINT in the registry).
+    pub partition: i16,
+    /// The fencing counter (§3.1) — increments on every ownership change, NOT a date.
+    pub ownership_version: i64,
+    /// Worker instance id; `None` = unowned (claimable).
+    pub claimed_by: Option<String>,
+    /// Past or `None` = claimable; heartbeat-renewed while owned.
+    pub lease_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// Largest mailbox position with everything at or below it terminal.
+    pub checkpoint: i64,
+    /// RECEIVED rows on the lane — the live backlog a worker pass would drain.
+    pub pending: i64,
+    /// SCHEDULED rows on the lane — future work (reminders) awaiting promotion.
+    pub scheduled: i64,
+    /// `received_at` of the oldest RECEIVED row — the lane's staleness signal.
+    pub oldest_pending_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Read port over the mailbox registry + backlog. Backs the ADMIN `mailboxLanes` supervision query;
+/// the adapter joins `mailbox_partitions` with per-lane counts from `inbound_messages`.
+#[async_trait]
+pub trait MailboxLaneRepository: Send + Sync {
+    /// Every registered lane, `(actor_type, partition)` order — empty until a worker seeds the registry.
+    async fn list(&self) -> Result<Vec<MailboxLaneRow>, DomainError>;
+}

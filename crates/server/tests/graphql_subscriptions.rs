@@ -221,6 +221,13 @@ impl application::queries::DeliverySatisfactionReadRepository for Empty {
     }
 }
 
+#[async_trait]
+impl application::queries::MailboxLaneRepository for Empty {
+    async fn list(&self) -> Result<Vec<application::queries::MailboxLaneRow>, DomainError> {
+        Ok(vec![])
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures.
 // ---------------------------------------------------------------------------------------------
@@ -323,6 +330,7 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
             delivery_partner_availabilities: Arc::new(Empty),
             reclamations: Arc::new(Empty),
             customer_credit: Arc::new(Empty),
+            mailbox_lanes: Arc::new(Empty),
         }),
         None,
         Some(bus),
@@ -467,6 +475,10 @@ async fn operation_status_changed_streams_the_journal_lifecycle() {
     let schema = build_schema(None, None, None);
     let journal: Arc<dyn application::journal::CommandJournal> =
         Arc::new(application::journal::mem::MemCommandJournal::default());
+    // The mailbox-first snapshot read (#242 flip): empty here — these tests drive the journal
+    // (the legacy PM-leg path), and the arm falls back to it when the mailbox has no row.
+    let mailbox: Arc<dyn application::mailbox::Mailbox> =
+        Arc::new(application::mailbox::mem::MemMailbox::default());
     let status_bus = infrastructure::OperationStatusBus::default();
 
     let message_id = uuid::Uuid::new_v4();
@@ -482,6 +494,7 @@ async fn operation_status_changed_streams_the_journal_lifecycle() {
             .data(RequestRole::Public)
             .data(server::graphql_session::SessionHeader(Some(session)))
             .data(journal.clone())
+            .data(mailbox.clone())
             .data(status_bus.clone()),
     );
 
@@ -530,6 +543,10 @@ async fn operation_status_changed_hides_non_owned_operations() {
     let schema = build_schema(None, None, None);
     let journal: Arc<dyn application::journal::CommandJournal> =
         Arc::new(application::journal::mem::MemCommandJournal::default());
+    // The mailbox-first snapshot read (#242 flip): empty here — these tests drive the journal
+    // (the legacy PM-leg path), and the arm falls back to it when the mailbox has no row.
+    let mailbox: Arc<dyn application::mailbox::Mailbox> =
+        Arc::new(application::mailbox::mem::MemMailbox::default());
     let status_bus = infrastructure::OperationStatusBus::default();
 
     let message_id = uuid::Uuid::new_v4();
@@ -543,6 +560,7 @@ async fn operation_status_changed_hides_non_owned_operations() {
             .data(RequestRole::Public)
             .data(server::graphql_session::SessionHeader(Some(uuid::Uuid::new_v4())))
             .data(journal.clone())
+            .data(mailbox.clone())
             .data(status_bus.clone()),
     );
     // The non-owned stream completes EMPTY (Ok(None)) — no item, no error, no oracle.

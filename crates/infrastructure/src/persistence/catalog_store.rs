@@ -8,7 +8,7 @@ use application::queries::CatalogRow;
 use domain::generated::scalars::{CatalogId, CatalogName, RestaurantId, Slug};
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use super::db_err;
 
@@ -30,14 +30,14 @@ pub(crate) fn decode(row: &PgRow) -> Result<CatalogRow, DomainError> {
 }
 
 /// Load the current projected state for one catalog, or `None` before its creation event.
-pub async fn load(pool: &PgPool, id: CatalogId) -> Result<Option<CatalogRow>, DomainError> {
+pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: CatalogId) -> Result<Option<CatalogRow>, DomainError> {
     let sql = format!("SELECT {COLUMNS} FROM catalog WHERE catalog_id = $1");
-    let row = sqlx::query(&sql).bind(id.0).fetch_optional(pool).await.map_err(db_err)?;
+    let row = sqlx::query(&sql).bind(id.0).fetch_optional(exec).await.map_err(db_err)?;
     row.as_ref().map(decode).transpose()
 }
 
 /// Write the folded row: `INSERT … ON CONFLICT (catalog_id) DO UPDATE` over all 7 columns.
-pub async fn upsert(pool: &PgPool, row: &CatalogRow) -> Result<(), DomainError> {
+pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &CatalogRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO catalog ({COLUMNS}) VALUES ($1,$2,$3,$4,$5,$6,$7) \
          ON CONFLICT (catalog_id) DO UPDATE SET \
@@ -56,7 +56,7 @@ pub async fn upsert(pool: &PgPool, row: &CatalogRow) -> Result<(), DomainError> 
         .bind(row.tree.clone())
         .bind(row.created_at)
         .bind(row.updated_at)
-        .execute(pool)
+        .execute(exec)
         .await
         .map_err(db_err)?;
     Ok(())

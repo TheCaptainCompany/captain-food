@@ -337,16 +337,16 @@ pub enum CoopCycleIngestOutcome {
 /// infrastructure failures surface as `Err` (5xx → co-op retries); everything else is definitive.
 pub struct CoopCycleWebhookIngestor {
     raw: Arc<dyn RawCoopCycleEvents>,
-    inbox: Arc<dyn application::journal::InboundEvents>,
+    mailbox: Arc<dyn application::mailbox::Mailbox>,
     on_staged: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl CoopCycleWebhookIngestor {
     pub fn new(
         raw: Arc<dyn RawCoopCycleEvents>,
-        inbox: Arc<dyn application::journal::InboundEvents>,
+        mailbox: Arc<dyn application::mailbox::Mailbox>,
     ) -> Self {
-        Self { raw, inbox, on_staged: None }
+        Self { raw, mailbox, on_staged: None }
     }
 
     /// Wire the post-staging nudge (spawns the drain pass; must not block).
@@ -379,33 +379,40 @@ impl CoopCycleWebhookIngestor {
             }
         };
 
-        // Stage the ADAPTED business event (co-op vocabulary stops here). The tagged serde form
-        // (`{"eventType": …, "payload": …}`) is what the drain worker deserializes back.
+        // Enqueue the ADAPTED business event on its actor lane (ADR-20260731-122500) (co-op vocabulary stops here). The tagged serde form
+        // (`{"eventType": …, "payload": …}`) is what the kind-EVENT route deserializes back.
         let tagged = serde_json::to_value(&domain_event).map_err(|e| {
             DomainError::Repository(format!("adapted event for {key} unserializable: {e}"))
         })?;
-        let event_type =
-            tagged.get("eventType").and_then(|t| t.as_str()).unwrap_or("unknown").to_owned();
-        let row = application::journal::InboundEventRow {
-            inbound_event_id: uuid::Uuid::now_v7(),
-            source: "coopcycle".into(),
-            external_id: key.clone(),
-            correlation_id: coopcycle_correlation_id(instance_id, &event.id),
-            event_type,
-            payload: tagged,
-            status: domain::generated::scalars::InboundEventStatus::RECEIVED,
-            error: None,
-            received_at: chrono::Utc::now(),
-            delivered_at: None,
+        let fact = match infrastructure::mailbox::inbound_fact_for(
+            "coopcycle",
+            &key,
+            coopcycle_correlation_id(instance_id, &event.id),
+            tagged,
+        ) {
+            Ok(f) => f,
+            // A mapped family the lane resolver cannot address is an ACL/schema drift — recorded
+            // as unmappable (mirror kept), never a 5xx retry storm.
+            Err(e) => {
+                self.raw.mark_processed(&key).await?;
+                return Ok(CoopCycleIngestOutcome::Unmappable { reason: e.to_string() });
+            }
         };
-        let outcome = match self.inbox.stage(&row).await? {
-            application::journal::StageOutcome::Staged => {
+        let outcome = match infrastructure::mailbox::enqueue_inbound_fact(self.mailbox.as_ref(), fact).await? {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 if let Some(nudge) = &self.on_staged {
                     nudge();
                 }
                 CoopCycleIngestOutcome::Recorded { event_type: event.event_type.clone() }
             }
-            application::journal::StageOutcome::Duplicate => CoopCycleIngestOutcome::Duplicate,
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(_) => CoopCycleIngestOutcome::Duplicate,
+            // Never applied twice (safe direction), but a conflict is a keying signal, not a
+            // dedupe — log it. (Every redelivery of a pre-flip BACKFILLED event lands here too:
+            // the backfill stored md5 hashes, the live path sha256.)
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(status) => {
+                tracing::warn!(source = "coopcycle", external_id = %key, row_status = ?status, "payload conflict under a redelivered provider id -- not enqueued");
+                CoopCycleIngestOutcome::Duplicate
+            },
         };
         self.raw.mark_processed(&key).await?;
         Ok(outcome)
@@ -493,44 +500,7 @@ mod tests {
 
     // ----- ingest flow over in-memory ports -----
 
-    use application::journal::{InboundEventRow, InboundEvents, StageOutcome};
-
     /// Local in-memory [`InboundEvents`], deduped on `(source, external_id)` — the cross-crate test
-    /// double for the inbox (the application's own `MemInboundEvents` is test-private there).
-    #[derive(Default)]
-    struct MemInbox {
-        rows: Mutex<Vec<(String, String)>>, // (source, external_id)
-    }
-    #[async_trait::async_trait]
-    impl InboundEvents for MemInbox {
-        async fn stage(&self, row: &InboundEventRow) -> Result<StageOutcome, DomainError> {
-            let mut rows = self.rows.lock().unwrap();
-            if rows.iter().any(|(s, e)| s == &row.source && e == &row.external_id) {
-                return Ok(StageOutcome::Duplicate);
-            }
-            rows.push((row.source.clone(), row.external_id.clone()));
-            Ok(StageOutcome::Staged)
-        }
-        async fn pending(&self, _limit: i64) -> Result<Vec<InboundEventRow>, DomainError> {
-            Ok(vec![])
-        }
-        async fn mark_delivered(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
-            Ok(())
-        }
-        async fn mark_ignored(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
-            Ok(())
-        }
-        async fn mark_duplicate(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
-            Ok(())
-        }
-        async fn mark_failed(
-            &self,
-            _id: uuid::Uuid,
-            _error: serde_json::Value,
-        ) -> Result<(), DomainError> {
-            Ok(())
-        }
-    }
 
     #[derive(Default)]
     struct MemRaw {
@@ -560,7 +530,7 @@ mod tests {
     #[tokio::test]
     async fn ingest_namespaces_the_key_by_instance_and_stages_the_fact() {
         let raw = Arc::new(MemRaw::default());
-        let inbox = Arc::new(MemInbox::default());
+        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
         let ingestor = CoopCycleWebhookIngestor::new(raw.clone(), inbox.clone());
         let event = accepted_event();
         let body = serde_json::to_value(&serde_json::json!({

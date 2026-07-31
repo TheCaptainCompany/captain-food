@@ -1,0 +1,26 @@
+# Captain.Food — the ACTOR MAILBOX RUNTIME (ADR-20260730-231500, ADR-20260730-234918).
+#
+# EXTRACTION-READY BY CONSTRUCTION: this crate is the durable-mailbox actor machinery — partition
+# leases, ownership_version fencing, head-of-line drain, atomic fenced completion — generic over a
+# `MessageHandler`, with ZERO Captain.Food domain dependencies (no `domain`, no `application`, no
+# `infrastructure` — enforced by tests/dependency_rule.rs, which fails the build the day someone
+# adds one). The product-owner directive is to reuse this on another product someday; keeping the
+# dependency floor at "sqlx + tokio + serde" is what makes that a `git mv`, not a rewrite.
+[package]
+name = "actor_runtime"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["chrono", "uuid", "json"] }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = "0.1"
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

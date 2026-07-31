@@ -879,6 +879,66 @@
     "en": "Use current location",
     "fr": "Utiliser ma position"
   },
+  "mailbox.checkpoint": {
+    "en": "Checkpoint",
+    "fr": "Point de contrôle"
+  },
+  "mailbox.empty.body": {
+    "en": "Lanes appear when a mailbox worker seeds the partition registry on startup.",
+    "fr": "Les voies apparaissent quand un worker de boîte aux lettres initialise le registre des partitions au démarrage."
+  },
+  "mailbox.empty.title": {
+    "en": "No lanes registered",
+    "fr": "Aucune voie enregistrée"
+  },
+  "mailbox.guide.body": {
+    "en": "A healthy lane has a live lease and pending near zero. A growing pending count with an expired lease means no worker owns the lane; a growing count with a live lease means the owner is stuck. Ownership version increments on every takeover — it should be stable outside deployments.",
+    "fr": "Une voie saine a un bail actif et un arriéré proche de zéro. Un arriéré croissant avec un bail expiré signifie qu'aucun worker ne possède la voie ; un arriéré croissant avec un bail actif signifie que le propriétaire est bloqué. La version de propriété s'incrémente à chaque reprise — elle doit rester stable hors déploiements."
+  },
+  "mailbox.guide.title": {
+    "en": "How to read this page",
+    "fr": "Comment lire cette page"
+  },
+  "mailbox.lane": {
+    "en": "Lane",
+    "fr": "Voie"
+  },
+  "mailbox.lanes": {
+    "en": "Lanes",
+    "fr": "Voies"
+  },
+  "mailbox.lease": {
+    "en": "Lease until",
+    "fr": "Bail jusqu'à"
+  },
+  "mailbox.oldest_pending": {
+    "en": "Oldest pending since",
+    "fr": "Plus ancien en attente depuis"
+  },
+  "mailbox.owner": {
+    "en": "Owner",
+    "fr": "Propriétaire"
+  },
+  "mailbox.ownership": {
+    "en": "Ownership version",
+    "fr": "Version de propriété"
+  },
+  "mailbox.pending": {
+    "en": "Pending",
+    "fr": "En attente"
+  },
+  "mailbox.scheduled": {
+    "en": "Scheduled",
+    "fr": "Planifiés"
+  },
+  "mailbox.subtitle": {
+    "en": "One lane per (actor type, partition) — leases, checkpoints and backlog.",
+    "fr": "Une voie par (type d'acteur, partition) — baux, points de contrôle et arriéré."
+  },
+  "mailbox.title": {
+    "en": "Actor mailbox",
+    "fr": "Boîte aux lettres des acteurs"
+  },
   "order.count_total": {
     "en": "{count} items · {total}",
     "fr": "{count} articles · {total}"

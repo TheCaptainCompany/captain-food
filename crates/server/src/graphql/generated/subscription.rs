@@ -29,6 +29,7 @@ impl SubscriptionRoot {
     #[graphql(name = "operationStatusChanged")]
     async fn operation_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Operation>>> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let wanted = input.message_id.0;
         let admin = matches!(
@@ -43,18 +44,34 @@ impl SubscriptionRoot {
         let mut rx = bus.subscribe();
         Ok(async_stream::stream! {
             use domain::generated::scalars::CommandJournalStatus as J;
-            // Snapshot-first: the current journal row (the acceptance already inserted it).
-            let Ok(Some(row)) = journal.by_message(wanted).await else { return };
-            let owned = admin
-                || (principal_uuid.is_some() && principal_uuid == row.entry.user_id)
-                || (session.is_some() && session == row.entry.session_id);
-            if !owned {
-                return;
-            }
-            let terminal = row.status != J::RECEIVED;
-            yield Ok(super::mutation::operation_from_journal(&row));
-            if terminal {
-                return;
+            use domain::generated::scalars::InboundMessageStatus as M;
+            // Snapshot-first, MAILBOX-FIRST (#242 flip): the acceptance already inserted the row —
+            // in inbound_messages post-flip, in command_journal for the legacy PM-leg mutations.
+            if let Ok(Some(row)) = mailbox.by_message(wanted).await {
+                let owned = admin
+                    || (principal_uuid.is_some() && principal_uuid == row.user_id)
+                    || (session.is_some() && session == row.session_id);
+                if !owned {
+                    return;
+                }
+                let terminal = !matches!(row.status, M::RECEIVED | M::SCHEDULED);
+                yield Ok(super::mutation::operation_from_mailbox(&row));
+                if terminal {
+                    return;
+                }
+            } else {
+                let Ok(Some(row)) = journal.by_message(wanted).await else { return };
+                let owned = admin
+                    || (principal_uuid.is_some() && principal_uuid == row.entry.user_id)
+                    || (session.is_some() && session == row.entry.session_id);
+                if !owned {
+                    return;
+                }
+                let terminal = row.status != J::RECEIVED;
+                yield Ok(super::mutation::operation_from_journal(&row));
+                if terminal {
+                    return;
+                }
             }
             loop {
                 match rx.recv().await {
@@ -73,9 +90,16 @@ impl SubscriptionRoot {
                         }
                     }
                     Ok(_) => {}
-                    // Lagged: the journal row is the pull truth — re-read and finish if terminal.
+                    // Lagged: the durable row is the pull truth — re-read (mailbox first) and
+                    // finish if terminal.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        if let Ok(Some(row)) = journal.by_message(wanted).await {
+                        if let Ok(Some(row)) = mailbox.by_message(wanted).await {
+                            let terminal = !matches!(row.status, M::RECEIVED | M::SCHEDULED);
+                            yield Ok(super::mutation::operation_from_mailbox(&row));
+                            if terminal {
+                                break;
+                            }
+                        } else if let Ok(Some(row)) = journal.by_message(wanted).await {
                             let terminal = row.status != J::RECEIVED;
                             yield Ok(super::mutation::operation_from_journal(&row));
                             if terminal {

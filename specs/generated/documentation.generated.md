@@ -185,6 +185,7 @@ A platform operator who onboards accounts and oversees the platform.
 |  | ChooseStorefrontAddress | [✏️ `configureRestaurantSlug`](#mutation-configurerestaurantslug) |
 |  | ActivateRestaurant | [✏️ `activateRestaurant`](#mutation-activaterestaurant) |
 |  | ImportCatalog | [✏️ `importCatalog`](#mutation-importcatalog) |
+| 🧭 **SuperviseActorMailbox** | ViewMailboxLanes | [🔎 `mailboxLanes`](#query-mailboxlanes) |
 | 🧭 **ManageListings** | BrowseListings | [🔎 `restaurants`](#query-restaurants) |
 |  | ChangeListingStatus | [✏️ `changeRestaurantListingStatus`](#mutation-changerestaurantlistingstatus) |
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
@@ -3628,7 +3629,7 @@ _🧩 aggregate_ — Per-order in-app message thread; id = orderId (a conversati
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [📩 `OpenConversation`](#command-openconversation) | [⚡ `ConversationOpened`](#event-conversationopened) | [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen) |
-| [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
+| [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `NotAParticipant`](#error-notaparticipant), [⛔ `RoleMismatch`](#error-rolemismatch), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
 | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) | [⚡ `MessageTranslationAdded`](#event-messagetranslationadded) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation), [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded) |
 | [📩 `EscalateToAdmin`](#command-escalatetoadmin) | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | [⛔ `ConversationNotFound`](#error-conversationnotfound) |
 | [📩 `MuteParticipant`](#command-muteparticipant) | [⚡ `ParticipantMuted`](#event-participantmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired) |
@@ -4376,7 +4377,7 @@ Post a message to an order's conversation — PUBLIC (customer-visible) or INTER
 
 - **Dispatched by**: [✏️ `postMessage`](#mutation-postmessage) · **handled by** [🎭 `Conversation`](#actor-conversation)
 - **Emits**: [⚡ `MessagePosted`](#event-messageposted)
-- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `NotAParticipant`](#error-notaparticipant), [⛔ `RoleMismatch`](#error-rolemismatch), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5385,7 +5386,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="scalar-reclamationstatus"></a>🔤 `ReclamationStatus` | enum (OPEN \| RESOLVED \| REJECTED) | Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).  |
 | <a id="scalar-claimtimelineeventkind"></a>🔤 `ClaimTimelineEventKind` | enum (OPENED \| RESOLVED \| REJECTED \| REOPENED \| EVIDENCE_ATTACHED) | Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).  |
 
-### ⛔ Errors _(38)_
+### ⛔ Errors _(40)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -5415,6 +5416,8 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-conversationalreadyopen"></a>⛔ `ConversationAlreadyOpen` | OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).  | 🇬🇧 A conversation is already open for this order. | 🇫🇷 Une conversation est déjà ouverte pour cette commande. | [📩 `OpenConversation`](#command-openconversation) |
 | <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage), [📩 `RecordMessageTranslation`](#command-recordmessagetranslation), [📩 `EscalateToAdmin`](#command-escalatetoadmin), [📩 `MuteParticipant`](#command-muteparticipant), [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
+| <a id="error-notaparticipant"></a>⛔ `NotAParticipant` | The acting principal is not a participant of the aggregate instance it tried to write to — the aggregate's own folded state names its participants and the caller is not among them (write-side per-instance authorization, #235 / PROP-20260728-135632 requires.acting). The instance's existence is NOT disclosed beyond this rejection.  | 🇬🇧 You are not a participant in this conversation. | 🇫🇷 Vous ne participez pas à cette conversation. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-rolemismatch"></a>⛔ `RoleMismatch` | The role claimed in the payload does not match the verified acting principal — e.g. a CUSTOMER posting authorRole RESTAURANT to forge a staff note (write-side anti-forgery, #235 / PROP-20260728-135632 requires.claims).  | 🇬🇧 The author role does not match your account. | 🇫🇷 Le rôle d'auteur ne correspond pas à votre compte. | [📩 `PostMessage`](#command-postmessage) |
 | <a id="error-customerchatdisabled"></a>⛔ `CustomerChatDisabled` | A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).  | 🇬🇧 Customer messaging is disabled for this order. | 🇫🇷 La messagerie client est désactivée pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
 | <a id="error-messagealreadyposted"></a>⛔ `MessageAlreadyPosted` | A message with this client-generated messageId was already posted to the conversation; the re-post is a duplicate and is rejected (idempotency; #129).  | 🇬🇧 This message has already been posted. | 🇫🇷 Ce message a déjà été envoyé. | [📩 `PostMessage`](#command-postmessage) |
 | <a id="error-messagenotfoundinconversation"></a>⛔ `MessageNotFoundInConversation` | A translation targeted a message that was never posted to the conversation; a translation can only be recorded for an actually-posted message (rules.yaml#/TranslationTargetsAPostedMessage) (#129).  | 🇬🇧 No such message exists in this conversation. | 🇫🇷 Ce message n'existe pas dans cette conversation. | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) |
@@ -5428,7 +5431,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
 
-### 📐 Business rules _(44)_
+### 📐 Business rules _(46)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5583,6 +5586,20 @@ _A Stripe payment outcome that matches no known checkout run is surfaced as a ty
 _A conversation is opened once per order (id = orderId); a second open is rejected, and posting a message before the conversation is opened is rejected (#129)._
 
 - **Verified by**: [🧪 `TestConversationOpened`](#test-testconversationopened), [🧪 `TestConversationOpenedTwiceIsRejected`](#test-testconversationopenedtwiceisrejected), [🧪 `TestPostToUnopenedConversationIsRejected`](#test-testposttounopenedconversationisrejected)
+
+<a id="rule-onlyparticipantswritetoanaggregate"></a>
+#### 📐 Rule: `OnlyParticipantsWriteToAnAggregate`
+
+_A write to an existing aggregate instance is accepted only from a principal the aggregate's own folded state names as a participant (or an explicitly exempt role) — enforced in the actor, against the fold, with zero projection lag (#235, PROP-20260728-135632)._
+
+- **Verified by**: [🧪 `TestPostByStrangerRejected`](#test-testpostbystrangerrejected), [🧪 `TestRiderPostDenied`](#test-testriderpostdenied)
+
+<a id="rule-authorroleispinnedtotheprincipal"></a>
+#### 📐 Rule: `AuthorRoleIsPinnedToThePrincipal`
+
+_A payload field claiming a business role (e.g. a conversation message's authorRole) must match the verified acting principal — a customer can never forge a staff note (#235, requires.claims)._
+
+- **Verified by**: [🧪 `TestForgedAuthorRoleRejected`](#test-testforgedauthorrolerejected)
 
 <a id="rule-customerchatrequiresrestaurantoptin"></a>
 #### 📐 Rule: `CustomerChatRequiresRestaurantOptIn`
@@ -6187,6 +6204,36 @@ _Re-posting a message with an already-seen messageId is rejected (idempotency)_
 - **When**: [📩 `PostMessage`](#command-postmessage)
 - **Thrown**: [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
 - **Verifies**: [📐 `MessagePostingIsIdempotent`](#rule-messagepostingisidempotent)
+
+<a id="test-testpostbystrangerrejected"></a>
+#### 🧪 Test: `TestPostByStrangerRejected`
+
+_A customer who is not the order's customer cannot post into its thread_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `NotAParticipant`](#error-notaparticipant)
+- **Verifies**: [📐 `OnlyParticipantsWriteToAnAggregate`](#rule-onlyparticipantswritetoanaggregate)
+
+<a id="test-testforgedauthorrolerejected"></a>
+#### 🧪 Test: `TestForgedAuthorRoleRejected`
+
+_A customer cannot post as authorRole RESTAURANT (forged staff note)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `RoleMismatch`](#error-rolemismatch)
+- **Verifies**: [📐 `AuthorRoleIsPinnedToThePrincipal`](#rule-authorroleispinnedtotheprincipal)
+
+<a id="test-testriderpostdenied"></a>
+#### 🧪 Test: `TestRiderPostDenied`
+
+_A rider cannot post into an order thread (RIDER absent from requires.acting = denied)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `NotAParticipant`](#error-notaparticipant)
+- **Verifies**: [📐 `OnlyParticipantsWriteToAnAggregate`](#rule-onlyparticipantswritetoanaggregate)
 
 <a id="test-testmessagetranslationrecorded"></a>
 #### 🧪 Test: `TestMessageTranslationRecorded`
@@ -9454,7 +9501,7 @@ _criticality: **high**_
 
 _Shared vocabulary and operations that span several bounded contexts (or belong to none)._
 
-### 🧰 API operations _(6)_
+### 🧰 API operations _(7)_
 
 <a id="query-phonecountries"></a>
 #### 🔎 Query: `phoneCountries`
@@ -9464,6 +9511,16 @@ Selectable phone countries for the dialing-code picker (static reference data; t
 - **Input**: _(none)_
 - **Returns**: [🧩 `PhoneCountry`](#type-phonecountry) (list) · **reads** [🗄️ `PhoneCountry`](#view-phonecountry)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
+
+<a id="query-mailboxlanes"></a>
+#### 🔎 Query: `mailboxLanes`
+
+Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from mailbox_partitions + inbound_messages directly, no View_* (write-path infrastructure, not a business read model).
+
+
+- **Input**: _(none)_
+- **Returns**: [🧩 `MailboxLane`](#type-mailboxlane) (list) · **reads** —
+- **Roles**: ADMIN · **slice** V0
 
 <a id="query-operationstatus"></a>
 #### 🔎 Query: `operationStatus`
@@ -9512,7 +9569,7 @@ Live status of one journaled command, keyed by its messageId acceptance handle (
 - **Streams**: [🧩 `Operation`](#type-operation)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
-### 🧩 Output types _(11)_
+### 🧩 Output types _(12)_
 
 <a id="type-product"></a>
 #### 🧩 Type: `Product`
@@ -9628,6 +9685,26 @@ The uniform acceptance EVERY mutation returns (acceptance-first writes, ADR-2026
 | <a id="type-mutationacceptance--operationstatus"></a>`operationStatus` | [🔤 `OperationStatus`](#scalar-operationstatus) | ✅ |
 | <a id="type-mutationacceptance--duplicate"></a>`duplicate` | `boolean` | ✅ |
 
+<a id="type-mailboxlane"></a>
+#### 🧩 Type: `MailboxLane`
+
+One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) row from the mailbox_partitions registry joined with live pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
+
+
+- **Read model**: _(resolved within a parent projection)_
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-mailboxlane--actortype"></a>`actorType` | `string` | ✅ |
+| <a id="type-mailboxlane--partition"></a>`partition` | `integer` | ✅ |
+| <a id="type-mailboxlane--ownershipversion"></a>`ownershipVersion` | `string` | ✅ |
+| <a id="type-mailboxlane--claimedby"></a>`claimedBy` | `string` | ⬜ |
+| <a id="type-mailboxlane--leaseuntil"></a>`leaseUntil` | `string` _date-time_ | ⬜ |
+| <a id="type-mailboxlane--checkpoint"></a>`checkpoint` | `string` | ✅ |
+| <a id="type-mailboxlane--pending"></a>`pending` | `integer` | ✅ |
+| <a id="type-mailboxlane--scheduled"></a>`scheduled` | `integer` | ✅ |
+| <a id="type-mailboxlane--oldestpendingat"></a>`oldestPendingAt` | `string` _date-time_ | ⬜ |
+
 <a id="type-operation"></a>
 #### 🧩 Type: `Operation`
 
@@ -9726,7 +9803,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(56)_
+### 🔤 Scalars _(55)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -9763,7 +9840,6 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-operationstatus"></a>🔤 `OperationStatus` | enum (PENDING \| SUCCEEDED \| REJECTED \| FAILED) | Live status of a command/operation streamed by the operationStatusChanged subscription: PENDING (accepted, in flight), SUCCEEDED, REJECTED (business invariant), FAILED (technical error)."  |
 | <a id="scalar-commandjournalstatus"></a>🔤 `CommandJournalStatus` | enum (RECEIVED \| SUCCEEDED \| REJECTED \| FAILED) | Lifecycle of a journaled command: RECEIVED (durably accepted, handler spawned), then SUCCEEDED, REJECTED (business invariant) or FAILED (technical). Maps onto the API OperationStatus (RECEIVED → PENDING). A duplicate submission is an acceptance-response attribute, not a status — the journal row keeps the original's real state.  |
 | <a id="scalar-commandchannel"></a>🔤 `CommandChannel` | enum (GRAPHQL \| WORKER \| INTERNAL) | Surface a journaled command arrived through: the GraphQL BFF dispatch, an on-app drain/enrichment worker (e.g. the HubRise enricher), or an internal trigger endpoint.  |
-| <a id="scalar-inboundeventstatus"></a>🔤 `InboundEventStatus` | enum (RECEIVED \| DELIVERED \| FAILED \| IGNORED \| DUPLICATE) | Lifecycle of an adapted inbound business event (inbound_events row). The three terminal success states are NOT interchangeable — they are the answer to "what did this delivery actually do?", and collapsing them is what made a SIRENE sweep unable to distinguish "registered 200,000 restaurants" from "did nothing 200,000 times" (ADR-20260728-011344 D6): * RECEIVED — staged by the adapter ACL, not yet delivered. * DELIVERED — the aggregate decided a fact and it was appended (a creation OR an update; which one landed is answerable from domain_events via `cause_id = inbound_event_id`, a better source than a status column). * IGNORED — the aggregate decided NOTHING changed, so no fact exists to append. A legitimate event-sourcing outcome, not a failure: the external system reported a record we already hold, identically. * DUPLICATE — the exact fact was ALREADY in the aggregate's stream (a redelivery tail). Distinct from IGNORED: here we have seen this very fact before, there the fact is new but semantically inert. Different causes, different fixes. * FAILED — delivery error, left for retry/inspection.  |
 | <a id="scalar-inboundmessagekind"></a>🔤 `InboundMessageKind` | enum (COMMAND \| EVENT \| MESSAGE) | What kind of thing one inbound_messages row is — the request/report split as a column (PROP-20260728-152752 §2): COMMAND = a request the actor may reject (feeds the operationStatus surface); EVENT = an adapted external fact that already happened (nothing to reject — the aggregate decides what follows); MESSAGE = a plain note, typically a reminder to self (§3.4) — neither rejectable nor a business fact.  |
 | <a id="scalar-inboundmessagestatus"></a>🔤 `InboundMessageStatus` | enum (SCHEDULED \| CANCELLED \| RECEIVED \| SUCCEEDED \| REJECTED \| FAILED \| IGNORED \| DUPLICATE) | Lifecycle of a mailbox row (PROP-20260728-152752 §2/§3.4). Immediate rows are born RECEIVED; scheduled rows (reminders / scheduled operations) are born SCHEDULED with NO position and are PROMOTED to RECEIVED with a fresh position when due — or completed CANCELLED before it. Terminal outcomes merge the two legacy vocabularies: SUCCEEDED / REJECTED (business invariant, {code, context} in `error`) / FAILED (technical) from the command journal; IGNORED (the aggregate decided nothing changed) / DUPLICATE (the exact fact was already in the stream) from the inbound-events inbox.  |
 | <a id="scalar-inboundmessagechannel"></a>🔤 `InboundMessageChannel` | enum (GRAPHQL \| WORKER \| EXTERNAL) | Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE, HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and which gains EXTERNAL for adapted facts).  |
@@ -10565,6 +10641,25 @@ _Surface_ **`rider.yaml`**
 | write | `confirm_pickup` | [✏️ `confirmPickup`](#mutation-confirmpickup) |
 | write | `complete_delivery` | [✏️ `completeDelivery`](#mutation-completedelivery) |
 
+_Surface_ **`system.yaml`**
+
+<a id="screen-mailbox_lanes"></a>
+### 📱 `mailbox_lanes` · `/system/mailbox` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Actor mailbox                            │
+├──────────────────────────────────────────┤
+│ page_header — Actor mailbox              │
+│ section — Lanes                          │
+│ section — How to read this page          │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `mailbox.lanes` | [🔎 `mailboxLanes`](#query-mailboxlanes) |
+
 <a id="sec-translations"></a>
 ## 🌐 Translations
 
@@ -10862,6 +10957,21 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-job-dropoff"></a>`rider.job.dropoff` | — | Drop-off | Livraison |
 | <a id="translation-rider-job-picked_up"></a>`rider.job.picked_up` | — | Picked up | Commande récupérée |
 | <a id="translation-rider-job-delivered"></a>`rider.job.delivered` | — | Delivered | Livrée |
+| <a id="translation-mailbox-title"></a>`mailbox.title` | — | Actor mailbox | Boîte aux lettres des acteurs |
+| <a id="translation-mailbox-subtitle"></a>`mailbox.subtitle` | — | One lane per (actor type, partition) — leases, checkpoints and backlog. | Une voie par (type d'acteur, partition) — baux, points de contrôle et arriéré. |
+| <a id="translation-mailbox-lanes"></a>`mailbox.lanes` | — | Lanes | Voies |
+| <a id="translation-mailbox-lane"></a>`mailbox.lane` | — | Lane | Voie |
+| <a id="translation-mailbox-owner"></a>`mailbox.owner` | — | Owner | Propriétaire |
+| <a id="translation-mailbox-lease"></a>`mailbox.lease` | — | Lease until | Bail jusqu'à |
+| <a id="translation-mailbox-ownership"></a>`mailbox.ownership` | — | Ownership version | Version de propriété |
+| <a id="translation-mailbox-checkpoint"></a>`mailbox.checkpoint` | — | Checkpoint | Point de contrôle |
+| <a id="translation-mailbox-pending"></a>`mailbox.pending` | — | Pending | En attente |
+| <a id="translation-mailbox-scheduled"></a>`mailbox.scheduled` | — | Scheduled | Planifiés |
+| <a id="translation-mailbox-oldest_pending"></a>`mailbox.oldest_pending` | — | Oldest pending since | Plus ancien en attente depuis |
+| <a id="translation-mailbox-empty-title"></a>`mailbox.empty.title` | — | No lanes registered | Aucune voie enregistrée |
+| <a id="translation-mailbox-empty-body"></a>`mailbox.empty.body` | — | Lanes appear when a mailbox worker seeds the partition registry on startup. | Les voies apparaissent quand un worker de boîte aux lettres initialise le registre des partitions au démarrage. |
+| <a id="translation-mailbox-guide-title"></a>`mailbox.guide.title` | — | How to read this page | Comment lire cette page |
+| <a id="translation-mailbox-guide-body"></a>`mailbox.guide.body` | — | A healthy lane has a live lease and pending near zero. A growing pending count with an expired lease means no worker owns the lane; a growing count with a live lease means the owner is stuck. Ownership version increments on every takeover — it should be stable outside deployments. | Une voie saine a un bail actif et un arriéré proche de zéro. Un arriéré croissant avec un bail expiré signifie qu'aucun worker ne possède la voie ; un arriéré croissant avec un bail actif signifie que le propriétaire est bloqué. La version de propriété s'incrémente à chaque reprise — elle doit rester stable hors déploiements. |
 | <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
 | <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
 | <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |

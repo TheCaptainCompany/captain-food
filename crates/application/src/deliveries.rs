@@ -126,7 +126,7 @@ mod tests {
         uuid::Uuid::from_u128(n)
     }
     fn actor() -> Actor {
-        Actor { user_id: uid(0xAC), user_type: "EXTERNAL".to_string(), correlation_id: uid(0xC0), cause_id: None }
+        Actor { user_id: uid(0xAC), user_type: "EXTERNAL".to_string(), domain_id: None, correlation_id: uid(0xC0), cause_id: None }
     }
     fn job_id() -> DeliveryJobId {
         DeliveryJobId(uid(1))

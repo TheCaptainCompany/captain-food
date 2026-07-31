@@ -21,6 +21,46 @@
 > no behavior flips) and proceed regardless; **slice 3 (mailbox migrations + resolver flip) waits
 > until the enum-text release is applied and smoked** — never stack a second unapplied migration
 > set on a paused prod.
+> 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
+> (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
+> they only APPLY at the manual deploy, ADR-20260730-051500).
+> ✅ **THE RESOLVER FLIP IS ON THE BRANCH (2026-07-31, Runtime C3a)**: aggregate-routed mutations
+> now ENQUEUE on `inbound_messages` and answer PENDING — the per-actor-type `MailboxWorker`s
+> (crates/actor_runtime: leases, `ownership_version` fencing inside the completion transaction,
+> head-of-line drain, staged-event flush) deliver through the GENERATED command router (82 arms
+> from the same table as the resolvers) and publish terminal status post-commit. The acceptance
+> contract is proven unchanged over the mailbox (duplicate replay / payload conflict / session
+> scope — `graphql_write_path` green); `operationStatus(+Changed)` reads mailbox-first with the
+> journal as pre-flip/PM-leg fallback. PM legs (placeOrder, approveRefund, denyRefund) stay on
+> journal+spawn until PM mailboxes (Runtime D). Remaining C3b: worker-channel flip (SIRENE/HubRise
+> `dispatch_journaled` → mailbox), adapter inbox → kind EVENT rows, backfill + legacy drop.
+> 36 DB suites green on a local PG16 under `DB_TESTS_REQUIRED=1`; `make rust` green.
+> ✅ **PR #270 review fixes (2026-07-31, branch `claude/pr-270-review-ajxr9o`)** — the five-lens
+> review of [#270 "actor mailbox runtime"](https://github.com/TheCaptainCompany/captain-food/pull/270)
+> found 6 criticals; all fixed with regression gates: C1 dropped shutdown sender = zero-sleep
+> busy-loop workers (now: held sender + SIGTERM drain + supervisor respawn + `changed() Err` =
+> no-signal); C2 `position > checkpoint` drain filter strands late-committing rows after takeover
+> (now: `status = 'RECEIVED'` alone defines undelivered; checkpoint = high-water mark only); C3/C4
+> transient handler errors and flush version conflicts landed TERMINAL and the enqueue pk-dedupe
+> then absorbed Stripe's own retries = permanently lost payment facts (now: abort-and-retry; only
+> deterministic outcomes are terminal); C5 the deployed `sweep_retention()` still swept the dropped
+> `inbound_events` (now: the drop migration redeploys the function, adds the `inbound_messages`
+> window, and `retention_sweep.rs` tests the REAL spec function via include_str — never a mirror);
+> C6 the kind-EVENT route never published on the event bus = `paymentStatusChanged` dark (now:
+> shared fan-out with the COMMAND route). Plus: mid-drain lease renewal, per-lane error
+> containment, enqueue→worker Notify nudges (delivery latency ~10 s → ~immediate), RIDER
+> `requires` deny closed (+ `TestRiderPostDenied`), HubRise connect awaits the account leg's
+> terminal verdict before dependents, backfill migration gains a write-fence + straggler guard,
+> and the stale `inbound_events` spec narratives are rewritten.
+> ✅ **Runtime B on the branch (2026-07-31): the actor-supervision surface is live end to end** —
+> ADMIN `mailboxLanes` query (api.yaml + story step), the `system.yaml` SDUI surface (first ADMIN
+> screen set, `/system/mailbox` lanes page + `system.translations.yaml` sidecar), the
+> `20260731063000_actor_mailbox_tables.sql` migration (inbound_messages + mailbox_partitions with
+> the drain/scheduler partial indexes — pulled forward from slice 3 so the surface is DB-testable;
+> NOTHING writes them until the worker flip), `MailboxLaneRepository` port + Pg lateral-join adapter
+> + composition-root wiring, and a DB-gated test that applies the REAL migration file and proves
+> counts + ADMIN guard + BIGINT-as-string serialization (verified locally against a real PG16:
+> full migration chain from scratch + every DB suite green under `DB_TESTS_REQUIRED=1`).
 > Realization starts with [#242 "Write path becomes an actor mailbox…"](https://github.com/TheCaptainCompany/captain-food/issues/242)'s
 > foundation slice (claimed, draft PR per protocol); [#235](https://github.com/TheCaptainCompany/captain-food/issues/235)
 > and [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) follow. Open veto flag:

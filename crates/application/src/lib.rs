@@ -15,6 +15,7 @@ pub mod dispatch;
 pub mod dispatch_strategy;
 pub mod generated;
 pub mod journal;
+pub mod mailbox;
 pub mod payments;
 pub mod pricing;
 pub mod process_managers;
@@ -23,6 +24,7 @@ pub mod projectors;
 pub mod ports;
 pub mod queries;
 pub mod repository;
+pub mod staging;
 
 // The PM state ports are GENERATED from specs/database/tables/process_managers.yaml (issue #27);
 // re-exported here so the stable `application::pm_state` path survives the move into `generated/`.

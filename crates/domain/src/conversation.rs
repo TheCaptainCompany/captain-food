@@ -7,12 +7,21 @@
 //! (`CustomerChatDisabled`) and the set of already-posted message ids (`MessageAlreadyPosted`). No I/O.
 
 use crate::generated::events::DomainEvent;
-use crate::generated::scalars::{ConversationAuthorRole, ConversationMessageId, Locale};
+use crate::generated::scalars::{
+    ConversationAuthorRole, ConversationMessageId, CustomerId, Locale, RestaurantId,
+};
 
 /// What the Conversation command handlers need to accept or reject a command. `None` (from [`fold`])
 /// means no `ConversationOpened` yet — the conversation does not exist.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConversationState {
+    /// The customer participant the `requires.acting.CUSTOMER` check authorizes against
+    /// (#235 consequence A; specs/actors.yaml Conversation state.customerId). `None` = guest
+    /// order — a CUSTOMER principal is then always denied.
+    pub customer_id: Option<CustomerId>,
+    /// The restaurant participant (`requires.acting.RESTAURANT`; enforcement waits on the #144
+    /// staff-identity bridge).
+    pub restaurant_id: RestaurantId,
     /// Snapshotted at open: whether a CUSTOMER may post to this thread (else it is staff-only).
     pub customer_chat_enabled: bool,
     /// Message ids already appended — the idempotency guard for `PostMessage`.
@@ -27,6 +36,60 @@ pub struct ConversationState {
     pub translations: Vec<(ConversationMessageId, Locale)>,
 }
 
+/// A violated `requires` precondition (specs/actors.yaml Conversation/PostMessage — #235,
+/// PROP-20260728-135632 §2.2). Mapped to `errors.yaml#/NotAParticipant` / `#/RoleMismatch` by the
+/// application handler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequiresViolation {
+    NotAParticipant,
+    RoleMismatch,
+}
+
+/// The PostMessage `requires` check — PURE, on the actor, over its own folded state (D4 as
+/// amended: the actor owns authorization, so testing the actor tests it). Hand-written at parity
+/// with the spec declaration until the generated precondition lands (#242 runtime branch).
+///
+/// STAGED enforcement, deliberately: `claims` (authorRole pinned to the principal, with
+/// RESTAURANT_ACCOUNT legitimately posting staff notes as RESTAURANT) and `acting.CUSTOMER`
+/// (the live #235 forgery hole) are enforced; `acting` for RESTAURANT/RESTAURANT_ACCOUNT/RIDER
+/// passes until the #144 staff/rider identity bridges land — the known, documented residual.
+pub fn requires_post_message(
+    state: &ConversationState,
+    actor_user_type: &str,
+    actor_domain_id: Option<uuid::Uuid>,
+    author_role: &ConversationAuthorRole,
+) -> Result<(), RequiresViolation> {
+    let claim_ok = match author_role {
+        ConversationAuthorRole::CUSTOMER => actor_user_type == "CUSTOMER",
+        ConversationAuthorRole::RESTAURANT => {
+            matches!(actor_user_type, "RESTAURANT" | "RESTAURANT_ACCOUNT")
+        }
+        ConversationAuthorRole::RIDER => actor_user_type == "RIDER",
+        ConversationAuthorRole::ADMIN => actor_user_type == "ADMIN",
+    };
+    if !claim_ok {
+        return Err(RequiresViolation::RoleMismatch);
+    }
+    match actor_user_type {
+        // acting: any — stated in the spec, never implied.
+        "ADMIN" => Ok(()),
+        // acting: state.customerId — the resolved domain identity must BE the folded participant;
+        // a guest thread (None) or an unresolved principal denies.
+        "CUSTOMER" => match (&state.customer_id, actor_domain_id) {
+            (Some(cid), Some(did)) if cid.0 == did => Ok(()),
+            _ => Err(RequiresViolation::NotAParticipant),
+        },
+        // acting: state.restaurantId — enforcement waits on the #144 identity bridge (no resolved
+        // restaurant identity exists yet to compare against the folded participant).
+        "RESTAURANT" | "RESTAURANT_ACCOUNT" => Ok(()),
+        // RIDER is DELIBERATELY ABSENT from `requires.acting` in the spec: absent = denied,
+        // unconditionally — no identity bridge is needed to know a rider is never a conversation
+        // participant. (The claim gate above already pinned author_role RIDER to user_type RIDER;
+        // this denies the acting side too.)
+        _ => Err(RequiresViolation::NotAParticipant),
+    }
+}
+
 /// Fold a Conversation stream (events in version order) into its current state. `None` ⇔ the stream
 /// has no `ConversationOpened` yet, i.e. the conversation does not exist.
 pub fn fold(events: &[DomainEvent]) -> Option<ConversationState> {
@@ -38,6 +101,8 @@ fn apply(state: Option<ConversationState>, event: &DomainEvent) -> Option<Conver
     match event {
         // The birth fact: establishes the conversation, snapshotting the customer-chat opt-in.
         DomainEvent::ConversationOpened(e) => Some(ConversationState {
+            customer_id: e.customer_id,
+            restaurant_id: e.restaurant_id,
             customer_chat_enabled: e.customer_chat_enabled,
             message_ids: Vec::new(),
             admin_invited: false,

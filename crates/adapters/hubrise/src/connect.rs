@@ -27,17 +27,15 @@
 
 use std::sync::Arc;
 
-use application::commands::{
-    create_catalog, import_catalog, register_restaurant, register_restaurant_account, rejection_code,
-};
-use application::dispatch::{dispatch_journaled, JournaledOutcome};
-use application::journal::{payload_hash, CommandJournal, CommandJournalEntry};
+use application::journal::{payload_hash, CommandJournalEntry};
+use application::mailbox::Mailbox;
+use infrastructure::mailbox::{enqueue_worker_command, EnqueueOutcome};
 use application::ports::{Actor, EventStore};
 use application::queries::RestaurantReadRepository;
 use domain::generated::commands::{CreateCatalog, RegisterRestaurant, RegisterRestaurantAccount};
 use domain::generated::entities::{Address, TaxRate};
 use domain::generated::scalars::{
-    AddressLine, CatalogName, CityName, CommandChannel, CommandJournalStatus, CountryCode,
+    AddressLine, CatalogName, CityName, CommandChannel, CountryCode,
     CurrencyCode, ExternalReference, PostalCode, RestaurantDisplayName, RestaurantLegalName,
     RestaurantListingStatus, TaxRatePercent, TimeZone,
 };
@@ -215,8 +213,7 @@ pub trait ConnectService: Send + Sync {
 /// Drives one OAuth callback end-to-end. Generic over the gateway so the whole provisioning
 /// (derived ids, journaling, idempotent re-connect) is unit-testable in memory.
 pub struct HubRiseConnectFlow<G: HubRiseConnectGateway> {
-    store: Arc<dyn EventStore>,
-    journal: Arc<dyn CommandJournal>,
+    mailbox: Arc<dyn Mailbox>,
     restaurants: Arc<dyn RestaurantReadRepository>,
     connections: Arc<dyn HubRiseConnections>,
     gateway: G,
@@ -224,13 +221,12 @@ pub struct HubRiseConnectFlow<G: HubRiseConnectGateway> {
 
 impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
     pub fn new(
-        store: Arc<dyn EventStore>,
-        journal: Arc<dyn CommandJournal>,
+        mailbox: Arc<dyn Mailbox>,
         restaurants: Arc<dyn RestaurantReadRepository>,
         connections: Arc<dyn HubRiseConnections>,
         gateway: G,
     ) -> Self {
-        Self { store, journal, restaurants, connections, gateway }
+        Self { mailbox, restaurants, connections, gateway }
     }
 
     /// One journaled WORKER send. `message_id` is scoped to THIS attempt (a re-connect re-sends with
@@ -261,45 +257,69 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
         Actor {
             user_id: hubrise_system_user_id(),
             user_type: EXTERNAL_USER_TYPE.to_string(),
+            domain_id: None,
             correlation_id: entry.correlation_id,
-            cause_id: Some(entry.message_id),
+            // The row's cause is the PARENT (the connect attempt); the delivery side chains
+            // appended events to the message itself.
+            cause_id: entry.cause_id,
         }
     }
 
-    /// Dispatch one provisioning command; a deterministic rejection becomes a warning (the connect
-    /// continues), an infra failure aborts. Returns `Ok(true)` when the command took effect (or was
-    /// an idempotent replay), `Ok(false)` on a warned rejection.
-    async fn send<F, Fut>(
+    /// Enqueue one provisioning command — fire-and-forget (ADR-20260731-122500): the mailbox
+    /// worker delivers; rejections live on the mailbox row and the supervision lanes, not here.
+    /// Returns `Ok(Some(message_id))` when the command is durably handed off (fresh or an
+    /// idempotent replay), `Ok(None)` on a payload conflict (warned — never enqueued); an infra
+    /// failure aborts.
+    async fn send(
         &self,
         attempt: uuid::Uuid,
         command_type: &str,
         entity: &str,
         payload: serde_json::Value,
         warnings: &mut Vec<String>,
-        handler: F,
-    ) -> Result<bool, ConnectError>
-    where
-        F: FnOnce(Actor) -> Fut,
-        Fut: std::future::Future<Output = Result<(), DomainError>>,
-    {
+    ) -> Result<Option<uuid::Uuid>, ConnectError> {
         let entry = Self::entry(attempt, command_type, entity, payload);
         let actor = Self::actor(&entry);
-        let outcome = dispatch_journaled(self.journal.as_ref(), entry, move || handler(actor))
-            .await
-            .map_err(ConnectError::Infra)?;
-        match outcome {
-            JournaledOutcome::Executed(Ok(()))
-            | JournaledOutcome::Deduplicated(CommandJournalStatus::SUCCEEDED) => Ok(true),
-            JournaledOutcome::Executed(Err(e)) if rejection_code(&e).is_some() => {
-                warnings.push(format!("{command_type} {entity}: rejected: {e}"));
-                Ok(false)
-            }
-            JournaledOutcome::Executed(Err(e)) => Err(ConnectError::Infra(e)),
-            other => {
-                warnings.push(format!("{command_type} {entity}: not re-applied ({other:?})"));
-                Ok(false)
+        match enqueue_worker_command(
+            self.mailbox.as_ref(),
+            entry.message_id,
+            command_type,
+            entry.payload,
+            &actor,
+        )
+        .await
+        .map_err(ConnectError::Infra)?
+        {
+            EnqueueOutcome::Enqueued | EnqueueOutcome::Deduplicated(_) => Ok(Some(entry.message_id)),
+            EnqueueOutcome::PayloadConflict(status) => {
+                warnings.push(format!(
+                    "{command_type} {entity}: payload conflict under a replayed id (mailbox row {status:?}) -- not re-sent"
+                ));
+                Ok(None)
             }
         }
+    }
+
+    /// Await a sent command's TERMINAL mailbox status (bounded poll). The provisioning chain is
+    /// causally ordered but its actors live on DIFFERENT lanes with no cross-lane ordering:
+    /// `register_restaurant` folds the ACCOUNT stream (`RestaurantAccountNotFound`), so the
+    /// account registration must be delivered before its dependents are enqueued — the old
+    /// inline dispatch gave this ordering for free. Returns the terminal status, or `None` on
+    /// timeout (the caller degrades to a warning; a re-connect replays idempotently).
+    async fn await_message_terminal(
+        &self,
+        message_id: uuid::Uuid,
+    ) -> Option<domain::generated::scalars::InboundMessageStatus> {
+        use domain::generated::scalars::InboundMessageStatus as S;
+        for _ in 0..40 {
+            if let Ok(Some(row)) = self.mailbox.by_message(message_id).await {
+                if !matches!(row.status, S::RECEIVED | S::SCHEDULED) {
+                    return Some(row.status);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        None
     }
 
     /// The registered Restaurant must be visible in the READ MODEL before `create_catalog` (its
@@ -377,18 +397,26 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
         };
         let payload = serde_json::to_value(&cmd)
             .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
-        let store = self.store.clone();
-        self.send(
-            attempt,
-            "RegisterRestaurantAccount",
-            &hubrise_account_id,
-            payload,
-            &mut warnings,
-            move |actor| async move {
-                register_restaurant_account(store.as_ref(), cmd, &actor).await
-            },
-        )
-        .await?;
+        let account_msg = self
+            .send(attempt, "RegisterRestaurantAccount", &hubrise_account_id, payload, &mut warnings)
+            .await?;
+        // The dependents fold the ACCOUNT stream on other lanes — deliver the account first
+        // (cross-lane enqueue order guarantees nothing). A rejection/timeout degrades to a
+        // warning the operator sees synchronously, the property the old inline dispatch had.
+        if let Some(account_msg) = account_msg {
+            use domain::generated::scalars::InboundMessageStatus as S;
+            match self.await_message_terminal(account_msg).await {
+                Some(S::SUCCEEDED | S::IGNORED | S::DUPLICATE) => {}
+                Some(status) => warnings.push(format!(
+                    "RegisterRestaurantAccount {hubrise_account_id}: delivered {status:?} — \
+                     dependent registrations may reject (fix and re-connect)"
+                )),
+                None => warnings.push(format!(
+                    "RegisterRestaurantAccount {hubrise_account_id}: not delivered before timeout — \
+                     dependent registrations may land first and reject (re-connect replays them)"
+                )),
+            }
+        }
 
         // 2) One Restaurant per location (the location IS the restaurant; ids reconcile with the
         //    enricher's derivation so later callbacks land on these aggregates).
@@ -439,14 +467,7 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
             };
             let payload = serde_json::to_value(&cmd)
                 .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
-            let store = self.store.clone();
-            let restaurants = self.restaurants.clone();
-            self.send(attempt, "RegisterRestaurant", &loc.id, payload, &mut warnings, {
-                move |actor| async move {
-                    register_restaurant(store.as_ref(), restaurants.as_ref(), cmd, &actor).await
-                }
-            })
-            .await?;
+            let _ = self.send(attempt, "RegisterRestaurant", &loc.id, payload, &mut warnings).await?;
             connected_locations.push(ConnectedLocation {
                 hubrise_location_id: loc.id.clone(),
                 restaurant_account_id,
@@ -509,15 +530,10 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
             };
             let payload = serde_json::to_value(&cmd)
                 .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
-            let store = self.store.clone();
-            let restaurants = self.restaurants.clone();
             let ok = self
-                .send(attempt, "CreateCatalog", &cat.id, payload, &mut warnings, {
-                    move |actor| async move {
-                        create_catalog(store.as_ref(), restaurants.as_ref(), cmd, &actor).await
-                    }
-                })
-                .await?;
+                .send(attempt, "CreateCatalog", &cat.id, payload, &mut warnings)
+                .await?
+                .is_some();
             if !ok {
                 continue;
             }
@@ -530,14 +546,10 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
                         let payload = serde_json::to_value(&cmd).map_err(|e| {
                             ConnectError::Infra(DomainError::Repository(e.to_string()))
                         })?;
-                        let store = self.store.clone();
                         let ok = self
-                            .send(attempt, "ImportCatalog", &cat.id, payload, &mut warnings, {
-                                move |actor| async move {
-                                    import_catalog(store.as_ref(), cmd, &actor).await
-                                }
-                            })
-                            .await?;
+                            .send(attempt, "ImportCatalog", &cat.id, payload, &mut warnings)
+                            .await?
+                            .is_some();
                         if ok {
                             imported += 1;
                         }
@@ -574,57 +586,14 @@ impl<G: HubRiseConnectGateway> ConnectService for HubRiseConnectFlow<G> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use application::journal::mem::MemCommandJournal;
-    use application::ports::version_conflict;
+    use application::mailbox::mem::MemMailbox;
+    use application::mailbox::MailboxEntry;
     use application::queries::{RestaurantFilter, RestaurantRow};
-    use domain::generated::events::DomainEvent;
     use domain::generated::scalars::{
         OrderAcceptanceMode, RestaurantId as RestaurantIdScalar, RestaurantStatus,
     };
 
     use crate::connections::mem::MemHubRiseConnections;
-
-    // ----- in-memory event store (mirrors the Postgres UNIQUE(stream,version) guard) -----
-
-    #[derive(Default)]
-    struct InMemoryEventStore {
-        streams: std::sync::Mutex<std::collections::HashMap<String, Vec<DomainEvent>>>,
-    }
-
-    impl InMemoryEventStore {
-        fn events(&self, stream: &str) -> Vec<DomainEvent> {
-            self.streams.lock().unwrap().get(stream).cloned().unwrap_or_default()
-        }
-        fn total_events(&self) -> usize {
-            self.streams.lock().unwrap().values().map(Vec::len).sum()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl EventStore for InMemoryEventStore {
-        async fn append(
-            &self,
-            stream_name: &str,
-            expected_version: i64,
-            events: &[DomainEvent],
-            _actor: &Actor,
-        ) -> Result<i64, DomainError> {
-            let mut streams = self.streams.lock().unwrap();
-            let stream = streams.entry(stream_name.to_string()).or_default();
-            if stream.len() as i64 != expected_version {
-                return Err(version_conflict(stream_name, expected_version));
-            }
-            stream.extend_from_slice(events);
-            Ok(stream.len() as i64)
-        }
-
-        async fn load(&self, stream_name: &str) -> Result<(Vec<DomainEvent>, i64), DomainError> {
-            let streams = self.streams.lock().unwrap();
-            let events = streams.get(stream_name).cloned().unwrap_or_default();
-            let version = events.len() as i64;
-            Ok((events, version))
-        }
-    }
 
     // ----- fake restaurant read model: a caught-up projection (by_id resolves immediately) -----
 
@@ -744,28 +713,31 @@ mod tests {
     }
 
     fn flow(
-        store: Arc<InMemoryEventStore>,
         connections: Arc<MemHubRiseConnections>,
         gateway: FakeGateway,
-    ) -> (HubRiseConnectFlow<FakeGateway>, Arc<MemCommandJournal>) {
-        let journal = Arc::new(MemCommandJournal::default());
+    ) -> (HubRiseConnectFlow<FakeGateway>, Arc<MemMailbox>) {
+        // Instantly-delivered: the connect flow awaits the account leg's terminal status.
+        let mailbox = Arc::new(MemMailbox::instantly_delivered());
         (
             HubRiseConnectFlow::new(
-                store,
-                journal.clone(),
+                mailbox.clone(),
                 Arc::new(CaughtUpRestaurants),
                 connections,
                 gateway,
             ),
-            journal,
+            mailbox,
         )
+    }
+
+    /// The enqueued entries of one command type (attempt-scoped ids make direct lookup moot).
+    fn entries_of(mailbox: &MemMailbox, command_type: &str) -> Vec<MailboxEntry> {
+        mailbox.entries().into_iter().filter(|e| e.message_type == command_type).collect()
     }
 
     #[tokio::test]
     async fn connect_provisions_the_derived_aggregates_and_stores_the_token() {
-        let store = Arc::new(InMemoryEventStore::default());
         let connections = Arc::new(MemHubRiseConnections::default());
-        let (flow, _journal) = flow(store.clone(), connections.clone(), fake_gateway("tok_1"));
+        let (flow, mailbox) = flow(connections.clone(), fake_gateway("tok_1"));
 
         let summary = flow.connect("the-code").await.unwrap();
 
@@ -774,49 +746,38 @@ mod tests {
         assert_eq!((summary.locations, summary.catalogs_created, summary.catalogs_imported), (1, 1, 1));
         assert_eq!(summary.warnings, Vec::<String>::new());
 
-        // The account aggregate, under the ENRICHER'S derived id, seeded from the pulled account.
-        let account_stream =
-            format!("RestaurantAccount-{}", derive_restaurant_account_id("acc_1").0);
-        let events = store.events(&account_stream);
-        assert_eq!(events.len(), 1);
-        let DomainEvent::RestaurantAccountRegistered(acc) = &events[0] else {
-            panic!("expected RestaurantAccountRegistered, got {:?}", events[0]);
-        };
-        assert_eq!(acc.legal_name.0, "Bella Pizza");
-        assert_eq!(acc.default_currency.0, "EUR");
-        assert_eq!(acc.r#ref, Some(ExternalReference("acc_1".into())));
-        assert_eq!(acc.timezone, Some(TimeZone("Europe/Paris".into())));
+        // Fire-and-forget (ADR-20260731-122500): the connect ENQUEUES the four provisioning
+        // commands — the mailbox worker delivers them and the aggregates decide. What this flow
+        // owns is the hand-off: one WORKER-channel entry per command, addressed to the derived
+        // lanes, payloads carrying the pulled data.
+        let acc = entries_of(&mailbox, "RegisterRestaurantAccount");
+        assert_eq!(acc.len(), 1);
+        assert_eq!(acc[0].kind, "COMMAND");
+        assert_eq!(acc[0].channel, "WORKER");
+        assert_eq!(acc[0].actor_type, "RestaurantAccount");
+        assert_eq!(acc[0].actor_id, derive_restaurant_account_id("acc_1").0);
+        assert_eq!(acc[0].payload["legalName"], serde_json::json!("Bella Pizza"));
+        assert_eq!(acc[0].payload["defaultCurrency"], serde_json::json!("EUR"));
+        assert_eq!(acc[0].payload["ref"], serde_json::json!("acc_1"));
 
-        // The location aggregate: derived id, owned by the account, PASSIVE_PARTNER, and
-        // deliberately WITHOUT a storefront address -- the owner picks that during onboarding
-        // name-locationid, ref = the HubRise location id (what callbacks carry).
-        let restaurant_stream = format!("Restaurant-{}", derive_restaurant_id("loc_1").0);
-        let events = store.events(&restaurant_stream);
-        assert_eq!(events.len(), 1);
-        let DomainEvent::RestaurantRegistered(r) = &events[0] else {
-            panic!("expected RestaurantRegistered, got {:?}", events[0]);
-        };
-        assert_eq!(r.account_id, Some(derive_restaurant_account_id("acc_1")));
-        assert_eq!(r.listing_status, RestaurantListingStatus::PASSIVE_PARTNER);
-        assert_eq!(r.r#ref, Some(ExternalReference("loc_1".into())));
-        assert_eq!(r.address.city.0, "Tours");
-        assert_eq!(r.timezone, Some(TimeZone("Europe/Paris".into())));
-        assert_eq!(r.preparation_time_minutes, Some(15));
+        let resto = entries_of(&mailbox, "RegisterRestaurant");
+        assert_eq!(resto.len(), 1);
+        assert_eq!(resto[0].actor_type, "Restaurant");
+        assert_eq!(resto[0].actor_id, derive_restaurant_id("loc_1").0);
+        assert_eq!(resto[0].payload["accountId"], serde_json::json!(derive_restaurant_account_id("acc_1").0));
+        assert_eq!(resto[0].payload["listingStatus"], serde_json::json!("PASSIVE_PARTNER"));
+        assert_eq!(resto[0].payload["ref"], serde_json::json!("loc_1"));
+        assert_eq!(resto[0].payload["address"]["city"], serde_json::json!("Tours"));
+        assert_eq!(resto[0].payload["preparationTimeMinutes"], serde_json::json!(15));
 
-        // The catalog: created AND initially imported (no waiting for the first callback), with the
-        // id inventory callbacks will re-derive.
-        let catalog_stream = format!("Catalog-{}", derive_catalog_id("cat_1").0);
-        let events = store.events(&catalog_stream);
-        assert!(
-            matches!(&events[0], DomainEvent::CatalogCreated(c) if c.r#ref == Some(ExternalReference("cat_1".into()))),
-            "first catalog event: {:?}",
-            events[0]
-        );
-        assert!(
-            matches!(&events[1], DomainEvent::CatalogImported(i) if i.products.len() == 1),
-            "second catalog event: {:?}",
-            events.get(1)
-        );
+        // The catalog: created AND initially imported (no waiting for the first callback), on the
+        // SAME Catalog lane — head-of-line order delivers CreateCatalog before ImportCatalog.
+        let create = entries_of(&mailbox, "CreateCatalog");
+        let import = entries_of(&mailbox, "ImportCatalog");
+        assert_eq!((create.len(), import.len()), (1, 1));
+        assert_eq!(create[0].actor_id, derive_catalog_id("cat_1").0);
+        assert_eq!(import[0].actor_id, derive_catalog_id("cat_1").0, "same lane = ordered delivery");
+        assert_eq!(import[0].payload["products"].as_array().map(Vec::len), Some(1));
 
         // The token is stored keyed by the RestaurantAccount, with the location snapshot for
         // callback→token resolution.
@@ -828,71 +789,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reconnect_is_idempotent_and_refreshes_the_token() {
-        let store = Arc::new(InMemoryEventStore::default());
+    async fn reconnect_re_enqueues_under_fresh_attempt_ids_and_refreshes_the_token() {
         let connections = Arc::new(MemHubRiseConnections::default());
-        let (first, _) = flow(store.clone(), connections.clone(), fake_gateway("tok_1"));
+        // One shared mailbox across both attempts (the door is the same in production).
+        let mailbox = Arc::new(MemMailbox::instantly_delivered());
+        let first = HubRiseConnectFlow::new(
+            mailbox.clone(),
+            Arc::new(CaughtUpRestaurants),
+            connections.clone(),
+            fake_gateway("tok_1"),
+        );
         first.connect("the-code").await.unwrap();
-        let events_before = store.total_events();
+        let entries_before = mailbox.entries().len();
+        assert_eq!(entries_before, 4, "account + restaurant + create + import");
 
         // The operator re-connects the SAME HubRise account (new OAuth round-trip, new token).
-        let (second, _) = flow(store.clone(), connections.clone(), fake_gateway("tok_2"));
+        // Each attempt enqueues under ITS OWN attempt-scoped ids — replay absorption is the
+        // AGGREGATES' job at delivery (their creation idempotency), not the mailbox key's.
+        let second = HubRiseConnectFlow::new(
+            mailbox.clone(),
+            Arc::new(CaughtUpRestaurants),
+            connections.clone(),
+            fake_gateway("tok_2"),
+        );
         let summary = second.connect("the-code").await.unwrap();
 
         assert_eq!(summary.warnings, Vec::<String>::new());
-        // No CREATION is double-applied: the account/restaurant streams are untouched and the
-        // catalog gains exactly ONE event — a fresh CatalogImported (re-import = replace semantics,
-        // the legitimate effect of a re-connect).
-        assert_eq!(store.total_events(), events_before + 1);
-        let account_stream =
-            format!("RestaurantAccount-{}", derive_restaurant_account_id("acc_1").0);
-        assert_eq!(store.events(&account_stream).len(), 1);
-        let restaurant_stream = format!("Restaurant-{}", derive_restaurant_id("loc_1").0);
-        assert_eq!(store.events(&restaurant_stream).len(), 1);
-        let catalog_events = store.events(&format!("Catalog-{}", derive_catalog_id("cat_1").0));
-        assert_eq!(
-            catalog_events
-                .iter()
-                .filter(|e| matches!(e, DomainEvent::CatalogCreated(_)))
-                .count(),
-            1,
-            "the catalog is created once"
-        );
-        assert_eq!(
-            catalog_events
-                .iter()
-                .filter(|e| matches!(e, DomainEvent::CatalogImported(_)))
-                .count(),
-            2,
-            "each connect re-imports (replace semantics)"
-        );
+        assert_eq!(mailbox.entries().len(), entries_before + 4, "a fresh fan-out per attempt");
         let conn = connections.connection(derive_restaurant_account_id("acc_1").0).unwrap();
         assert_eq!(conn.access_token, "tok_2", "a re-connect refreshes the stored token");
     }
 
     #[tokio::test]
     async fn a_connection_without_an_account_in_scope_fails_and_stores_nothing() {
-        let store = Arc::new(InMemoryEventStore::default());
         let connections = Arc::new(MemHubRiseConnections::default());
         let mut gateway = fake_gateway("tok_1");
         gateway.token =
             serde_json::from_value(serde_json::json!({ "access_token": "tok_1" })).unwrap();
         gateway.account = serde_json::json!({ "name": "No Id", "currency": "EUR" });
-        let (flow, _) = flow(store.clone(), connections.clone(), gateway);
+        let (flow, mailbox) = flow(connections.clone(), gateway);
 
         let err = flow.connect("the-code").await.unwrap_err();
         assert!(matches!(err, ConnectError::NoAccountInScope), "got {err}");
-        assert_eq!(store.total_events(), 0);
+        assert!(mailbox.entries().is_empty(), "nothing enqueued");
         assert!(connections.connection(derive_restaurant_account_id("acc_1").0).is_none());
     }
 
     #[tokio::test]
     async fn a_failed_catalog_listing_still_records_the_connection() {
-        let store = Arc::new(InMemoryEventStore::default());
         let connections = Arc::new(MemHubRiseConnections::default());
         let mut gateway = fake_gateway("tok_1");
         gateway.catalogs = Err("hubrise API returned status 500".into());
-        let (flow, _) = flow(store.clone(), connections.clone(), gateway);
+        let (flow, _mailbox) = flow(connections.clone(), gateway);
 
         let summary = flow.connect("the-code").await.unwrap();
 

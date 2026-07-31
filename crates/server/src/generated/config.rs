@@ -229,8 +229,6 @@ pub struct Config {
     pub run_projector: bool,
     /// In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires. Readiness at GET /saga.
     pub run_process_managers: bool,
-    /// Inbound-events drain (ADR-20260720-015400) delivering adapter-staged facts through the write path, plus the command_journal stale sweep. OFF, every webhook-staged fact accumulates undelivered.
-    pub run_inbound_drain: bool,
     /// Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without bound.
     pub run_retention_sweep: bool,
     /// SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene.
@@ -389,10 +387,6 @@ impl Config {
             .or_else(|| baked("RUN_PROCESS_MANAGERS", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_PROCESS_MANAGERS", &v, true))
             .unwrap_or(true);
-        let run_inbound_drain = raw("RUN_INBOUND_DRAIN")
-            .or_else(|| baked("RUN_INBOUND_DRAIN", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_INBOUND_DRAIN", &v, true))
-            .unwrap_or(true);
         let run_retention_sweep = raw("RUN_RETENTION_SWEEP")
             .or_else(|| baked("RUN_RETENTION_SWEEP", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_RETENTION_SWEEP", &v, true))
@@ -533,7 +527,6 @@ impl Config {
                 projection_partitions,
                 run_projector,
                 run_process_managers,
-                run_inbound_drain,
                 run_retention_sweep,
                 run_sirene_worker,
                 run_delivery_offer_timeout,
@@ -596,7 +589,6 @@ impl Config {
         out.push_str(&format!("  PROJECTION_PARTITIONS      = {}\n", self.projection_partitions));
         out.push_str(&format!("  RUN_PROJECTOR              = {}\n", self.run_projector));
         out.push_str(&format!("  RUN_PROCESS_MANAGERS       = {}\n", self.run_process_managers));
-        out.push_str(&format!("  RUN_INBOUND_DRAIN          = {}\n", self.run_inbound_drain));
         out.push_str(&format!("  RUN_RETENTION_SWEEP        = {}\n", self.run_retention_sweep));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
         out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
@@ -628,7 +620,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 53;
+pub const KEY_COUNT: usize = 52;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -659,7 +651,6 @@ pub const DECLARED_KEYS: &[&str] = &[
     "PROJECTION_PARTITIONS",
     "RUN_PROJECTOR",
     "RUN_PROCESS_MANAGERS",
-    "RUN_INBOUND_DRAIN",
     "RUN_RETENTION_SWEEP",
     "RUN_SIRENE_WORKER",
     "RUN_DELIVERY_OFFER_TIMEOUT",
@@ -709,8 +700,6 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_PROJECTOR", "staging", "true"),
     ("RUN_PROCESS_MANAGERS", "production", "true"),
     ("RUN_PROCESS_MANAGERS", "staging", "true"),
-    ("RUN_INBOUND_DRAIN", "production", "true"),
-    ("RUN_INBOUND_DRAIN", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),
     ("RUN_RETENTION_SWEEP", "staging", "true"),
     ("RUN_SIRENE_WORKER", "production", "true"),

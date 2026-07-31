@@ -72,6 +72,7 @@ pub fn saga_actor(env: &TriggerEnvelope) -> Actor {
     Actor {
         user_id: saga_system_user_id(),
         user_type: EXTERNAL_USER_TYPE.to_string(),
+        domain_id: None,
         correlation_id: env.correlation_id,
         cause_id: Some(env.event_id),
     }
