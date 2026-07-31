@@ -619,11 +619,11 @@ pub fn router() -> Router {
                     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(
                         operation_status_bus.clone(),
                     ));
-                    let worker_id = format!(
-                        "{}-{}",
-                        std::env::var("HOSTNAME").unwrap_or_else(|_| "captain".into()),
-                        std::process::id()
-                    );
+                    // Unique per PROCESS (pid alone collides across hosts; hostname is an env
+                    // read the configuration gate would demand a declaration for). Only
+                    // uniqueness matters: claimed_by is a fencing identity plus a diagnostic.
+                    let worker_id =
+                        format!("w-{}-{}", std::process::id(), &uuid::Uuid::new_v4().simple().to_string()[..8]);
                     for (actor_type, width) in
                         infrastructure::generated::command_router::ACTOR_MAILBOXES
                     {
