@@ -2,9 +2,12 @@
 
 **Status**: APPROVED (product-owner, in-session 2026-07-31) — choices **D-A = A2** (two-phase
 payment delivery), **D-B = B2** (chained PM facts), **D-C = C2** (event-lineage reminder
-triggers); recorded in [ADR-20260731-203000](../adr/ADR-20260731-203000-runtime-d-choices-a2-b2-c2.md)
+triggers); recorded in [ADR-20260731-203000](../adr/ADR-20260731-203000-runtime-d-choices-a2-b2-c2.md).
+**REFINED post-approval** (same day, product owner) by
+[ADR-20260731-214500](../adr/ADR-20260731-214500-deletion-dsl-declarative-generic-engine.md) —
+see the "Post-approval refinements" section at the end; where they differ, the refinements govern.
 **Tracking issue**: [#272 "Runtime D: PM mailboxes (placeOrder/refund flip), reminders machinery, activations — continuation of #242"](https://github.com/TheCaptainCompany/captain-food/issues/272)
-**Realizing PR**: TBD (fresh branch from `main` after [#270 "actor mailbox runtime (consolidated)"](https://github.com/TheCaptainCompany/captain-food/pull/270) merges)
+**Realizing PR**: [#273 "Runtime D — PM mailboxes (two-phase payment delivery), typed reminders, activations"](https://github.com/TheCaptainCompany/captain-food/pull/273) (branch `272-runtime-d-pm-mailboxes-reminders`)
 **Context**: [PROP-20260728-152752](PROP-20260728-152752-actor-mailbox-write-path.md) §3.4 ·
 [ADR-20260731-120825](../adr/ADR-20260731-120825-actor-messages-typed-inside-the-actor.md) (messages typed inside the actor) ·
 [ADR-20260731-150500](../adr/ADR-20260731-150500-reminders-reschedule-in-place.md) (reschedule in place) ·
@@ -173,3 +176,78 @@ the retention windows per data category (legal/product input, referential layer)
 across instances, and the observability-contract rewrite's content (it MUST ship in the same
 change as the flip — the #270 review showed `command_completion_ms` goes dark otherwise — but its
 shape follows the existing contract format and needs no choice here).
+
+## Post-approval refinements (2026-07-31, product owner — ADR-20260731-214500)
+
+The design session continued after approval; these decisions REFINE the approved shape above
+(the original text is kept as the historical record — this section governs where they differ):
+
+1. **Naming**: the per-actor self-message section is **`reminders:`** (not `messages:`); the
+   data-removal block is **`deletion:`** (product owner considered and declined both `erasure:`
+   and `dies:` — "deletion" is the term a DPO/auditor greps for, and it matches the
+   `*Deleted`/`*DeletionRequested` event vocabulary).
+2. **C2 is superseded by `schedules:` on receives**: the reminder trigger is declared on the
+   `receives` entry that fires it (`schedules: [{ $ref: '#/<Actor>/reminders/<Name>' }]`),
+   alongside `emits`/`throws` — the handler's third observable effect, so generated behaviour
+   tests assert scheduling and rescheduling per receive.
+3. **`deletion:` block** replaces the D-C-era expiry sketch: `triggers` (each `on:` event
+   `$ref`s + optional `after:` **`$ref` into configuration.yaml** — never a bare string —
+   + optional `cancelled_on:` + typed `match:`), and `receipt:` (the business fact recorded on
+   the deletion ledger — pseudonymous references only, per ADR-20260731-160000 §6).
+4. **Propagation = the child declares how it dies**: a sub-actor lists the parent's `receipt`
+   fact in its own `triggers.on` — the dependency tree EMERGES from declarations; the validator
+   builds it and proves acyclicity. No parent-side cascade list; read models need no declaration
+   (each projection folds the deletion fact and removes its rows).
+5. **`match:` is strongly typed** — `$ref` to the triggering event's property AND `$ref` to the
+   child actor's state property; the engine enumerates child instances through the child's
+   projection. Bare string paths are barred, and the two legacy string dialects
+   (`requires.acting: state.customerId`, `identity: orderId`) are scheduled for the same
+   `$ref` normalization in D2.
+6. **The undo**: `cancelled_on` facts cancel the pending scheduled deletion
+   (`SCHEDULED → CANCELLED`, the explicit transition ADR-20260731-150500 kept separate from
+   reschedule). Pilot: `CancelRestaurantDeletion` during the cooling window.
+7. **One generic deletion engine** (refines ADR-20260731-160000 §4): the decided journey —
+   projection-checkpoint verification → grace window → technical tombstone event → technical
+   worker deletes the stream from `domain_events` + `domain_stream` → receipt — is implemented
+   once, parameterized by the declarations; per-aggregate erasure PMs are not written (escape
+   hatch: a bespoke PM remains possible).
+8. **Second pilot — the leaving restaurant**: `RequestRestaurantDeletion` is a refusable COMMAND
+   (throws e.g. `RestaurantHasOpenOrders`; a future `UnsettledInvoices` slots in when the
+   invoicing concept exists — noted, no development yet) emitting the FACT
+   `RestaurantDeletionRequested`; no `delete:` flag ever appears on a receive — deletion
+   semantics live only in the `deletion:` block.
+
+### Final DSL shape (governing)
+
+```yaml
+Restaurant:
+  receives:
+    - message: { $ref: 'commands.yaml#/RequestRestaurantDeletion' }
+      emits:  [{ $ref: 'events.yaml#/RestaurantDeletionRequested' }]
+      throws: [{ $ref: 'errors.yaml#/RestaurantHasOpenOrders' }]
+    - message: { $ref: 'commands.yaml#/CancelRestaurantDeletion' }
+      emits:  [{ $ref: 'events.yaml#/RestaurantDeletionCancelled' }]
+      throws: [{ $ref: 'errors.yaml#/NoPendingDeletion' }]
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/RestaurantDeletionRequested' }]
+        after: { $ref: 'configuration.yaml#/RESTAURANT_DELETION_COOLING_PERIOD' }
+        cancelled_on: [{ $ref: 'events.yaml#/RestaurantDeletionCancelled' }]
+    receipt: { $ref: 'events.yaml#/RestaurantDeleted' }
+
+Catalog:
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/RestaurantDeleted' }]        # the tree edge: dies with its restaurant
+        match:
+          event: { $ref: 'events.yaml#/RestaurantDeleted/properties/restaurantId' }
+          state: { $ref: '#/Catalog/state/restaurantId' }
+    receipt: { $ref: 'events.yaml#/CatalogDeleted' }
+
+Order:
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/OrderDelivered' }, { $ref: 'events.yaml#/OrderCancelled' }]
+        after: { $ref: 'configuration.yaml#/ORDER_RETENTION_WINDOW' }
+    receipt: { $ref: 'events.yaml#/OrderDeleted' }
+```
