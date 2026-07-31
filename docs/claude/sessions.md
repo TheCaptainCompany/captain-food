@@ -139,5 +139,11 @@ operating model itself — **proposals, ADRs, `DECISIONS.md` and `STATUS.md` are
 session.** When a session has produced decisions, write them down and let the next session start
 small; do not carry a 30-turn context forward for its own sake.
 
+**The remote git proxy cannot DELETE branches.** `git push origin --delete <branch>` (and the
+`:refs/heads/<branch>` form) dies with "the remote end hung up unexpectedly" — the per-session git
+proxy only supports fetch/push of refs, not deletions — and the GitHub MCP toolset has no
+ref-deletion tool either. Branch cleanup must happen from the GitHub UI or a normal clone; don't
+burn retries on it (cost: three failed attempts before diagnosing, 2026-07-31).
+
 When wrapping up, state the handoff explicitly: what was pushed and to which branch, what remains on
 the user's side, which decisions are blocking, and what the next code slice is.
