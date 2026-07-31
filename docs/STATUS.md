@@ -24,6 +24,17 @@
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).
+> ✅ **THE RESOLVER FLIP IS ON THE BRANCH (2026-07-31, Runtime C3a)**: aggregate-routed mutations
+> now ENQUEUE on `inbound_messages` and answer PENDING — the per-actor-type `MailboxWorker`s
+> (crates/actor_runtime: leases, `ownership_version` fencing inside the completion transaction,
+> head-of-line drain, staged-event flush) deliver through the GENERATED command router (82 arms
+> from the same table as the resolvers) and publish terminal status post-commit. The acceptance
+> contract is proven unchanged over the mailbox (duplicate replay / payload conflict / session
+> scope — `graphql_write_path` green); `operationStatus(+Changed)` reads mailbox-first with the
+> journal as pre-flip/PM-leg fallback. PM legs (placeOrder, approveRefund, denyRefund) stay on
+> journal+spawn until PM mailboxes (Runtime D). Remaining C3b: worker-channel flip (SIRENE/HubRise
+> `dispatch_journaled` → mailbox), adapter inbox → kind EVENT rows, backfill + legacy drop.
+> 36 DB suites green on a local PG16 under `DB_TESTS_REQUIRED=1`; `make rust` green.
 > ✅ **Runtime B on the branch (2026-07-31): the actor-supervision surface is live end to end** —
 > ADMIN `mailboxLanes` query (api.yaml + story step), the `system.yaml` SDUI surface (first ADMIN
 > screen set, `/system/mailbox` lanes page + `system.translations.yaml` sidecar), the
