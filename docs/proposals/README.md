@@ -32,6 +32,11 @@ chose what we chose.
   - **Date**: YYYY-MM-DD
   - **Tracking issue**: [#NN "<title>"](https://github.com/TheCaptainCompany/captain-food/issues/NN) (REQUIRED — create it if missing; full clickable link, never a bare number)
   - **Realized by**: PR #NN / ADR-… (filled at completion)
+  - **Concerns**: (optional) a checklist of NAMED blocking concerns — `- [ ] <name>: <one line>`.
+    A proposal cannot move to `Approved` while an unchecked concern exists; resolving one means
+    checking it WITH a one-line resolution, never deleting it. (Rust-RFC "register a concern":
+    the mechanism for "I approve, but sleep on THIS first" — and for the assistant to surface a
+    hazard in an already-favored option without burying it in chat.)
   ```
 
 - Body = the proposal as presented for approval: context, the recommended approach, **alternatives
@@ -46,7 +51,13 @@ chose what we chose.
   - **Per-option pros / cons for every decision** the proposal surfaces — each option gets its
     trade-offs (a small table is ideal), and the chosen option is marked. Never present a bare
     "A vs B" without the trade-offs that justify the pick.
-  - PROP-20260726-013207 (reclamation) is the reference example for all three.
+  - **Drawbacks** — why we might regret the WHOLE thing (distinct from per-option cons: even the
+    winning option's global costs — complexity added, doors closed, maintenance taken on).
+  - **Unresolved questions** — the named open points the approval deliberately leaves open. On
+    approval they are COPIED into the tracking issue's checklist so they cannot silently
+    evaporate (the Rust-RFC tracking-issue move); each is later closed by an ADR, a spec change,
+    or an explicit "won't fix" on the issue.
+  - PROP-20260726-013207 (reclamation) is the reference example for the first three.
 - The file is a HISTORICAL RECORD once approved — do not rewrite it to match what was eventually
   built; divergences are noted in the realizing PR/ADR/STATUS instead (the honest-residuals rule).
 - Plan-mode flow: the plan written for approval IS the proposal — commit it here verbatim when

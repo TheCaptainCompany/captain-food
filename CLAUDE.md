@@ -194,6 +194,12 @@ mutation/query is reached by a story step, and every test↔rule link holds both
   decision without alternatives gets an ADR (inline "options considered" at most); a small
   subject with no real decision needs NEITHER — the commit message and the PR's one-paragraph
   body are enough. Issues and PR bodies stay one paragraph + links + a checklist.
+- **Gate, then stabilize** (Rust-RFC import, product-owner approved 2026-07-31): behavior that
+  changes a critical path ships BEHIND a gate (env toggle / config flag / spec `activations`),
+  and flipping the default is a SEPARATE, recorded decision (a one-line ADR) after the gated
+  form has been smoked — never the same change. **Named concerns**: a proposal's header may
+  carry a `Concerns` checklist; an unchecked concern mechanically blocks `Approved` (see
+  docs/proposals/README.md) — enforced by the validator's proposal-hygiene rules.
   **Every proposal MUST include** (product-owner directive, 2026-07-26): **per-use-case screen
   mockups**, **per-flow sequence diagrams** (mermaid, hexagonal-faithful), and **per-option pros/cons**
   for every decision it surfaces (a bare "A vs B" without trade-offs is incomplete) — see
