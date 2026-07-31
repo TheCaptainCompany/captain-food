@@ -21,6 +21,13 @@
 > no behavior flips) and proceed regardless; **slice 3 (mailbox migrations + resolver flip) waits
 > until the enum-text release is applied and smoked** — never stack a second unapplied migration
 > set on a paused prod.
+> ✅ **#270 MERGED (2026-07-31, squash `15864f7`)** — Runtime A+B+C + review fixes + the combined
+> actors/projector test are on `main`. **Runtime D continues on
+> [#272](https://github.com/TheCaptainCompany/captain-food/issues/272)** (branch
+> `272-runtime-d-pm-mailboxes-reminders`), under the APPROVED
+> [PROP-20260731-195500](proposals/PROP-20260731-195500-runtime-d-pm-mailboxes-and-reminders.md)
+> choices A2 (two-phase payment delivery) / B2 (chained PM facts) / C2 (event-lineage reminder
+> triggers), ADR-20260731-203000.
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).
