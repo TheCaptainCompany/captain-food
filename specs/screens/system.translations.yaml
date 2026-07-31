@@ -1,0 +1,25 @@
+version: 1
+description: >
+  System-surface UI strings (ADR-0033; sidecar convention ADR-20260722-101500) — the
+  surface-specific translation catalog for `screens/system.yaml` (internal ADMIN operations @
+  system.captain.food). First block: the actor-mailbox supervision page (#242 Runtime B). The
+  codegen merges every translations file into a single `translations.generated.json`; keys are
+  globally namespaced and unique across all files. Same convention as translations.yaml (dotted
+  key - optional params - en+fr messages with matching {param} tokens).
+
+# ── mailbox supervision ───────────────────────────────────────────────────────
+mailbox.title:          { messages: { en: "Actor mailbox", fr: "Boîte aux lettres des acteurs" } }
+mailbox.subtitle:       { messages: { en: "One lane per (actor type, partition) — leases, checkpoints and backlog.", fr: "Une voie par (type d'acteur, partition) — baux, points de contrôle et arriéré." } }
+mailbox.lanes:          { messages: { en: "Lanes", fr: "Voies" } }
+mailbox.lane:           { messages: { en: "Lane", fr: "Voie" } }
+mailbox.owner:          { messages: { en: "Owner", fr: "Propriétaire" } }
+mailbox.lease:          { messages: { en: "Lease until", fr: "Bail jusqu'à" } }
+mailbox.ownership:      { messages: { en: "Ownership version", fr: "Version de propriété" } }
+mailbox.checkpoint:     { messages: { en: "Checkpoint", fr: "Point de contrôle" } }
+mailbox.pending:        { messages: { en: "Pending", fr: "En attente" } }
+mailbox.scheduled:      { messages: { en: "Scheduled", fr: "Planifiés" } }
+mailbox.oldest_pending: { messages: { en: "Oldest pending since", fr: "Plus ancien en attente depuis" } }
+mailbox.empty.title:    { messages: { en: "No lanes registered", fr: "Aucune voie enregistrée" } }
+mailbox.empty.body:     { messages: { en: "Lanes appear when a mailbox worker seeds the partition registry on startup.", fr: "Les voies apparaissent quand un worker de boîte aux lettres initialise le registre des partitions au démarrage." } }
+mailbox.guide.title:    { messages: { en: "How to read this page", fr: "Comment lire cette page" } }
+mailbox.guide.body:     { messages: { en: "A healthy lane has a live lease and pending near zero. A growing pending count with an expired lease means no worker owns the lane; a growing count with a live lease means the owner is stuck. Ownership version increments on every takeover — it should be stable outside deployments.", fr: "Une voie saine a un bail actif et un arriéré proche de zéro. Un arriéré croissant avec un bail expiré signifie qu'aucun worker ne possède la voie ; un arriéré croissant avec un bail actif signifie que le propriétaire est bloqué. La version de propriété s'incrémente à chaque reprise — elle doit rester stable hors déploiements." } }

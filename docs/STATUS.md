@@ -24,6 +24,15 @@
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).
+> ✅ **Runtime B on the branch (2026-07-31): the actor-supervision surface is live end to end** —
+> ADMIN `mailboxLanes` query (api.yaml + story step), the `system.yaml` SDUI surface (first ADMIN
+> screen set, `/system/mailbox` lanes page + `system.translations.yaml` sidecar), the
+> `20260731063000_actor_mailbox_tables.sql` migration (inbound_messages + mailbox_partitions with
+> the drain/scheduler partial indexes — pulled forward from slice 3 so the surface is DB-testable;
+> NOTHING writes them until the worker flip), `MailboxLaneRepository` port + Pg lateral-join adapter
+> + composition-root wiring, and a DB-gated test that applies the REAL migration file and proves
+> counts + ADMIN guard + BIGINT-as-string serialization (verified locally against a real PG16:
+> full migration chain from scratch + every DB suite green under `DB_TESTS_REQUIRED=1`).
 > Realization starts with [#242 "Write path becomes an actor mailbox…"](https://github.com/TheCaptainCompany/captain-food/issues/242)'s
 > foundation slice (claimed, draft PR per protocol); [#235](https://github.com/TheCaptainCompany/captain-food/issues/235)
 > and [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) follow. Open veto flag:

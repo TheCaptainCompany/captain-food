@@ -46,7 +46,7 @@ use sqlx::{PgPool, Row};
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
-    DeliveryReadRepository, OrderReadRepository,
+    DeliveryReadRepository, MailboxLaneRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
     RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
     UberSplitPolicyReadRepository,
@@ -365,6 +365,11 @@ pub fn router() -> Router {
                     Arc::new(PgReclamationRepository::new(pool.clone()));
                 let customer_credit: Arc<dyn CustomerCreditReadRepository> =
                     Arc::new(PgCustomerCreditRepository::new(pool.clone()));
+                let mailbox_lanes: Arc<dyn MailboxLaneRepository> = Arc::new(
+                    infrastructure::persistence::mailbox_lanes::PgMailboxLaneRepository::new(
+                        pool.clone(),
+                    ),
+                );
                 read_deps = Some(ReadDeps {
                     restaurants,
                     prospection,
@@ -382,6 +387,7 @@ pub fn router() -> Router {
                     delivery_partner_availabilities,
                     reclamations,
                     customer_credit,
+                    mailbox_lanes,
                 });
 
                 // Write side (CQRS commands): the event store behind the mutation resolvers, plus the

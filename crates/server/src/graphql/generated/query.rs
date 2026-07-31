@@ -19,6 +19,13 @@ impl QueryRoot {
     async fn phone_countries(&self) -> async_graphql::Result<Vec<PhoneCountry>> {
         Err(async_graphql::Error::new("not implemented"))
     }
+    /// Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from mailbox_partitions + inbound_messages directly, no View_* (write-path infrastructure, not a business read model).
+    #[graphql(name = "mailboxLanes", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    async fn mailbox_lanes(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<MailboxLane>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::MailboxLaneRepository>>()?;
+        let rows = repo.list().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(MailboxLane::from).collect())
+    }
     /// Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the command_journal, no View_*.
     #[graphql(name = "operationStatus")]
     async fn operation_status(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusQueryInput) -> async_graphql::Result<Option<Operation>> {

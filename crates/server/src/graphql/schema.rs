@@ -16,7 +16,7 @@ use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier}
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
-    DeliveryReadRepository, OrderConversationReadRepository, OrderReadRepository,
+    DeliveryReadRepository, MailboxLaneRepository, OrderConversationReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
     RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
     UberSplitPolicyReadRepository,
@@ -49,6 +49,9 @@ pub struct ReadDeps {
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
     pub reclamations: Arc<dyn ReclamationReadRepository>,
     pub customer_credit: Arc<dyn CustomerCreditReadRepository>,
+    /// The ADMIN `mailboxLanes` supervision read (#242 Runtime B): the mailbox partition registry
+    /// joined with its live backlog — write-path infrastructure, not a business read model.
+    pub mailbox_lanes: Arc<dyn MailboxLaneRepository>,
 }
 
 /// Write-side ports injected into the mutation resolvers' context (ADR-0035 composition root): the
@@ -113,6 +116,7 @@ pub fn build_schema(
         builder = builder.data(d.delivery_partner_availabilities);
         builder = builder.data(d.reclamations);
         builder = builder.data(d.customer_credit);
+        builder = builder.data(d.mailbox_lanes);
     }
     if let Some(w) = writes {
         builder = builder.data(w.event_store);

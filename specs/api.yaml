@@ -247,6 +247,23 @@ types:
       traceId: { $ref: 'scalars.yaml#/TraceId', nullable: true }       # traceparent-derived; null until tracing lands on the request
       operationStatus: { $ref: 'scalars.yaml#/OperationStatus' }       # PENDING on first acceptance; the original's status on a duplicate
       duplicate: { type: boolean }                                     # true when this messageId was already journaled (idempotent replay)
+  MailboxLane:
+    description: >
+      One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a
+      (actorType, partition) row from the mailbox_partitions registry joined with live
+      pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT
+      rendered as decimal strings (GraphQL Int is 32-bit). NON-PROJECTED (transient) — write-path
+      infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
+    properties:
+      actorType: { type: string }
+      partition: { type: integer }
+      ownershipVersion: { type: string }
+      claimedBy: { type: string, nullable: true }
+      leaseUntil: { type: string, format: date-time, nullable: true }
+      checkpoint: { type: string }
+      pending: { type: integer }
+      scheduled: { type: integer }
+      oldestPendingAt: { type: string, format: date-time, nullable: true }
   Operation:
     description: >
       Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance
@@ -445,6 +462,17 @@ queries:
   phoneCountries:
     description: "Selectable phone countries for the dialing-code picker (static reference data; the picker sends back the dialingCode '+33')."
     returns: { $ref: '#/types/PhoneCountry', array: true }
+    slice: V0
+
+  mailboxLanes:
+    description: >
+      Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and
+      live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient —
+      served from mailbox_partitions + inbound_messages directly, no View_* (write-path
+      infrastructure, not a business read model).
+    args: {}
+    returns: { $ref: '#/types/MailboxLane', array: true }
+    roles: [ADMIN]
     slice: V0
 
   operationStatus:

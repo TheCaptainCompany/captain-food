@@ -781,6 +781,18 @@ type MutationAcceptance {
   duplicate: Boolean!
 }
 
+type MailboxLane {
+  actorType: String!
+  partition: Int!
+  ownershipVersion: String!
+  claimedBy: String
+  leaseUntil: DateTime
+  checkpoint: String!
+  pending: Int!
+  scheduled: Int!
+  oldestPendingAt: DateTime
+}
+
 type Operation {
   messageId: MessageId!
   correlationId: CorrelationId!
@@ -1720,6 +1732,7 @@ input MetadataInput {
 # ==============================================================================
 type Query {
   phoneCountries: [PhoneCountry!]! @public @reads(views: ["PhoneCountry"])
+  mailboxLanes: [MailboxLane!]! @auth(requires: [ADMIN])
   operationStatus(input: OperationStatusQueryInput!): Operation @public
   paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
   me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["Customer"])

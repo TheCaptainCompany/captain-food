@@ -221,6 +221,13 @@ impl application::queries::DeliverySatisfactionReadRepository for Empty {
     }
 }
 
+#[async_trait]
+impl application::queries::MailboxLaneRepository for Empty {
+    async fn list(&self) -> Result<Vec<application::queries::MailboxLaneRow>, DomainError> {
+        Ok(vec![])
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures.
 // ---------------------------------------------------------------------------------------------
@@ -323,6 +330,7 @@ fn schema_over(orders: InMemoryOrders, restaurants: InMemoryRestaurants, bus: Ev
             delivery_partner_availabilities: Arc::new(Empty),
             reclamations: Arc::new(Empty),
             customer_credit: Arc::new(Empty),
+            mailbox_lanes: Arc::new(Empty),
         }),
         None,
         Some(bus),

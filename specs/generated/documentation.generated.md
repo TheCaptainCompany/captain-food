@@ -185,6 +185,7 @@ A platform operator who onboards accounts and oversees the platform.
 |  | ChooseStorefrontAddress | [✏️ `configureRestaurantSlug`](#mutation-configurerestaurantslug) |
 |  | ActivateRestaurant | [✏️ `activateRestaurant`](#mutation-activaterestaurant) |
 |  | ImportCatalog | [✏️ `importCatalog`](#mutation-importcatalog) |
+| 🧭 **SuperviseActorMailbox** | ViewMailboxLanes | [🔎 `mailboxLanes`](#query-mailboxlanes) |
 | 🧭 **ManageListings** | BrowseListings | [🔎 `restaurants`](#query-restaurants) |
 |  | ChangeListingStatus | [✏️ `changeRestaurantListingStatus`](#mutation-changerestaurantlistingstatus) |
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
@@ -9490,7 +9491,7 @@ _criticality: **high**_
 
 _Shared vocabulary and operations that span several bounded contexts (or belong to none)._
 
-### 🧰 API operations _(6)_
+### 🧰 API operations _(7)_
 
 <a id="query-phonecountries"></a>
 #### 🔎 Query: `phoneCountries`
@@ -9500,6 +9501,16 @@ Selectable phone countries for the dialing-code picker (static reference data; t
 - **Input**: _(none)_
 - **Returns**: [🧩 `PhoneCountry`](#type-phonecountry) (list) · **reads** [🗄️ `PhoneCountry`](#view-phonecountry)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
+
+<a id="query-mailboxlanes"></a>
+#### 🔎 Query: `mailboxLanes`
+
+Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from mailbox_partitions + inbound_messages directly, no View_* (write-path infrastructure, not a business read model).
+
+
+- **Input**: _(none)_
+- **Returns**: [🧩 `MailboxLane`](#type-mailboxlane) (list) · **reads** —
+- **Roles**: ADMIN · **slice** V0
 
 <a id="query-operationstatus"></a>
 #### 🔎 Query: `operationStatus`
@@ -9548,7 +9559,7 @@ Live status of one journaled command, keyed by its messageId acceptance handle (
 - **Streams**: [🧩 `Operation`](#type-operation)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
-### 🧩 Output types _(11)_
+### 🧩 Output types _(12)_
 
 <a id="type-product"></a>
 #### 🧩 Type: `Product`
@@ -9663,6 +9674,26 @@ The uniform acceptance EVERY mutation returns (acceptance-first writes, ADR-2026
 | <a id="type-mutationacceptance--traceid"></a>`traceId` | [🔤 `TraceId`](#scalar-traceid) | ⬜ |
 | <a id="type-mutationacceptance--operationstatus"></a>`operationStatus` | [🔤 `OperationStatus`](#scalar-operationstatus) | ✅ |
 | <a id="type-mutationacceptance--duplicate"></a>`duplicate` | `boolean` | ✅ |
+
+<a id="type-mailboxlane"></a>
+#### 🧩 Type: `MailboxLane`
+
+One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) row from the mailbox_partitions registry joined with live pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
+
+
+- **Read model**: _(resolved within a parent projection)_
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-mailboxlane--actortype"></a>`actorType` | `string` | ✅ |
+| <a id="type-mailboxlane--partition"></a>`partition` | `integer` | ✅ |
+| <a id="type-mailboxlane--ownershipversion"></a>`ownershipVersion` | `string` | ✅ |
+| <a id="type-mailboxlane--claimedby"></a>`claimedBy` | `string` | ⬜ |
+| <a id="type-mailboxlane--leaseuntil"></a>`leaseUntil` | `string` _date-time_ | ⬜ |
+| <a id="type-mailboxlane--checkpoint"></a>`checkpoint` | `string` | ✅ |
+| <a id="type-mailboxlane--pending"></a>`pending` | `integer` | ✅ |
+| <a id="type-mailboxlane--scheduled"></a>`scheduled` | `integer` | ✅ |
+| <a id="type-mailboxlane--oldestpendingat"></a>`oldestPendingAt` | `string` _date-time_ | ⬜ |
 
 <a id="type-operation"></a>
 #### 🧩 Type: `Operation`
@@ -10601,6 +10632,25 @@ _Surface_ **`rider.yaml`**
 | write | `confirm_pickup` | [✏️ `confirmPickup`](#mutation-confirmpickup) |
 | write | `complete_delivery` | [✏️ `completeDelivery`](#mutation-completedelivery) |
 
+_Surface_ **`system.yaml`**
+
+<a id="screen-mailbox_lanes"></a>
+### 📱 `mailbox_lanes` · `/system/mailbox` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Actor mailbox                            │
+├──────────────────────────────────────────┤
+│ page_header — Actor mailbox              │
+│ section — Lanes                          │
+│ section — How to read this page          │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `mailbox.lanes` | [🔎 `mailboxLanes`](#query-mailboxlanes) |
+
 <a id="sec-translations"></a>
 ## 🌐 Translations
 
@@ -10898,6 +10948,21 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-job-dropoff"></a>`rider.job.dropoff` | — | Drop-off | Livraison |
 | <a id="translation-rider-job-picked_up"></a>`rider.job.picked_up` | — | Picked up | Commande récupérée |
 | <a id="translation-rider-job-delivered"></a>`rider.job.delivered` | — | Delivered | Livrée |
+| <a id="translation-mailbox-title"></a>`mailbox.title` | — | Actor mailbox | Boîte aux lettres des acteurs |
+| <a id="translation-mailbox-subtitle"></a>`mailbox.subtitle` | — | One lane per (actor type, partition) — leases, checkpoints and backlog. | Une voie par (type d'acteur, partition) — baux, points de contrôle et arriéré. |
+| <a id="translation-mailbox-lanes"></a>`mailbox.lanes` | — | Lanes | Voies |
+| <a id="translation-mailbox-lane"></a>`mailbox.lane` | — | Lane | Voie |
+| <a id="translation-mailbox-owner"></a>`mailbox.owner` | — | Owner | Propriétaire |
+| <a id="translation-mailbox-lease"></a>`mailbox.lease` | — | Lease until | Bail jusqu'à |
+| <a id="translation-mailbox-ownership"></a>`mailbox.ownership` | — | Ownership version | Version de propriété |
+| <a id="translation-mailbox-checkpoint"></a>`mailbox.checkpoint` | — | Checkpoint | Point de contrôle |
+| <a id="translation-mailbox-pending"></a>`mailbox.pending` | — | Pending | En attente |
+| <a id="translation-mailbox-scheduled"></a>`mailbox.scheduled` | — | Scheduled | Planifiés |
+| <a id="translation-mailbox-oldest_pending"></a>`mailbox.oldest_pending` | — | Oldest pending since | Plus ancien en attente depuis |
+| <a id="translation-mailbox-empty-title"></a>`mailbox.empty.title` | — | No lanes registered | Aucune voie enregistrée |
+| <a id="translation-mailbox-empty-body"></a>`mailbox.empty.body` | — | Lanes appear when a mailbox worker seeds the partition registry on startup. | Les voies apparaissent quand un worker de boîte aux lettres initialise le registre des partitions au démarrage. |
+| <a id="translation-mailbox-guide-title"></a>`mailbox.guide.title` | — | How to read this page | Comment lire cette page |
+| <a id="translation-mailbox-guide-body"></a>`mailbox.guide.body` | — | A healthy lane has a live lease and pending near zero. A growing pending count with an expired lease means no worker owns the lane; a growing count with a live lease means the owner is stuck. Ownership version increments on every takeover — it should be stable outside deployments. | Une voie saine a un bail actif et un arriéré proche de zéro. Un arriéré croissant avec un bail expiré signifie qu'aucun worker ne possède la voie ; un arriéré croissant avec un bail actif signifie que le propriétaire est bloqué. La version de propriété s'incrémente à chaque reprise — elle doit rester stable hors déploiements. |
 | <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
 | <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
 | <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |

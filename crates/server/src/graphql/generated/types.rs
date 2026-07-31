@@ -6,7 +6,7 @@
 #![allow(non_camel_case_types)]
 
 use application::projections::{CartRow, CatalogRow, CustomerCreditBalanceRow, CustomerRow, OrderConversationRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
-use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, PricingPolicyRow, ReclamationRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
+use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, MailboxLaneRow, PricingPolicyRow, ReclamationRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
 use super::scalars::*;
@@ -754,6 +754,30 @@ pub struct MutationAcceptance {
     pub duplicate: bool,
 }
 
+/// One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) row from the mailbox_partitions registry joined with live pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxLane {
+    #[graphql(name = "actorType")]
+    pub actor_type: String,
+    #[graphql(name = "partition")]
+    pub partition: i64,
+    #[graphql(name = "ownershipVersion")]
+    pub ownership_version: String,
+    #[graphql(name = "claimedBy")]
+    pub claimed_by: Option<String>,
+    #[graphql(name = "leaseUntil")]
+    pub lease_until: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "checkpoint")]
+    pub checkpoint: String,
+    #[graphql(name = "pending")]
+    pub pending: i64,
+    #[graphql(name = "scheduled")]
+    pub scheduled: i64,
+    #[graphql(name = "oldestPendingAt")]
+    pub oldest_pending_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance handle: polled by `operationStatus`, streamed by `operationStatusChanged`. `errorCode` is the stable errors.yaml code when the operation REJECTED/FAILED after acceptance (the async home of the P-10 rejection contract — sync validation failures still use GraphQL errors). Ownership- scoped in the resolver: the journaling actor (JWT), the journaling session (X-SESSION-ID), or ADMIN. NON-PROJECTED (transient) — served from the command_journal, no backing View_*.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -1424,6 +1448,24 @@ impl From<UberSplitPolicyRow> for UberSplitPolicy {
             avg_delivery_fee_cents: row.avg_delivery_fee_cents,
             platform_fee_pct: row.platform_fee_pct,
             effective_from: row.effective_from,
+        }
+    }
+}
+
+/// Supervision row → API type: a mailbox lane (#242 Runtime B). The BIGINT counters
+/// (ownershipVersion/checkpoint) render as decimal strings — GraphQL Int is 32-bit.
+impl From<MailboxLaneRow> for MailboxLane {
+    fn from(row: MailboxLaneRow) -> Self {
+        Self {
+            actor_type: row.actor_type,
+            partition: i64::from(row.partition),
+            ownership_version: row.ownership_version.to_string(),
+            claimed_by: row.claimed_by,
+            lease_until: row.lease_until,
+            checkpoint: row.checkpoint.to_string(),
+            pending: row.pending,
+            scheduled: row.scheduled,
+            oldest_pending_at: row.oldest_pending_at,
         }
     }
 }

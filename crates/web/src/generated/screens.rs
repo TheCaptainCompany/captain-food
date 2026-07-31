@@ -660,3 +660,31 @@ pub mod rider {
     pub const SHEETS: &[Sheet] = &[
     ];
 }
+
+/// `specs/screens/system.yaml` — 1 screen(s).
+pub mod system {
+    use super::*;
+
+    pub const SCREENS: &[Screen] = &[
+        Screen {
+            id: "mailbox_lanes",
+            route: "/system/mailbox",
+            roles: &["ADMIN"],
+            requires_auth: false,
+            sdui: true,
+            data_requirements: &[ResolverKey::MailboxLanes],
+            tree: &[
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("mailbox.title")), ("subtitle", PropValue::I18n("mailbox.subtitle"))], children: &[] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("lanes")), ("title", PropValue::I18n("mailbox.lanes"))], children: &[
+                Node { kind: ComponentKind::List, props: &[("id", PropValue::Text("lane_list")), ("items", PropValue::Binding("mailbox_lanes")), ("empty_state.icon", PropValue::Text("inbox")), ("empty_state.title", PropValue::I18n("mailbox.empty.title")), ("empty_state.body", PropValue::I18n("mailbox.empty.body")), ("item_components.0.type", PropValue::Text("info_row")), ("item_components.0.label", PropValue::I18n("mailbox.lane")), ("item_components.0.value", PropValue::Binding("item.actorType }} / {{ item.partition")), ("item_components.1.type", PropValue::Text("info_row")), ("item_components.1.label", PropValue::I18n("mailbox.owner")), ("item_components.1.value", PropValue::Binding("item.claimedBy")), ("item_components.2.type", PropValue::Text("info_row")), ("item_components.2.label", PropValue::I18n("mailbox.lease")), ("item_components.2.value", PropValue::Binding("item.leaseUntil")), ("item_components.3.type", PropValue::Text("info_row")), ("item_components.3.label", PropValue::I18n("mailbox.ownership")), ("item_components.3.value", PropValue::Binding("item.ownershipVersion")), ("item_components.4.type", PropValue::Text("info_row")), ("item_components.4.label", PropValue::I18n("mailbox.checkpoint")), ("item_components.4.value", PropValue::Binding("item.checkpoint")), ("item_components.5.type", PropValue::Text("badge")), ("item_components.5.label", PropValue::I18n("mailbox.pending")), ("item_components.5.value", PropValue::Binding("item.pending")), ("item_components.5.variant_when.warning", PropValue::Text("item.pending > 0")), ("item_components.6.type", PropValue::Text("badge")), ("item_components.6.label", PropValue::I18n("mailbox.scheduled")), ("item_components.6.value", PropValue::Binding("item.scheduled")), ("item_components.7.type", PropValue::Text("info_row")), ("item_components.7.label", PropValue::I18n("mailbox.oldest_pending")), ("item_components.7.value", PropValue::Binding("item.oldestPendingAt")), ("item_components.7.visible_when", PropValue::Text("item.oldestPendingAt != null"))], children: &[] }
+            ] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("reading_guide")), ("title", PropValue::I18n("mailbox.guide.title"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("mailbox.guide.body"))], children: &[] }
+            ] }
+        ],
+        },
+    ];
+
+    pub const SHEETS: &[Sheet] = &[
+    ];
+}
