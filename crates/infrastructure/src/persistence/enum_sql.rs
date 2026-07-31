@@ -11,7 +11,7 @@ use domain::generated::scalars::{
     CartStatus, CityAvailabilityStatus, CommandChannel, CommandJournalStatus, ComparisonBasis,
     CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus,
     DeliveryTimeliness, GbpLinkStatus,
-    InboundEventStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
+    InboundEventStatus, InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
     RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
     RestaurantStatus, ServiceType, ThumbRating,
@@ -71,6 +71,16 @@ enum_text!(DeliveryStatus {
     CANCELLED,
 });
 enum_text!(DeliveryProvider { PARTNER, INDEPENDENT });
+enum_text!(InboundMessageStatus {
+    SCHEDULED,
+    CANCELLED,
+    RECEIVED,
+    SUCCEEDED,
+    REJECTED,
+    FAILED,
+    IGNORED,
+    DUPLICATE,
+});
 enum_text!(ComparisonBasis { ESTIMATED, REAL });
 enum_text!(ThumbRating { UP, DOWN });
 enum_text!(DeliveryTimeliness { ON_TIME, ACCEPTABLE_DELAY, TOO_LATE });

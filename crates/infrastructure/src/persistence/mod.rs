@@ -19,6 +19,7 @@ pub mod event_bus;
 pub mod event_store;
 pub mod inbound_events;
 pub mod mailbox_lanes;
+pub mod mailbox_store;
 pub mod order;
 pub mod order_conversation;
 pub mod order_conversation_store;
