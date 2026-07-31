@@ -11,6 +11,9 @@ members = [
     "crates/domain",           # ★ pure DDD — depends on nothing else
     "crates/application",      # use cases + ports (traits) — depends on domain
     "crates/sirene_ingest",    # SIRENE raw-ingestion client + CI bin (ADR-0045) — NO domain crates (thin CI build)
+    "crates/actor_runtime",    # durable-mailbox actor machinery (ADR-20260730-234918) — EXTRACTION-READY:
+                               # zero Captain.Food crates (enforced by its dependency_rule test); generic
+                               # over a MessageHandler, so another product can lift it wholesale
     "crates/infrastructure",   # adapters implementing ports — depends on application, domain, sirene_ingest (wire types)
     "crates/adapters/stripe",  # Stripe partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
     "crates/adapters/hubrise", # HubRise partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
