@@ -48,12 +48,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use application::commands::mark_restaurant_closed;
-use application::dispatch::{dispatch_journaled, JournaledOutcome};
-use application::journal::{
-    payload_hash, CommandJournalEntry, InboundEventRow, InboundEvents, StageOutcome,
-};
-use domain::generated::scalars::InboundEventStatus;
+use application::journal::{payload_hash, CommandJournalEntry};
 use application::ports::Actor;
 use application::repository::Repository;
 use domain::restaurant::RestaurantState;
@@ -63,6 +58,11 @@ use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{
     CommandChannel, RestaurantListingStatus, RestaurantStatus,
 };
+
+use crate::mailbox::{
+    enqueue_inbound_fact, enqueue_worker_command, EnqueueOutcome, InboundFact,
+};
+use crate::persistence::mailbox_store::PgMailbox;
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 
@@ -71,7 +71,7 @@ use crate::integrations::sirene::{
     Etablissement,
 };
 use crate::persistence::db_err;
-use crate::{PgCommandJournal, PgEventStore, PgInboundEvents, PgRestaurantRepository};
+use crate::{PgEventStore, PgRestaurantRepository};
 
 /// Safety-net poll interval. The PRIMARY trigger is the ingestion's ping on
 /// `POST /internal/sirene/drain`; the loop only catches missed pings, so it can be slow.
@@ -335,12 +335,11 @@ impl SireneSyncWorker {
         // Backs register_restaurant's SlugAlreadyTaken check; a re-synced SIRET matches its own row
         // (same deterministic id) and stays an idempotent no-op.
         let restaurants = PgRestaurantRepository::new(self.pool.clone());
-        // The closure path is still a COMMAND (absence is our inference and can be refused), so the
-        // journal stays for it. Registrations no longer touch it.
-        let journal = PgCommandJournal::new(self.pool.clone());
-        // Registrations are staged as inbound FACTS instead (ADR-20260728-011344 D4).
-        let inbox = PgInboundEvents::new(self.pool.clone());
-        // Fresh correlation id per pass so all journal rows + events of one drain are traceable
+        // THE MAILBOX IS THE ONLY DOOR (ADR-20260731-122500): closures enqueue a WORKER-channel
+        // command, registrations enqueue an inbound FACT (ADR-20260728-011344 D4) — both
+        // fire-and-forget; the mailbox worker delivers and the ledger owns the outcome.
+        let mailbox = PgMailbox::new(self.pool.clone());
+        // Fresh correlation id per pass so all mailbox rows + events of one drain are traceable
         // together; each send derives its own message_id/cause_id ([`journal_entry`]).
         let correlation_id = uuid::Uuid::new_v4();
 
@@ -375,7 +374,7 @@ impl SireneSyncWorker {
                 let last_seen_at: DateTime<Utc> = row.try_get("last_seen_at").map_err(db_err)?;
                 let staged_hash: String = row.try_get("payload_hash").map_err(db_err)?;
                 after = siret.clone();
-                self.process_row(&store, &restaurants, &journal, &inbox, correlation_id, &siret, payload, &etat, last_seen_at, &staged_hash, &mut summary)
+                self.process_row(&store, &restaurants, &mailbox, correlation_id, &siret, payload, &etat, last_seen_at, &staged_hash, &mut summary)
                     .await?;
             }
         }
@@ -384,7 +383,7 @@ impl SireneSyncWorker {
         self.reconcile_staged(&mut summary).await?;
 
         // 3) Deletion reconciliation by absence (debounced, freshness-guarded, partner-gated).
-        self.reconcile_absent(&store, &restaurants, &journal, correlation_id, &mut summary).await?;
+        self.reconcile_absent(&store, &restaurants, &mailbox, correlation_id, &mut summary).await?;
 
         Ok(summary)
     }
@@ -396,8 +395,7 @@ impl SireneSyncWorker {
         &self,
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
-        journal: &PgCommandJournal,
-        inbox: &PgInboundEvents,
+        mailbox: &PgMailbox,
         correlation_id: uuid::Uuid,
         siret: &str,
         payload: Option<serde_json::Value>,
@@ -439,7 +437,7 @@ impl SireneSyncWorker {
         let explicitly_closed = etat == "F" || matches!(etablissement.etat(), Some("F") | Some("C"));
         if explicitly_closed {
             match self
-                .close_if_prospect(store, restaurants, journal, correlation_id, siret, last_seen_at, "SIRENE: establishment administratively closed (etat=F)", summary)
+                .close_if_prospect(store, restaurants, mailbox, correlation_id, siret, last_seen_at, "SIRENE: establishment administratively closed (etat=F)", summary)
                 .await
             {
                 Ok(()) => return self.mark_processed(siret, last_seen_at, RowOutcome::Synced).await,
@@ -470,43 +468,40 @@ impl SireneSyncWorker {
         match etablissement_to_registered_event(&etablissement) {
             Ok(event) => {
                 let external_id = format!("{siret}:{staged_hash}");
-                let row = InboundEventRow {
-                    inbound_event_id: uuid::Uuid::new_v4(),
+                // The addressed lane: the Restaurant aggregate this fact belongs to — its id is
+                // deterministic (UUIDv5 of the SIRET), carried on the event itself.
+                let restaurant_uuid = event.restaurant_id.0;
+                let fact = InboundFact {
                     source: SIRENE_SOURCE.to_string(),
                     external_id: external_id.clone(),
-                    // The established ACL convention: UUIDv5 of the external id, so the whole chain
-                    // (staging row → inbound row → appended fact) shares one correlation.
-                    correlation_id: sirene_uuid(&format!("inbound:{external_id}")),
                     event_type: "RestaurantRegistered".to_string(),
-                    // The ADJACENTLY-TAGGED union form (`{"eventType", "payload"}`) — the drain
-                    // worker deserializes `DomainEvent`, so a bare payload here is undeliverable:
-                    // every staged fact would come back FAILED ("missing field eventType").
+                    // The ADJACENTLY-TAGGED union form (`{"eventType", "payload"}`) — the EVENT
+                    // route deserializes `DomainEvent`, so a bare payload here is undeliverable.
                     payload: serde_json::to_value(DomainEvent::RestaurantRegistered(event))
                         .map_err(|e| {
                             DomainError::Repository(format!("serialize RestaurantRegistered: {e}"))
                         })?,
-                    status: InboundEventStatus::RECEIVED,
-                    error: None,
-                    received_at: Utc::now(),
-                    delivered_at: None,
+                    // The established ACL convention: UUIDv5 of the external id, so the whole chain
+                    // (staging row → mailbox row → appended fact) shares one correlation.
+                    correlation_id: sirene_uuid(&format!("inbound:{external_id}")),
+                    actor_type: "Restaurant".to_string(),
+                    actor_id: restaurant_uuid,
                 };
-                match inbox.stage(&row).await {
-                    Ok(StageOutcome::Staged) => {
+                match enqueue_inbound_fact(mailbox, fact).await {
+                    Ok(EnqueueOutcome::Enqueued) => {
                         summary.registered += 1;
                         self.mark_processed(siret, last_seen_at, RowOutcome::Staged).await
                     }
-                    // Already staged: this exact (siret, payload_hash) is in the inbox — either awaiting
-                    // the drain or already delivered. Nothing to re-stage, and the staging row is done.
-                    // Already in the inbox — this exact (siret, payload_hash) is either awaiting the
-                    // drain or already decided. Same STAGED state: reconciliation reads the verdict off
-                    // the inbound row that is already there.
-                    Ok(StageOutcome::Duplicate) => {
+                    // Already on the mailbox — this exact (siret, payload_hash) is either awaiting
+                    // delivery or already decided. Reconciliation reads the verdict off the row
+                    // that is already there.
+                    Ok(EnqueueOutcome::Deduplicated(_)) | Ok(EnqueueOutcome::PayloadConflict(_)) => {
                         summary.skipped += 1;
                         self.mark_processed(siret, last_seen_at, RowOutcome::Staged).await
                     }
                     Err(e) => {
                         summary.failed += 1; // left pending → retried next pass
-                        tracing::error!(worker = "sirene_sync", %siret, error = %e, "staging failed");
+                        tracing::error!(worker = "sirene_sync", %siret, error = %e, "mailbox enqueue failed");
                         self.mark_failed(siret).await;
                         Ok(())
                     }
@@ -650,13 +645,13 @@ impl SireneSyncWorker {
             "UPDATE external_sirene_restaurants s \
                 SET status = CASE WHEN i.status = 'FAILED' THEN 'FAILED' ELSE 'SYNCED' END, \
                     synced_at = CASE WHEN i.status = 'FAILED' THEN s.synced_at \
-                                     ELSE COALESCE(i.delivered_at, now()) END, \
+                                     ELSE COALESCE(i.completed_at, now()) END, \
                     payload = CASE WHEN i.status = 'FAILED' THEN s.payload ELSE NULL END \
-               FROM inbound_events i \
+               FROM inbound_messages i \
               WHERE s.status = 'STAGED' \
                 AND i.source = $1 \
                 AND i.external_id = s.siret || ':' || s.payload_hash \
-                AND i.status <> 'RECEIVED' \
+                AND i.status NOT IN ('RECEIVED', 'SCHEDULED') \
           RETURNING s.status",
         )
         .bind(SIRENE_SOURCE)
@@ -676,7 +671,7 @@ impl SireneSyncWorker {
         &self,
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
-        journal: &PgCommandJournal,
+        mailbox: &PgMailbox,
         correlation_id: uuid::Uuid,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
@@ -720,7 +715,7 @@ impl SireneSyncWorker {
                 .close_if_prospect(
                     store,
                     restaurants,
-                    journal,
+                    mailbox,
                     correlation_id,
                     &siret,
                     last_seen_at,
@@ -745,7 +740,7 @@ impl SireneSyncWorker {
         &self,
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
-        journal: &PgCommandJournal,
+        mailbox: &PgMailbox,
         correlation_id: uuid::Uuid,
         siret: &str,
         last_seen_at: DateTime<Utc>,
@@ -779,6 +774,10 @@ impl SireneSyncWorker {
             RestaurantListingStatus::NON_PARTNER => {
                 let cmd = MarkRestaurantClosed { restaurant_id, reason: Some(reason.to_string()) };
                 let payload = serialize_command("MarkRestaurantClosed", &cmd)?;
+                // The deterministic identity is unchanged (the compaction parity below pins it);
+                // only the DOOR moved: fire-and-forget enqueue, the mailbox worker delivers
+                // (ADR-20260731-122500). `closed` now counts HAND-OFFS; the delivered outcome
+                // lives on the mailbox row and the supervision lanes.
                 let entry = journal_entry(
                     "MarkRestaurantClosed",
                     siret,
@@ -787,31 +786,26 @@ impl SireneSyncWorker {
                     payload,
                 );
                 let actor = send_actor(&entry);
-                let outcome = dispatch_journaled(journal, entry, || async {
-                    mark_restaurant_closed(store, cmd, &actor).await
-                })
-                .await?;
-                match outcome {
-                    JournaledOutcome::Executed(Ok(())) => {
+                match enqueue_worker_command(mailbox, entry.message_id, "MarkRestaurantClosed", entry.payload, &actor).await? {
+                    EnqueueOutcome::Enqueued => {
                         summary.closed += 1;
-                        tracing::info!(worker = "sirene_sync", %siret, prospect = %state.display_name.0, "closed prospect");
+                        tracing::info!(worker = "sirene_sync", %siret, prospect = %state.display_name.0, "close signal handed to the mailbox");
                     }
-                    JournaledOutcome::Executed(Err(e)) => return Err(e),
                     // This exact closure signal (SIRET + staged version) was already consumed —
                     // e.g. closed, then manually reactivated: a spent signal never re-closes.
-                    JournaledOutcome::Deduplicated(status) => {
+                    EnqueueOutcome::Deduplicated(status) => {
                         tracing::info!(
                             worker = "sirene_sync",
                             %siret,
-                            journaled = ?status,
-                            "close signal already journaled -- not re-sent (a spent signal never re-closes)"
+                            mailbox = ?status,
+                            "close signal already on the mailbox -- not re-sent (a spent signal never re-closes)"
                         );
                     }
-                    JournaledOutcome::PayloadConflict { existing_status } => {
+                    EnqueueOutcome::PayloadConflict(status) => {
                         tracing::warn!(
                             worker = "sirene_sync",
                             %siret,
-                            journaled = ?existing_status,
+                            mailbox = ?status,
                             "close payload conflict at the same staged version -- not re-sent"
                         );
                     }

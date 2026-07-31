@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use actor_runtime::{MailboxWorker, WorkerConfig};
 use application::generated::services::{IdentityService, PaymentService};
-use application::ports::EventStore;
+
 use infrastructure::generated::command_router::CommandDeps;
 use infrastructure::mailbox::{MailboxCommandHandler, StatusBusObserver};
 use infrastructure::{

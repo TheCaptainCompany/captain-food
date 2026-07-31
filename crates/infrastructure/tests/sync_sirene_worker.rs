@@ -1,10 +1,11 @@
-//! Integration test for the ADR-0045 staging→worker slice, post-#227 (ADR-20260728-011344 D4): a raw
-//! INSEE row in `external_sirene_restaurants` → `SireneSyncWorker::run_once` → ACL → an inbound FACT in
-//! `inbound_events` (INSEE cannot be told "no", so registrations are recorded, not requested) →
-//! `InboundEventsDrainWorker` delivers it through the normal write path and the AGGREGATE decides →
-//! the verdict is reconciled back onto the mirror (`STAGED` → `SYNCED`/`FAILED`, #231). The explicit
-//! `etat=F` closure stays a COMMAND (`MarkRestaurantClosed` — our inference, refusable), so that half
-//! still journals through `command_journal`.
+//! Integration test for the ADR-0045 staging→worker slice, post-ADR-20260731-122500 ("the mailbox
+//! is the only door"): a raw INSEE row in `external_sirene_restaurants` → `SireneSyncWorker::run_once`
+//! → ACL → a kind-EVENT row on the MAILBOX (INSEE cannot be told "no", so registrations are recorded,
+//! not requested) → the MailboxWorker delivers it through the fenced write path and the AGGREGATE
+//! decides → the verdict is reconciled back onto the mirror (`STAGED` → `SYNCED`/`FAILED`, #231).
+//! The explicit `etat=F` closure stays a COMMAND (`MarkRestaurantClosed` — our inference, refusable)
+//! but is now a fire-and-forget WORKER-channel enqueue: `closed` counts HAND-OFFS, and the event
+//! lands when the mailbox worker delivers.
 //! Needs a real Postgres: set `DATABASE_URL` (see restaurant_write_path.rs for a throwaway docker
 //! one-liner). Without it the test SKIPS so `cargo test` stays green offline.
 
@@ -17,9 +18,16 @@ use domain::generated::scalars::{
     AddressLine, CityName, CountryCode, PostalCode, RestaurantDisplayName, RestaurantId,
     RestaurantListingStatus,
 };
+use actor_runtime::{MailboxWorker, WorkerConfig};
+use application::generated::services::{IdentityService, PaymentService};
+use infrastructure::generated::command_router::CommandDeps;
 use infrastructure::integrations::sirene::restaurant_id_for_siret;
+use infrastructure::mailbox::MailboxCommandHandler;
 use infrastructure::{
-    InboundEventsDrainWorker, PgCommandJournal, PgEventStore, PgInboundEvents, SireneSyncWorker,
+    FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
+    PgCatalogRepository, PgCustomerRepository, PgEventStore, PgProspectionRepository,
+    PgRestaurantRepository, PgSlugReservationRepository, SireneSyncWorker,
+    UnverifiedGbpOrderLinkProbe,
 };
 use sqlx::PgPool;
 
@@ -31,47 +39,24 @@ fn db_lock() -> &'static tokio::sync::Mutex<()> {
 
 /// Fresh copies of the tables the slice touches: the staging table (mirrors
 /// migrations/20260718100000) + the write path's `domain_events` + the `restaurant` projection table
-/// backing register_restaurant's SlugAlreadyTaken check (empty is fine — the worker does not project)
-/// + `command_journal` (mirrors migrations/20260720030000), which every worker send writes on the
-/// WORKER channel since #15.
+/// backing the close path's legacy-id adoption + the MAILBOX (the real migration DDL via
+/// include_str!, so this fixture and production cannot drift — every send lands there since
+/// ADR-20260731-122500).
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
+        "DROP TABLE IF EXISTS external_sirene_restaurants, domain_events, restaurant, \
+                              command_journal, inbound_events, inbound_messages, mailbox_partitions CASCADE;\n\
+         DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
+    )
+    .execute(pool)
+    .await
+    .expect("drop");
+    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the actor-mailbox migration");
+    sqlx::raw_sql(
         r#"
-        DROP TABLE IF EXISTS external_sirene_restaurants, domain_events, restaurant, command_journal, inbound_events CASCADE;
-        CREATE TABLE command_journal (
-          message_id UUID PRIMARY KEY,
-          correlation_id UUID NOT NULL,
-          cause_id UUID NULL,
-          session_id UUID NULL,
-          trace_id TEXT NULL,
-          user_id UUID NULL,
-          user_type TEXT NOT NULL,
-          channel TEXT NOT NULL,
-          command_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          payload_hash TEXT NOT NULL,
-          status TEXT NOT NULL,
-          error JSONB NULL,
-          received_at TIMESTAMPTZ NOT NULL,
-          completed_at TIMESTAMPTZ NULL
-        );
-        -- The worker stages registrations here since ADR-20260728-011344 (#227) — INSEE cannot be
-        -- told "no", so a registry record is an inbound FACT, not a command. Missing from this fixture
-        -- until #231; every drain assertion failed on `relation "inbound_events" does not exist`, and
-        -- nothing caught it because CI has no DATABASE_URL and these tests skip.
-        CREATE TABLE inbound_events (
-          inbound_event_id UUID PRIMARY KEY,
-          source TEXT NOT NULL,
-          external_id TEXT NOT NULL,
-          correlation_id UUID NOT NULL,
-          event_type TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          status TEXT NOT NULL,
-          error JSONB NULL,
-          received_at TIMESTAMPTZ NOT NULL,
-          delivered_at TIMESTAMPTZ NULL,
-          UNIQUE (source, external_id)
-        );
         CREATE TABLE external_sirene_restaurants (
           siret TEXT PRIMARY KEY,
           -- NULLable since #231: the payload is TRANSIENT, present only while the row is pending
@@ -299,14 +284,37 @@ async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map(
     assert_eq!(still_pending, 0, "keeping a payload is not the same as leaving the row pending");
 }
 
-/// The real delivery half (ADR-20260720-015400), wired over the same pool — so these tests assert what
-/// production does with a staged fact, not a hand-simulated verdict.
-fn drain_worker(pool: &PgPool) -> Arc<InboundEventsDrainWorker> {
-    Arc::new(InboundEventsDrainWorker::new(
-        Arc::new(PgInboundEvents::new(pool.clone())),
-        Arc::new(PgCommandJournal::new(pool.clone())),
-        Arc::new(PgEventStore::new(pool.clone())),
-    ))
+/// The real delivery half (ADR-20260731-122500), wired over the same pool — the production
+/// MailboxWorker + MailboxCommandHandler, so these tests assert what production does with an
+/// enqueued row, not a hand-simulated verdict. Returns the delivered count for the pass.
+async fn deliver_once(pool: &PgPool) -> u64 {
+    let deps = CommandDeps {
+        store: Arc::new(PgEventStore::new(pool.clone())),
+        restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
+        slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
+        ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
+        probe: Arc::new(UnverifiedGbpOrderLinkProbe),
+        prospection: Arc::new(PgProspectionRepository::new(pool.clone())),
+        catalogs: Arc::new(PgCatalogRepository::new(pool.clone())),
+        auth: Arc::new(FailClosedIdentityService) as Arc<dyn IdentityService>,
+        customers: Arc::new(PgCustomerRepository::new(pool.clone())),
+        sessions: Arc::new(application::auth_sessions::NoopAuthSessionStore),
+        payments: Arc::new(FailClosedPaymentGateway) as Arc<dyn PaymentService>,
+        pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(pool.clone())),
+        refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(pool.clone())),
+    };
+    let worker = MailboxWorker::new(
+        pool.clone(),
+        "w-test",
+        "Restaurant",
+        // Zero-length lease: each deliver_once call is a fresh takeover — the previous call's
+        // lanes are instantly claimable again (a test calls this several times per scenario).
+        WorkerConfig { lease_seconds: 0, ..WorkerConfig::default() },
+        Arc::new(MailboxCommandHandler::new(deps)),
+    );
+    worker.seed(100).await.expect("seed");
+    worker.claim().await.expect("claim");
+    worker.drain().await.expect("drain")
 }
 
 #[tokio::test]
@@ -336,14 +344,14 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     assert_eq!(summary.registered, 1, "one registry fact handed to the inbox");
     assert_eq!(summary.failed, 0);
 
-    let (inbound_event_id, source, external_id, event_type, inbound_status): (
+    let (mailbox_message_id, source, external_id, event_type, inbound_status): (
         uuid::Uuid,
         String,
         String,
         String,
         String,
     ) = sqlx::query_as(
-        "SELECT inbound_event_id, source, external_id, event_type, status FROM inbound_events",
+        "SELECT message_id, source, external_id, message_type, status FROM inbound_messages",
     )
     .fetch_one(&pool)
     .await
@@ -360,15 +368,15 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     .expect("staged hash");
     assert_eq!(external_id, format!("85242109900021:{staged_hash}"));
     assert_eq!(event_type, "RestaurantRegistered");
-    assert_eq!(inbound_status, "RECEIVED", "RECEIVED — awaiting the drain");
+    assert_eq!(inbound_status, "RECEIVED", "RECEIVED — awaiting the mailbox worker");
 
-    let register_journal: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM command_journal WHERE command_type = 'RegisterRestaurant'",
+    let register_commands: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM inbound_messages WHERE kind = 'COMMAND' AND message_type = 'RegisterRestaurant'",
     )
     .fetch_one(&pool)
     .await
-    .expect("count register journal rows");
-    assert_eq!(register_journal, 0, "a fact is recorded, not requested — no command is journaled");
+    .expect("count register command rows");
+    assert_eq!(register_commands, 0, "a fact is recorded, not requested — no command is enqueued");
     let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM domain_events")
         .fetch_one(&pool)
         .await
@@ -384,13 +392,10 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     .expect("pending flag");
     assert!(!pending, "a drained row must carry its processed_at checkpoint");
 
-    // 2) The REAL drain worker delivers the fact through the normal write path: ONE
+    // 2) The REAL mailbox worker delivers the fact through the fenced write path: ONE
     //    RestaurantRegistered on the deterministic UUIDv5(SIRET) stream, stamped EXTERNAL, and
-    //    caused by the exact inbound record that carried it.
-    let drain = drain_worker(&pool);
-    let delivered = drain.run_once().await.expect("single-flight");
-    assert_eq!(delivered.delivered, 1);
-    assert_eq!(delivered.failed, 0);
+    //    caused by the exact mailbox row that carried it.
+    assert_eq!(deliver_once(&pool).await, 1);
 
     let (stream, event_type, user_type, cause_id, payload): (
         String,
@@ -407,7 +412,7 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     assert_eq!(stream, format!("Restaurant-{restaurant_id}"));
     assert_eq!(event_type, "RestaurantRegistered");
     assert_eq!(user_type, "EXTERNAL"); // EXTERNAL envelope stamp (ADR-0041)
-    assert_eq!(cause_id, Some(inbound_event_id), "the fact chains to the inbound record");
+    assert_eq!(cause_id, Some(mailbox_message_id), "the fact chains to the mailbox row");
     assert_eq!(payload["ref"], serde_json::json!("85242109900021"));
     assert_eq!(payload["listingStatus"], serde_json::json!("NON_PARTNER"));
 
@@ -441,7 +446,7 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     assert_eq!(refresh.registered, 0, "the same fact is not re-staged");
     assert_eq!(refresh.skipped, 1, "it deduplicates on the inbox instead");
     assert_eq!(refresh.resolved, 1, "and the known verdict re-confirms the row in the same pass");
-    let inbound_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inbound_events")
+    let inbound_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inbound_messages WHERE kind = 'EVENT'")
         .fetch_one(&pool)
         .await
         .expect("count inbound rows");
@@ -459,7 +464,9 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
     stage_row(&pool, "F").await;
     let closing = worker.run_once().await.expect("closing drain");
     assert_eq!(closing.processed, 1);
-    assert_eq!(closing.closed, 1);
+    assert_eq!(closing.closed, 1, "the close signal is HANDED OFF (fire-and-forget)");
+    // The hand-off is not the delivery: the event lands when the mailbox worker runs.
+    assert_eq!(deliver_once(&pool).await, 1);
     let (last_type,): (String,) = sqlx::query_as(
         "SELECT event_type FROM domain_events ORDER BY position DESC LIMIT 1",
     )
@@ -478,22 +485,22 @@ async fn worker_drains_staging_rows_through_the_write_path_idempotently_and_clos
         .await
         .expect("final event count");
     assert_eq!(events, 2, "register + one close, no matter how often the signal repeats");
-    // The repeated signal never reached the dispatch (the aggregate already folds INACTIVE), so the
-    // journal holds exactly ONE MarkRestaurantClosed submission — journaled, WORKER, SUCCEEDED.
+    // The repeated signal never reached the enqueue (the aggregate already folds INACTIVE), so the
+    // mailbox holds exactly ONE MarkRestaurantClosed submission — WORKER channel, SUCCEEDED.
     let (close_rows, close_channel_status): (i64, i64) = (
         sqlx::query_scalar(
-            "SELECT COUNT(*) FROM command_journal WHERE command_type = 'MarkRestaurantClosed'",
+            "SELECT COUNT(*) FROM inbound_messages WHERE message_type = 'MarkRestaurantClosed'",
         )
         .fetch_one(&pool)
         .await
-        .expect("count close journal rows"),
+        .expect("count close mailbox rows"),
         sqlx::query_scalar(
-            "SELECT COUNT(*) FROM command_journal \
-             WHERE command_type = 'MarkRestaurantClosed' AND channel = 'WORKER' AND status = 'SUCCEEDED'",
+            "SELECT COUNT(*) FROM inbound_messages \
+             WHERE message_type = 'MarkRestaurantClosed' AND channel = 'WORKER' AND status = 'SUCCEEDED'",
         )
         .fetch_one(&pool)
         .await
-        .expect("count close journal rows by channel/status"),
+        .expect("count close mailbox rows by channel/status"),
     );
     assert_eq!((close_rows, close_channel_status), (1, 1));
 }
@@ -589,8 +596,9 @@ async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_
     // not a derived sibling.
     stage_row(&pool, "F").await;
     let closing = worker.run_once().await.expect("closing drain");
-    assert_eq!(closing.closed, 1);
+    assert_eq!(closing.closed, 1, "handed off");
     assert_eq!(closing.failed, 0);
+    assert_eq!(deliver_once(&pool).await, 1, "the mailbox worker delivers the close");
     let (stream, event_type): (String, String) = sqlx::query_as(
         "SELECT stream_name, event_type FROM domain_events ORDER BY position DESC LIMIT 1",
     )
@@ -601,8 +609,8 @@ async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_
         (stream.as_str(), event_type.as_str()),
         (format!("Restaurant-{legacy_id}").as_str(), "RestaurantMarkedClosed")
     );
-    // And the register-path contrast (#227): a closure needs no inbound fact — nothing was staged.
-    let inbound_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inbound_events")
+    // And the register-path contrast (#227): a closure needs no inbound FACT — kind COMMAND only.
+    let inbound_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inbound_messages WHERE kind = 'EVENT'")
         .fetch_one(&pool)
         .await
         .expect("count inbound rows");
@@ -639,27 +647,25 @@ async fn a_failed_delivery_leaves_a_durable_trace_and_is_not_retried_forever() {
     // Break the staged fact the way an ACL/schema drift would: the payload no longer parses as a
     // DomainEvent. The REAL drain worker then records the verdict — this is not simulated.
     sqlx::query(
-        "UPDATE inbound_events SET payload = '{\"eventType\":\"NotAnEvent\"}'::jsonb \
+        "UPDATE inbound_messages SET payload = '{\"eventType\":\"NotAnEvent\"}'::jsonb \
           WHERE source = 'sirene'",
     )
     .execute(&pool)
     .await
     .expect("corrupt the staged fact");
-    let drain = drain_worker(&pool);
-    let delivered = drain.run_once().await.expect("single-flight");
-    assert_eq!(delivered.failed, 1);
-    assert_eq!(delivered.delivered, 0);
+    // The mailbox worker delivers the row and records the FAILED verdict — not simulated.
+    assert_eq!(deliver_once(&pool).await, 1);
 
     // (a) The verdict is durable and queryable — support can answer "what happened to this row".
     let (inbound_status, error): (String, Option<serde_json::Value>) =
-        sqlx::query_as("SELECT status, error FROM inbound_events WHERE source = 'sirene'")
+        sqlx::query_as("SELECT status, error FROM inbound_messages WHERE source = 'sirene'")
             .fetch_one(&pool)
             .await
             .expect("inbound verdict");
     assert_eq!(inbound_status, "FAILED");
     let error = error.expect("the failure reason is recorded on the row");
     assert!(
-        error["detail"].as_str().is_some_and(|d| !d.is_empty()),
+        error["context"]["detail"].as_str().is_some_and(|d| !d.is_empty()),
         "the trace says WHY, not just that it failed"
     );
 
@@ -692,13 +698,13 @@ async fn a_failed_delivery_leaves_a_durable_trace_and_is_not_retried_forever() {
 }
 
 /// The worker does NOT know, at hand-over, whether the aggregate accepted the record — since
-/// ADR-20260728-011344 the register path stages an inbound FACT and `InboundEventsDrainWorker` delivers
+/// ADR-20260728-011344 the register path enqueues an inbound FACT and the MailboxWorker delivers
 /// it later. So `STAGED -> SYNCED` has to be resolved from the aggregate's verdict on a subsequent pass,
 /// and this pins that it actually happens: without it the mirror would sit on STAGED forever, or (worse)
 /// claim a success nobody observed.
 ///
 /// The join needs no extra bookkeeping — the ACL already writes
-/// `inbound_events.external_id = '{siret}:{payload_hash}'`, and both halves are columns on the row.
+/// `inbound_messages.external_id = '{siret}:{payload_hash}'`, and both halves are columns on the row.
 #[tokio::test]
 async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
@@ -733,10 +739,10 @@ async fn staged_rows_resolve_to_synced_from_the_aggregates_verdict() {
     .expect("staged row payload");
     assert!(payload.is_some(), "the payload survives hand-over — the verdict is not in yet");
 
-    // The drain worker delivers it and the aggregate decides. Simulated here by writing the verdict the
-    // real InboundEventsDrainWorker writes — DELIVERED (ordinal 1).
+    // The mailbox worker delivers it and the aggregate decides. Simulated here by writing the
+    // verdict the real delivery writes — SUCCEEDED.
     let updated = sqlx::query(
-        "UPDATE inbound_events SET status = 'DELIVERED', delivered_at = now() WHERE source = 'sirene'",
+        "UPDATE inbound_messages SET status = 'SUCCEEDED', completed_at = now() WHERE source = 'sirene'",
     )
     .execute(&pool)
     .await
@@ -786,8 +792,8 @@ async fn an_ignored_verdict_still_counts_as_synced() {
 
     stage_row(&pool, "A").await;
     worker.run_once().await.expect("stage the fact");
-    // IGNORED = 3 (declaration-order ordinal): the aggregate decided nothing had changed.
-    sqlx::query("UPDATE inbound_events SET status = 'IGNORED', delivered_at = now() WHERE source = 'sirene'")
+    // IGNORED: the aggregate decided nothing had changed.
+    sqlx::query("UPDATE inbound_messages SET status = 'IGNORED', completed_at = now() WHERE source = 'sirene'")
         .execute(&pool)
         .await
         .expect("simulate a no-change verdict");
@@ -866,8 +872,8 @@ async fn a_failed_verdict_keeps_the_payload() {
 
     stage_row(&pool, "A").await;
     worker.run_once().await.expect("stage the fact");
-    // FAILED = 2 (declaration-order ordinal).
-    sqlx::query("UPDATE inbound_events SET status = 'FAILED' WHERE source = 'sirene'")
+    // FAILED: the delivery could not apply the fact.
+    sqlx::query("UPDATE inbound_messages SET status = 'FAILED', completed_at = now() WHERE source = 'sirene'")
         .execute(&pool)
         .await
         .expect("simulate a failed delivery");
