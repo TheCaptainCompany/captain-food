@@ -183,9 +183,10 @@ mutation/query is reached by a story step, and every test↔rule link holds both
 - **Proposals are committed to the repo** (ADR-20260724-135945, product-owner directive): every
   proposal presented for approval lands in [docs/proposals/](docs/proposals/) as
   `PROP-YYYYMMDD-HHMMSS-<slug>.md` — the proposal as presented, alternatives considered, the
-  approver's scope choices, status header linking the realizing PR/ADR. Approved proposals are
-  historical records: never rewritten to match what was built; divergences go in the realizing
-  change. A session-local plan file is NOT a substitute — the rationale must survive the session.
+  approver's scope choices, status header linking the realizing PR/ADR. Proposals are LIVING
+  documents (ADR-20260801-020000): the file always holds the clean CURRENT state of the design —
+  refinements rewrite it in the same change as their ADR; history lives in the file's git log,
+  never as appended sections or superseded blocks. A session-local plan file is NOT a substitute — the rationale must survive the session.
   **GitHub is never the record**: issue bodies, PR bodies and PR/issue comments carry LINKS into
   docs/proposals + docs/adr (and a tracking checklist at most) — never the design content itself;
   content drafted in a GitHub surface must land in the repo in the same change.
