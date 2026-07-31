@@ -139,6 +139,22 @@ operating model itself — **proposals, ADRs, `DECISIONS.md` and `STATUS.md` are
 session.** When a session has produced decisions, write them down and let the next session start
 small; do not carry a 30-turn context forward for its own sake.
 
+**The scratchpad's parent-directory permissions RESET between wakeups** — a local Postgres run
+under a dedicated user (`pguser`) inside the scratchpad dies mid-session with "Permission denied"
+on the data directory, and every DB-gated suite then fails with PoolTimedOut/Connection refused
+(cost: a full server-suite failure mis-read as a code regression, 2026-07-31). Recovery recipe:
+re-`chmod o+x` every path component from `/tmp/claude-0` down to the scratchpad, `rm -f
+<pgdata>/postmaster.pid`, then `su pguser -c "pg_ctl -D <pgdata> -o '-k /tmp -p 5433 -c
+listen_addresses=127.0.0.1 -c fsync=off' start"`. Diagnose "tests suddenly failing" with
+`pg_isready`/`psql` FIRST, before reading a single line of code.
+
+**While a background agent owns the branch checkout, edit `main` through a git WORKTREE**
+(`git worktree add <scratchpad>/main-wt origin/main -b <tmp>` → edit → push `<tmp>:main` →
+`git worktree remove`): switching branches under a running agent yanks its files; and when the
+stop-hook flags the agent's uncommitted WIP, leave it — the agent commits gated work itself;
+committing under it snapshots untested state. (`git worktree remove` leaves the shell's cwd
+dangling — `cd` out first or ignore the getcwd error.)
+
 **The remote git proxy cannot DELETE branches.** `git push origin --delete <branch>` (and the
 `:refs/heads/<branch>` form) dies with "the remote end hung up unexpectedly" — the per-session git
 proxy only supports fetch/push of refs, not deletions — and the GitHub MCP toolset has no
