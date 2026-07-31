@@ -60,6 +60,11 @@ chose what we chose.
   - PROP-20260726-013207 (reclamation) is the reference example for the first three.
 - The file is a HISTORICAL RECORD once approved — do not rewrite it to match what was eventually
   built; divergences are noted in the realizing PR/ADR/STATUS instead (the honest-residuals rule).
+  **When a refinement supersedes PART of an approved proposal**, additionally place an inline
+  `> ⚠️ SUPERSEDED — kept verbatim as the approval-time record` callout AT the superseded block,
+  naming what changed and linking the refining ADR/section — the header note alone is invisible
+  to a reader landing mid-document (product-owner directive, 2026-08-01; PROP-20260731-195500 is
+  the reference example).
 - Plan-mode flow: the plan written for approval IS the proposal — commit it here verbatim when
   approved (spec-touching plans land in the same change as the spec edit; code-only plans land with
   the claim or the PR).
