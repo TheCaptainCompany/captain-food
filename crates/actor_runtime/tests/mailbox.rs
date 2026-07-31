@@ -18,8 +18,8 @@
 use std::sync::Arc;
 
 use actor_runtime::{
-    claim_due_lanes, complete_fenced, steal_lane, CompletionError, HandlerVerdict, InboundMessage,
-    MailboxWorker, MessageHandler, WorkerConfig,
+    claim_due_lanes, complete_fenced, steal_lane, CompletionError, Delivery, HandlerVerdict,
+    InboundMessage, MailboxWorker, MessageHandler, WorkerConfig,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
@@ -33,13 +33,13 @@ impl MessageHandler for ProbeHandler {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
-    ) -> Result<HandlerVerdict, sqlx::Error> {
+    ) -> Result<Delivery, sqlx::Error> {
         sqlx::query("INSERT INTO delivered_probe (message_id, position) VALUES ($1, $2)")
             .bind(message.message_id)
             .bind(message.position)
             .execute(&mut **tx)
             .await?;
-        Ok(HandlerVerdict::Succeeded)
+        Ok(Delivery::of(HandlerVerdict::Succeeded))
     }
 }
 

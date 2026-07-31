@@ -97,13 +97,31 @@ impl HandlerVerdict {
 ///
 /// A returned `Err` is an infrastructure failure (DB unreachable mid-handling): the delivery
 /// aborts, the row stays RECEIVED, and redelivery is the retry.
+/// One handled delivery: the verdict to commit, plus an optional action to run strictly AFTER the
+/// commit succeeds (in-process fan-out of the effects that just became durable — an event-bus
+/// publish, a cache invalidation). A fenced-out or rolled-back delivery never runs it.
+pub struct Delivery {
+    pub verdict: HandlerVerdict,
+    pub post_commit: Option<Box<dyn FnOnce() + Send>>,
+}
+
+impl Delivery {
+    pub fn of(verdict: HandlerVerdict) -> Self {
+        Self { verdict, post_commit: None }
+    }
+
+    pub fn then(verdict: HandlerVerdict, post_commit: impl FnOnce() + Send + 'static) -> Self {
+        Self { verdict, post_commit: Some(Box::new(post_commit)) }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait MessageHandler: Send + Sync {
     async fn handle(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
-    ) -> Result<HandlerVerdict, sqlx::Error>;
+    ) -> Result<Delivery, sqlx::Error>;
 }
 
 /// Post-COMMIT notification of one delivery — the seam a host hangs its status bus / subscription

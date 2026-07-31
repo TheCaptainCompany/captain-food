@@ -8,13 +8,14 @@
 
 use std::sync::Arc;
 
-use actor_runtime::{DeliveryObserver, HandlerVerdict, InboundMessage, MessageHandler};
+use actor_runtime::{Delivery, DeliveryObserver, HandlerVerdict, InboundMessage, MessageHandler};
 use application::ports::{is_version_conflict, Actor, EventStore};
 use application::staging::StagingEventStore;
 use domain::shared::errors::DomainError;
 use sqlx::{Postgres, Transaction};
 
 use crate::generated::command_router::{dispatch_command, CommandDeps};
+use crate::persistence::event_bus::{AppendedEvent, EventBus};
 use crate::persistence::status_bus::{OperationStatusBus, OperationUpdate};
 
 use super::flush_staged_in_tx;
@@ -24,11 +25,20 @@ use super::flush_staged_in_tx;
 /// misrouted row is loud, never silently swallowed.
 pub struct MailboxCommandHandler {
     deps: CommandDeps,
+    /// When present, each committed delivery publishes its appended events on the in-process bus
+    /// (the GraphQL domain-fact subscriptions) — POST-COMMIT, via the runtime's Delivery hook,
+    /// exactly where the pool-backed PgEventStore publishes.
+    event_bus: Option<EventBus>,
 }
 
 impl MailboxCommandHandler {
     pub fn new(deps: CommandDeps) -> Self {
-        Self { deps }
+        Self { deps, event_bus: None }
+    }
+
+    pub fn with_event_bus(mut self, bus: EventBus) -> Self {
+        self.event_bus = Some(bus);
+        self
     }
 }
 
@@ -38,12 +48,12 @@ impl MessageHandler for MailboxCommandHandler {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
-    ) -> Result<HandlerVerdict, sqlx::Error> {
+    ) -> Result<Delivery, sqlx::Error> {
         if message.kind != "COMMAND" {
-            return Ok(HandlerVerdict::Failed(serde_json::json!({
+            return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                 "code": "Internal",
                 "context": { "detail": format!("kind {} not routed yet (#242 later slices)", message.kind) }
-            })));
+            }))));
         }
 
         // The acting principal, envelope → Actor (ADR-0041) with the #235 domain-identity bridge:
@@ -88,33 +98,64 @@ impl MessageHandler for MailboxCommandHandler {
         )
         .await;
 
-        let verdict = match outcome {
-            None => HandlerVerdict::Failed(serde_json::json!({
+        let delivery = match outcome {
+            None => Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                 "code": "Internal",
                 "context": { "detail": format!("unroutable command type '{}'", message.message_type) }
-            })),
-            Some(Ok(())) => match flush_staged_in_tx(tx, &staging.take_staged()).await {
-                Ok(()) => HandlerVerdict::Succeeded,
-                // A version clash at commit time: a concurrent writer moved the stream between
-                // the handler's load and this flush. FAILED (not REJECTED): it is contention,
-                // not a business verdict — a resubmission under a fresh id retries cleanly.
-                Err(e) if is_version_conflict(&e) => HandlerVerdict::Failed(serde_json::json!({
-                    "code": "Internal",
-                    "context": { "detail": e.to_string() }
-                })),
-                Err(DomainError::Repository(detail)) => {
-                    // Infrastructure failure mid-flush: abort the delivery (row stays RECEIVED,
-                    // redelivery retries) rather than recording a verdict we are not sure of.
-                    return Err(sqlx::Error::Protocol(detail));
+            }))),
+            Some(Ok(())) => {
+                let staged = staging.take_staged();
+                match flush_staged_in_tx(tx, &staged).await {
+                    Ok(()) => match &self.event_bus {
+                        // The domain-fact subscription fan-out — post-commit via the Delivery
+                        // hook, mirroring PgEventStore's publish-after-commit.
+                        Some(bus) => {
+                            let bus = bus.clone();
+                            let envelopes: Vec<AppendedEvent> = staged
+                                .iter()
+                                .flat_map(|a| {
+                                    a.events.iter().enumerate().filter_map(|(i, e)| {
+                                        let tagged = serde_json::to_value(e).ok()?;
+                                        Some(AppendedEvent {
+                                            stream_name: a.stream_name.clone(),
+                                            event_type: tagged.get("eventType")?.as_str()?.to_owned(),
+                                            correlation_id: a.actor.correlation_id,
+                                            position: a.expected_version + i as i64 + 1,
+                                        })
+                                    })
+                                })
+                                .collect();
+                            Delivery::then(HandlerVerdict::Succeeded, move || {
+                                for envelope in envelopes {
+                                    bus.publish(envelope);
+                                }
+                            })
+                        }
+                        None => Delivery::of(HandlerVerdict::Succeeded),
+                    },
+                    // A version clash at commit time: a concurrent writer moved the stream between
+                    // the handler's load and this flush. FAILED (not REJECTED): it is contention,
+                    // not a business verdict — a resubmission under a fresh id retries cleanly.
+                    Err(e) if is_version_conflict(&e) => {
+                        Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                            "code": "Internal",
+                            "context": { "detail": e.to_string() }
+                        })))
+                    }
+                    Err(DomainError::Repository(detail)) => {
+                        // Infrastructure failure mid-flush: abort the delivery (row stays RECEIVED,
+                        // redelivery retries) rather than recording a verdict we are not sure of.
+                        return Err(sqlx::Error::Protocol(detail));
+                    }
+                    Err(e) => Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                        "code": "Internal",
+                        "context": { "detail": e.to_string() }
+                    }))),
                 }
-                Err(e) => HandlerVerdict::Failed(serde_json::json!({
-                    "code": "Internal",
-                    "context": { "detail": e.to_string() }
-                })),
-            },
-            Some(Err(e)) => verdict_of_error(e),
+            }
+            Some(Err(e)) => Delivery::of(verdict_of_error(e)),
         };
-        Ok(verdict)
+        Ok(delivery)
     }
 }
 

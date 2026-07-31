@@ -62,7 +62,8 @@ pub async fn complete_fenced(
 ) -> Result<HandlerVerdict, CompletionError> {
     let mut tx: Transaction<'_, Postgres> = pool.begin().await?;
 
-    let verdict = handler.handle(&mut tx, message).await?;
+    let delivery = handler.handle(&mut tx, message).await?;
+    let verdict = delivery.verdict;
 
     // Terminal flip — only if still RECEIVED (guard 1).
     let flipped = sqlx::query(
@@ -89,5 +90,9 @@ pub async fn complete_fenced(
     }
 
     tx.commit().await?;
+    // Post-commit action: fan-out of what just became durable. Never on a rolled-back path.
+    if let Some(action) = delivery.post_commit {
+        action();
+    }
     Ok(verdict)
 }
