@@ -37,6 +37,13 @@ rm -rf target/debug/incremental target/debug/build target/debug/deps   # freed 2
 cold build. In the session where this happened it bought two full rebuilds. Delete only when writes
 are actually failing, and prefer dropping `incremental`/`deps` over the whole `target/`.
 
+**The cheap lever inside `deps/` (2026-07-31):** the files **over ~50M are final-LINK products**
+(test binaries — stale hashes accumulate, ~15G across ~20 files after a day of DB-test iteration),
+not compiled dependencies. `find target/debug/deps -maxdepth 1 -type f -size +50M -delete` freed
+15G and cost only a **relink** of whatever ran next (~seconds each), where deleting all of `deps/`
+costs a full recompile of ~200 crates. Two ENOSPC build failures in one session were both cured by
+this plus dropping `incremental/`.
+
 Never tell the user the container is unrecoverable — clean up first; a fresh session is the fallback,
 not the first move.
 
