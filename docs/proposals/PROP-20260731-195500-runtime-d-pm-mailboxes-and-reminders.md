@@ -48,6 +48,12 @@ product-owner choice; everything else is already decided by the ADRs above and s
    addressing — so it lands only WITH the D-A wiring below, never alone.
 2. **Typed reminders inside the actor** (ADR-20260731-120825, shape per the pilot):
 
+   > ⚠️ **SUPERSEDED — kept verbatim as the approval-time record.** The governing shape renamed
+   > `messages:` → `reminders:`, moved the trigger onto the firing receive as `schedules:`, and
+   > folded the expiry pilot into the `deletion:` block — see
+   > [Post-approval refinements](#post-approval-refinements-2026-07-31-product-owner--adr-20260731-214500)
+   > and [ADR-20260731-214500](../adr/ADR-20260731-214500-deletion-dsl-declarative-generic-engine.md).
+
 ```yaml
 Order:
   messages:                        # per-actor typed self-messages — no messages.yaml catalog
@@ -100,6 +106,12 @@ ownership, and the extra row is the price of visibility — the same trade every
 pays.
 
 ## Decision D-C — how formal is the reminder trigger (`schedule.when`)?
+
+> ⚠️ **SUPERSEDED — kept verbatim as the approval-time record.** C2 was approved, then refined:
+> the trigger list became `schedules:` declared on the firing receive (same information, at the
+> handler, testable per receive) — see
+> [Post-approval refinements](#post-approval-refinements-2026-07-31-product-owner--adr-20260731-214500)
+> and [ADR-20260731-214500](../adr/ADR-20260731-214500-deletion-dsl-declarative-generic-engine.md).
 
 | | Option | Pros | Cons |
 |---|---|---|---|
