@@ -2,3 +2,4 @@
 pub mod pm_state;
 pub mod service_clients;
 pub mod service_bindings;
+pub mod command_router;

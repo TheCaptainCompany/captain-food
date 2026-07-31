@@ -9,6 +9,9 @@ description = "Captain.Food infrastructure: adapters implementing the applicatio
 [dependencies]
 domain = { path = "../domain" }
 application = { path = "../application" }
+# The durable-mailbox actor machinery (#242, ADR-20260730-234918) — the dependency points INWARD:
+# infrastructure implements its MessageHandler; actor_runtime never sees a Captain.Food type.
+actor_runtime = { path = "../actor_runtime" }
 # Instrumentation (issue #191). This is a FRAMEWORK layer -- the event store, publisher, projectors and
 # saga runner are all `instrumented: true` in c4-l3.yaml -- so the telemetry SDK belongs here. It must
 # never appear in `domain` or `application`; a workspace test enforces that.

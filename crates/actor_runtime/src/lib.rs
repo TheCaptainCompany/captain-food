@@ -28,5 +28,5 @@ pub mod worker;
 
 pub use completion::{complete_fenced, CompletionError};
 pub use lease::{claim_due_lanes, heartbeat, release_lane, seed_partitions, steal_lane, Lane};
-pub use message::{HandlerVerdict, InboundMessage, MessageHandler};
+pub use message::{DeliveryObserver, HandlerVerdict, InboundMessage, MessageHandler};
 pub use worker::{MailboxWorker, WorkerConfig};

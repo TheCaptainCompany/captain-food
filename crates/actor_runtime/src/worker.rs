@@ -8,7 +8,7 @@ use sqlx::PgPool;
 
 use crate::completion::{complete_fenced, CompletionError};
 use crate::lease::{claim_due_lanes, heartbeat, release_lane, seed_partitions, Lane};
-use crate::message::{InboundMessage, MessageHandler};
+use crate::message::{DeliveryObserver, InboundMessage, MessageHandler};
 
 /// Tuning knobs — the host wires these from ITS configuration source (specs/configuration.yaml:
 /// `MAILBOX_LEASE_SECONDS`, `MAILBOX_HEARTBEAT_SECONDS`); the defaults mirror the spec defaults.
@@ -39,6 +39,7 @@ pub struct MailboxWorker {
     pub actor_type: String,
     config: WorkerConfig,
     handler: Arc<dyn MessageHandler>,
+    observer: Option<Arc<dyn DeliveryObserver>>,
     lanes: tokio::sync::Mutex<Vec<Lane>>,
 }
 
@@ -56,8 +57,15 @@ impl MailboxWorker {
             actor_type: actor_type.into(),
             config,
             handler,
+            observer: None,
             lanes: tokio::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    /// Attach a post-commit observer (status bus / subscription fan-out).
+    pub fn with_observer(mut self, observer: Arc<dyn DeliveryObserver>) -> Self {
+        self.observer = Some(observer);
+        self
     }
 
     /// Idempotently seed this actor type's registry rows (run once at startup).
@@ -165,6 +173,9 @@ impl MailboxWorker {
                     self.handler.as_ref(),
                 )
                 .await?;
+                if let Some(obs) = &self.observer {
+                    obs.committed(&message, &verdict);
+                }
                 tracing::debug!(
                     worker = %self.worker_id,
                     actor_type = %message.actor_type,

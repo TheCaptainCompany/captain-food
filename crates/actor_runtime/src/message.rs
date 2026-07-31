@@ -105,3 +105,11 @@ pub trait MessageHandler: Send + Sync {
         message: &InboundMessage,
     ) -> Result<HandlerVerdict, sqlx::Error>;
 }
+
+/// Post-COMMIT notification of one delivery — the seam a host hangs its status bus / subscription
+/// fan-out on (PROP-20260728-152752: "the status bus publishes AFTER the commit — subscribers only
+/// ever hear about durable facts"). Called once per committed delivery, never for a fenced-out or
+/// rolled-back one. Must be cheap and non-blocking: it runs on the drain path.
+pub trait DeliveryObserver: Send + Sync {
+    fn committed(&self, message: &InboundMessage, verdict: &HandlerVerdict);
+}

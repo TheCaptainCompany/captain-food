@@ -10,6 +10,7 @@
 
 pub mod generated;
 pub mod integrations;
+pub mod mailbox;
 pub mod persistence;
 pub mod process_manager;
 pub mod projection;
