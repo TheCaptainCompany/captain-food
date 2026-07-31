@@ -21,6 +21,9 @@
 > no behavior flips) and proceed regardless; **slice 3 (mailbox migrations + resolver flip) waits
 > until the enum-text release is applied and smoked** — never stack a second unapplied migration
 > set on a paused prod.
+> 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
+> (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
+> they only APPLY at the manual deploy, ADR-20260730-051500).
 > Realization starts with [#242 "Write path becomes an actor mailbox…"](https://github.com/TheCaptainCompany/captain-food/issues/242)'s
 > foundation slice (claimed, draft PR per protocol); [#235](https://github.com/TheCaptainCompany/captain-food/issues/235)
 > and [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) follow. Open veto flag:
