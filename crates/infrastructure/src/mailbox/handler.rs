@@ -67,14 +67,19 @@ impl MessageHandler for MailboxCommandHandler {
         // None until their bridges land (#144).
         let domain_id = if message.user_type == "CUSTOMER" {
             match message.user_id {
-                Some(uid) => self
+                Some(uid) => match self
                     .deps
                     .customers
                     .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
                     .await
-                    .ok()
-                    .flatten()
-                    .map(|c| c.customer_id.0),
+                {
+                    Ok(customer) => customer.map(|c| c.customer_id.0),
+                    // An infrastructure failure resolving the principal must ABORT the delivery
+                    // (row stays RECEIVED, redelivery retries) — swallowing it into `None` would
+                    // durably record a legitimate customer's command as REJECTED NotAParticipant,
+                    // a wrong-class terminal verdict for a transient DB blip.
+                    Err(e) => return Err(sqlx::Error::Protocol(e.to_string())),
+                },
                 None => None,
             }
         } else {
@@ -111,41 +116,15 @@ impl MessageHandler for MailboxCommandHandler {
             Some(Ok(())) => {
                 let staged = staging.take_staged();
                 match flush_staged_in_tx(tx, &staged).await {
-                    Ok(()) => match &self.event_bus {
-                        // The domain-fact subscription fan-out — post-commit via the Delivery
-                        // hook, mirroring PgEventStore's publish-after-commit.
-                        Some(bus) => {
-                            let bus = bus.clone();
-                            let envelopes: Vec<AppendedEvent> = staged
-                                .iter()
-                                .flat_map(|a| {
-                                    a.events.iter().enumerate().filter_map(|(i, e)| {
-                                        let tagged = serde_json::to_value(e).ok()?;
-                                        Some(AppendedEvent {
-                                            stream_name: a.stream_name.clone(),
-                                            event_type: tagged.get("eventType")?.as_str()?.to_owned(),
-                                            correlation_id: a.actor.correlation_id,
-                                            position: a.expected_version + i as i64 + 1,
-                                        })
-                                    })
-                                })
-                                .collect();
-                            Delivery::then(HandlerVerdict::Succeeded, move || {
-                                for envelope in envelopes {
-                                    bus.publish(envelope);
-                                }
-                            })
-                        }
-                        None => Delivery::of(HandlerVerdict::Succeeded),
-                    },
-                    // A version clash at commit time: a concurrent writer moved the stream between
-                    // the handler's load and this flush. FAILED (not REJECTED): it is contention,
-                    // not a business verdict — a resubmission under a fresh id retries cleanly.
+                    Ok(()) => self.fanout_delivery(&staged),
+                    // A version clash at commit time: a concurrent writer (a legacy-path PM leg,
+                    // another lane) moved the stream between the handler's load and this flush.
+                    // ABORT the delivery — the row stays RECEIVED and the retry re-runs the
+                    // handler against the moved stream. Contention is transient by construction
+                    // (each retry reloads), so retry-in-place converges; a terminal FAILED here
+                    // would make a peak-time clash cost the client a manual resubmit.
                     Err(e) if is_version_conflict(&e) => {
-                        Delivery::of(HandlerVerdict::Failed(serde_json::json!({
-                            "code": "Internal",
-                            "context": { "detail": e.to_string() }
-                        })))
+                        return Err(sqlx::Error::Protocol(e.to_string()));
                     }
                     Err(DomainError::Repository(detail)) => {
                         // Infrastructure failure mid-flush: abort the delivery (row stays RECEIVED,
@@ -157,6 +136,13 @@ impl MessageHandler for MailboxCommandHandler {
                         "context": { "detail": e.to_string() }
                     }))),
                 }
+            }
+            // A transient infrastructure failure INSIDE the handler (a repository read, a gateway
+            // call) aborts the delivery for retry — only deterministic outcomes may land a
+            // terminal verdict. A terminal FAILED here would be absorbed by the enqueue-side pk
+            // dedupe on redelivery, turning one DB blip into a permanently lost message.
+            Some(Err(DomainError::Repository(detail))) => {
+                return Err(sqlx::Error::Protocol(detail));
             }
             Some(Err(e)) => Delivery::of(verdict_of_error(e)),
         };
@@ -224,29 +210,81 @@ impl MailboxCommandHandler {
                 }))))
             }
         };
-        let verdict = match outcome {
+        let delivery = match outcome {
             Ok(RecordOutcome::Recorded) | Ok(RecordOutcome::Updated) => {
-                match flush_staged_in_tx(tx, &staging.take_staged()).await {
-                    Ok(()) => HandlerVerdict::Succeeded,
-                    // Version clash at flush: someone appended between load and commit — the fact
-                    // is in the log either way; a redelivery tail.
-                    Err(e) if is_version_conflict(&e) => HandlerVerdict::Duplicate,
+                let staged = staging.take_staged();
+                match flush_staged_in_tx(tx, &staged).await {
+                    // Same post-commit subscription fan-out as the COMMAND route: an inbound
+                    // PaymentCaptured must reach `paymentStatusChanged` exactly like a
+                    // command-emitted fact — the retired drain published through
+                    // PgEventStore::with_bus, and the checkout screen's push depends on it.
+                    Ok(()) => self.fanout_delivery(&staged),
+                    // Version clash at flush: someone appended between load and commit. That
+                    // someone is NOT necessarily a redelivery of this fact — the legacy-path PM
+                    // legs write the same Payment streams until Runtime D — so a terminal
+                    // DUPLICATE here could drop a fact that never reached the log. ABORT for
+                    // retry: the redelivery re-runs the fold-based dedupe against the moved
+                    // stream and lands Duplicate only if the fact is genuinely in it.
+                    Err(e) if is_version_conflict(&e) => {
+                        return Err(sqlx::Error::Protocol(e.to_string()));
+                    }
                     Err(DomainError::Repository(detail)) => {
                         return Err(sqlx::Error::Protocol(detail));
                     }
-                    Err(e) => HandlerVerdict::Failed(
+                    Err(e) => Delivery::of(HandlerVerdict::Failed(
                         serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
-                    ),
+                    )),
                 }
             }
-            Ok(RecordOutcome::NoChange) => HandlerVerdict::Ignored,
-            Ok(RecordOutcome::AlreadyRecorded) => HandlerVerdict::Duplicate,
-            Err(e) if is_version_conflict(&e) => HandlerVerdict::Duplicate,
-            Err(e) => HandlerVerdict::Failed(
+            Ok(RecordOutcome::NoChange) => Delivery::of(HandlerVerdict::Ignored),
+            Ok(RecordOutcome::AlreadyRecorded) => Delivery::of(HandlerVerdict::Duplicate),
+            // A conflict surfaced by the recorder itself: the stream moved under it — retry, same
+            // reasoning as the flush-time clash above.
+            Err(e) if is_version_conflict(&e) => {
+                return Err(sqlx::Error::Protocol(e.to_string()));
+            }
+            // Transient infrastructure failure while loading/folding the stream: ABORT for retry.
+            // A terminal FAILED would be absorbed by the enqueue-side pk dedupe when the provider
+            // redelivers, permanently losing the payment/delivery fact (PR #270 review C3).
+            Err(DomainError::Repository(detail)) => {
+                return Err(sqlx::Error::Protocol(detail));
+            }
+            Err(e) => Delivery::of(HandlerVerdict::Failed(
                 serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
-            ),
+            )),
         };
-        Ok(Delivery::of(verdict))
+        Ok(delivery)
+    }
+
+    /// The committed-success Delivery: verdict + the post-commit event-bus fan-out of everything
+    /// the flush just made durable (both delivery routes share this — subscriptions must hear
+    /// mailbox-written facts exactly as they heard PgEventStore-written ones).
+    fn fanout_delivery(&self, staged: &[application::staging::StagedAppend]) -> Delivery {
+        match &self.event_bus {
+            Some(bus) => {
+                let bus = bus.clone();
+                let envelopes: Vec<AppendedEvent> = staged
+                    .iter()
+                    .flat_map(|a| {
+                        a.events.iter().enumerate().filter_map(|(i, e)| {
+                            let tagged = serde_json::to_value(e).ok()?;
+                            Some(AppendedEvent {
+                                stream_name: a.stream_name.clone(),
+                                event_type: tagged.get("eventType")?.as_str()?.to_owned(),
+                                correlation_id: a.actor.correlation_id,
+                                position: a.expected_version + i as i64 + 1,
+                            })
+                        })
+                    })
+                    .collect();
+                Delivery::then(HandlerVerdict::Succeeded, move || {
+                    for envelope in envelopes {
+                        bus.publish(envelope);
+                    }
+                })
+            }
+            None => Delivery::of(HandlerVerdict::Succeeded),
+        }
     }
 }
 

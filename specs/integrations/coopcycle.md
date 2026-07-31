@@ -9,7 +9,7 @@ and `stripe-adapter`. See [ADR-0031](../../docs/adr/0031-delivery-bounded-contex
 
 CoopCycle is the **third** `DeliveryProvider = PARTNER` implementation of the pattern established by
 Avelo37 ([specs/integrations/avelo37.md](avelo37.md), issue #28): the two-layer webhook inbox
-(`external_coopcycle_events` mirror → `inbound_events` → drain onto the `DeliveryJob` stream), the
+(`external_coopcycle_events` mirror → kind-EVENT `inbound_messages` on the `DeliveryJob` lane → mailbox delivery onto the `DeliveryJob` stream, ADR-20260731-122500), the
 outbound `DeliveryService` gateway, and the fail-closed config gate. The delta is the **federation
 dimension** below.
 

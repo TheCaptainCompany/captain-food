@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use sqlx::PgPool;
+use tokio::sync::Notify;
 
 use crate::completion::{complete_fenced, CompletionError};
 use crate::lease::{claim_due_lanes, heartbeat, release_lane, seed_partitions, Lane};
@@ -40,6 +41,9 @@ pub struct MailboxWorker {
     config: WorkerConfig,
     handler: Arc<dyn MessageHandler>,
     observer: Option<Arc<dyn DeliveryObserver>>,
+    /// Enqueue-side wake signal: a producer's `notify_one` cuts the delivery latency from the
+    /// heartbeat poll to ~immediate. Purely an accelerator — the poll is the guarantee.
+    nudge: Option<Arc<Notify>>,
     lanes: tokio::sync::Mutex<Vec<Lane>>,
 }
 
@@ -58,6 +62,7 @@ impl MailboxWorker {
             config,
             handler,
             observer: None,
+            nudge: None,
             lanes: tokio::sync::Mutex::new(Vec::new()),
         }
     }
@@ -65,6 +70,13 @@ impl MailboxWorker {
     /// Attach a post-commit observer (status bus / subscription fan-out).
     pub fn with_observer(mut self, observer: Arc<dyn DeliveryObserver>) -> Self {
         self.observer = Some(observer);
+        self
+    }
+
+    /// Attach an enqueue-side wake signal: producers `notify_one` after a successful insert so a
+    /// fresh message is drained on the next pass instead of waiting out the heartbeat sleep.
+    pub fn with_nudge(mut self, nudge: Arc<Notify>) -> Self {
+        self.nudge = Some(nudge);
         self
     }
 
@@ -120,7 +132,9 @@ impl MailboxWorker {
 
     /// Drain one pass over every owned lane, head-of-line per lane. Returns delivered count.
     /// A fenced-out / already-completed delivery drops the lane on the spot (the authority is
-    /// gone); an infrastructure error stops the lane's pass (redelivery retries next pass).
+    /// gone); an infrastructure error stops THAT lane's pass and moves on to the next lane —
+    /// one failing lane (a poisoned head row, a data-dependent flush error) must never starve
+    /// the worker's other lanes; the failing lane retries next pass.
     pub async fn drain(&self) -> sqlx::Result<u64> {
         let lanes: Vec<Lane> = self.lanes.lock().await.clone();
         let mut delivered = 0u64;
@@ -128,19 +142,38 @@ impl MailboxWorker {
             match self.drain_lane(&lane).await {
                 Ok(n) => delivered += n,
                 Err(CompletionError::FencedOut) | Err(CompletionError::AlreadyCompleted) => {
-                    self.lanes
-                        .lock()
-                        .await
-                        .retain(|l| !(l.actor_type == lane.actor_type && l.partition == lane.partition));
+                    // Drop exactly the authority that was fenced — never a fresher claim of the
+                    // same partition a concurrent claim() may have added.
+                    self.lanes.lock().await.retain(|l| {
+                        !(l.actor_type == lane.actor_type
+                            && l.partition == lane.partition
+                            && l.ownership_version == lane.ownership_version)
+                    });
                 }
-                Err(CompletionError::Db(e)) => return Err(e),
+                Err(CompletionError::Db(e)) => {
+                    tracing::warn!(
+                        worker = %self.worker_id,
+                        actor_type = %lane.actor_type,
+                        partition = lane.partition,
+                        error = %e,
+                        "mailbox: lane drain failed -- retrying next pass"
+                    );
+                }
             }
         }
         Ok(delivered)
     }
 
-    /// Head-of-line drain of ONE lane: RECEIVED rows above the checkpoint, strictly in `position`
-    /// order, each committed through [`complete_fenced`] before the next is looked at.
+    /// Head-of-line drain of ONE lane: RECEIVED rows strictly in `position` order, each committed
+    /// through [`complete_fenced`] before the next is looked at.
+    ///
+    /// The drain filters on `status = 'RECEIVED'` ALONE — never `position > checkpoint`. Positions
+    /// are sequence-allocated at INSERT, and Postgres commits are not sequence-ordered: a row can
+    /// become visible with a position BELOW one already delivered, so a checkpoint-filtered drain
+    /// would hide it from every future owner the moment the lane changes hands. The status flip is
+    /// transactional with the delivery, so RECEIVED is exactly the set of undelivered rows; the
+    /// checkpoint is a monotonic high-water mark (supervision + the fence's write target), not a
+    /// consumption cursor.
     pub async fn drain_lane(&self, lane: &Lane) -> Result<u64, CompletionError> {
         let mut delivered = 0u64;
         loop {
@@ -149,13 +182,12 @@ impl MailboxWorker {
                         payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
                         session_id, received_at \
                  FROM inbound_messages \
-                 WHERE actor_type = $1 AND partition = $2 AND status = 'RECEIVED' AND position > $3 \
+                 WHERE actor_type = $1 AND partition = $2 AND status = 'RECEIVED' \
                  ORDER BY position \
-                 LIMIT $4",
+                 LIMIT $3",
             )
             .bind(&lane.actor_type)
             .bind(lane.partition)
-            .bind(lane.checkpoint)
             .bind(self.config.batch)
             .fetch_all(&self.pool)
             .await
@@ -190,32 +222,77 @@ impl MailboxWorker {
             if (rows.len() as i64) < self.config.batch {
                 return Ok(delivered);
             }
-            // A full batch: keep going from the last committed position — the checkpoint moved
-            // with every completion, but our Lane snapshot did not; re-query picks up after it.
+            // A full batch means a backlog deeper than one pass. Renew THIS lane's lease before
+            // the next batch — an unbounded drain that never heartbeats would expire mid-pass
+            // under any backlog worth more than `lease_seconds` of handler time, and every
+            // completion after the takeover would run the full handler only to fence out.
+            let renewed =
+                heartbeat(&self.pool, lane, &self.worker_id, self.config.lease_seconds).await?;
+            if !renewed {
+                return Err(CompletionError::FencedOut);
+            }
         }
     }
 
-    /// The production loop: claim → drain → beat, then sleep a heartbeat. `shutdown` flips the
-    /// loop off; owned lanes are released so peers take over immediately instead of waiting out
-    /// the lease.
+    /// The production loop: claim → drain → beat, then sleep a heartbeat (or until a producer's
+    /// nudge). `shutdown` flips the loop off; owned lanes are released so peers take over
+    /// immediately instead of waiting out the lease.
+    ///
+    /// LIVENESS OVER PROPAGATION: a transient claim/beat/drain error is logged and retried next
+    /// pass — a momentary pool exhaustion (most likely exactly at peak) must never permanently
+    /// end an actor type's delivery. The loop only exits via `shutdown`. A DROPPED shutdown
+    /// sender means no shutdown can ever arrive — it must behave like a channel that never fires
+    /// (fall through to the sleep), NOT like a signal: `watch::Receiver::changed()` resolves
+    /// `Err` immediately once the sender is gone, and treating that as a wake turns every pass
+    /// into a zero-sleep busy loop against the database.
     pub async fn run(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> sqlx::Result<()> {
+        let mut sender_gone = false;
         loop {
             if *shutdown.borrow() {
                 break;
             }
-            self.claim().await?;
+            if let Err(e) = self.claim().await {
+                tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: claim failed -- retrying next pass");
+            }
             if let Err(e) = self.drain().await {
                 tracing::error!(worker = %self.worker_id, error = %e, "mailbox: drain pass failed");
             }
-            self.beat().await?;
-            tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(self.config.heartbeat_seconds)) => {}
-                _ = shutdown.changed() => {}
+            if let Err(e) = self.beat().await {
+                tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: heartbeat failed -- retrying next pass");
+            }
+            let sleep =
+                tokio::time::sleep(std::time::Duration::from_secs(self.config.heartbeat_seconds));
+            tokio::pin!(sleep);
+            let nudged = async {
+                match &self.nudge {
+                    Some(n) => n.notified().await,
+                    None => std::future::pending().await,
+                }
+            };
+            if sender_gone {
+                tokio::select! {
+                    _ = &mut sleep => {}
+                    _ = nudged => {}
+                }
+            } else {
+                tokio::select! {
+                    _ = &mut sleep => {}
+                    _ = nudged => {}
+                    changed = shutdown.changed() => {
+                        if changed.is_err() {
+                            sender_gone = true;
+                            // The wake that noticed the drop must still pace itself.
+                            sleep.await;
+                        }
+                    }
+                }
             }
         }
         let lanes: Vec<Lane> = self.lanes.lock().await.drain(..).collect();
         for lane in &lanes {
-            release_lane(&self.pool, lane, &self.worker_id).await?;
+            if let Err(e) = release_lane(&self.pool, lane, &self.worker_id).await {
+                tracing::warn!(worker = %self.worker_id, actor_type = %lane.actor_type, partition = lane.partition, error = %e, "mailbox: lane release failed -- peers take over at lease expiry");
+            }
         }
         tracing::info!(worker = %self.worker_id, released = lanes.len(), "mailbox: shut down");
         Ok(())

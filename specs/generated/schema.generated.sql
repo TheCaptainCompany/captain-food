@@ -546,16 +546,20 @@ $$;
 --
 -- Scope, per table (aged rows only — the guard columns are the tables' own high-water marks):
 --   command_journal            terminal rows (SUCCEEDED/REJECTED/FAILED)  90 days from completed_at
---   inbound_events             DELIVERED rows                             30 days from delivered_at
+--   inbound_messages           terminal rows (SUCCEEDED/REJECTED/FAILED/IGNORED/DUPLICATE/
+--                              CANCELLED)                                 90 days from completed_at
 --   external_stripe_events     processed rows (processed_at set)          90 days from processed_at
 --   external_hubrise_callbacks processed rows (processed_at set)          90 days from processed_at
 --   external_avelo37_events    processed rows (processed_at set)          90 days from processed_at
 --   external_uber_direct_events processed rows (processed_at set)         90 days from processed_at
 --
+-- (`inbound_events` was swept here until ADR-20260731-122500 retired it — the mailbox backfill
+-- migration drops the table and redeploys this function without its section.)
+--
 -- NEVER swept, at any age: domain_events / domain_stream (the forever log — deliberately not
 -- referenced here; its only trimming is the opt-in per-stream $maxAge/$maxCount machinery),
 -- command_journal RECEIVED rows (the stale-RECEIVED sweep marks crashed runs FAILED first),
--- inbound_events FAILED rows (kept until resolved) and RECEIVED rows (pending work),
+-- inbound_messages RECEIVED rows (pending work) and SCHEDULED rows (future work),
 -- unprocessed mirror rows (processed_at IS NULL), and external_sirene_restaurants (a full
 -- mirror — detect-by-absence needs the complete row set, ADR-0045).
 CREATE FUNCTION sweep_retention()
@@ -574,12 +578,14 @@ BEGIN
   GET DIAGNOSTICS n = ROW_COUNT;
   swept_table := 'command_journal'; deleted := n; RETURN NEXT;
 
-  DELETE FROM inbound_events
-   WHERE status = 'DELIVERED'
-     AND delivered_at IS NOT NULL
-     AND delivered_at < now() - INTERVAL '30 days';
+  -- The mailbox (journals.yaml `inbound_messages.retention`): terminal rows only — RECEIVED is
+  -- pending work, SCHEDULED is future work; neither is ever age-swept.
+  DELETE FROM inbound_messages
+   WHERE status IN ('SUCCEEDED', 'REJECTED', 'FAILED', 'IGNORED', 'DUPLICATE', 'CANCELLED')
+     AND completed_at IS NOT NULL
+     AND completed_at < now() - INTERVAL '90 days';
   GET DIAGNOSTICS n = ROW_COUNT;
-  swept_table := 'inbound_events'; deleted := n; RETURN NEXT;
+  swept_table := 'inbound_messages'; deleted := n; RETURN NEXT;
 
   DELETE FROM external_stripe_events
    WHERE processed_at IS NOT NULL

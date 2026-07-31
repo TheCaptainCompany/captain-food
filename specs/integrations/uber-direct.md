@@ -10,7 +10,7 @@ and [ADR-20260721-172500](../../docs/adr/20260721-172500-uber-direct-delivery-pa
 
 Uber Direct is a `DeliveryProvider = PARTNER` implementation of the pattern established by Avelo37
 ([specs/integrations/avelo37.md](avelo37.md), issue #28): the two-layer webhook inbox
-(`external_uber_direct_events` mirror → `inbound_events` → drain onto the `DeliveryJob` stream), the
+(`external_uber_direct_events` mirror → kind-EVENT `inbound_messages` on the `DeliveryJob` lane → mailbox delivery onto the `DeliveryJob` stream, ADR-20260731-122500), the
 outbound `DeliveryService` gateway, and the fail-closed config gate. The two deltas from Avelo37 are
 the **OAuth2 client-credentials** auth (§5) and the **signature scheme** (§4).
 

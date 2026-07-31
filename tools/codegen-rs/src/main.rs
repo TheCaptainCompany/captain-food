@@ -9984,7 +9984,7 @@ fn emit_domain_states(model: &Model) -> String {
         // Group the per-event mutation statements (insertion order = spec field order).
         #[allow(clippy::type_complexity)]
         let mut arms: Vec<(String, Vec<String>)> = Vec::new();
-        let mut stmt = |ev: &str, s: String, arms: &mut Vec<(String, Vec<String>)>| {
+        let stmt = |ev: &str, s: String, arms: &mut Vec<(String, Vec<String>)>| {
             match arms.iter_mut().find(|(e, _)| e == ev) {
                 Some((_, v)) => v.push(s),
                 None => arms.push((ev.to_string(), vec![s])),

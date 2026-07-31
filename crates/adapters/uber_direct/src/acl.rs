@@ -354,7 +354,14 @@ impl UberDirectWebhookIngestor {
                 }
                 UberIngestOutcome::Recorded { event_type: event.kind.clone() }
             }
-            _ => UberIngestOutcome::Duplicate,
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(_) => UberIngestOutcome::Duplicate,
+            // Never applied twice (safe direction), but a conflict is a keying signal, not a
+            // dedupe — log it. (Every redelivery of a pre-flip BACKFILLED event lands here too:
+            // the backfill stored md5 hashes, the live path sha256.)
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(status) => {
+                tracing::warn!(source = "uber_direct", external_id = %event.event_id, row_status = ?status, "payload conflict under a redelivered provider id -- not enqueued");
+                UberIngestOutcome::Duplicate
+            },
         };
         self.raw.mark_processed(&event.event_id).await?;
         Ok(outcome)

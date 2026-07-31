@@ -79,8 +79,14 @@ pub fn requires_post_message(
             (Some(cid), Some(did)) if cid.0 == did => Ok(()),
             _ => Err(RequiresViolation::NotAParticipant),
         },
-        // acting: state.restaurantId / rider — enforcement waits on the #144 identity bridges.
-        _ => Ok(()),
+        // acting: state.restaurantId — enforcement waits on the #144 identity bridge (no resolved
+        // restaurant identity exists yet to compare against the folded participant).
+        "RESTAURANT" | "RESTAURANT_ACCOUNT" => Ok(()),
+        // RIDER is DELIBERATELY ABSENT from `requires.acting` in the spec: absent = denied,
+        // unconditionally — no identity bridge is needed to know a rider is never a conversation
+        // participant. (The claim gate above already pinned author_role RIDER to user_type RIDER;
+        // this denies the acting side too.)
+        _ => Err(RequiresViolation::NotAParticipant),
     }
 }
 

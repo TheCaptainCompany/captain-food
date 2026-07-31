@@ -86,8 +86,8 @@ delivery:
         Avelo37 partner ACL (crates/adapters/avelo37, issue #28): outbound offer_job posts the job to
         the partner API (gated on AVELO37_API_KEY — unconfigured deployments keep the logged no-op
         stand-in, so jobs stay open to independent riders); the partner's answers come back through
-        its verified webhook and the two-layer inbox (external_avelo37_events → inbound_events,
-        ADR-20260720-015400).
+        its verified webhook and the two-layer inbox (external_avelo37_events → kind-EVENT
+        inbound_messages on the DeliveryJob lane, ADR-20260720-015400 / ADR-20260731-122500).
       routes:
         offer_job: 'POST /adapters/avelo37/deliveries'
     coopcycle:
@@ -99,8 +99,9 @@ delivery:
         outbound offer_job resolves the job to an instance by coverage area (dropoff postal prefix) and
         POSTs a create-delivery with an OAuth2 token; unconfigured deployments keep the logged no-op
         stand-in (jobs stay open to independent riders). The instance's answers come back through its
-        verified per-instance webhook and the two-layer inbox (external_coopcycle_events → inbound_events,
-        ADR-20260720-015400 / ADR-20260721-122910).
+        verified per-instance webhook and the two-layer inbox (external_coopcycle_events → kind-EVENT
+        inbound_messages on the DeliveryJob lane, ADR-20260720-015400 / ADR-20260721-122910 /
+        ADR-20260731-122500).
       routes:
         offer_job: 'POST /adapters/coopcycle/deliveries'
     uber_direct:
@@ -113,8 +114,9 @@ delivery:
         offer_job fetches the OAuth2 token and POSTs a Create Delivery carrying our deliveryJobId as
         external_id; unconfigured deployments keep the logged no-op stand-in (jobs fall through to the
         next ranked channel via the offer timeout, #60). Uber's answers come back through its verified
-        X-Uber-Signature webhook and the two-layer inbox (external_uber_direct_events → inbound_events,
-        ADR-20260720-015400 / ADR-20260721-172500).
+        X-Uber-Signature webhook and the two-layer inbox (external_uber_direct_events → kind-EVENT
+        inbound_messages on the DeliveryJob lane, ADR-20260720-015400 / ADR-20260721-172500 /
+        ADR-20260731-122500).
       routes:
         offer_job: 'POST /adapters/uber-direct/deliveries'
 

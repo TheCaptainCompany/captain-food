@@ -405,7 +405,14 @@ impl CoopCycleWebhookIngestor {
                 }
                 CoopCycleIngestOutcome::Recorded { event_type: event.event_type.clone() }
             }
-            _ => CoopCycleIngestOutcome::Duplicate,
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(_) => CoopCycleIngestOutcome::Duplicate,
+            // Never applied twice (safe direction), but a conflict is a keying signal, not a
+            // dedupe — log it. (Every redelivery of a pre-flip BACKFILLED event lands here too:
+            // the backfill stored md5 hashes, the live path sha256.)
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(status) => {
+                tracing::warn!(source = "coopcycle", external_id = %key, row_status = ?status, "payload conflict under a redelivered provider id -- not enqueued");
+                CoopCycleIngestOutcome::Duplicate
+            },
         };
         self.raw.mark_processed(&key).await?;
         Ok(outcome)

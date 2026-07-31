@@ -40,11 +40,22 @@ pub async fn enqueue_worker_command(
             "command '{command_type}' has no mailbox address (not received by any mailbox actor)"
         )));
     };
-    let actor_id = identity_prop
-        .and_then(|prop| payload.get(prop))
-        .and_then(|v| v.as_str())
-        .and_then(|s| uuid::Uuid::parse_str(s).ok())
-        .unwrap_or_else(uuid::Uuid::now_v7);
+    // A DECLARED identity property that is missing or unparsable is a keying bug and must fail
+    // at the door: minting a random id would park the command on an arbitrary lane, silently
+    // breaking the per-aggregate serialization the mailbox exists to give. Only a command whose
+    // actor declares NO identity property (id minted at delivery) gets a fresh lane id.
+    let actor_id = match identity_prop {
+        Some(prop) => payload
+            .get(prop)
+            .and_then(|v| v.as_str())
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+            .ok_or_else(|| {
+                DomainError::Repository(format!(
+                    "command '{command_type}': identity property '{prop}' missing or not a uuid — unaddressable"
+                ))
+            })?,
+        None => uuid::Uuid::now_v7(),
+    };
     let payload_hash = application::journal::payload_hash(&payload);
     let entry = MailboxEntry {
         message_id,

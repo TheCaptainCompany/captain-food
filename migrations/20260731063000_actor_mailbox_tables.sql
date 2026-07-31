@@ -63,6 +63,13 @@ CREATE INDEX idx_inbound_messages_pending_reminders
     ON inbound_messages (actor_id)
     WHERE status = 'SCHEDULED';
 
+-- The supervision page's per-lane SCHEDULED count (mailboxLanes lateral): without this, each of
+-- the ~1400 lane probes scans every SCHEDULED row — degrading exactly when a reminder backlog
+-- exists, which is when someone is staring at the page.
+CREATE INDEX idx_inbound_messages_scheduled_lane
+    ON inbound_messages (actor_type, partition)
+    WHERE status = 'SCHEDULED';
+
 -- Delivery-level dedupe for adapted facts: one row per provider event. Partial — commands and
 -- reminders have no source and must not collide on (NULL, NULL).
 CREATE UNIQUE INDEX idx_inbound_messages_source_external
@@ -82,6 +89,6 @@ CREATE TABLE mailbox_partitions (
     ownership_version  BIGINT      NOT NULL DEFAULT 0, -- fencing counter — NOT a date (§3.1)
     claimed_by         TEXT            NULL,          -- worker instance id; NULL = unowned
     lease_until        TIMESTAMPTZ     NULL,          -- past or NULL = claimable; heartbeat-renewed
-    checkpoint         BIGINT      NOT NULL DEFAULT 0, -- everything at or below it is terminal
+    checkpoint         BIGINT      NOT NULL DEFAULT 0, -- delivered-position high-water mark (monotonic); NOT a consumption filter — positions are sequence-allocated, not commit-ordered, so `status` alone defines undelivered work
     PRIMARY KEY (actor_type, partition)
 );

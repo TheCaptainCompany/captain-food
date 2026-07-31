@@ -5,7 +5,9 @@
 //! std/default hasher: Rust's SipHash is randomly keyed per process, which is exactly the
 //! non-determinism this function exists to exclude. The golden-value test below is the freeze.
 
-/// FNV-1a 64-bit over the uuid's 16 big-endian bytes, reduced mod `width`.
+/// FNV-1a 64-bit over the uuid's 16 big-endian bytes, reduced mod `width`. The result feeds a
+/// SMALLINT column, so `width` is clamped to `1..=i16::MAX` — an unclamped `width > 32767` would
+/// silently wrap negative in the cast and strand the row on a partition no lane maps to.
 pub fn stable_partition(actor_id: &uuid::Uuid, width: u16) -> i16 {
     const OFFSET: u64 = 0xcbf29ce484222325;
     const PRIME: u64 = 0x00000100000001b3;
@@ -14,7 +16,7 @@ pub fn stable_partition(actor_id: &uuid::Uuid, width: u16) -> i16 {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(PRIME);
     }
-    (hash % u64::from(width.max(1))) as i16
+    (hash % u64::from(width.clamp(1, i16::MAX as u16))) as i16
 }
 
 #[cfg(test)]

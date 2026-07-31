@@ -281,6 +281,17 @@ pub fn router() -> Router {
     // every command_journal transition here; operationStatusChanged streams it. Like the event bus,
     // constructed unconditionally so the schema always carries one.
     let operation_status_bus = infrastructure::OperationStatusBus::default();
+    // The enqueue→worker wake registry (one Notify per mailbox actor type): every in-process
+    // PgMailbox insert nudges the actor type's worker, cutting delivery latency from the
+    // heartbeat poll (~10s) to ~immediate. Registered up-front from the SAME generated table the
+    // workers spawn from.
+    let mailbox_nudges = {
+        let mut nudges = infrastructure::persistence::mailbox_store::MailboxNudges::default();
+        for (actor_type, _) in infrastructure::generated::command_router::ACTOR_MAILBOXES {
+            nudges.register(actor_type);
+        }
+        Arc::new(nudges)
+    };
     let mut read_deps: Option<ReadDeps> = None;
     // The host fallback's tenant lookup (#98): decides registered-vs-unclaimed for {slug} hosts.
     let mut tenant_lookup = hosts::TenantLookup(None);
@@ -439,9 +450,10 @@ pub fn router() -> Router {
                     journal: Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
                     // The actor mailbox (#242 flip): the aggregate-routed mutations enqueue here;
                     // the partitioned workers spawned below deliver.
-                    mailbox: Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(
-                        pool.clone(),
-                    )),
+                    mailbox: Arc::new(
+                        infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())
+                            .with_nudges(mailbox_nudges.clone()),
+                    ),
                     status_bus: operation_status_bus.clone(),
                     slug_reservations: Arc::new(
                         infrastructure::PgSlugReservationRepository::new(pool.clone()),
@@ -625,26 +637,85 @@ pub fn router() -> Router {
                     // uniqueness matters: claimed_by is a fencing identity plus a diagnostic.
                     let worker_id =
                         format!("w-{}-{}", std::process::id(), &uuid::Uuid::new_v4().simple().to_string()[..8]);
+                    // ONE shutdown channel for every worker, flipped by the signal task below —
+                    // the SENDER MUST STAY ALIVE: a dropped sender cannot deliver a shutdown, and
+                    // (PR #270 review C1) the workers' graceful lane release would be dead code,
+                    // stalling every lane for a full lease on each deploy.
+                    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+                    tokio::spawn(async move {
+                        let ctrl_c = async {
+                            let _ = tokio::signal::ctrl_c().await;
+                        };
+                        #[cfg(unix)]
+                        let terminate = async {
+                            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                                Ok(mut sig) => {
+                                    sig.recv().await;
+                                }
+                                Err(_) => std::future::pending().await,
+                            }
+                        };
+                        #[cfg(not(unix))]
+                        let terminate = std::future::pending::<()>();
+                        tokio::select! {
+                            _ = ctrl_c => {}
+                            _ = terminate => {}
+                        }
+                        tracing::info!("mailbox: shutdown signal -- draining workers");
+                        let _ = shutdown_tx.send(true);
+                        // Hold the sender until the process ends: dropping it here would turn the
+                        // receivers' `changed()` into an instant wake again.
+                        std::future::pending::<()>().await;
+                    });
                     for (actor_type, width) in
                         infrastructure::generated::command_router::ACTOR_MAILBOXES
                     {
-                        let worker = actor_runtime::MailboxWorker::new(
-                            pool.clone(),
-                            worker_id.clone(),
-                            *actor_type,
-                            actor_runtime::WorkerConfig::default(),
-                            handler.clone(),
-                        )
-                        .with_observer(observer.clone());
+                        let worker = Arc::new(
+                            {
+                                let mut w = actor_runtime::MailboxWorker::new(
+                                    pool.clone(),
+                                    worker_id.clone(),
+                                    *actor_type,
+                                    actor_runtime::WorkerConfig::default(),
+                                    handler.clone(),
+                                )
+                                .with_observer(observer.clone());
+                                if let Some(nudge) = mailbox_nudges.get(actor_type) {
+                                    w = w.with_nudge(nudge);
+                                }
+                                w
+                            },
+                        );
                         let width = *width as i16;
-                        let (_, rx) = tokio::sync::watch::channel(false);
+                        let rx = shutdown_rx.clone();
+                        // SUPERVISED: the loop itself retries transient errors, but a handler
+                        // panic unwinds through the task — the supervisor respawns it (with
+                        // backoff) so one poisoned delivery cannot permanently end an actor
+                        // type's consumption.
                         tokio::spawn(async move {
                             if let Err(e) = worker.seed(width).await {
                                 tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %e, "mailbox: seed failed -- worker not started");
                                 return;
                             }
-                            if let Err(e) = worker.run(rx).await {
-                                tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %e, "mailbox: worker loop exited");
+                            loop {
+                                let run = {
+                                    let w = worker.clone();
+                                    let rx = rx.clone();
+                                    tokio::spawn(async move { w.run(rx).await })
+                                };
+                                match run.await {
+                                    Ok(Ok(())) => break, // graceful shutdown
+                                    Ok(Err(e)) => {
+                                        tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %e, "mailbox: worker loop exited -- respawning");
+                                    }
+                                    Err(join_err) => {
+                                        tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %join_err, "mailbox: worker loop panicked -- respawning");
+                                    }
+                                }
+                                if *rx.borrow() {
+                                    break;
+                                }
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                             }
                         });
                     }
@@ -660,7 +731,7 @@ pub fn router() -> Router {
                 // Mounted at `POST /adapters/stripe/webhooks` below.
                 stripe_ingestor = Some(Arc::new(StripeWebhookIngestor::new(
                     Arc::new(stripe_adapter::PgRawStripeEvents::new(pool.clone())),
-                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()).with_nudges(mailbox_nudges.clone())),
                 )));
 
                 // Avelo37 delivery-partner webhook ingestor (issue #28, same two-layer inbox as
@@ -668,7 +739,7 @@ pub fn router() -> Router {
                 // DeliveryJob lane → ACK. Mounted at `POST /adapters/avelo37/webhooks` below.
                 avelo37_ingestor = Some(Arc::new(Avelo37WebhookIngestor::new(
                     Arc::new(avelo37_adapter::PgRawAvelo37Events::new(pool.clone())),
-                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()).with_nudges(mailbox_nudges.clone())),
                 )));
 
                 // CoopCycle delivery-partner webhook ingestor (issue #58, same two-layer inbox): the
@@ -678,7 +749,7 @@ pub fn router() -> Router {
                 // Mounted below with the registry (secrets).
                 coopcycle_ingestor = Some(Arc::new(CoopCycleWebhookIngestor::new(
                     Arc::new(coopcycle_adapter::PgRawCoopCycleEvents::new(pool.clone())),
-                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()).with_nudges(mailbox_nudges.clone())),
                 )));
 
                 // Uber Direct delivery-partner webhook ingestor (issue #57, same two-layer inbox as
@@ -687,7 +758,7 @@ pub fn router() -> Router {
                 // `POST /adapters/uber-direct/webhooks` below with the signing secret.
                 uber_direct_ingestor = Some(Arc::new(UberDirectWebhookIngestor::new(
                     Arc::new(uber_direct_adapter::PgRawUberDirectEvents::new(pool.clone())),
-                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()).with_nudges(mailbox_nudges.clone())),
                 )));
 
                 // HubRise wiring (issue #20): the raw mirror (external_hubrise_callbacks), the
@@ -700,7 +771,8 @@ pub fn router() -> Router {
                     Some(Arc::new(hubrise_adapter::PgRawHubRiseCallbacks::new(pool.clone())));
                 {
                     let hubrise_mailbox = Arc::new(
-                        infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()),
+                        infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())
+                            .with_nudges(mailbox_nudges.clone()),
                     );
                     let hubrise_connections =
                         Arc::new(hubrise_adapter::PgHubRiseConnections::new(pool.clone()));

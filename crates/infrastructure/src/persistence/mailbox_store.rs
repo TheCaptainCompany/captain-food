@@ -3,6 +3,9 @@
 //! `operationStatus`. Idempotency rides the `message_id` primary key: `ON CONFLICT DO NOTHING`
 //! then read back — the caller discriminates replay (same hash) from conflict (different hash).
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use application::mailbox::{Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxStatusRow};
 use async_trait::async_trait;
 use domain::shared::errors::DomainError;
@@ -11,13 +14,50 @@ use sqlx::{PgPool, Row};
 use super::db_err;
 use super::enum_sql::EnumText;
 
+/// The enqueue→worker wake registry: one [`tokio::sync::Notify`] per mailbox actor type. A
+/// producer's successful insert nudges the actor type's in-process worker so delivery starts on
+/// the next pass instead of waiting out the heartbeat poll (the poll stays the guarantee — a
+/// nudge is an accelerator, and a process without the worker simply has nobody listening).
+#[derive(Default, Clone)]
+pub struct MailboxNudges {
+    map: HashMap<String, Arc<tokio::sync::Notify>>,
+}
+
+impl MailboxNudges {
+    /// Register (or fetch) the actor type's wake signal — the composition root hands the same
+    /// `Notify` to the actor type's worker.
+    pub fn register(&mut self, actor_type: &str) -> Arc<tokio::sync::Notify> {
+        self.map.entry(actor_type.to_owned()).or_default().clone()
+    }
+
+    /// The actor type's wake signal, for the worker side of the wiring.
+    pub fn get(&self, actor_type: &str) -> Option<Arc<tokio::sync::Notify>> {
+        self.map.get(actor_type).cloned()
+    }
+
+    /// Wake the actor type's worker, if one is registered in this process.
+    pub fn nudge(&self, actor_type: &str) {
+        if let Some(n) = self.map.get(actor_type) {
+            n.notify_one();
+        }
+    }
+}
+
 pub struct PgMailbox {
     pool: PgPool,
+    nudges: Option<Arc<MailboxNudges>>,
 }
 
 impl PgMailbox {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self { pool, nudges: None }
+    }
+
+    /// Wire the enqueue-side wake registry (composition root only — adapters' standalone
+    /// binaries have no in-process workers to wake).
+    pub fn with_nudges(mut self, nudges: Arc<MailboxNudges>) -> Self {
+        self.nudges = Some(nudges);
+        self
     }
 }
 
@@ -55,6 +95,9 @@ impl Mailbox for PgMailbox {
         .rows_affected()
             == 1;
         if inserted {
+            if let Some(nudges) = &self.nudges {
+                nudges.nudge(&entry.actor_type);
+            }
             return Ok(MailboxInsertOutcome::Inserted);
         }
         let row = sqlx::query(

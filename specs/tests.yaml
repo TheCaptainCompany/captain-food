@@ -3151,6 +3151,19 @@ tests:
     thrown:
       - { $ref: 'errors.yaml#/RoleMismatch' }
 
+  TestRiderPostDenied:
+    name: "A rider cannot post into an order thread (RIDER absent from requires.acting = denied)"
+    rules: [{ $ref: 'rules.yaml#/OnlyParticipantsWriteToAnAggregate' }]
+    actor: { $ref: 'actors.yaml#/Conversation' }
+    given:
+      - { $ref: '#/fixtures/conversationOpened' }
+    when:
+      type: { $ref: 'commands.yaml#/PostMessage' }
+      principal: { userType: "RIDER" }
+      data: { orderId: "order-1", messageId: "msg-9", authorRole: "RIDER", visibility: "PUBLIC", body: "On my way", originalLocale: "fr-FR" }
+    thrown:
+      - { $ref: 'errors.yaml#/NotAParticipant' }
+
   TestMessageTranslationRecorded:
     name: "A posted message is translated into a target locale and the translation is cached"
     rules: [{ $ref: 'rules.yaml#/TranslationsAreCachedOncePerLocale' }]

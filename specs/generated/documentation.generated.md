@@ -5592,7 +5592,7 @@ _A conversation is opened once per order (id = orderId); a second open is reject
 
 _A write to an existing aggregate instance is accepted only from a principal the aggregate's own folded state names as a participant (or an explicitly exempt role) — enforced in the actor, against the fold, with zero projection lag (#235, PROP-20260728-135632)._
 
-- **Verified by**: [🧪 `TestPostByStrangerRejected`](#test-testpostbystrangerrejected)
+- **Verified by**: [🧪 `TestPostByStrangerRejected`](#test-testpostbystrangerrejected), [🧪 `TestRiderPostDenied`](#test-testriderpostdenied)
 
 <a id="rule-authorroleispinnedtotheprincipal"></a>
 #### 📐 Rule: `AuthorRoleIsPinnedToThePrincipal`
@@ -6224,6 +6224,16 @@ _A customer cannot post as authorRole RESTAURANT (forged staff note)_
 - **When**: [📩 `PostMessage`](#command-postmessage)
 - **Thrown**: [⛔ `RoleMismatch`](#error-rolemismatch)
 - **Verifies**: [📐 `AuthorRoleIsPinnedToThePrincipal`](#rule-authorroleispinnedtotheprincipal)
+
+<a id="test-testriderpostdenied"></a>
+#### 🧪 Test: `TestRiderPostDenied`
+
+_A rider cannot post into an order thread (RIDER absent from requires.acting = denied)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `NotAParticipant`](#error-notaparticipant)
+- **Verifies**: [📐 `OnlyParticipantsWriteToAnAggregate`](#rule-onlyparticipantswritetoanaggregate)
 
 <a id="test-testmessagetranslationrecorded"></a>
 #### 🧪 Test: `TestMessageTranslationRecorded`

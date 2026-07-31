@@ -35,6 +35,23 @@
 > journal+spawn until PM mailboxes (Runtime D). Remaining C3b: worker-channel flip (SIRENE/HubRise
 > `dispatch_journaled` → mailbox), adapter inbox → kind EVENT rows, backfill + legacy drop.
 > 36 DB suites green on a local PG16 under `DB_TESTS_REQUIRED=1`; `make rust` green.
+> ✅ **PR #270 review fixes (2026-07-31, branch `claude/pr-270-review-ajxr9o`)** — the five-lens
+> review of [#270 "actor mailbox runtime"](https://github.com/TheCaptainCompany/captain-food/pull/270)
+> found 6 criticals; all fixed with regression gates: C1 dropped shutdown sender = zero-sleep
+> busy-loop workers (now: held sender + SIGTERM drain + supervisor respawn + `changed() Err` =
+> no-signal); C2 `position > checkpoint` drain filter strands late-committing rows after takeover
+> (now: `status = 'RECEIVED'` alone defines undelivered; checkpoint = high-water mark only); C3/C4
+> transient handler errors and flush version conflicts landed TERMINAL and the enqueue pk-dedupe
+> then absorbed Stripe's own retries = permanently lost payment facts (now: abort-and-retry; only
+> deterministic outcomes are terminal); C5 the deployed `sweep_retention()` still swept the dropped
+> `inbound_events` (now: the drop migration redeploys the function, adds the `inbound_messages`
+> window, and `retention_sweep.rs` tests the REAL spec function via include_str — never a mirror);
+> C6 the kind-EVENT route never published on the event bus = `paymentStatusChanged` dark (now:
+> shared fan-out with the COMMAND route). Plus: mid-drain lease renewal, per-lane error
+> containment, enqueue→worker Notify nudges (delivery latency ~10 s → ~immediate), RIDER
+> `requires` deny closed (+ `TestRiderPostDenied`), HubRise connect awaits the account leg's
+> terminal verdict before dependents, backfill migration gains a write-fence + straggler guard,
+> and the stale `inbound_events` spec narratives are rewritten.
 > ✅ **Runtime B on the branch (2026-07-31): the actor-supervision surface is live end to end** —
 > ADMIN `mailboxLanes` query (api.yaml + story step), the `system.yaml` SDUI surface (first ADMIN
 > screen set, `/system/mailbox` lanes page + `system.translations.yaml` sidecar), the

@@ -83,9 +83,17 @@ pub mod mem {
     #[derive(Default)]
     pub struct MemMailbox {
         rows: Mutex<HashMap<uuid::Uuid, (MailboxEntry, InboundMessageStatus, Option<serde_json::Value>)>>,
+        /// When set, inserts land SUCCEEDED immediately — the fake stands in for a mailbox WITH a
+        /// live worker, for flows that await a sent command's terminal status (HubRise connect).
+        auto_succeed: bool,
     }
 
     impl MemMailbox {
+        /// A fake whose worker "delivers" instantly: every insert lands SUCCEEDED.
+        pub fn instantly_delivered() -> Self {
+            Self { auto_succeed: true, ..Self::default() }
+        }
+
         /// Snapshot of every stored entry, insertion-order-independent (test assertions).
         pub fn entries(&self) -> Vec<MailboxEntry> {
             self.rows.lock().expect("mem mailbox poisoned").values().map(|(e, _, _)| e.clone()).collect()
@@ -111,7 +119,12 @@ pub mod mem {
                     payload_hash: existing.payload_hash.clone(),
                 });
             }
-            rows.insert(entry.message_id, (entry.clone(), InboundMessageStatus::RECEIVED, None));
+            let status = if self.auto_succeed {
+                InboundMessageStatus::SUCCEEDED
+            } else {
+                InboundMessageStatus::RECEIVED
+            };
+            rows.insert(entry.message_id, (entry.clone(), status, None));
             Ok(MailboxInsertOutcome::Inserted)
         }
 

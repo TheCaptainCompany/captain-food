@@ -460,7 +460,14 @@ impl StripeWebhookIngestor {
                 }
                 StripeIngestOutcome::Recorded { event_type: event.event_type.clone() }
             }
-            _ => StripeIngestOutcome::Duplicate,
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(_) => StripeIngestOutcome::Duplicate,
+            // Never applied twice (safe direction), but a conflict is a keying signal, not a
+            // dedupe — log it. (Every redelivery of a pre-flip BACKFILLED event lands here too:
+            // the backfill stored md5 hashes, the live path sha256.)
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(status) => {
+                tracing::warn!(source = "stripe", external_id = %event.id, row_status = ?status, "payload conflict under a redelivered provider id -- not enqueued");
+                StripeIngestOutcome::Duplicate
+            },
         };
         self.raw.mark_processed(&event.id).await?;
         Ok(outcome)

@@ -267,8 +267,9 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
 
     /// Enqueue one provisioning command — fire-and-forget (ADR-20260731-122500): the mailbox
     /// worker delivers; rejections live on the mailbox row and the supervision lanes, not here.
-    /// Returns `Ok(true)` when the command is durably handed off (fresh or an idempotent replay),
-    /// `Ok(false)` on a payload conflict (warned — never enqueued); an infra failure aborts.
+    /// Returns `Ok(Some(message_id))` when the command is durably handed off (fresh or an
+    /// idempotent replay), `Ok(None)` on a payload conflict (warned — never enqueued); an infra
+    /// failure aborts.
     async fn send(
         &self,
         attempt: uuid::Uuid,
@@ -276,7 +277,7 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
         entity: &str,
         payload: serde_json::Value,
         warnings: &mut Vec<String>,
-    ) -> Result<bool, ConnectError> {
+    ) -> Result<Option<uuid::Uuid>, ConnectError> {
         let entry = Self::entry(attempt, command_type, entity, payload);
         let actor = Self::actor(&entry);
         match enqueue_worker_command(
@@ -289,14 +290,36 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
         .await
         .map_err(ConnectError::Infra)?
         {
-            EnqueueOutcome::Enqueued | EnqueueOutcome::Deduplicated(_) => Ok(true),
+            EnqueueOutcome::Enqueued | EnqueueOutcome::Deduplicated(_) => Ok(Some(entry.message_id)),
             EnqueueOutcome::PayloadConflict(status) => {
                 warnings.push(format!(
                     "{command_type} {entity}: payload conflict under a replayed id (mailbox row {status:?}) -- not re-sent"
                 ));
-                Ok(false)
+                Ok(None)
             }
         }
+    }
+
+    /// Await a sent command's TERMINAL mailbox status (bounded poll). The provisioning chain is
+    /// causally ordered but its actors live on DIFFERENT lanes with no cross-lane ordering:
+    /// `register_restaurant` folds the ACCOUNT stream (`RestaurantAccountNotFound`), so the
+    /// account registration must be delivered before its dependents are enqueued — the old
+    /// inline dispatch gave this ordering for free. Returns the terminal status, or `None` on
+    /// timeout (the caller degrades to a warning; a re-connect replays idempotently).
+    async fn await_message_terminal(
+        &self,
+        message_id: uuid::Uuid,
+    ) -> Option<domain::generated::scalars::InboundMessageStatus> {
+        use domain::generated::scalars::InboundMessageStatus as S;
+        for _ in 0..40 {
+            if let Ok(Some(row)) = self.mailbox.by_message(message_id).await {
+                if !matches!(row.status, S::RECEIVED | S::SCHEDULED) {
+                    return Some(row.status);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        None
     }
 
     /// The registered Restaurant must be visible in the READ MODEL before `create_catalog` (its
@@ -374,8 +397,26 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
         };
         let payload = serde_json::to_value(&cmd)
             .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
-        self.send(attempt, "RegisterRestaurantAccount", &hubrise_account_id, payload, &mut warnings)
+        let account_msg = self
+            .send(attempt, "RegisterRestaurantAccount", &hubrise_account_id, payload, &mut warnings)
             .await?;
+        // The dependents fold the ACCOUNT stream on other lanes — deliver the account first
+        // (cross-lane enqueue order guarantees nothing). A rejection/timeout degrades to a
+        // warning the operator sees synchronously, the property the old inline dispatch had.
+        if let Some(account_msg) = account_msg {
+            use domain::generated::scalars::InboundMessageStatus as S;
+            match self.await_message_terminal(account_msg).await {
+                Some(S::SUCCEEDED | S::IGNORED | S::DUPLICATE) => {}
+                Some(status) => warnings.push(format!(
+                    "RegisterRestaurantAccount {hubrise_account_id}: delivered {status:?} — \
+                     dependent registrations may reject (fix and re-connect)"
+                )),
+                None => warnings.push(format!(
+                    "RegisterRestaurantAccount {hubrise_account_id}: not delivered before timeout — \
+                     dependent registrations may land first and reject (re-connect replays them)"
+                )),
+            }
+        }
 
         // 2) One Restaurant per location (the location IS the restaurant; ids reconcile with the
         //    enricher's derivation so later callbacks land on these aggregates).
@@ -426,7 +467,7 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
             };
             let payload = serde_json::to_value(&cmd)
                 .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
-            self.send(attempt, "RegisterRestaurant", &loc.id, payload, &mut warnings).await?;
+            let _ = self.send(attempt, "RegisterRestaurant", &loc.id, payload, &mut warnings).await?;
             connected_locations.push(ConnectedLocation {
                 hubrise_location_id: loc.id.clone(),
                 restaurant_account_id,
@@ -491,7 +532,8 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
                 .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
             let ok = self
                 .send(attempt, "CreateCatalog", &cat.id, payload, &mut warnings)
-                .await?;
+                .await?
+                .is_some();
             if !ok {
                 continue;
             }
@@ -506,7 +548,8 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
                         })?;
                         let ok = self
                             .send(attempt, "ImportCatalog", &cat.id, payload, &mut warnings)
-                            .await?;
+                            .await?
+                            .is_some();
                         if ok {
                             imported += 1;
                         }
@@ -673,7 +716,8 @@ mod tests {
         connections: Arc<MemHubRiseConnections>,
         gateway: FakeGateway,
     ) -> (HubRiseConnectFlow<FakeGateway>, Arc<MemMailbox>) {
-        let mailbox = Arc::new(MemMailbox::default());
+        // Instantly-delivered: the connect flow awaits the account leg's terminal status.
+        let mailbox = Arc::new(MemMailbox::instantly_delivered());
         (
             HubRiseConnectFlow::new(
                 mailbox.clone(),
@@ -748,7 +792,7 @@ mod tests {
     async fn reconnect_re_enqueues_under_fresh_attempt_ids_and_refreshes_the_token() {
         let connections = Arc::new(MemHubRiseConnections::default());
         // One shared mailbox across both attempts (the door is the same in production).
-        let mailbox = Arc::new(MemMailbox::default());
+        let mailbox = Arc::new(MemMailbox::instantly_delivered());
         let first = HubRiseConnectFlow::new(
             mailbox.clone(),
             Arc::new(CaughtUpRestaurants),

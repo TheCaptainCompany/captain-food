@@ -32,7 +32,7 @@ use sqlx::{PgPool, Row};
 
 async fn setup(pool: &PgPool) {
     sqlx::raw_sql(
-        "DROP TABLE IF EXISTS inbound_messages, mailbox_partitions, domain_events CASCADE;\n\
+        "DROP TABLE IF EXISTS inbound_messages, mailbox_partitions, domain_events, customer CASCADE;\n\
          DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
     )
     .execute(pool)
@@ -63,6 +63,32 @@ async fn setup(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("domain_events");
+    // The customer projection table the #235 by_auth_ref bridge resolves against. EMPTY here —
+    // a stranger principal must resolve to Ok(None) (no participant), not to an infrastructure
+    // error: the delivery path now ABORTS on a resolution error instead of swallowing it into a
+    // wrong-class NotAParticipant rejection (PR #270 review).
+    sqlx::raw_sql(
+        "CREATE TABLE customer (\n\
+           customer_id UUID PRIMARY KEY,\n\
+           phone TEXT NOT NULL UNIQUE,\n\
+           auth_ref TEXT,\n\
+           display_name TEXT,\n\
+           email TEXT,\n\
+           email_verified BOOLEAN NOT NULL,\n\
+           locale TEXT,\n\
+           timezone TEXT,\n\
+           ratings JSONB NOT NULL,\n\
+           favorite_restaurant_ids JSONB NOT NULL,\n\
+           preferences JSONB,\n\
+           addresses JSONB NOT NULL,\n\
+           payment_method_id TEXT,\n\
+           created_at TIMESTAMPTZ NOT NULL,\n\
+           updated_at TIMESTAMPTZ NOT NULL\n\
+         )",
+    )
+    .execute(pool)
+    .await
+    .expect("customer");
 }
 
 fn deps_over(pool: &PgPool) -> CommandDeps {

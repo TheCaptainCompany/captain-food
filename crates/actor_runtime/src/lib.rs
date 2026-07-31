@@ -4,7 +4,10 @@
 //! - `inbound_messages` — the mailbox: one row per message to one actor, addressed by
 //!   `(actor_type, actor_id)`, consumed in `position` order per partition (head-of-line);
 //! - `mailbox_partitions` — the registry: one row per `(actor_type, partition)` carrying the
-//!   CHECKPOINT (everything at or below it is terminal), the LEASE (`claimed_by` + `lease_until`,
+//!   CHECKPOINT (a monotonic delivered-position high-water mark — supervision visibility and the
+//!   fence's write target, NOT a consumption filter: sequence-allocated positions are not
+//!   commit-ordered, so filtering on it would strand late-committing rows; `status = 'RECEIVED'`
+//!   alone defines what is undelivered), the LEASE (`claimed_by` + `lease_until`,
 //!   heartbeat-renewed, expiry-takeover — no coordinator), and the OWNERSHIP_VERSION fencing
 //!   counter (incremented on every ownership change, asserted inside every completion
 //!   transaction: a stale owner's commit matches 0 rows and the WHOLE transaction rolls back,

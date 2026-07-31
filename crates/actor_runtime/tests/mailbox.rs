@@ -335,3 +335,161 @@ async fn expired_lease_is_reclaimed_and_the_orphan_row_delivered() {
     let (_, delivered_pos) = probe_rows(&pool).await[0];
     assert_eq!(delivered_pos, pos);
 }
+
+/// PR #270 review C2: positions are sequence-allocated at INSERT, not commit-ordered, so a row
+/// can be RECEIVED *below* the lane's checkpoint (its insert committed after a higher-position
+/// row was delivered). The drain must find it after a takeover — a `position > checkpoint`
+/// filter would strand it forever.
+#[tokio::test]
+async fn below_checkpoint_received_row_survives_takeover() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    actor_runtime::seed_partitions(&pool, "Conversation", 4).await.expect("seed");
+    let (_m1, p1) = enqueue(&pool, 0, 21).await;
+    let (m2, p2) = enqueue(&pool, 0, 22).await;
+    assert!(p1 < p2);
+
+    // A owns the lane and completes ONLY the higher-position row (the lower one's insert is the
+    // late-committing transaction in the real race — here it simply sits RECEIVED).
+    let a_lanes = claim_due_lanes(&pool, "Conversation", "w-A", 300, 100).await.expect("A claims");
+    let a_lane = a_lanes.iter().find(|l| l.partition == 0).expect("lane 0").clone();
+    let row2 = sqlx::query(
+        "SELECT message_id, position, kind, actor_type, actor_id, partition, message_type, \
+                payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
+                session_id, received_at \
+         FROM inbound_messages WHERE message_id = $1",
+    )
+    .bind(m2)
+    .fetch_one(&pool)
+    .await
+    .expect("row2");
+    let msg2 = decode_for_test(&row2);
+    complete_fenced(&pool, &a_lane, "w-A", &msg2, &ProbeHandler).await.expect("A completes row2");
+
+    // The checkpoint now sits at p2, ABOVE the still-RECEIVED p1.
+    let ckpt: i64 = sqlx::query(
+        "SELECT checkpoint FROM mailbox_partitions WHERE actor_type = 'Conversation' AND partition = 0",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("ckpt")
+    .get("checkpoint");
+    assert_eq!(ckpt, p2);
+
+    // B takes over: its fresh Lane carries checkpoint p2 from the registry. The drain must STILL
+    // deliver p1 — status alone defines what is undelivered.
+    let b_lane = steal_lane(&pool, "Conversation", 0, "w-B", 300)
+        .await
+        .expect("steal")
+        .expect("lane exists");
+    let b = MailboxWorker::new(
+        pool.clone(),
+        "w-B",
+        "Conversation",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        Arc::new(ProbeHandler),
+    );
+    assert_eq!(b.drain_lane(&b_lane).await.expect("B drains"), 1, "the below-checkpoint row was delivered");
+    let delivered: Vec<i64> = probe_rows(&pool).await.iter().map(|(_, p)| *p).collect();
+    assert!(delivered.contains(&p1), "p1 must not be stranded below the checkpoint");
+}
+
+/// PR #270 review C1: a DROPPED shutdown sender must behave like a shutdown that never fires —
+/// the loop keeps its heartbeat pacing (no zero-sleep busy loop) and keeps running.
+#[tokio::test]
+async fn dropped_shutdown_sender_keeps_heartbeat_pacing() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    let worker = Arc::new(MailboxWorker::new(
+        pool.clone(),
+        "w-drop",
+        "Conversation",
+        WorkerConfig { lease_seconds: 30, heartbeat_seconds: 2, ..WorkerConfig::default() },
+        Arc::new(ProbeHandler),
+    ));
+    worker.seed(4).await.expect("seed");
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+    drop(_tx); // the C1 production bug, on purpose
+    let w = worker.clone();
+    tokio::spawn(async move { w.run(rx).await });
+
+    // Let the first (empty) pass complete, then enqueue mid-sleep.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    enqueue(&pool, 0, 31).await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        probe_rows(&pool).await.is_empty(),
+        "delivered mid-sleep: the loop is spinning instead of sleeping (C1 busy loop)"
+    );
+    // ...and after the heartbeat elapses the loop is still alive and delivers.
+    tokio::time::sleep(std::time::Duration::from_millis(2600)).await;
+    assert_eq!(probe_rows(&pool).await.len(), 1, "the loop must keep running after the sender drop");
+}
+
+/// The enqueue-side nudge wakes the worker ahead of the heartbeat: with a 30s heartbeat, a
+/// nudged enqueue is delivered in well under a second.
+#[tokio::test]
+async fn nudge_wakes_the_worker_before_the_heartbeat() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    let nudge = Arc::new(tokio::sync::Notify::new());
+    let worker = Arc::new(
+        MailboxWorker::new(
+            pool.clone(),
+            "w-nudge",
+            "Conversation",
+            WorkerConfig { lease_seconds: 30, heartbeat_seconds: 30, ..WorkerConfig::default() },
+            Arc::new(ProbeHandler),
+        )
+        .with_nudge(nudge.clone()),
+    );
+    worker.seed(4).await.expect("seed");
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let w = worker.clone();
+    let run = tokio::spawn(async move { w.run(rx).await });
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await; // first pass done, now sleeping
+    enqueue(&pool, 0, 41).await;
+    nudge.notify_one();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if !probe_rows(&pool).await.is_empty() {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "nudge did not wake the worker");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    tx.send(true).expect("shutdown");
+    run.await.expect("join").expect("clean shutdown");
+}
+
+/// Test-local decode of a full mailbox row (the crate's own decode is private).
+fn decode_for_test(row: &sqlx::postgres::PgRow) -> InboundMessage {
+    InboundMessage {
+        message_id: row.get("message_id"),
+        position: row.get("position"),
+        kind: row.get("kind"),
+        actor_type: row.get("actor_type"),
+        actor_id: row.get("actor_id"),
+        partition: row.get("partition"),
+        message_type: row.get("message_type"),
+        payload: row.get("payload"),
+        payload_hash: row.get("payload_hash"),
+        channel: row.get("channel"),
+        user_id: row.get("user_id"),
+        user_type: row.get("user_type"),
+        correlation_id: row.get("correlation_id"),
+        cause_id: row.get("cause_id"),
+        session_id: row.get("session_id"),
+        received_at: row.get("received_at"),
+    }
+}

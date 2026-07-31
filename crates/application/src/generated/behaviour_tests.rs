@@ -3616,6 +3616,21 @@ async fn test_forged_author_role_rejected() {
     bed.assert_appended("TestForgedAuthorRoleRejected", &before, &[]);
 }
 
+/// tests.yaml#/tests/TestRiderPostDenied — "A rider cannot post into an order thread (RIDER absent from requires.acting = denied)"
+/// rules: OnlyParticipantsWriteToAnAggregate
+#[tokio::test]
+async fn test_rider_post_denied() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-9")), author_role: sc::ConversationAuthorRole::RIDER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("On my way".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor_principal("RIDER", None)).await;
+    let err = result.expect_err("TestRiderPostDenied: the spec expects a typed rejection");
+    support::assert_thrown("TestRiderPostDenied", &err, &["NotAParticipant"]);
+    bed.assert_appended("TestRiderPostDenied", &before, &[]);
+}
+
 /// tests.yaml#/tests/TestMessageTranslationRecorded — "A posted message is translated into a target locale and the translation is cached"
 /// rules: TranslationsAreCachedOncePerLocale
 #[tokio::test]
