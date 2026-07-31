@@ -14848,6 +14848,152 @@ fn emit_behaviour_tests(model: &Model) -> String {
     out
 }
 
+// ─── §13 — proposal hygiene (docs/proposals/PROP-*.md, #272) ────────────────────────────────────
+//
+// Realizes the docs/proposals/README.md header convention + the CLAUDE.md "Named concerns" rule
+// (an unchecked concern mechanically blocks `Approved`). Scope: `PROP-*.md` files ONLY — the two
+// legacy non-PROP files predate the convention and are grandfathered out by the filename filter.
+// Severities were calibrated against the committed corpus (2026-07-31: all 31 PROP-* files carry a
+// Status line and a header tracking-issue link, and every Approved one names an ADR), so all four
+// rules are ERRORS — the gate stays 0-error without grandfathering any rule down to a warning.
+
+/// Read every `docs/proposals/PROP-*.md` under the repo root, sorted for determinism. A missing
+/// directory yields an empty corpus (mirrors the tolerant `read_dir` pattern of `load_model`).
+fn load_proposal_files(root: &std::path::Path) -> Vec<(String, String)> {
+    let dir = root.join("docs/proposals");
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(&dir) {
+        let mut paths: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("PROP-") && n.ends_with(".md"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        paths.sort();
+        for p in paths {
+            if let (Some(name), Ok(content)) = (p.file_name().and_then(|n| n.to_str()), fs::read_to_string(&p)) {
+                out.push((format!("docs/proposals/{}", name), content));
+            }
+        }
+    }
+    out
+}
+
+/// The Status value: the text after `**Status**` on the first line carrying it. Tolerates both the
+/// `- **Status**:` list form and the bare `**Status**:` form used by existing files.
+fn proposal_status(content: &str) -> Option<&str> {
+    for line in content.lines() {
+        if let Some(idx) = line.find("**Status**") {
+            let rest = &line[idx + "**Status**".len()..];
+            return Some(rest.trim_start().trim_start_matches(':').trim());
+        }
+    }
+    None
+}
+
+/// True when `text` contains a FULL clickable tracking-issue link (a bare `#NN` is a dead reference
+/// in repo markdown — GitHub only auto-links it inside issues/PRs/commits).
+fn has_tracking_issue_link(text: &str) -> bool {
+    const NEEDLE: &str = "https://github.com/TheCaptainCompany/captain-food/issues/";
+    let mut rest = text;
+    while let Some(idx) = rest.find(NEEDLE) {
+        let after = &rest[idx + NEEDLE.len()..];
+        if after.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            return true;
+        }
+        rest = after;
+    }
+    false
+}
+
+/// True when an UNCHECKED `- [ ]` item exists inside a Concerns block — either the header-entry
+/// form (`- **Concerns**:` + indented checklist) or a `## Concerns` section. The scan is SCOPED to
+/// the block so unchecked checklists elsewhere in the body (e.g. scope checklists) never trip it:
+/// a heading always ends the block; the header-entry form also ends at a blank line or the next
+/// sibling `- **Field**:` entry (its own checklist items are indented `- [ ]`/`- [x]` lines).
+fn proposal_has_unresolved_concern(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+        let is_heading_marker =
+            trimmed.starts_with('#') && trimmed.trim_start_matches('#').trim().starts_with("Concerns");
+        let is_entry_marker = line.contains("**Concerns**");
+        if !(is_heading_marker || is_entry_marker) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < lines.len() {
+            let l = lines[j];
+            let t = l.trim_start();
+            if t.starts_with('#') {
+                break; // next heading ends BOTH block forms
+            }
+            if is_entry_marker && (l.trim().is_empty() || t.starts_with("- **")) {
+                break; // header-entry form: blank line or sibling header field ends the block
+            }
+            if t.starts_with("- [ ]") {
+                return true;
+            }
+            j += 1;
+        }
+        i = j.max(i + 1);
+    }
+    false
+}
+
+/// The four proposal-hygiene rules, pure over `(path, content)` pairs so unit tests can feed
+/// fixture strings and `main` feeds `load_proposal_files(repo_root)`.
+fn validate_proposal_hygiene(files: &[(String, String)]) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    for (path, content) in files {
+        let status = proposal_status(content);
+        if status.is_none() {
+            issues.push(err(
+                "proposal-status-missing",
+                path.clone(),
+                "no `**Status**` line — the header block (docs/proposals/README.md) requires one.".into(),
+            ));
+        }
+        // The tracking-issue link must sit in the HEADER (first 40 lines), as a full clickable URL
+        // (ADR-20260724-143000). Corpus-calibrated to ERROR: every committed PROP-* file passes.
+        let header: String = content.lines().take(40).collect::<Vec<_>>().join("\n");
+        if !has_tracking_issue_link(&header) {
+            issues.push(err(
+                "proposal-tracking-issue-missing",
+                path.clone(),
+                "no tracking-issue link (https://github.com/TheCaptainCompany/captain-food/issues/<N>) in the first 40 lines — every proposal has a tracking issue, named in the header as a FULL clickable link (ADR-20260724-143000).".into(),
+            ));
+        }
+        // `Approved`/`APPROVED` case-sensitively: a Proposed status mentioning "partially approved"
+        // in prose is NOT an approval (e.g. PROP-20260730-032306).
+        let approved = status.map(|s| s.contains("Approved") || s.contains("APPROVED")).unwrap_or(false);
+        if approved {
+            if proposal_has_unresolved_concern(content) {
+                issues.push(err(
+                    "proposal-approved-unresolved-concern",
+                    path.clone(),
+                    "Status is Approved but an unchecked `- [ ]` item remains in the Concerns block — an unchecked concern mechanically blocks Approved (CLAUDE.md \"Named concerns\"): resolve it by CHECKING it with a one-line resolution, never by deleting it.".into(),
+                ));
+            }
+            // Corpus-calibrated to ERROR: every Approved PROP-* file already names an ADR.
+            if !content.contains("ADR-") {
+                issues.push(err(
+                    "proposal-approved-without-decision",
+                    path.clone(),
+                    "Status is Approved but the file references no ADR (`ADR-…`) — an approval is recorded by a decision record; name the ADR that recorded it.".into(),
+                ));
+            }
+        }
+    }
+    issues
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let check = args.iter().any(|a| a == "--check");
@@ -14863,7 +15009,12 @@ fn main() {
         }
     };
 
-    let Report { issues, coverage, handled_commands } = validate(&model);
+    let Report { mut issues, coverage, handled_commands } = validate(&model);
+    // ─── §13 — proposal hygiene (docs/proposals/PROP-*.md, #272) — runs alongside the spec
+    // validator: same issue list, same gate, but reads the proposals corpus from the repo root
+    // (derived from `--specs`) because proposals are markdown, not part of the YAML model.
+    let proposals = load_proposal_files(&repo_root(&specs));
+    issues.extend(validate_proposal_hygiene(&proposals));
     let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
     let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
 
@@ -14916,6 +15067,10 @@ fn main() {
     eprintln!("    - ui: {} SDUI screens — resolver/action bindings $ref real api ops (API-meets-UI), data_requirements resolve; {} translations (en+fr, params match)", coverage.screens, coverage.translations);
     eprintln!("    - observability: {} workflow contracts — $ref/surface bindings resolve, mandatory ids (correlation_id/trace_id), span kinds, success.required_spans ⊆ declared spans", coverage.obs_contracts);
     eprintln!("    - c4: bounded-context↔actor mapping (no unmapped aggregate / phantom container ref)");
+    eprintln!(
+        "    - proposals: {} docs/proposals/PROP-*.md — Status header, tracking-issue link, Concerns resolved before Approved, Approved names an ADR",
+        proposals.len()
+    );
 
     if !issues.is_empty() {
         eprintln!("• checks: {} error(s), {} warning(s)", errors.len(), warnings.len());
@@ -17966,5 +18121,124 @@ Catalog:
         let md = emit_documentation(&model);
         assert!(!md.contains("Reminders (self-scheduled facts"), "doc section must not render on unchanged specs");
         assert!(!md.contains("Deletion (declarative"), "doc section must not render on unchanged specs");
+    }
+
+    // ─── §13 — proposal hygiene (#272 — CLAUDE.md "Named concerns" + docs/proposals/README.md) ──
+
+    fn hygiene(files: &[(&str, &str)]) -> Vec<Issue> {
+        let owned: Vec<(String, String)> =
+            files.iter().map(|(p, c)| (p.to_string(), c.to_string())).collect();
+        validate_proposal_hygiene(&owned)
+    }
+
+    fn hygiene_rules(issues: &[Issue]) -> Vec<&'static str> {
+        issues.iter().map(|i| i.rule).collect()
+    }
+
+    const TRACK: &str =
+        "- **Tracking issue**: [#9 \"t\"](https://github.com/TheCaptainCompany/captain-food/issues/9)\n";
+
+    #[test]
+    fn proposal_status_line_is_required() {
+        let list_form = format!("# PROP-x — t\n- **Status**: Proposed\n{TRACK}");
+        assert!(hygiene(&[("docs/proposals/PROP-a.md", &list_form)]).is_empty());
+        let bare_form = format!("# PROP-x — t\n**Status**: Proposed\n{TRACK}");
+        assert!(
+            hygiene(&[("docs/proposals/PROP-b.md", &bare_form)]).is_empty(),
+            "the bare `**Status**:` form used by existing files must be tolerated"
+        );
+        let missing = format!("# PROP-x — t\nno header block here\n{TRACK}");
+        let issues = hygiene(&[("docs/proposals/PROP-c.md", &missing)]);
+        assert_eq!(hygiene_rules(&issues), vec!["proposal-status-missing"]);
+        assert!(issues[0].level == Level::Error, "status is a header REQUIREMENT — error");
+    }
+
+    #[test]
+    fn proposal_tracking_issue_link_must_be_in_the_header() {
+        let ok = format!("# PROP-x — t\n- **Status**: Proposed\n{TRACK}");
+        assert!(hygiene(&[("docs/proposals/PROP-a.md", &ok)]).is_empty());
+        // A bare `#NN` is a dead reference in repo markdown — only the full URL counts.
+        let bare_number = "# PROP-x — t\n- **Status**: Proposed\n- **Tracking issue**: #272\n";
+        let issues = hygiene(&[("docs/proposals/PROP-b.md", bare_number)]);
+        assert_eq!(hygiene_rules(&issues), vec!["proposal-tracking-issue-missing"]);
+        assert!(issues[0].level == Level::Error, "corpus-calibrated: every PROP-* passes — error");
+        // A link buried past the first 40 lines is not IN THE HEADER.
+        let buried = format!("# PROP-x — t\n- **Status**: Proposed\n{}{TRACK}", "\n".repeat(45));
+        assert_eq!(
+            hygiene_rules(&hygiene(&[("docs/proposals/PROP-c.md", &buried)])),
+            vec!["proposal-tracking-issue-missing"]
+        );
+    }
+
+    #[test]
+    fn approved_proposal_blocks_on_unchecked_concern_scoped_to_the_concerns_block() {
+        // Header-entry form: an unchecked named concern under `- **Concerns**:` blocks Approved.
+        let unresolved = format!(
+            "# P\n- **Status**: Approved — ADR-20260731-000000\n{TRACK}- **Concerns**:\n  - [ ] latency: unmeasured at peak\n"
+        );
+        let issues = hygiene(&[("docs/proposals/PROP-a.md", &unresolved)]);
+        assert_eq!(hygiene_rules(&issues), vec!["proposal-approved-unresolved-concern"]);
+        assert!(issues[0].level == Level::Error);
+        // Resolving = CHECKING the item with a resolution — the checked form passes.
+        let resolved = format!(
+            "# P\n- **Status**: Approved — ADR-20260731-000000\n{TRACK}- **Concerns**:\n  - [x] latency: measured — P99 ok at peak\n"
+        );
+        assert!(hygiene(&[("docs/proposals/PROP-b.md", &resolved)]).is_empty());
+        // `## Concerns` section form: blank lines inside the section do not end it — the next
+        // heading does.
+        let section = format!(
+            "# P\n- **Status**: APPROVED (in-session) — ADR-20260731-000000\n{TRACK}\n## Concerns\n\n- [ ] naming: collides with the PM state table\n\n## Next steps\n"
+        );
+        assert_eq!(
+            hygiene_rules(&hygiene(&[("docs/proposals/PROP-c.md", &section)])),
+            vec!["proposal-approved-unresolved-concern"]
+        );
+        // SCOPED: unchecked checklists OUTSIDE the Concerns block (scope checklists, a checklist
+        // after the sibling header field that ends the entry-form block) must NOT trip the rule.
+        let scope_only = format!(
+            "# P\n- **Status**: Approved — ADR-20260731-000000\n{TRACK}- **Concerns**:\n  - [x] a: done\n- **Realized by**: ADR-20260731-000000\n\n## Scope\n- [ ] later slice, deliberately deferred\n"
+        );
+        assert!(hygiene(&[("docs/proposals/PROP-d.md", &scope_only)]).is_empty());
+        // An unchecked concern on a NON-approved proposal is fine — it is what blocks the flip.
+        let proposed = format!(
+            "# P\n- **Status**: Proposed\n{TRACK}- **Concerns**:\n  - [ ] latency: unmeasured at peak\n"
+        );
+        assert!(hygiene(&[("docs/proposals/PROP-e.md", &proposed)]).is_empty());
+    }
+
+    #[test]
+    fn approved_proposal_must_reference_a_decision_record() {
+        let no_adr = format!("# P\n- **Status**: Approved (product owner, in-session)\n{TRACK}body\n");
+        let issues = hygiene(&[("docs/proposals/PROP-a.md", &no_adr)]);
+        assert_eq!(hygiene_rules(&issues), vec!["proposal-approved-without-decision"]);
+        assert!(issues[0].level == Level::Error, "corpus-calibrated: every Approved PROP-* names an ADR — error");
+        let with_adr = format!(
+            "# P\n- **Status**: Approved\n{TRACK}Recorded by ADR-20260731-061609.\n"
+        );
+        assert!(hygiene(&[("docs/proposals/PROP-b.md", &with_adr)]).is_empty());
+        // Not Approved → no decision-record requirement.
+        let proposed = format!("# P\n- **Status**: Proposed\n{TRACK}body\n");
+        assert!(hygiene(&[("docs/proposals/PROP-c.md", &proposed)]).is_empty());
+        // Lowercase "partially approved" prose inside a Proposed status is NOT an approval
+        // (the PROP-20260730-032306 shape).
+        let partial = format!("# P\n- **Status**: Proposed (partially approved — see §3)\n{TRACK}body\n");
+        assert!(hygiene(&[("docs/proposals/PROP-d.md", &partial)]).is_empty());
+    }
+
+    #[test]
+    fn real_proposals_satisfy_the_hygiene_rules() {
+        // The committed corpus is the calibration baseline (2026-07-31): all four rules are ERRORS
+        // because every PROP-* file passes them — this test keeps that true, so the gate stays
+        // 0-error and no rule ever needs grandfathering down to a warning.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let files = load_proposal_files(&root);
+        assert!(!files.is_empty(), "expected the committed docs/proposals/PROP-*.md corpus");
+        let issues = validate_proposal_hygiene(&files);
+        let errors: Vec<String> = issues
+            .iter()
+            .filter(|i| i.level == Level::Error)
+            .map(|i| format!("{} at {}: {}", i.rule, i.location, i.message))
+            .collect();
+        assert!(errors.is_empty(), "proposal hygiene must be 0-error on the committed corpus:\n{}", errors.join("\n"));
     }
 }
