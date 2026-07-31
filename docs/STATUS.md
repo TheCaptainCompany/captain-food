@@ -26,6 +26,15 @@
 > and [#267](https://github.com/TheCaptainCompany/captain-food/issues/267) follow. Open veto flag:
 > `messages.yaml` as the third payload catalog.
 
+> 🚨 **2026-07-31 — HOSTING MIGRATES TO OVH (ADR-20260731-061609, product-owner decision).**
+> Render + Supabase limitations are exhausted (bandwidth/build/disk; Disk-IO budget) and the costs
+> do not match the project. **Supabase is kept for IDENTITY ONLY.** The cutover uses the current
+> outage: final dump → OVH restore → ALL pending migrations (incl. enum-text) → deploy → smoke →
+> DNS; **Render is never resumed** — the "once the Render workspace is restored" runbook below is
+> SUPERSEDED by [PROP-20260731-061609 §5](proposals/PROP-20260731-061609-ovh-migration.md).
+> Tracking: [#271](https://github.com/TheCaptainCompany/captain-food/issues/271). #242 slice 3's
+> prod-gate becomes "OVH cutover complete".
+
 > 🚧 **2026-07-30 — pipeline isolated: build (auto) / deploy (manual) / migrate (after deploy) —
 > ADR-20260730-051500 (product-owner directive).** Render is paused (outbound bandwidth exhausted), which
 > exposed the hazard in migrate-on-green-ci: the enum-text schema conversion would have applied underneath
