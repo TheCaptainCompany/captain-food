@@ -94,6 +94,7 @@ fn admin_actor() -> Actor {
     Actor {
         user_id: uuid::Uuid::new_v4(),
         user_type: "ADMIN".to_string(),
+        domain_id: None,
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     }

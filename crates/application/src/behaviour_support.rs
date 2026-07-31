@@ -73,12 +73,20 @@ pub fn actor() -> Actor {
     actor_as("ADMIN")
 }
 
+/// A command-side actor with an explicit UserType AND resolved domain identity — what
+/// `when.principal` in tests.yaml dispatches as, exercising the `requires` acting/claims checks
+/// (#235, PROP-20260728-135632 §2.2).
+pub fn actor_principal(user_type: &str, domain_id: Option<uuid::Uuid>) -> Actor {
+    Actor { domain_id, ..actor_as(user_type) }
+}
+
 /// A command-side actor with an explicit UserType TEXT value — for the handlers whose semantics
 /// derive from the acting persona (e.g. `TipOrder`'s `tippedBy`, ADR-0041).
 pub fn actor_as(user_type: &str) -> Actor {
     Actor {
         user_id: uuid::Uuid::from_u128(0xA0),
         user_type: user_type.to_string(),
+        domain_id: None,
         correlation_id: uuid::Uuid::from_u128(0xC0),
         cause_id: None,
     }

@@ -568,6 +568,7 @@ async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_
     let actor = Actor {
         user_id: uuid::Uuid::nil(),
         user_type: "EXTERNAL".to_string(),
+        domain_id: None,
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     };

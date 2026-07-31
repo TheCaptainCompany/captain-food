@@ -3628,7 +3628,7 @@ _🧩 aggregate_ — Per-order in-app message thread; id = orderId (a conversati
 | Receives | Emits → | Throws |
 | --- | --- | --- |
 | [📩 `OpenConversation`](#command-openconversation) | [⚡ `ConversationOpened`](#event-conversationopened) | [⛔ `ConversationAlreadyOpen`](#error-conversationalreadyopen) |
-| [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
+| [📩 `PostMessage`](#command-postmessage) | [⚡ `MessagePosted`](#event-messageposted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `NotAParticipant`](#error-notaparticipant), [⛔ `RoleMismatch`](#error-rolemismatch), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted) |
 | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) | [⚡ `MessageTranslationAdded`](#event-messagetranslationadded) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MessageNotFoundInConversation`](#error-messagenotfoundinconversation), [⛔ `TranslationAlreadyRecorded`](#error-translationalreadyrecorded) |
 | [📩 `EscalateToAdmin`](#command-escalatetoadmin) | [⚡ `AdminInvitedToConversation`](#event-admininvitedtoconversation) | [⛔ `ConversationNotFound`](#error-conversationnotfound) |
 | [📩 `MuteParticipant`](#command-muteparticipant) | [⚡ `ParticipantMuted`](#event-participantmuted) | [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `MuteReasonRequired`](#error-mutereasonrequired) |
@@ -4376,7 +4376,7 @@ Post a message to an order's conversation — PUBLIC (customer-visible) or INTER
 
 - **Dispatched by**: [✏️ `postMessage`](#mutation-postmessage) · **handled by** [🎭 `Conversation`](#actor-conversation)
 - **Emits**: [⚡ `MessagePosted`](#event-messageposted)
-- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
+- **Throws**: [⛔ `ConversationNotFound`](#error-conversationnotfound), [⛔ `NotAParticipant`](#error-notaparticipant), [⛔ `RoleMismatch`](#error-rolemismatch), [⛔ `CustomerChatDisabled`](#error-customerchatdisabled), [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5385,7 +5385,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="scalar-reclamationstatus"></a>🔤 `ReclamationStatus` | enum (OPEN \| RESOLVED \| REJECTED) | Lifecycle of a reclamation as the read model folds it from the domain facts (View_Reclamation): OPEN on ReclamationOpened (awaiting a decision), RESOLVED on ReclamationResolved, REJECTED on ReclamationRejected, and back to OPEN on ReclamationReopened. Mirrors the pure domain enum in `crates/domain/src/reclamation.rs`; this DSL scalar backs the view/api derived status (#154).  |
 | <a id="scalar-claimtimelineeventkind"></a>🔤 `ClaimTimelineEventKind` | enum (OPENED \| RESOLVED \| REJECTED \| REOPENED \| EVIDENCE_ATTACHED) | Which reclamation lifecycle fact a ClaimTimelineEntry records as it is woven into the per-order conversation thread: OPENED (ReclamationOpened), RESOLVED (ReclamationResolved), REJECTED (ReclamationRejected), REOPENED (ReclamationReopened) or EVIDENCE_ATTACHED (ReclamationEvidenceAttached — the customer attached an evidence photo to the claim, #156). Lets the order thread show a claim's status and evidence inline without copying the reclamation's own read model (§2.5, #155).  |
 
-### ⛔ Errors _(38)_
+### ⛔ Errors _(40)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -5415,6 +5415,8 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-cannotordertestrestaurant"></a>⛔ `CannotOrderTestRestaurant` | A production (LIVE) order was placed against a TEST restaurant (ADR-0038 test-mode isolation). Real customers never reach test data; a TEST order may instead target a LIVE restaurant (receipt validation).  | 🇬🇧 This restaurant is not available. | 🇫🇷 Ce restaurant n'est pas disponible. | [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-conversationalreadyopen"></a>⛔ `ConversationAlreadyOpen` | OpenConversation targeted an order whose conversation already exists (id = orderId). The birth is idempotent-guarded, so a second open is rejected (#129).  | 🇬🇧 A conversation is already open for this order. | 🇫🇷 Une conversation est déjà ouverte pour cette commande. | [📩 `OpenConversation`](#command-openconversation) |
 | <a id="error-conversationnotfound"></a>⛔ `ConversationNotFound` | PostMessage targeted an order whose conversation was never opened; a message cannot be posted before the conversation exists (#129).  | 🇬🇧 No conversation exists for this order. | 🇫🇷 Aucune conversation n'existe pour cette commande. | [📩 `PostMessage`](#command-postmessage), [📩 `RecordMessageTranslation`](#command-recordmessagetranslation), [📩 `EscalateToAdmin`](#command-escalatetoadmin), [📩 `MuteParticipant`](#command-muteparticipant), [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
+| <a id="error-notaparticipant"></a>⛔ `NotAParticipant` | The acting principal is not a participant of the aggregate instance it tried to write to — the aggregate's own folded state names its participants and the caller is not among them (write-side per-instance authorization, #235 / PROP-20260728-135632 requires.acting). The instance's existence is NOT disclosed beyond this rejection.  | 🇬🇧 You are not a participant in this conversation. | 🇫🇷 Vous ne participez pas à cette conversation. | [📩 `PostMessage`](#command-postmessage) |
+| <a id="error-rolemismatch"></a>⛔ `RoleMismatch` | The role claimed in the payload does not match the verified acting principal — e.g. a CUSTOMER posting authorRole RESTAURANT to forge a staff note (write-side anti-forgery, #235 / PROP-20260728-135632 requires.claims).  | 🇬🇧 The author role does not match your account. | 🇫🇷 Le rôle d'auteur ne correspond pas à votre compte. | [📩 `PostMessage`](#command-postmessage) |
 | <a id="error-customerchatdisabled"></a>⛔ `CustomerChatDisabled` | A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).  | 🇬🇧 Customer messaging is disabled for this order. | 🇫🇷 La messagerie client est désactivée pour cette commande. | [📩 `PostMessage`](#command-postmessage) |
 | <a id="error-messagealreadyposted"></a>⛔ `MessageAlreadyPosted` | A message with this client-generated messageId was already posted to the conversation; the re-post is a duplicate and is rejected (idempotency; #129).  | 🇬🇧 This message has already been posted. | 🇫🇷 Ce message a déjà été envoyé. | [📩 `PostMessage`](#command-postmessage) |
 | <a id="error-messagenotfoundinconversation"></a>⛔ `MessageNotFoundInConversation` | A translation targeted a message that was never posted to the conversation; a translation can only be recorded for an actually-posted message (rules.yaml#/TranslationTargetsAPostedMessage) (#129).  | 🇬🇧 No such message exists in this conversation. | 🇫🇷 Ce message n'existe pas dans cette conversation. | [📩 `RecordMessageTranslation`](#command-recordmessagetranslation) |
@@ -5428,7 +5430,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
 
-### 📐 Business rules _(44)_
+### 📐 Business rules _(46)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5583,6 +5585,20 @@ _A Stripe payment outcome that matches no known checkout run is surfaced as a ty
 _A conversation is opened once per order (id = orderId); a second open is rejected, and posting a message before the conversation is opened is rejected (#129)._
 
 - **Verified by**: [🧪 `TestConversationOpened`](#test-testconversationopened), [🧪 `TestConversationOpenedTwiceIsRejected`](#test-testconversationopenedtwiceisrejected), [🧪 `TestPostToUnopenedConversationIsRejected`](#test-testposttounopenedconversationisrejected)
+
+<a id="rule-onlyparticipantswritetoanaggregate"></a>
+#### 📐 Rule: `OnlyParticipantsWriteToAnAggregate`
+
+_A write to an existing aggregate instance is accepted only from a principal the aggregate's own folded state names as a participant (or an explicitly exempt role) — enforced in the actor, against the fold, with zero projection lag (#235, PROP-20260728-135632)._
+
+- **Verified by**: [🧪 `TestPostByStrangerRejected`](#test-testpostbystrangerrejected)
+
+<a id="rule-authorroleispinnedtotheprincipal"></a>
+#### 📐 Rule: `AuthorRoleIsPinnedToThePrincipal`
+
+_A payload field claiming a business role (e.g. a conversation message's authorRole) must match the verified acting principal — a customer can never forge a staff note (#235, requires.claims)._
+
+- **Verified by**: [🧪 `TestForgedAuthorRoleRejected`](#test-testforgedauthorrolerejected)
 
 <a id="rule-customerchatrequiresrestaurantoptin"></a>
 #### 📐 Rule: `CustomerChatRequiresRestaurantOptIn`
@@ -6187,6 +6203,26 @@ _Re-posting a message with an already-seen messageId is rejected (idempotency)_
 - **When**: [📩 `PostMessage`](#command-postmessage)
 - **Thrown**: [⛔ `MessageAlreadyPosted`](#error-messagealreadyposted)
 - **Verifies**: [📐 `MessagePostingIsIdempotent`](#rule-messagepostingisidempotent)
+
+<a id="test-testpostbystrangerrejected"></a>
+#### 🧪 Test: `TestPostByStrangerRejected`
+
+_A customer who is not the order's customer cannot post into its thread_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `NotAParticipant`](#error-notaparticipant)
+- **Verifies**: [📐 `OnlyParticipantsWriteToAnAggregate`](#rule-onlyparticipantswritetoanaggregate)
+
+<a id="test-testforgedauthorrolerejected"></a>
+#### 🧪 Test: `TestForgedAuthorRoleRejected`
+
+_A customer cannot post as authorRole RESTAURANT (forged staff note)_
+
+- **Given**: [⚡ `ConversationOpened`](#event-conversationopened)
+- **When**: [📩 `PostMessage`](#command-postmessage)
+- **Thrown**: [⛔ `RoleMismatch`](#error-rolemismatch)
+- **Verifies**: [📐 `AuthorRoleIsPinnedToThePrincipal`](#rule-authorroleispinnedtotheprincipal)
 
 <a id="test-testmessagetranslationrecorded"></a>
 #### 🧪 Test: `TestMessageTranslationRecorded`

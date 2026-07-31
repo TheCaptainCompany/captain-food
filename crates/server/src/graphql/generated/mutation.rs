@@ -88,10 +88,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -172,10 +186,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -257,10 +285,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -341,10 +383,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -425,10 +481,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -509,10 +579,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -594,10 +678,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -680,10 +778,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -764,10 +876,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -848,10 +974,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -932,10 +1072,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1016,10 +1170,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1100,10 +1268,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1184,10 +1366,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1268,10 +1464,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1353,10 +1563,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1438,10 +1662,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1522,10 +1760,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1606,10 +1858,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1691,10 +1957,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1776,10 +2056,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1860,10 +2154,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -1944,10 +2252,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2029,10 +2351,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2114,10 +2450,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2199,10 +2549,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2283,10 +2647,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2367,10 +2745,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2451,10 +2843,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2535,10 +2941,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2619,10 +3039,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2703,10 +3137,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2787,10 +3235,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2871,10 +3333,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -2955,10 +3431,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3040,10 +3530,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3127,10 +3631,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3213,10 +3731,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3298,10 +3830,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3384,10 +3930,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3470,10 +4030,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3554,10 +4128,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3639,10 +4227,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3723,10 +4325,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3807,10 +4423,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3891,10 +4521,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -3975,10 +4619,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4059,10 +4717,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4143,10 +4815,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4230,10 +4916,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4314,10 +5014,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4398,10 +5112,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4482,10 +5210,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4566,10 +5308,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4650,10 +5406,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4734,10 +5504,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4818,10 +5602,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4902,10 +5700,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -4986,10 +5798,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5074,10 +5900,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5158,10 +5998,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5244,10 +6098,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5329,10 +6197,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5413,10 +6295,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5497,10 +6393,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5581,10 +6491,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5665,10 +6589,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5749,10 +6687,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5837,10 +6789,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -5921,10 +6887,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6005,10 +6985,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6089,10 +7083,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6173,10 +7181,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6257,10 +7279,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6341,10 +7377,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6425,10 +7475,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6509,10 +7573,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6593,10 +7671,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6677,10 +7769,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6761,10 +7867,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6845,10 +7965,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };
@@ -6929,10 +8063,24 @@ impl MutationRoot {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
-        // Envelope → Actor (ADR-0041): events appended by this command carry cause_id = messageId.
+        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER
+        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer
+        // queries already use); requires.acting compares THAT, never the raw auth subject. Other
+        // roles stay None until their bridges land (#144).
+        let domain_id = if env.user_type == "CUSTOMER" {
+            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {
+                (Some(uid), Ok(customers)) => customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                    .map_err(domain_error)?
+                    .map(|c| c.customer_id.0),
+                _ => None,
+            }
+        } else { None };
         let actor = application::ports::Actor {
             user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),
             user_type: env.user_type.clone(),
+            domain_id,
             correlation_id: env.correlation_id,
             cause_id: Some(env.message_id),
         };

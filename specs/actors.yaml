@@ -847,6 +847,8 @@ Conversation:
       emits: [{ $ref: 'events.yaml#/MessagePosted' }]
       throws:
         - { $ref: 'errors.yaml#/ConversationNotFound' }
+        - { $ref: 'errors.yaml#/NotAParticipant' }
+        - { $ref: 'errors.yaml#/RoleMismatch' }
         - { $ref: 'errors.yaml#/CustomerChatDisabled' }
         - { $ref: 'errors.yaml#/MessageAlreadyPosted' }
     - message: { $ref: 'commands.yaml#/RecordMessageTranslation' }

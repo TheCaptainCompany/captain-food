@@ -78,6 +78,7 @@ impl DeliveryOfferTimeoutWorker {
         Actor {
             user_id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"captain.food/delivery-offer-timeout-worker"),
             user_type: "EXTERNAL".to_string(), // UserType::EXTERNAL, stored as TEXT (ADR-20260728)
+        domain_id: None,
             correlation_id: uuid::Uuid::new_v4(),
             cause_id: None,
         }

@@ -574,12 +574,12 @@ fn fx_rider_status_changed() -> DomainEvent {
 
 /// tests.yaml#/fixtures/conversationOpened — events.yaml#/ConversationOpened
 fn fx_conversation_opened() -> DomainEvent {
-    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, customer_chat_enabled: true })
+    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), customer_chat_enabled: true })
 }
 
 /// tests.yaml#/fixtures/conversationOpenedChatDisabled — events.yaml#/ConversationOpened
 fn fx_conversation_opened_chat_disabled() -> DomainEvent {
-    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, customer_chat_enabled: false })
+    DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), customer_chat_enabled: false })
 }
 
 /// tests.yaml#/fixtures/messagePostedPublic — events.yaml#/MessagePosted
@@ -3487,7 +3487,7 @@ async fn test_conversation_opened() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, customer_chat_enabled: true };
+    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), customer_chat_enabled: true };
     let result = crate::commands::open_conversation(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestConversationOpened: the spec expects acceptance");
     bed.assert_appended("TestConversationOpened", &before, &[
@@ -3503,7 +3503,7 @@ async fn test_conversation_opened_twice_is_rejected() {
     spec_baseline(&bed).await;
     bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: None, customer_chat_enabled: true };
+    let cmd = cmds::OpenConversation { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), customer_chat_enabled: true };
     let result = crate::commands::open_conversation(&bed.store, cmd, &support::actor()).await;
     let err = result.expect_err("TestConversationOpenedTwiceIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestConversationOpenedTwiceIsRejected", &err, &["ConversationAlreadyOpen"]);
@@ -3533,7 +3533,7 @@ async fn test_public_message_posted() {
     bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
     let before = bed.snapshot();
     let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hi, any update on my order?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
-    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor_principal("CUSTOMER", Some(support::uid("cust-1")))).await;
     let _ = result.expect("TestPublicMessagePosted: the spec expects acceptance");
     bed.assert_appended("TestPublicMessagePosted", &before, &[
         (format!("Conversation-{}", support::uid("order-1")), fx_message_posted_public()),
@@ -3549,7 +3549,7 @@ async fn test_internal_note_posted() {
     bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
     let before = bed.snapshot();
     let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-2")), author_role: sc::ConversationAuthorRole::RESTAURANT, visibility: sc::MessageVisibility::INTERNAL, body: sc::MessageBody("Customer asked about ETA; kitchen backed up.".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
-    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor_principal("RESTAURANT", None)).await;
     let _ = result.expect("TestInternalNotePosted: the spec expects acceptance");
     bed.assert_appended("TestInternalNotePosted", &before, &[
         (format!("Conversation-{}", support::uid("order-1")), fx_message_posted_internal()),
@@ -3565,7 +3565,7 @@ async fn test_customer_post_rejected_when_chat_disabled() {
     bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened_chat_disabled()]).await;
     let before = bed.snapshot();
     let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hi, any update on my order?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
-    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor_principal("CUSTOMER", Some(support::uid("cust-1")))).await;
     let err = result.expect_err("TestCustomerPostRejectedWhenChatDisabled: the spec expects a typed rejection");
     support::assert_thrown("TestCustomerPostRejectedWhenChatDisabled", &err, &["CustomerChatDisabled"]);
     bed.assert_appended("TestCustomerPostRejectedWhenChatDisabled", &before, &[]);
@@ -3580,10 +3580,40 @@ async fn test_duplicate_message_rejected() {
     bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened(), fx_message_posted_public()]).await;
     let before = bed.snapshot();
     let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-1")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hi, any update on my order?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
-    let result = crate::commands::post_message(&bed.store, cmd, &support::actor()).await;
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor_principal("CUSTOMER", Some(support::uid("cust-1")))).await;
     let err = result.expect_err("TestDuplicateMessageRejected: the spec expects a typed rejection");
     support::assert_thrown("TestDuplicateMessageRejected", &err, &["MessageAlreadyPosted"]);
     bed.assert_appended("TestDuplicateMessageRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestPostByStrangerRejected — "A customer who is not the order's customer cannot post into its thread"
+/// rules: OnlyParticipantsWriteToAnAggregate
+#[tokio::test]
+async fn test_post_by_stranger_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-9")), author_role: sc::ConversationAuthorRole::CUSTOMER, visibility: sc::MessageVisibility::PUBLIC, body: sc::MessageBody("Hello?".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor_principal("CUSTOMER", Some(support::uid("cust-2")))).await;
+    let err = result.expect_err("TestPostByStrangerRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestPostByStrangerRejected", &err, &["NotAParticipant"]);
+    bed.assert_appended("TestPostByStrangerRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestForgedAuthorRoleRejected — "A customer cannot post as authorRole RESTAURANT (forged staff note)"
+/// rules: AuthorRoleIsPinnedToThePrincipal
+#[tokio::test]
+async fn test_forged_author_role_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Conversation-{}", support::uid("order-1")), vec![fx_conversation_opened()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PostMessage { order_id: sc::OrderId(support::uid("order-1")), message_id: sc::ConversationMessageId(support::uid("msg-9")), author_role: sc::ConversationAuthorRole::RESTAURANT, visibility: sc::MessageVisibility::INTERNAL, body: sc::MessageBody("Fake staff note".into()), original_locale: sc::Locale("fr-FR".into()), attachment_refs: Vec::new() };
+    let result = crate::commands::post_message(&bed.store, cmd, &support::actor_principal("CUSTOMER", Some(support::uid("cust-1")))).await;
+    let err = result.expect_err("TestForgedAuthorRoleRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestForgedAuthorRoleRejected", &err, &["RoleMismatch"]);
+    bed.assert_appended("TestForgedAuthorRoleRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestMessageTranslationRecorded — "A posted message is translated into a target locale and the translation is cached"

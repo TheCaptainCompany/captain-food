@@ -158,6 +158,7 @@ async fn registered_customer_is_folded_and_served_by_the_read_repository() {
     let actor = Actor {
         user_id: uuid::Uuid::nil(),
         user_type: "CUSTOMER".to_string(),
+        domain_id: None,
         correlation_id: uuid::Uuid::new_v4(),
         cause_id: None,
     };

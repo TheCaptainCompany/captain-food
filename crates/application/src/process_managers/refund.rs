@@ -346,6 +346,7 @@ mod tests {
         Actor {
             user_id: uid(0xAD),
             user_type: "ADMIN".to_string(),
+        domain_id: None,
             correlation_id: uid(0xC0),
             cause_id: None,
         }

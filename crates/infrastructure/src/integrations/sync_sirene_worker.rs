@@ -138,6 +138,7 @@ fn send_actor(entry: &CommandJournalEntry) -> Actor {
     Actor {
         user_id: sirene_system_user_id(),
         user_type: EXTERNAL_USER_TYPE.to_string(),
+        domain_id: None,
         correlation_id: entry.correlation_id,
         cause_id: Some(entry.message_id),
     }

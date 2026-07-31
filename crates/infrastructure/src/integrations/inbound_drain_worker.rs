@@ -200,6 +200,7 @@ impl InboundEventsDrainWorker {
                 format!("system:{}", row.source).as_bytes(),
             ),
             user_type: EXTERNAL_USER_TYPE.to_string(),
+            domain_id: None,
             correlation_id: row.correlation_id,
             // The causality link: the appended fact's cause is the inbound record that carried it.
             cause_id: Some(row.inbound_event_id),
@@ -420,7 +421,7 @@ mod tests {
                     dropoff: address,
                     provider: None,
                 }),
-                Actor { user_id: uuid::Uuid::nil(), user_type: "PUBLIC".to_string(), correlation_id: uuid::Uuid::nil(), cause_id: None },
+                Actor { user_id: uuid::Uuid::nil(), user_type: "PUBLIC".to_string(), domain_id: None, correlation_id: uuid::Uuid::nil(), cause_id: None },
             ));
         // …and the Avelo37 ACL staged the partner acceptance.
         let event = DomainEvent::DeliveryAcceptedByPartner(DeliveryAcceptedByPartner {

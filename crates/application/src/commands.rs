@@ -1797,6 +1797,23 @@ pub async fn post_message(
             reject("ConversationNotFound", json!({ "orderId": cmd.order_id }))
         })
         .await?;
+    // requires (specs/actors.yaml Conversation/PostMessage — #235): the actor's own precondition,
+    // checked against its folded participants BEFORE any business invariant.
+    if let Err(v) = domain::conversation::requires_post_message(
+        &state,
+        &actor.user_type,
+        actor.domain_id,
+        &cmd.author_role,
+    ) {
+        return Err(match v {
+            domain::conversation::RequiresViolation::NotAParticipant => {
+                reject("NotAParticipant", json!({ "orderId": cmd.order_id }))
+            }
+            domain::conversation::RequiresViolation::RoleMismatch => {
+                reject("RoleMismatch", json!({ "orderId": cmd.order_id }))
+            }
+        });
+    }
     if cmd.author_role == ConversationAuthorRole::CUSTOMER && !state.customer_chat_enabled {
         return Err(reject("CustomerChatDisabled", json!({ "orderId": cmd.order_id })));
     }
@@ -3738,6 +3755,7 @@ mod create_if_absent_tests {
         Actor {
             user_id: uuid::Uuid::nil(),
             user_type: "PUBLIC".to_string(),
+        domain_id: None,
             correlation_id: uuid::Uuid::nil(),
             cause_id: None,
         }

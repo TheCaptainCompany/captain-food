@@ -605,6 +605,7 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
         Actor {
             user_id: hubrise_system_user_id(),
             user_type: EXTERNAL_USER_TYPE.to_string(),
+        domain_id: None,
             correlation_id: entry.correlation_id,
             cause_id: Some(entry.message_id),
         }
@@ -1007,6 +1008,7 @@ mod tests {
                 &Actor {
                     user_id: uuid::Uuid::nil(),
                     user_type: EXTERNAL_USER_TYPE.to_string(),
+        domain_id: None,
                     correlation_id: uuid::Uuid::nil(),
                     cause_id: None,
                 },

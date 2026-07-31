@@ -650,6 +650,22 @@ pub const CONVERSATION_NOT_FOUND: ErrorDef = ErrorDef {
     message_fr: "Aucune conversation n'existe pour cette commande.",
 };
 
+/// The acting principal is not a participant of the aggregate instance it tried to write to — the aggregate's own folded state names its participants and the caller is not among them (write-side per-instance authorization, #235 / PROP-20260728-135632 requires.acting). The instance's existence is NOT disclosed beyond this rejection.
+/// Context: `orderId`.
+pub const NOT_A_PARTICIPANT: ErrorDef = ErrorDef {
+    code: "NotAParticipant",
+    message_en: "You are not a participant in this conversation.",
+    message_fr: "Vous ne participez pas à cette conversation.",
+};
+
+/// The role claimed in the payload does not match the verified acting principal — e.g. a CUSTOMER posting authorRole RESTAURANT to forge a staff note (write-side anti-forgery, #235 / PROP-20260728-135632 requires.claims).
+/// Context: `orderId`.
+pub const ROLE_MISMATCH: ErrorDef = ErrorDef {
+    code: "RoleMismatch",
+    message_en: "The author role does not match your account.",
+    message_fr: "Le rôle d'auteur ne correspond pas à votre compte.",
+};
+
 /// A CUSTOMER-authored message was posted to an order whose restaurant disabled customer chat; only staff may post on that thread (#129).
 /// Context: `orderId`.
 pub const CUSTOMER_CHAT_DISABLED: ErrorDef = ErrorDef {
@@ -837,6 +853,8 @@ pub const ERRORS: &[ErrorDef] = &[
     CANNOT_ORDER_TEST_RESTAURANT,
     CONVERSATION_ALREADY_OPEN,
     CONVERSATION_NOT_FOUND,
+    NOT_A_PARTICIPANT,
+    ROLE_MISMATCH,
     CUSTOMER_CHAT_DISABLED,
     MESSAGE_ALREADY_POSTED,
     MESSAGE_NOT_FOUND_IN_CONVERSATION,
