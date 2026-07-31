@@ -1,6 +1,7 @@
 # ADR-20260731-153000 — GDPR data expiry is a SCHEDULED actor message; Order expiration is the first reminder use case
 
-**Status**: Accepted (product-owner decision, in-session 2026-07-31) — decides the TRIGGER
+**Status**: Accepted (product-owner decision, in-session 2026-07-31; AMENDED same session:
+the scheduled message is the FACT `OrderExpired`, not a command — see §1a) — decides the TRIGGER
 mechanism only; the erasure ACTION remains the open decision C
 ([PROP-20260726-170000 D3](../proposals/PROP-20260726-170000-event-log-integrity-evolution-and-erasure.md),
 crypto-shredding recommended, gates
@@ -15,11 +16,23 @@ crypto-shredding recommended, gates
 > "It could be useful for the GDPR compliance to schedule the expiration of the order."
 
 1. **Data-retention expiry is triggered by a SCHEDULED message on the owning actor** — not by a
-   table-scan sweep. When an Order reaches a terminal state, the Order actor declares its own
-   `ExpireOrder` reminder: kind `MESSAGE`, identity `UUIDv5(orderId, "expire")`,
+   table-scan sweep. When an Order reaches a terminal state, the Order actor schedules the FACT
+   `OrderExpired` for itself: kind `MESSAGE`, identity `UUIDv5(orderId, "expire")`,
    `scheduled_at = terminal time + the retention window`. The promotion pass delivers it when
-   due; the delivery performs the expiry through the ordinary write path, leaving the ordinary
-   audit trail (an `OrderExpired` fact — the moment expiry became true is itself a fact).
+   due; the delivery records the expiry through the ordinary write path.
+
+1a. **It is `OrderExpired`, a FACT — never `ExpireOrder`, a command** (product-owner amendment,
+   same session: *"at this moment the order IS expired — no discussion, no rejection possible;
+   just be ignored/duplicate if it's already the case"*). This is the repository's own
+   command-vs-fact doctrine: a command exists to be refusable, and the passage of the retention
+   deadline cannot be refused by anyone. Consequences of the naming:
+   - the payload vocabulary is **events.yaml** (past tense), not commands.yaml;
+   - the delivery uses **record semantics** (the `record_inbound_*` family's shape): the
+     aggregate folds its stream and answers Recorded, or NoChange/AlreadyRecorded when the
+     expiry is already true — surfacing as SUCCEEDED / IGNORED / DUPLICATE on the mailbox row.
+     **REJECTED is not a possible verdict for this delivery**; a handler that could reject it
+     would be modeling the wrong thing;
+   - `errors.yaml` gains nothing: there is no anticipated rejection to catalogue.
 2. **Why per-actor scheduling beats a sweep**: the schedule is DECLARED at the moment the
    retention clock starts, visible per order on the supervision surface ("when does this
    expire?" is a row, not a query over a policy), idempotent (one pending expiry per order, the
@@ -27,14 +40,14 @@ crypto-shredding recommended, gates
    re-declares the reminder and the ADR-150500 reschedule postpones/advances the SAME row in
    place. A sweep answers none of those without new machinery.
 3. **This opens the reminders build** (Runtime D): the promotion pass, the per-actor typed
-   message declaration (`Order.messages: ExpireOrder`), the `receives`-coverage validation and
+   message declaration (`Order.messages: OrderExpired`), the `receives`-coverage validation and
    the `Rescheduled` insert outcome now have a concrete pilot. The `CheckPreparationDelay`
    illustration from the proposal stays an illustration.
 
 ## Deliberately left open (not decided here)
 
-- **The erasure action** — what `ExpireOrder`'s handler DOES: crypto-shredding vs payload
-  rewrite vs deletion is decision C, and the handler is a stub until it lands.
+- **The erasure action** — what recording `OrderExpired` DOES to the data: crypto-shredding vs
+  payload rewrite vs deletion is decision C, and the recording is a stub until it lands.
 - **The retention window(s)** — a legal/product input, per DATA CATEGORY, not a single number:
   French commercial law retains accounting records ~10 years, so an order's FINANCIAL facts
   outlive its PERSONAL data (delivery address, phone, conversation) — "expire the order" will in
@@ -49,9 +62,9 @@ crypto-shredding recommended, gates
 
 ## Consequences
 
-- Runtime D's reminders slice targets `ExpireOrder` as its pilot: schedule-at-terminal,
-  promotion, reschedule-on-policy-change, and a STUB handler that emits nothing until decision C
-  — the machinery is provable end to end (scheduled → promoted → delivered → verdict) without
-  pre-empting the erasure strategy.
+- Runtime D's reminders slice targets `OrderExpired` as its pilot: schedule-at-terminal,
+  promotion, reschedule-on-policy-change, and a STUB recording that emits nothing until decision
+  C — the machinery is provable end to end (scheduled → promoted → delivered → verdict, with the
+  IGNORED/DUPLICATE dedupe observable on redelivery) without pre-empting the erasure strategy.
 - The DECISIONS.md queue gains the cross-reference: deciding C now also unblocks the pilot's
   handler, raising its leverage.
