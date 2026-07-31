@@ -186,6 +186,9 @@ mutation/query is reached by a story step, and every test↔rule link holds both
   approver's scope choices, status header linking the realizing PR/ADR. Approved proposals are
   historical records: never rewritten to match what was built; divergences go in the realizing
   change. A session-local plan file is NOT a substitute — the rationale must survive the session.
+  **GitHub is never the record**: issue bodies, PR bodies and PR/issue comments carry LINKS into
+  docs/proposals + docs/adr (and a tracking checklist at most) — never the design content itself;
+  content drafted in a GitHub surface must land in the repo in the same change.
   **Every proposal MUST include** (product-owner directive, 2026-07-26): **per-use-case screen
   mockups**, **per-flow sequence diagrams** (mermaid, hexagonal-faithful), and **per-option pros/cons**
   for every decision it surfaces (a bare "A vs B" without trade-offs is incomplete) — see

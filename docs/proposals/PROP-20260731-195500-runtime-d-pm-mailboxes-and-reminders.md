@@ -251,3 +251,72 @@ Order:
         after: { $ref: 'configuration.yaml#/ORDER_RETENTION_WINDOW' }
     receipt: { $ref: 'events.yaml#/OrderDeleted' }
 ```
+
+## Appendix — the validated `PlaceOrderProcess` / `RefundProcess` entries (canonical copy)
+
+Gate-green against `main` (0 validator errors); previously parked in a PR #270 comment — moved
+here because the repo, not GitHub, is the record. Lands in actors.yaml only WITH the D1 wiring
+(the generated addressing flips the three mutations the moment these exist).
+
+```yaml
+PlaceOrderProcess:
+  type: process-manager
+  identity: orderId
+  mailbox:
+    partitions: 100          # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
+  description: >
+    The checkout saga (ADR-0004, acceptance-first ADR-20260720-015500): PlaceOrder validates the
+    cart against the live catalog, prices server-side, creates the Stripe PaymentIntent and
+    freezes the checkout as PaymentIntentCreated -- the ORDER IS NOT PLACED YET. The order
+    materializes only when Stripe reports the capture: the PaymentCaptured reaction
+    re-materializes the frozen checkout from PaymentIntentCreated's log (no external store) and
+    emits OrderPlaced idempotently. A PaymentFailed reaction records the outcome on the process
+    state; the customer retries by resubmitting checkout.
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      emits:
+        - { $ref: 'events.yaml#/PaymentIntentCreated' }
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
+        - { $ref: 'errors.yaml#/CartNotOpen' }
+        - { $ref: 'errors.yaml#/CartEmpty' }
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/RestaurantPaused' }
+        - { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }
+        - { $ref: 'errors.yaml#/DeliveryAddressRequired' }
+        - { $ref: 'errors.yaml#/OutsideDeliveryArea' }
+        - { $ref: 'errors.yaml#/PriceMismatch' }
+        - { $ref: 'errors.yaml#/PriceUnresolvable' }
+        - { $ref: 'errors.yaml#/PaymentDeclined' }
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+      emits:
+        - { $ref: 'events.yaml#/OrderPlaced' }
+      effect: "Inbound Stripe fact: re-materialize the frozen checkout and place the order, idempotently (a redelivered capture is a no-op)."
+    - message: { $ref: 'events.yaml#/PaymentFailed' }
+      emits: []
+      effect: "Inbound Stripe fact: the failure lands on the process state; the customer's resubmit is the retry."
+
+RefundProcess:
+  type: process-manager
+  identity: orderId
+  mailbox:
+    partitions: 100          # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
+  description: >
+    The refund saga: records the staff decision on an OPEN refund (RefundOpened is emitted by the
+    order-lifecycle commands -- RejectOrder, CancelOrder -- not by this saga's receives), drives
+    the Stripe refund on approval, and closes idempotently when Stripe reports the PaymentRefunded
+    fact. Approval and denial are restaurant/admin decisions on a pending refund; anything else is
+    RefundNotPending.
+  receives:
+    - message: { $ref: 'commands.yaml#/ApproveRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundApproved' }]
+      throws:
+        - { $ref: 'errors.yaml#/RefundNotPending' }
+    - message: { $ref: 'commands.yaml#/DenyRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundDenied' }]
+      throws:
+        - { $ref: 'errors.yaml#/RefundNotPending' }
+    - message: { $ref: 'events.yaml#/PaymentRefunded' }
+      emits: []
+      effect: "Inbound Stripe fact: close the refund saga idempotently."
+```
