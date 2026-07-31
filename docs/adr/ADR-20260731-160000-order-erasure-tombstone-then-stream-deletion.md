@@ -1,6 +1,7 @@
 # ADR-20260731-160000 — Order erasure = projection tombstone, then technical stream deletion, owned by a process manager
 
-**Status**: Accepted (product-owner decision, in-session 2026-07-31) — DECIDES decision C
+**Status**: Accepted (product-owner decision, in-session 2026-07-31; AMENDED same day — the
+phase-2 mechanism and the receipt's shape, §5/§6 below) — DECIDES decision C
 ([PROP-20260726-170000 D3](../proposals/PROP-20260726-170000-event-log-integrity-evolution-and-erasure.md),
 [#194 "GDPR erasure"](https://github.com/TheCaptainCompany/captain-food/issues/194)) **for the
 Order scope**, diverging deliberately from the proposal's crypto-shredding recommendation.
@@ -35,6 +36,25 @@ Customer-account-level erasure remains open (see "Left open").
    deletion, and record completion. Erasure that nobody supervises is erasure that silently
    half-happens; the PM makes "is this order really gone?" an answerable, monitored question —
    same pattern as every other saga, visible on the supervision surface.
+
+5. **AMENDMENT — the phase-2 instruction is a TECHNICAL TOMBSTONE EVENT** (product-owner
+   refinement, 2026-07-31): once the PM has verified every projection checkpoint passed the
+   `OrderExpired` fact and the grace period is out, it appends an EventStore-style technical
+   tombstone event to the stream (envelope-level, not events.yaml vocabulary — the business fact
+   was `OrderExpired`; this is plumbing). A TECHNICAL worker consumes tombstones and physically
+   deletes the stream's rows from `domain_events` AND `domain_stream`. The instruction being an
+   appended event keeps the whole journey in the log until the very last moment (auditable,
+   replayable, supervisable) — the deletion itself is the only non-log operation, performed by
+   infrastructure on an explicit, durable instruction.
+6. **AMENDMENT — the receipt is the BUSINESS event `OrderDeleted`** (same refinement): the PM
+   records completion by emitting `OrderDeleted` on its own erasure-ledger stream — never on the
+   (about-to-be / already deleted) order streams — carrying the PSEUDONYMOUS domain references
+   the accountability duty needs: `customerId`, `restaurantId`, the rider id(s), the policy
+   under which erasure ran, and when. This sharpens the earlier "no personal data" wording:
+   the receipt carries identifier REFERENCES (whose order was erased must remain answerable),
+   never the erased personal payloads (address, phone, conversation content — those are gone).
+   The PM's own trace/stamp of "deleted, thanks to tombstone <id>" lives in the same record, so
+   "is this order really gone?" has one durable, queryable answer that outlives the streams.
 
 ## What this changes architecturally
 
