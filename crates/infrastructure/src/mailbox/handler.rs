@@ -14,6 +14,8 @@ use application::staging::StagingEventStore;
 use domain::shared::errors::DomainError;
 use sqlx::{Postgres, Transaction};
 
+use application::payments::RecordOutcome;
+
 use crate::generated::command_router::{dispatch_command, CommandDeps};
 use crate::persistence::event_bus::{AppendedEvent, EventBus};
 use crate::persistence::status_bus::{OperationStatusBus, OperationUpdate};
@@ -49,6 +51,9 @@ impl MessageHandler for MailboxCommandHandler {
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
     ) -> Result<Delivery, sqlx::Error> {
+        if message.kind == "EVENT" {
+            return self.handle_inbound_event(tx, message).await;
+        }
         if message.kind != "COMMAND" {
             return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                 "code": "Internal",
@@ -156,6 +161,92 @@ impl MessageHandler for MailboxCommandHandler {
             Some(Err(e)) => Delivery::of(verdict_of_error(e)),
         };
         Ok(delivery)
+    }
+}
+
+impl MailboxCommandHandler {
+    /// The kind-EVENT delivery route (ADR-20260731-122500): adapted inbound BUSINESS facts, the
+    /// mailbox-era home of the retired InboundEventsDrainWorker's routing. The aggregate's
+    /// fold-based dedupe stays authoritative — its verdict is PERSISTED on the row (a no-change
+    /// decision lands IGNORED, a redelivered fact DUPLICATE, per ADR-20260728-011344 D6), and the
+    /// staged events flush into the SAME fenced transaction as every command delivery.
+    async fn handle_inbound_event(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        message: &InboundMessage,
+    ) -> Result<Delivery, sqlx::Error> {
+        let event: domain::generated::events::DomainEvent =
+            match serde_json::from_value(message.payload.clone()) {
+                Ok(e) => e,
+                Err(e) => {
+                    return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                        "code": "Internal",
+                        "context": { "detail": format!("unparsable staged DomainEvent: {e}") }
+                    }))))
+                }
+            };
+        let actor = Actor {
+            // The external system principal (deterministic per source — mirrors the enqueue side).
+            user_id: message.user_id.unwrap_or_else(uuid::Uuid::nil),
+            user_type: message.user_type.clone(),
+            domain_id: None,
+            correlation_id: message.correlation_id,
+            // The causality link: the appended fact's cause is the mailbox row that carried it.
+            cause_id: Some(message.message_id),
+        };
+        let staging = Arc::new(StagingEventStore::new(self.deps.store.clone()));
+        let store: Arc<dyn EventStore> = staging.clone();
+
+        use domain::generated::events::DomainEvent as E;
+        let outcome = match &event {
+            E::PaymentCaptured(_) | E::PaymentFailed(_) | E::PaymentRefunded(_) => {
+                application::payments::record_inbound_payment_event(store.as_ref(), event, &actor)
+                    .await
+            }
+            E::DeliveryAcceptedByPartner(_)
+            | E::DeliveryRejectedByPartner(_)
+            | E::DeliveryStatusUpdated(_) => {
+                application::deliveries::record_inbound_delivery_event(store.as_ref(), event, &actor)
+                    .await
+            }
+            E::RestaurantRegistered(_) => {
+                application::commands::record_inbound_restaurant_registration(
+                    store.as_ref(),
+                    event,
+                    &actor,
+                )
+                .await
+            }
+            _ => {
+                return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                    "code": "Internal",
+                    "context": { "detail": format!("no delivery route for inbound event type '{}'", message.message_type) }
+                }))))
+            }
+        };
+        let verdict = match outcome {
+            Ok(RecordOutcome::Recorded) | Ok(RecordOutcome::Updated) => {
+                match flush_staged_in_tx(tx, &staging.take_staged()).await {
+                    Ok(()) => HandlerVerdict::Succeeded,
+                    // Version clash at flush: someone appended between load and commit — the fact
+                    // is in the log either way; a redelivery tail.
+                    Err(e) if is_version_conflict(&e) => HandlerVerdict::Duplicate,
+                    Err(DomainError::Repository(detail)) => {
+                        return Err(sqlx::Error::Protocol(detail));
+                    }
+                    Err(e) => HandlerVerdict::Failed(
+                        serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
+                    ),
+                }
+            }
+            Ok(RecordOutcome::NoChange) => HandlerVerdict::Ignored,
+            Ok(RecordOutcome::AlreadyRecorded) => HandlerVerdict::Duplicate,
+            Err(e) if is_version_conflict(&e) => HandlerVerdict::Duplicate,
+            Err(e) => HandlerVerdict::Failed(
+                serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
+            ),
+        };
+        Ok(Delivery::of(verdict))
     }
 }
 

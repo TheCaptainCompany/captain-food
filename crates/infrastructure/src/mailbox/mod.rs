@@ -3,8 +3,13 @@
 //! the command dispatch (generated router over the application handlers), the staged-event flush
 //! into the fenced completion transaction, and the post-commit status-bus fan-out.
 
+mod enqueue;
 mod handler;
 
+pub use enqueue::{
+    enqueue_inbound_fact, enqueue_worker_command, inbound_message_id, inbound_namespace,
+    EnqueueOutcome, InboundFact,
+};
 pub use handler::{MailboxCommandHandler, StatusBusObserver};
 
 use application::ports::{version_conflict, Actor};

@@ -11573,9 +11573,25 @@ fn emit_infra_command_router(model: &Model) -> String {
         ));
     }
     out.push_str("        _ => None,\n    }\n}\n");
-    // The actor-type → mailbox-width catalog (actors.yaml `mailbox.partitions`): what the
-    // composition root spawns workers over and seeds the partition registry from.
+    // The runtime addressing surface (ADR-20260731-122500 "the mailbox is the only door"): the
+    // WORKER-channel producers (SIRENE, HubRise) resolve a command's mailbox address through this
+    // — the same map the resolver templates were generated from, so no channel can address
+    // differently than another.
     let addressing = command_addressing(model);
+    out.push_str(
+        "\n/// A command's mailbox address: `(actor_type, identity payload key, partition width)`.\n/// `None` identity key = a birth command whose id the handler mints (the enqueue helper mints an\n/// addressing-only actor_id). `None` overall = a command no mailbox actor receives (the PM legs,\n/// until Runtime D).\npub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'static str>, u16)> {\n    match command_type {\n",
+    );
+    for (command, addr) in &addressing {
+        let prop = match &addr.identity_prop {
+            Some(p) => format!("Some(\"{}\")", p),
+            None => "None".to_string(),
+        };
+        out.push_str(&format!(
+            "        \"{}\" => Some((\"{}\", {}, {})),\n",
+            command, addr.actor_type, prop, addr.partitions
+        ));
+    }
+    out.push_str("        _ => None,\n    }\n}\n");
     let mut widths: BTreeMap<&str, u16> = BTreeMap::new();
     for a in addressing.values() {
         widths.insert(&a.actor_type, a.partitions);
