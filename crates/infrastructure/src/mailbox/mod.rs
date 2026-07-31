@@ -7,8 +7,9 @@ mod enqueue;
 mod handler;
 
 pub use enqueue::{
-    enqueue_inbound_fact, enqueue_worker_command, inbound_fact_for, inbound_message_id,
-    inbound_namespace, surrogate_actor_id, EnqueueOutcome, InboundFact,
+    cancel_reminder, enqueue_inbound_fact, enqueue_worker_command, inbound_fact_for,
+    inbound_message_id, inbound_namespace, reminder_message_id, schedule_reminder,
+    surrogate_actor_id, EnqueueOutcome, InboundFact, ScheduleOutcome,
 };
 pub use handler::{MailboxCommandHandler, StatusBusObserver};
 

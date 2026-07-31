@@ -1,4 +1,5 @@
-//! The per-actor-type mailbox worker: claim → drain (head-of-line per lane) → heartbeat, forever.
+//! The per-actor-type mailbox worker: promote (due reminders) → claim → drain (head-of-line per
+//! lane) → heartbeat, forever.
 //! Single-step methods are public so tests (and the host's supervision tooling) can drive each
 //! move deterministically; [`MailboxWorker::run`] is the production loop over them.
 
@@ -83,6 +84,13 @@ impl MailboxWorker {
     /// Idempotently seed this actor type's registry rows (run once at startup).
     pub async fn seed(&self, width: i16) -> sqlx::Result<()> {
         seed_partitions(&self.pool, &self.actor_type, width).await
+    }
+
+    /// Promote this actor type's due reminders (SCHEDULED → RECEIVED + a fresh position,
+    /// [`crate::schedule::promote_due`]) so the SAME pass's drain can deliver them. Leaseless on
+    /// purpose — see the function's doc.
+    pub async fn promote(&self) -> sqlx::Result<u64> {
+        crate::schedule::promote_due(&self.pool, &self.actor_type).await
     }
 
     /// Claim every claimable lane (up to the pass bound) and remember the authority.
@@ -234,8 +242,8 @@ impl MailboxWorker {
         }
     }
 
-    /// The production loop: claim → drain → beat, then sleep a heartbeat (or until a producer's
-    /// nudge). `shutdown` flips the loop off; owned lanes are released so peers take over
+    /// The production loop: promote → claim → drain → beat, then sleep a heartbeat (or until a
+    /// producer's nudge). `shutdown` flips the loop off; owned lanes are released so peers take over
     /// immediately instead of waiting out the lease.
     ///
     /// LIVENESS OVER PROPAGATION: a transient claim/beat/drain error is logged and retried next
@@ -250,6 +258,9 @@ impl MailboxWorker {
         loop {
             if *shutdown.borrow() {
                 break;
+            }
+            if let Err(e) = self.promote().await {
+                tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: promotion failed -- retrying next pass");
             }
             if let Err(e) = self.claim().await {
                 tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: claim failed -- retrying next pass");

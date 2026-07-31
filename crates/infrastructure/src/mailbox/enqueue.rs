@@ -3,7 +3,7 @@
 //! HAND-OFF, not the outcome — deterministic `message_id`s keep redelivery idempotent (a
 //! re-enqueue dedupes on the mailbox pk), and the mailbox ledger owns what happens next.
 
-use application::mailbox::{Mailbox, MailboxEntry, MailboxInsertOutcome};
+use application::mailbox::{Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome};
 use application::ports::Actor;
 use domain::generated::scalars::InboundMessageStatus;
 use domain::shared::errors::DomainError;
@@ -147,6 +147,105 @@ pub async fn enqueue_inbound_fact(
         external_id: Some(fact.external_id),
     };
     insert_mapped(mailbox, entry, &payload_hash).await
+}
+
+/// What one reminder declaration did. A separate enum from [`EnqueueOutcome`]: `Rescheduled` is a
+/// reminder-only outcome, and widening the shared enum would force every adapter's exhaustive
+/// match to name a case it can never see.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScheduleOutcome {
+    /// Fresh SCHEDULED row — the promotion pass delivers it when due.
+    Scheduled,
+    /// The identity was still SCHEDULED: `scheduled_at` + payload moved in place — the
+    /// "declare the reminder with the time you NOW want" contract (ADR-20260731-150500).
+    Rescheduled,
+    /// The pending occurrence is spent (promoted or terminal) and the payload matches — the
+    /// idempotent re-declaration; nothing to do.
+    Deduplicated(InboundMessageStatus),
+    /// Spent occurrence AND a different payload — never written; the caller logs and skips
+    /// (a genuinely new occurrence needs occurrence-scoped identity, open per ADR-150500 §2).
+    PayloadConflict(InboundMessageStatus),
+}
+
+/// The mailbox identity of a reminder: `UUIDv5(actor_id, purpose)` in the inbound namespace
+/// (PROP-20260728-152752 §3.4) — deterministic, so every re-declaration of the same purpose
+/// converges on ONE pending row (ADR-20260731-150500 §1).
+pub fn reminder_message_id(actor_id: uuid::Uuid, reminder_name: &str) -> uuid::Uuid {
+    uuid::Uuid::new_v5(&inbound_namespace(), format!("{actor_id}:{reminder_name}").as_bytes())
+}
+
+/// Declare (or re-declare) one reminder: kind MESSAGE, channel WORKER, `message_type` = the
+/// reminder's payload FACT type (ADR-20260731-153000 §1a — the scheduled message is an event,
+/// recorded with record semantics at delivery). `payload_event_tagged` is the adjacently-tagged
+/// `{"eventType","payload"}` form, exactly like an adapted inbound fact.
+pub async fn schedule_reminder(
+    mailbox: &dyn Mailbox,
+    actor_type: &str,
+    actor_id: uuid::Uuid,
+    reminder_name: &str,
+    payload_event_tagged: serde_json::Value,
+    scheduled_at: chrono::DateTime<chrono::Utc>,
+    correlation_id: uuid::Uuid,
+) -> Result<ScheduleOutcome, DomainError> {
+    let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == actor_type) else {
+        return Err(DomainError::Repository(format!(
+            "'{actor_type}' is not a mailbox actor — reminder '{reminder_name}' has no lane"
+        )));
+    };
+    let event_type = payload_event_tagged
+        .get("eventType")
+        .and_then(|t| t.as_str())
+        .ok_or_else(|| {
+            DomainError::Repository(format!(
+                "reminder '{reminder_name}': payload without eventType tag — not a fact"
+            ))
+        })?
+        .to_owned();
+    let message_id = reminder_message_id(actor_id, reminder_name);
+    let payload_hash = application::journal::payload_hash(&payload_event_tagged);
+    let entry = MailboxEntry {
+        message_id,
+        kind: "MESSAGE".into(),
+        actor_type: actor_type.to_owned(),
+        actor_id,
+        partition: actor_runtime::stable_partition(&actor_id, *width),
+        message_type: event_type,
+        payload: payload_event_tagged,
+        payload_hash: payload_hash.clone(),
+        channel: "WORKER".into(),
+        // The scheduling principal is the system scheduler (ADR-0041 envelope metadata): a
+        // deterministic system user, like the per-source principals on adapted facts.
+        user_id: Some(uuid::Uuid::new_v5(&inbound_namespace(), b"system:scheduler")),
+        user_type: "EXTERNAL".into(),
+        correlation_id,
+        cause_id: None,
+        session_id: None,
+        trace_id: None,
+        source: None,
+        external_id: None,
+    };
+    match mailbox.schedule(&entry, scheduled_at).await? {
+        MailboxScheduleOutcome::Scheduled => Ok(ScheduleOutcome::Scheduled),
+        MailboxScheduleOutcome::Rescheduled => Ok(ScheduleOutcome::Rescheduled),
+        MailboxScheduleOutcome::Duplicate { status, payload_hash: existing } => {
+            if existing == payload_hash {
+                Ok(ScheduleOutcome::Deduplicated(status))
+            } else {
+                Ok(ScheduleOutcome::PayloadConflict(status))
+            }
+        }
+    }
+}
+
+/// Withdraw a reminder that has not been promoted yet: `SCHEDULED → CANCELLED`
+/// (ADR-20260731-150500 §3). `false` = the row is absent, already delivered, or already
+/// cancelled — the caller decides whether losing that race matters.
+pub async fn cancel_reminder(
+    mailbox: &dyn Mailbox,
+    actor_id: uuid::Uuid,
+    reminder_name: &str,
+) -> Result<bool, DomainError> {
+    mailbox.cancel_scheduled(reminder_message_id(actor_id, reminder_name)).await
 }
 
 async fn insert_mapped(

@@ -28,10 +28,12 @@ pub mod completion;
 pub mod lease;
 pub mod message;
 pub mod partition;
+pub mod schedule;
 pub mod worker;
 
 pub use completion::{complete_fenced, CompletionError};
 pub use lease::{claim_due_lanes, heartbeat, release_lane, seed_partitions, steal_lane, Lane};
 pub use message::{Delivery, DeliveryObserver, HandlerVerdict, InboundMessage, MessageHandler};
 pub use partition::stable_partition;
+pub use schedule::promote_due;
 pub use worker::{MailboxWorker, WorkerConfig};
