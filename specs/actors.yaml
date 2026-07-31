@@ -950,3 +950,67 @@ CustomerCredit:
       emits: [{ $ref: 'events.yaml#/CustomerCreditConsumed' }]
       throws:
         - { $ref: 'errors.yaml#/InsufficientCustomerCredit' }
+
+# --- Process managers (sagas) ---
+
+PlaceOrderProcess:
+  type: process-manager
+  identity: orderId
+  mailbox:
+    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    A checkout saga (ADR-0004) that coordinates order placement: validates the cart against the live
+    catalog, prices server-side, takes payment via Stripe, and materializes the Order. Reacts to
+    payment capture and failure (inbound Stripe facts); emits the OrderPlaced + PaymentIntentCreated
+    facts that birth the Order and Payment streams. On payment capture (PaymentCaptured inbound event),
+    re-materializes the frozen checkout from PaymentIntentCreated's log (no external store).
+    Rejects on invariant violation (cart not found, out of stock, invalid address, price mismatch);
+    payment failures are recorded and delivery to the Order saga is retried.
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      emits:
+        - { $ref: 'events.yaml#/OrderPlaced' }
+        - { $ref: 'events.yaml#/PaymentIntentCreated' }
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
+        - { $ref: 'errors.yaml#/OrderAlreadyExists' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+        - { $ref: 'errors.yaml#/OfferNotAvailable' }
+        - { $ref: 'errors.yaml#/InsufficientStock' }
+        - { $ref: 'errors.yaml#/InvalidAddress' }
+        - { $ref: 'errors.yaml#/PaymentFailed' }
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+      effect: "Inbound payment fact: PlaceOrderProcess re-materializes and delivers OrderPlaced idempotently."
+    - message: { $ref: 'events.yaml#/PaymentFailed' }
+      emits: []
+      effect: "Inbound payment failure: logged; a manual retry mechanism (or customer resubmit) is needed."
+
+RefundProcess:
+  type: process-manager
+  identity: orderId
+  mailbox:
+    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    A refund saga that coordinates partial/full order refunds: stores restaurant or admin approval,
+    drives the Stripe refund, and records the outcome. Reacts to refund approval/denial commands
+    (from restaurant/admin staff) and to inbound Stripe refund completion facts (PaymentRefunded).
+    Emits RefundOpened (for the payment queue), RefundApproved, RefundDenied (decision facts),
+    and OrderErasureRequested (when an order is expired/deleted). On PaymentRefunded (inbound fact),
+    closes the refund saga idempotently.
+  receives:
+    - message: { $ref: 'commands.yaml#/ApproveRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundApproved' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+        - { $ref: 'errors.yaml#/InvalidRefundAmount' }
+    - message: { $ref: 'commands.yaml#/DenyRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundDenied' }]
+      throws:
+        - { $ref: 'errors.yaml#/OrderNotFound' }
+        - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+        - { $ref: 'errors.yaml#/RejectionReasonRequired' }
+    - message: { $ref: 'events.yaml#/PaymentRefunded' }
+      emits: []
+      effect: "Inbound Stripe refund fact: RefundProcess closes the saga idempotently."
