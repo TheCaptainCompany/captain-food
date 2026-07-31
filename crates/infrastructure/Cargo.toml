@@ -35,6 +35,9 @@ sqlx = { workspace = true, features = ["chrono", "uuid", "json"] }
 # behind the in-process EventBus (appended-event fan-out for GraphQL subscriptions); the workspace
 # feature set also carries rt/macros used by the integration test.
 tokio = { workspace = true, features = ["sync"] }
+# catch_unwind for per-event panic isolation INSIDE the projection batch transaction (the old
+# tokio::spawn isolation cannot borrow the transaction) -- already in-tree transitively via sqlx.
+futures = "0.3"
 # The generated /services/* HTTP clients (issue #26, ADR-20260719-214500) — constructed only for
 # services whose spec binding is `http`, compiled for all so the wire path stays covered.
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }

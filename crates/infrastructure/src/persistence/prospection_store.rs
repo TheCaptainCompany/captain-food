@@ -10,7 +10,7 @@ use application::queries::ProspectionPipelineRow;
 use domain::generated::scalars::{ProspectionScore, RestaurantId};
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use super::db_err;
 use super::enum_sql::EnumText;
@@ -35,14 +35,14 @@ pub(crate) fn decode(row: &PgRow) -> Result<ProspectionPipelineRow, DomainError>
 }
 
 /// Load the current projected state for one prospect, or `None` before its creation event.
-pub async fn load(pool: &PgPool, id: RestaurantId) -> Result<Option<ProspectionPipelineRow>, DomainError> {
+pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: RestaurantId) -> Result<Option<ProspectionPipelineRow>, DomainError> {
     let sql = format!("SELECT {COLUMNS} FROM prospectionpipeline WHERE restaurant_id = $1");
-    let row = sqlx::query(&sql).bind(id.0).fetch_optional(pool).await.map_err(db_err)?;
+    let row = sqlx::query(&sql).bind(id.0).fetch_optional(exec).await.map_err(db_err)?;
     row.as_ref().map(decode).transpose()
 }
 
 /// Write the folded row: `INSERT … ON CONFLICT (restaurant_id) DO UPDATE` over all 8 columns.
-pub async fn upsert(pool: &PgPool, row: &ProspectionPipelineRow) -> Result<(), DomainError> {
+pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &ProspectionPipelineRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO prospectionpipeline ({COLUMNS}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) \
          ON CONFLICT (restaurant_id) DO UPDATE SET \
@@ -63,7 +63,7 @@ pub async fn upsert(pool: &PgPool, row: &ProspectionPipelineRow) -> Result<(), D
         .bind(row.replied_at)
         .bind(row.created_at)
         .bind(row.updated_at)
-        .execute(pool)
+        .execute(exec)
         .await
         .map_err(db_err)?;
     Ok(())

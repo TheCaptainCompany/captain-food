@@ -14,7 +14,7 @@ use domain::generated::scalars::{
 };
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use super::db_err;
 use super::enum_sql::{opt_from_text, opt_to_text, EnumText};
@@ -96,14 +96,14 @@ pub(crate) fn decode(row: &PgRow) -> Result<OrderTrackingRow, DomainError> {
 }
 
 /// Load the current projected state for one order, or `None` before its creation event.
-pub async fn load(pool: &PgPool, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError> {
+pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: OrderId) -> Result<Option<OrderTrackingRow>, DomainError> {
     let sql = format!("SELECT {COLUMNS} FROM ordertracking WHERE order_id = $1");
-    let row = sqlx::query(&sql).bind(id.0).fetch_optional(pool).await.map_err(db_err)?;
+    let row = sqlx::query(&sql).bind(id.0).fetch_optional(exec).await.map_err(db_err)?;
     row.as_ref().map(decode).transpose()
 }
 
 /// Write the folded row: `INSERT … ON CONFLICT (order_id) DO UPDATE` over all 37 columns.
-pub async fn upsert(pool: &PgPool, row: &OrderTrackingRow) -> Result<(), DomainError> {
+pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &OrderTrackingRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO ordertracking ({COLUMNS}) VALUES \
          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,\
@@ -188,7 +188,7 @@ pub async fn upsert(pool: &PgPool, row: &OrderTrackingRow) -> Result<(), DomainE
         .bind(row.estimated_dropoff_at)
         .bind(row.created_at)
         .bind(row.updated_at)
-        .execute(pool)
+        .execute(exec)
         .await
         .map_err(db_err)?;
     Ok(())

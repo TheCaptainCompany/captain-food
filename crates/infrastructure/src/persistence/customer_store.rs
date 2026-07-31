@@ -13,7 +13,7 @@ use domain::generated::scalars::{
 };
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use super::db_err;
 
@@ -61,14 +61,14 @@ pub(crate) fn decode(row: &PgRow) -> Result<CustomerRow, DomainError> {
 }
 
 /// Load the current projected state for one customer, or `None` before its creation event.
-pub async fn load(pool: &PgPool, id: CustomerId) -> Result<Option<CustomerRow>, DomainError> {
+pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: CustomerId) -> Result<Option<CustomerRow>, DomainError> {
     let sql = format!("SELECT {COLUMNS} FROM customer WHERE customer_id = $1");
-    let row = sqlx::query(&sql).bind(id.0).fetch_optional(pool).await.map_err(db_err)?;
+    let row = sqlx::query(&sql).bind(id.0).fetch_optional(exec).await.map_err(db_err)?;
     row.as_ref().map(decode).transpose()
 }
 
 /// Write the folded row: `INSERT … ON CONFLICT (customer_id) DO UPDATE` over all 15 columns.
-pub async fn upsert(pool: &PgPool, row: &CustomerRow) -> Result<(), DomainError> {
+pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &CustomerRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO customer ({COLUMNS}) VALUES \
          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) \
@@ -104,7 +104,7 @@ pub async fn upsert(pool: &PgPool, row: &CustomerRow) -> Result<(), DomainError>
         .bind(row.payment_method_id.as_ref().map(|v| v.0.clone()))
         .bind(row.created_at)
         .bind(row.updated_at)
-        .execute(pool)
+        .execute(exec)
         .await
         .map_err(db_err)?;
     Ok(())

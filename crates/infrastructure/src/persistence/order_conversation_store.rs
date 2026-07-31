@@ -11,7 +11,7 @@ use application::queries::OrderConversationRow;
 use domain::generated::scalars::{EscalationReason, OrderId, RestaurantId};
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use super::db_err;
 use super::enum_sql::EnumText;
@@ -44,14 +44,14 @@ pub(crate) fn decode(row: &PgRow) -> Result<OrderConversationRow, DomainError> {
 }
 
 /// Load the current projected conversation for one order, or `None` before its ConversationOpened event.
-pub async fn load(pool: &PgPool, id: OrderId) -> Result<Option<OrderConversationRow>, DomainError> {
+pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: OrderId) -> Result<Option<OrderConversationRow>, DomainError> {
     let sql = format!("SELECT {COLUMNS} FROM orderconversation WHERE order_id = $1");
-    let row = sqlx::query(&sql).bind(id.0).fetch_optional(pool).await.map_err(db_err)?;
+    let row = sqlx::query(&sql).bind(id.0).fetch_optional(exec).await.map_err(db_err)?;
     row.as_ref().map(decode).transpose()
 }
 
 /// Write the folded row: `INSERT … ON CONFLICT (order_id) DO UPDATE` over all 12 columns.
-pub async fn upsert(pool: &PgPool, row: &OrderConversationRow) -> Result<(), DomainError> {
+pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &OrderConversationRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO orderconversation ({COLUMNS}) VALUES \
          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
@@ -83,7 +83,7 @@ pub async fn upsert(pool: &PgPool, row: &OrderConversationRow) -> Result<(), Dom
         .bind(row.created_at)
         .bind(row.updated_at)
         .bind(row.claim_events.clone())
-        .execute(pool)
+        .execute(exec)
         .await
         .map_err(db_err)?;
     Ok(())
