@@ -362,7 +362,7 @@ pub enum Avelo37IngestOutcome {
 /// ports so the flow is unit-testable in memory.
 pub struct Avelo37WebhookIngestor {
     raw: Arc<dyn RawAvelo37Events>,
-    inbox: Arc<dyn application::journal::InboundEvents>,
+    mailbox: Arc<dyn application::mailbox::Mailbox>,
     /// Optional post-staging nudge (the composition root wires it to the drain worker's `run_once`)
     /// so delivery lag is near zero; the worker's poll loop is the safety net.
     on_staged: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -371,9 +371,9 @@ pub struct Avelo37WebhookIngestor {
 impl Avelo37WebhookIngestor {
     pub fn new(
         raw: Arc<dyn RawAvelo37Events>,
-        inbox: Arc<dyn application::journal::InboundEvents>,
+        mailbox: Arc<dyn application::mailbox::Mailbox>,
     ) -> Self {
-        Self { raw, inbox, on_staged: None }
+        Self { raw, mailbox, on_staged: None }
     }
 
     /// Wire the post-staging nudge (spawns the drain pass; must not block).
@@ -407,36 +407,33 @@ impl Avelo37WebhookIngestor {
             }
         };
 
-        // Stage the ADAPTED business event (external vocabulary stops here). The tagged serde form
-        // (`{"eventType": …, "payload": …}`) is what the drain worker deserializes back.
+        // Enqueue the ADAPTED business event on its actor lane (ADR-20260731-122500) (external vocabulary stops here). The tagged serde form
+        // (`{"eventType": …, "payload": …}`) is what the kind-EVENT route deserializes back.
         let tagged = serde_json::to_value(&domain_event).map_err(|e| {
             DomainError::Repository(format!("adapted event for {} unserializable: {e}", event.id))
         })?;
-        let event_type = tagged
-            .get("eventType")
-            .and_then(|t| t.as_str())
-            .unwrap_or("unknown")
-            .to_owned();
-        let row = application::journal::InboundEventRow {
-            inbound_event_id: uuid::Uuid::now_v7(),
-            source: "avelo37".into(),
-            external_id: event.id.clone(),
-            correlation_id: avelo37_correlation_id(&event.id),
-            event_type,
-            payload: tagged,
-            status: domain::generated::scalars::InboundEventStatus::RECEIVED,
-            error: None,
-            received_at: chrono::Utc::now(),
-            delivered_at: None,
+        let fact = match infrastructure::mailbox::inbound_fact_for(
+            "avelo37",
+            &event.id,
+            avelo37_correlation_id(&event.id),
+            tagged,
+        ) {
+            Ok(f) => f,
+            // A mapped family the lane resolver cannot address is an ACL/schema drift — recorded
+            // as unmappable (mirror kept), never a 5xx retry storm.
+            Err(e) => {
+                self.raw.mark_processed(&event.id).await?;
+                return Ok(Avelo37IngestOutcome::Unmappable { reason: e.to_string() });
+            }
         };
-        let outcome = match self.inbox.stage(&row).await? {
-            application::journal::StageOutcome::Staged => {
+        let outcome = match infrastructure::mailbox::enqueue_inbound_fact(self.mailbox.as_ref(), fact).await? {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 if let Some(nudge) = &self.on_staged {
                     nudge();
                 }
                 Avelo37IngestOutcome::Recorded { event_type: event.event_type.clone() }
             }
-            application::journal::StageOutcome::Duplicate => Avelo37IngestOutcome::Duplicate,
+            _ => Avelo37IngestOutcome::Duplicate,
         };
         self.raw.mark_processed(&event.id).await?;
         Ok(outcome)
@@ -651,7 +648,7 @@ mod tests {
     #[tokio::test]
     async fn a_delivery_is_mirrored_and_staged_for_the_drain() {
         let raw = Arc::new(MemRawAvelo37Events::default());
-        let inbox = Arc::new(application::journal::mem::MemInboundEvents::default());
+        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
         let ingestor = Avelo37WebhookIngestor::new(raw.clone(), inbox.clone());
         let event = sample_accepted();
         let raw_body = serde_json::json!({ "id": event.id, "verbatim": true });
@@ -668,20 +665,22 @@ mod tests {
         assert!(processed);
         drop(rows);
         // …and the ADAPTED business event awaits the drain worker (no domain append here).
-        let pending = inbox.pending(10).await.unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].source, "avelo37");
-        assert_eq!(pending[0].external_id, event.id);
-        assert_eq!(pending[0].event_type, "DeliveryAcceptedByPartner");
-        assert_eq!(pending[0].correlation_id, avelo37_correlation_id(&event.id));
-        let staged: DomainEvent = serde_json::from_value(pending[0].payload.clone()).unwrap();
+        let entries = inbox.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "EVENT");
+        assert_eq!(entries[0].source.as_deref(), Some("avelo37"));
+        assert_eq!(entries[0].external_id.as_deref(), Some(event.id.as_str()));
+        assert_eq!(entries[0].message_type, "DeliveryAcceptedByPartner");
+        assert_eq!(entries[0].correlation_id, avelo37_correlation_id(&event.id));
+        assert_eq!(entries[0].actor_type, "DeliveryJob", "addressed to the DeliveryJob lane");
+        let staged: DomainEvent = serde_json::from_value(entries[0].payload.clone()).unwrap();
         assert!(matches!(staged, DomainEvent::DeliveryAcceptedByPartner(_)));
     }
 
     #[tokio::test]
     async fn redelivered_webhook_is_a_no_op() {
         let raw = Arc::new(MemRawAvelo37Events::default());
-        let inbox = Arc::new(application::journal::mem::MemInboundEvents::default());
+        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
         let ingestor = Avelo37WebhookIngestor::new(raw, inbox.clone());
         let event = sample_accepted();
         let raw_body = serde_json::json!({ "id": event.id });
@@ -694,13 +693,13 @@ mod tests {
         // The partner redelivers the SAME event → the (source, external_id) staging dedupe absorbs it.
         let second = ingestor.ingest(&event, &raw_body).await.unwrap();
         assert_eq!(second, Avelo37IngestOutcome::Duplicate);
-        assert_eq!(inbox.pending(10).await.unwrap().len(), 1, "staged exactly once");
+        assert_eq!(inbox.entries().len(), 1, "enqueued exactly once");
     }
 
     #[tokio::test]
     async fn ignored_and_unmappable_deliveries_are_mirrored_but_never_staged() {
         let raw = Arc::new(MemRawAvelo37Events::default());
-        let inbox = Arc::new(application::journal::mem::MemInboundEvents::default());
+        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
         let ingestor = Avelo37WebhookIngestor::new(raw.clone(), inbox.clone());
 
         let ignored = event_from_json(serde_json::json!({
@@ -726,6 +725,6 @@ mod tests {
         assert!(rows.get("evt_no_job").is_some_and(|r| r.1));
         drop(rows);
         // …but nothing crossed into the domain handoff.
-        assert!(inbox.pending(10).await.unwrap().is_empty());
+        assert!(inbox.entries().is_empty());
     }
 }

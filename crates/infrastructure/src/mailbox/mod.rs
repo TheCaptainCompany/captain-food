@@ -7,8 +7,8 @@ mod enqueue;
 mod handler;
 
 pub use enqueue::{
-    enqueue_inbound_fact, enqueue_worker_command, inbound_message_id, inbound_namespace,
-    EnqueueOutcome, InboundFact,
+    enqueue_inbound_fact, enqueue_worker_command, inbound_fact_for, inbound_message_id,
+    inbound_namespace, surrogate_actor_id, EnqueueOutcome, InboundFact,
 };
 pub use handler::{MailboxCommandHandler, StatusBusObserver};
 

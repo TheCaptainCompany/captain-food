@@ -11592,9 +11592,19 @@ fn emit_infra_command_router(model: &Model) -> String {
         ));
     }
     out.push_str("        _ => None,\n    }\n}\n");
-    let mut widths: BTreeMap<&str, u16> = BTreeMap::new();
-    for a in addressing.values() {
-        widths.insert(&a.actor_type, a.partitions);
+    // Scanned from the ACTOR CATALOG directly, not from the command map: an actor that receives
+    // only inbound EVENTS (Payment) has a mailbox but no command address, and deriving the widths
+    // from commands silently dropped its lane (found by the Stripe ACL tests).
+    let mut widths: BTreeMap<String, u16> = BTreeMap::new();
+    if let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") {
+        for (k, def) in actors {
+            let Some(actor) = k.as_str().filter(|s| *s != "principals") else { continue };
+            if let Some(w) =
+                def.get("mailbox").and_then(|m| m.get("partitions")).and_then(|p| p.as_u64())
+            {
+                widths.insert(actor.to_string(), w as u16);
+            }
+        }
     }
     out.push_str(
         "\n/// Every actor type with a declared mailbox, and its partition WIDTH (actors.yaml\n/// `mailbox.partitions`) — the composition root spawns one MailboxWorker per entry and seeds the\n/// registry with these widths. The widths are part of the frozen routing contract: narrowing one\n/// re-routes in-flight rows.\npub const ACTOR_MAILBOXES: &[(&str, u16)] = &[\n",

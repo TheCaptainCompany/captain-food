@@ -753,6 +753,7 @@ pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
     ("DeliveryJob", 100),
     ("DeliveryPartnerRegistration", 100),
     ("Order", 100),
+    ("Payment", 100),
     ("Prospect", 100),
     ("Reclamation", 100),
     ("Restaurant", 100),

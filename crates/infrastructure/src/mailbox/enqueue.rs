@@ -154,3 +154,75 @@ async fn insert_mapped(
         }
     }
 }
+
+/// Surrogate lane id for aggregates whose identity is NOT a uuid (the `Payment-<intentId>`
+/// streams): UUIDv5 over `"{actor_type}:{key}"` in the inbound namespace. FROZEN like the
+/// partition hash — the same aggregate must land on the same lane forever, or its in-flight
+/// facts reorder across lanes.
+pub fn surrogate_actor_id(actor_type: &str, key: &str) -> uuid::Uuid {
+    uuid::Uuid::new_v5(&inbound_namespace(), format!("{actor_type}:{key}").as_bytes())
+}
+
+/// Build the [`InboundFact`] for one ADAPTED domain event (the tagged `{"eventType","payload"}`
+/// form every ACL produces): resolves the addressed LANE from the event family — the same
+/// families the kind-EVENT delivery route recognizes, so a fact that cannot be addressed here
+/// could not be delivered there either (fail at the door, not in the worker).
+pub fn inbound_fact_for(
+    source: &str,
+    external_id: &str,
+    correlation_id: uuid::Uuid,
+    tagged: serde_json::Value,
+) -> Result<InboundFact, DomainError> {
+    let event_type = tagged
+        .get("eventType")
+        .and_then(|t| t.as_str())
+        .ok_or_else(|| DomainError::Repository("adapted event without eventType tag".into()))?
+        .to_owned();
+    let payload_str = |key: &str| {
+        tagged
+            .get("payload")
+            .and_then(|p| p.get(key))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                DomainError::Repository(format!("{event_type}: payload lacks '{key}' — unaddressable"))
+            })
+    };
+    let (actor_type, actor_id) = match event_type.as_str() {
+        "PaymentCaptured" | "PaymentFailed" | "PaymentRefunded" => {
+            ("Payment", surrogate_actor_id("Payment", &payload_str("paymentIntentId")?))
+        }
+        "DeliveryAcceptedByPartner" | "DeliveryRejectedByPartner" | "DeliveryStatusUpdated" => {
+            let id = payload_str("deliveryJobId")?;
+            (
+                "DeliveryJob",
+                uuid::Uuid::parse_str(&id).map_err(|e| {
+                    DomainError::Repository(format!("{event_type}: deliveryJobId '{id}': {e}"))
+                })?,
+            )
+        }
+        "RestaurantRegistered" => {
+            let id = payload_str("restaurantId")?;
+            (
+                "Restaurant",
+                uuid::Uuid::parse_str(&id).map_err(|e| {
+                    DomainError::Repository(format!("{event_type}: restaurantId '{id}': {e}"))
+                })?,
+            )
+        }
+        other => {
+            return Err(DomainError::Repository(format!(
+                "no mailbox lane for inbound event type '{other}' — extend inbound_fact_for + the kind-EVENT route together"
+            )))
+        }
+    };
+    Ok(InboundFact {
+        source: source.to_owned(),
+        external_id: external_id.to_owned(),
+        event_type,
+        payload: tagged,
+        correlation_id,
+        actor_type: actor_type.to_owned(),
+        actor_id,
+    })
+}

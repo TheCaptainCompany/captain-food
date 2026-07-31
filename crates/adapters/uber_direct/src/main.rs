@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use infrastructure::{PgCommandJournal, PgEventStore, PgInboundEvents};
+use infrastructure::persistence::mailbox_store::PgMailbox;
 use uber_direct_adapter::{
     routes, PgRawUberDirectEvents, UberDirectConfig, UberDirectWebhookIngestor, UberDirectWebhookState,
 };
@@ -24,24 +24,10 @@ async fn main() {
         .acquire_timeout(Duration::from_secs(10))
         .connect_lazy(&url)
         .unwrap_or_else(|e| panic!("DATABASE_URL pool init failed: {e}"));
-    // Standalone deployment: mirror + stage on ingest, and run our OWN drain worker delivering staged
-    // facts through the normal write path.
-    let inbox = Arc::new(PgInboundEvents::new(pool.clone()));
-    let drain = Arc::new(infrastructure::InboundEventsDrainWorker::new(
-        inbox.clone(),
-        Arc::new(PgCommandJournal::new(pool.clone())),
-        Arc::new(PgEventStore::new(pool.clone())),
-    ));
-    tokio::spawn(drain.clone().run_loop());
-    let nudge_worker = drain.clone();
-    let ingestor = Arc::new(
-        UberDirectWebhookIngestor::new(Arc::new(PgRawUberDirectEvents::new(pool)), inbox).with_nudge(
-            Arc::new(move || {
-                let w = nudge_worker.clone();
-                tokio::spawn(async move { w.run_once().await });
-            }),
-        ),
-    );
+    // Standalone deployment (ADR-20260731-122500): mirror + ENQUEUE on the shared mailbox;
+    // the monolith's per-actor-type MailboxWorkers deliver (same database, lease-competed).
+    let mailbox = Arc::new(PgMailbox::new(pool.clone()));
+    let ingestor = Arc::new(UberDirectWebhookIngestor::new(Arc::new(PgRawUberDirectEvents::new(pool)), mailbox));
     let state = UberDirectWebhookState {
         ingestor: Some(ingestor),
         webhook_secret: config.map(|c| Arc::new(c.webhook_secret)),

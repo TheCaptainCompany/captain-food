@@ -653,72 +653,41 @@ pub fn router() -> Router {
                     );
                 }
 
-                // Stripe webhook ingestor (ADR-20260720-015400 inbound event sourcing): verify →
-                // mirror the verbatim delivery into external_stripe_events → ACL → stage the adapted
-                // business event in inbound_events → ACK, nudging the drain worker. The HTTP endpoint
-                // (`POST /adapters/stripe/webhooks`) is mounted below with the other non-GraphQL routes.
-                let nudge_worker = drain.clone();
-                stripe_ingestor = Some(Arc::new(
-                    StripeWebhookIngestor::new(
-                        Arc::new(stripe_adapter::PgRawStripeEvents::new(pool.clone())),
-                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    )
-                    .with_nudge(Arc::new(move || {
-                        let w = nudge_worker.clone();
-                        tokio::spawn(async move { w.run_once().await });
-                    })),
-                ));
+                // Stripe webhook ingestor (ADR-20260731-122500 — the mailbox is the only door):
+                // verify → mirror the verbatim delivery into external_stripe_events → ACL → ENQUEUE
+                // the adapted fact on its Payment lane → ACK; the mailbox workers above deliver.
+                // Mounted at `POST /adapters/stripe/webhooks` below.
+                stripe_ingestor = Some(Arc::new(StripeWebhookIngestor::new(
+                    Arc::new(stripe_adapter::PgRawStripeEvents::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+                )));
 
                 // Avelo37 delivery-partner webhook ingestor (issue #28, same two-layer inbox as
-                // Stripe): verify → mirror the verbatim delivery into external_avelo37_events → ACL
-                // → stage the adapted DeliveryAcceptedByPartner/RejectedByPartner/StatusUpdated fact
-                // in inbound_events → ACK, nudging the drain worker (which now routes delivery facts
-                // onto the DeliveryJob stream). Mounted at `POST /adapters/avelo37/webhooks` below.
-                let nudge_worker = drain.clone();
-                avelo37_ingestor = Some(Arc::new(
-                    Avelo37WebhookIngestor::new(
-                        Arc::new(avelo37_adapter::PgRawAvelo37Events::new(pool.clone())),
-                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    )
-                    .with_nudge(Arc::new(move || {
-                        let w = nudge_worker.clone();
-                        tokio::spawn(async move { w.run_once().await });
-                    })),
-                ));
+                // Stripe): verify → mirror → ACL → ENQUEUE the adapted delivery fact on its
+                // DeliveryJob lane → ACK. Mounted at `POST /adapters/avelo37/webhooks` below.
+                avelo37_ingestor = Some(Arc::new(Avelo37WebhookIngestor::new(
+                    Arc::new(avelo37_adapter::PgRawAvelo37Events::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+                )));
 
                 // CoopCycle delivery-partner webhook ingestor (issue #58, same two-layer inbox): the
                 // federation twist is that the verified webhook arrives per-instance at
                 // `POST /adapters/coopcycle/{instance}/webhooks` and is namespaced by instance; the
-                // ingestor itself is provider-shaped like Avelo37's (mirror → ACL → inbound_events →
-                // drain routes onto the DeliveryJob stream). Mounted below with the registry (secrets).
-                let nudge_worker = drain.clone();
-                coopcycle_ingestor = Some(Arc::new(
-                    CoopCycleWebhookIngestor::new(
-                        Arc::new(coopcycle_adapter::PgRawCoopCycleEvents::new(pool.clone())),
-                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    )
-                    .with_nudge(Arc::new(move || {
-                        let w = nudge_worker.clone();
-                        tokio::spawn(async move { w.run_once().await });
-                    })),
-                ));
+                // ingestor itself is provider-shaped like Avelo37's (mirror → ACL → mailbox lane).
+                // Mounted below with the registry (secrets).
+                coopcycle_ingestor = Some(Arc::new(CoopCycleWebhookIngestor::new(
+                    Arc::new(coopcycle_adapter::PgRawCoopCycleEvents::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+                )));
 
                 // Uber Direct delivery-partner webhook ingestor (issue #57, same two-layer inbox as
-                // Avelo37/CoopCycle): verify the X-Uber-Signature → mirror the verbatim delivery into
-                // external_uber_direct_events → ACL → stage the adapted DeliveryAcceptedByPartner/
-                // RejectedByPartner/StatusUpdated fact in inbound_events → ACK, nudging the drain
-                // worker. Mounted at `POST /adapters/uber-direct/webhooks` below with the signing secret.
-                let nudge_worker = drain.clone();
-                uber_direct_ingestor = Some(Arc::new(
-                    UberDirectWebhookIngestor::new(
-                        Arc::new(uber_direct_adapter::PgRawUberDirectEvents::new(pool.clone())),
-                        Arc::new(infrastructure::PgInboundEvents::new(pool.clone())),
-                    )
-                    .with_nudge(Arc::new(move || {
-                        let w = nudge_worker.clone();
-                        tokio::spawn(async move { w.run_once().await });
-                    })),
-                ));
+                // Avelo37/CoopCycle): verify the X-Uber-Signature → mirror → ACL → ENQUEUE the
+                // adapted delivery fact on its DeliveryJob lane → ACK. Mounted at
+                // `POST /adapters/uber-direct/webhooks` below with the signing secret.
+                uber_direct_ingestor = Some(Arc::new(UberDirectWebhookIngestor::new(
+                    Arc::new(uber_direct_adapter::PgRawUberDirectEvents::new(pool.clone())),
+                    Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+                )));
 
                 // HubRise wiring (issue #20): the raw mirror (external_hubrise_callbacks), the
                 // enrichment, AND the connect flow all need only the database — the pull token is

@@ -288,16 +288,16 @@ pub enum UberIngestOutcome {
 /// surface as `Err` (5xx → Uber retries); everything else is definitive.
 pub struct UberDirectWebhookIngestor {
     raw: Arc<dyn RawUberDirectEvents>,
-    inbox: Arc<dyn application::journal::InboundEvents>,
+    mailbox: Arc<dyn application::mailbox::Mailbox>,
     on_staged: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl UberDirectWebhookIngestor {
     pub fn new(
         raw: Arc<dyn RawUberDirectEvents>,
-        inbox: Arc<dyn application::journal::InboundEvents>,
+        mailbox: Arc<dyn application::mailbox::Mailbox>,
     ) -> Self {
-        Self { raw, inbox, on_staged: None }
+        Self { raw, mailbox, on_staged: None }
     }
 
     /// Wire the post-staging nudge (spawns the drain pass; must not block).
@@ -328,33 +328,33 @@ impl UberDirectWebhookIngestor {
             }
         };
 
-        // Stage the ADAPTED business event (Uber vocabulary stops here). The tagged serde form
-        // (`{"eventType": …, "payload": …}`) is what the drain worker deserializes back.
+        // Enqueue the ADAPTED business event on its actor lane (ADR-20260731-122500) (Uber vocabulary stops here). The tagged serde form
+        // (`{"eventType": …, "payload": …}`) is what the kind-EVENT route deserializes back.
         let tagged = serde_json::to_value(&domain_event).map_err(|e| {
             DomainError::Repository(format!("adapted event for {} unserializable: {e}", event.event_id))
         })?;
-        let event_type =
-            tagged.get("eventType").and_then(|t| t.as_str()).unwrap_or("unknown").to_owned();
-        let row = application::journal::InboundEventRow {
-            inbound_event_id: uuid::Uuid::now_v7(),
-            source: "uber_direct".into(),
-            external_id: event.event_id.clone(),
-            correlation_id: uber_direct_correlation_id(&event.event_id),
-            event_type,
-            payload: tagged,
-            status: domain::generated::scalars::InboundEventStatus::RECEIVED,
-            error: None,
-            received_at: chrono::Utc::now(),
-            delivered_at: None,
+        let fact = match infrastructure::mailbox::inbound_fact_for(
+            "uber_direct",
+            &event.event_id,
+            uber_direct_correlation_id(&event.event_id),
+            tagged,
+        ) {
+            Ok(f) => f,
+            // A mapped family the lane resolver cannot address is an ACL/schema drift — recorded
+            // as unmappable (mirror kept), never a 5xx retry storm.
+            Err(e) => {
+                self.raw.mark_processed(&event.event_id).await?;
+                return Ok(UberIngestOutcome::Unmappable { reason: e.to_string() });
+            }
         };
-        let outcome = match self.inbox.stage(&row).await? {
-            application::journal::StageOutcome::Staged => {
+        let outcome = match infrastructure::mailbox::enqueue_inbound_fact(self.mailbox.as_ref(), fact).await? {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 if let Some(nudge) = &self.on_staged {
                     nudge();
                 }
                 UberIngestOutcome::Recorded { event_type: event.kind.clone() }
             }
-            application::journal::StageOutcome::Duplicate => UberIngestOutcome::Duplicate,
+            _ => UberIngestOutcome::Duplicate,
         };
         self.raw.mark_processed(&event.event_id).await?;
         Ok(outcome)
@@ -464,42 +464,6 @@ mod tests {
 
     // ----- ingest flow over in-memory ports -----
 
-    use application::journal::{InboundEventRow, InboundEvents, StageOutcome};
-
-    #[derive(Default)]
-    struct MemInbox {
-        rows: Mutex<Vec<(String, String)>>, // (source, external_id)
-    }
-    #[async_trait::async_trait]
-    impl InboundEvents for MemInbox {
-        async fn stage(&self, row: &InboundEventRow) -> Result<StageOutcome, DomainError> {
-            let mut rows = self.rows.lock().unwrap();
-            if rows.iter().any(|(s, e)| s == &row.source && e == &row.external_id) {
-                return Ok(StageOutcome::Duplicate);
-            }
-            rows.push((row.source.clone(), row.external_id.clone()));
-            Ok(StageOutcome::Staged)
-        }
-        async fn pending(&self, _limit: i64) -> Result<Vec<InboundEventRow>, DomainError> {
-            Ok(vec![])
-        }
-        async fn mark_delivered(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
-            Ok(())
-        }
-        async fn mark_ignored(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
-            Ok(())
-        }
-        async fn mark_duplicate(&self, _id: uuid::Uuid) -> Result<(), DomainError> {
-            Ok(())
-        }
-        async fn mark_failed(
-            &self,
-            _id: uuid::Uuid,
-            _error: serde_json::Value,
-        ) -> Result<(), DomainError> {
-            Ok(())
-        }
-    }
 
     #[derive(Default)]
     struct MemRaw {
@@ -528,7 +492,7 @@ mod tests {
     #[tokio::test]
     async fn ingest_stages_the_fact_and_dedupes_redelivery() {
         let raw = Arc::new(MemRaw::default());
-        let inbox = Arc::new(MemInbox::default());
+        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
         let ingestor = UberDirectWebhookIngestor::new(raw.clone(), inbox.clone());
         let event = pickup_event();
         let body = serde_json::json!({
