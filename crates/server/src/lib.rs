@@ -438,6 +438,11 @@ pub fn router() -> Router {
                     // Acceptance-first dispatch (ADR-20260720-015300/-015500): the durable command
                     // journal + the journal-transition broadcast behind operationStatus(+Changed).
                     journal: Arc::new(infrastructure::PgCommandJournal::new(pool.clone())),
+                    // The actor mailbox (#242 flip): the aggregate-routed mutations enqueue here;
+                    // the partitioned workers spawned below deliver.
+                    mailbox: Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(
+                        pool.clone(),
+                    )),
                     status_bus: operation_status_bus.clone(),
                     slug_reservations: Arc::new(
                         infrastructure::PgSlugReservationRepository::new(pool.clone()),
@@ -577,6 +582,75 @@ pub fn router() -> Router {
                     tracing::info!(worker = "inbound_drain", running = true, toggle = "RUN_INBOUND_DRAIN", "worker running in-process");
                 } else {
                     tracing::warn!(worker = "inbound_drain", running = false, toggle = "RUN_INBOUND_DRAIN", "poll loop NOT started -- webhook-staged facts accumulate undelivered (nudge trigger stays active)");
+                }
+
+                // THE MAILBOX WORKERS (#242 Runtime C3, PROP-20260728-152752): one per actor type
+                // with a declared mailbox — claim partition lanes, drain head-of-line, deliver
+                // through the generated command router, commit fenced. ALWAYS running when a DB is
+                // configured: the flipped resolvers only enqueue, so without these workers every
+                // aggregate-routed mutation would accept and then hang PENDING forever.
+                {
+                    let deps = infrastructure::generated::command_router::CommandDeps {
+                        store: Arc::new(PgEventStore::new(pool.clone())),
+                        restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
+                        slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
+                        ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
+                        probe: Arc::new(UnverifiedGbpOrderLinkProbe),
+                        prospection: Arc::new(PgProspectionRepository::new(pool.clone())),
+                        catalogs: Arc::new(PgCatalogRepository::new(pool.clone())),
+                        auth: infrastructure::generated::service_bindings::identity_service(
+                            || identity_service_impl(),
+                        )
+                        .expect("identity service binding (services.yaml)"),
+                        customers: Arc::new(PgCustomerRepository::new(pool.clone())),
+                        sessions: auth_sessions.clone(),
+                        payments: Arc::new(FailClosedPaymentGateway),
+                        pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(
+                            pool.clone(),
+                        )),
+                        refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(
+                            pool.clone(),
+                        )),
+                    };
+                    let handler = Arc::new(
+                        infrastructure::mailbox::MailboxCommandHandler::new(deps)
+                            .with_event_bus(event_bus.clone()),
+                    );
+                    let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(
+                        operation_status_bus.clone(),
+                    ));
+                    let worker_id = format!(
+                        "{}-{}",
+                        std::env::var("HOSTNAME").unwrap_or_else(|_| "captain".into()),
+                        std::process::id()
+                    );
+                    for (actor_type, width) in
+                        infrastructure::generated::command_router::ACTOR_MAILBOXES
+                    {
+                        let worker = actor_runtime::MailboxWorker::new(
+                            pool.clone(),
+                            worker_id.clone(),
+                            *actor_type,
+                            actor_runtime::WorkerConfig::default(),
+                            handler.clone(),
+                        )
+                        .with_observer(observer.clone());
+                        let width = *width as i16;
+                        let (_, rx) = tokio::sync::watch::channel(false);
+                        tokio::spawn(async move {
+                            if let Err(e) = worker.seed(width).await {
+                                tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %e, "mailbox: seed failed -- worker not started");
+                                return;
+                            }
+                            if let Err(e) = worker.run(rx).await {
+                                tracing::error!(worker = %worker.worker_id, actor_type = %worker.actor_type, error = %e, "mailbox: worker loop exited");
+                            }
+                        });
+                    }
+                    tracing::info!(
+                        workers = infrastructure::generated::command_router::ACTOR_MAILBOXES.len(),
+                        "mailbox: per-actor-type workers running in-process"
+                    );
                 }
 
                 // Stripe webhook ingestor (ADR-20260720-015400 inbound event sourcing): verify →

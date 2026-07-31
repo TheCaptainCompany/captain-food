@@ -72,3 +72,48 @@ pub trait Mailbox: Send + Sync {
         message_id: uuid::Uuid,
     ) -> Result<Option<MailboxStatusRow>, DomainError>;
 }
+
+/// In-memory double for tests (mirrors `journal::mem::MemCommandJournal`).
+pub mod mem {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    use super::*;
+
+    #[derive(Default)]
+    pub struct MemMailbox {
+        rows: Mutex<HashMap<uuid::Uuid, (MailboxEntry, InboundMessageStatus, Option<serde_json::Value>)>>,
+    }
+
+    #[async_trait]
+    impl Mailbox for MemMailbox {
+        async fn insert(&self, entry: &MailboxEntry) -> Result<MailboxInsertOutcome, DomainError> {
+            let mut rows = self.rows.lock().expect("mem mailbox poisoned");
+            if let Some((existing, status, _)) = rows.get(&entry.message_id) {
+                return Ok(MailboxInsertOutcome::Duplicate {
+                    status: *status,
+                    payload_hash: existing.payload_hash.clone(),
+                });
+            }
+            rows.insert(entry.message_id, (entry.clone(), InboundMessageStatus::RECEIVED, None));
+            Ok(MailboxInsertOutcome::Inserted)
+        }
+
+        async fn by_message(
+            &self,
+            message_id: uuid::Uuid,
+        ) -> Result<Option<MailboxStatusRow>, DomainError> {
+            let rows = self.rows.lock().expect("mem mailbox poisoned");
+            Ok(rows.get(&message_id).map(|(e, status, error)| MailboxStatusRow {
+                message_id: e.message_id,
+                correlation_id: e.correlation_id,
+                status: *status,
+                error: error.clone(),
+                user_id: e.user_id,
+                session_id: e.session_id,
+                received_at: chrono::Utc::now(),
+                completed_at: None,
+            }))
+        }
+    }
+}

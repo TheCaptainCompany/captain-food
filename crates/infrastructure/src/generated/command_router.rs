@@ -635,3 +635,23 @@ pub async fn dispatch_command(
         _ => None,
     }
 }
+
+/// Every actor type with a declared mailbox, and its partition WIDTH (actors.yaml
+/// `mailbox.partitions`) — the composition root spawns one MailboxWorker per entry and seeds the
+/// registry with these widths. The widths are part of the frozen routing contract: narrowing one
+/// re-routes in-flight rows.
+pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
+    ("Cart", 100),
+    ("Catalog", 100),
+    ("Conversation", 100),
+    ("Customer", 100),
+    ("CustomerCredit", 100),
+    ("DeliveryJob", 100),
+    ("DeliveryPartnerRegistration", 100),
+    ("Order", 100),
+    ("Prospect", 100),
+    ("Reclamation", 100),
+    ("Restaurant", 100),
+    ("RestaurantAccount", 100),
+    ("Rider", 100),
+];

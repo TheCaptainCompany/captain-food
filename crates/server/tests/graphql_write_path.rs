@@ -37,7 +37,8 @@ use sqlx::PgPool;
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
         r#"
-        DROP TABLE IF EXISTS domain_events, restaurant, prospectionpipeline, projection_checkpoint, command_journal CASCADE;
+        DROP TABLE IF EXISTS domain_events, restaurant, prospectionpipeline, projection_checkpoint, command_journal, inbound_messages, mailbox_partitions CASCADE;
+        DROP SEQUENCE IF EXISTS inbound_messages_position_seq;
         CREATE TABLE domain_events (
           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
           id UUID NOT NULL UNIQUE,
@@ -106,11 +107,56 @@ async fn reset_schema(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("reset schema");
+    // The mailbox era (#242 flip): the aggregate-routed mutations enqueue on inbound_messages and
+    // a worker delivers — the REAL migration DDL, so this test and production cannot drift.
+    sqlx::raw_sql(include_str!("../../../migrations/20260731063000_actor_mailbox_tables.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the actor-mailbox migration");
+}
+
+/// Spawn the production delivery side for the test schema: one MailboxWorker per actor type over
+/// the same CommandDeps the composition root builds, on a fast heartbeat so the poll budget holds.
+fn spawn_mailbox_workers(pool: &PgPool, bus: infrastructure::OperationStatusBus) {
+    let deps = infrastructure::generated::command_router::CommandDeps {
+        store: Arc::new(PgEventStore::new(pool.clone())),
+        restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
+        slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
+        ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
+        probe: Arc::new(UnverifiedGbpOrderLinkProbe),
+        prospection: Arc::new(PgProspectionRepository::new(pool.clone())),
+        catalogs: Arc::new(PgCatalogRepository::new(pool.clone())),
+        auth: Arc::new(FailClosedIdentityService),
+        customers: Arc::new(PgCustomerRepository::new(pool.clone())),
+        sessions: Arc::new(application::auth_sessions::NoopAuthSessionStore),
+        payments: Arc::new(FailClosedPaymentGateway),
+        pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(pool.clone())),
+        refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(pool.clone())),
+    };
+    let handler = Arc::new(infrastructure::mailbox::MailboxCommandHandler::new(deps));
+    let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(bus));
+    for (actor_type, width) in infrastructure::generated::command_router::ACTOR_MAILBOXES {
+        let worker = actor_runtime::MailboxWorker::new(
+            pool.clone(),
+            "w-test",
+            *actor_type,
+            actor_runtime::WorkerConfig { heartbeat_seconds: 1, ..Default::default() },
+            handler.clone(),
+        )
+        .with_observer(observer.clone());
+        let width = *width as i16;
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        std::mem::forget(_tx); // keep the shutdown channel open for the test's lifetime
+        tokio::spawn(async move {
+            worker.seed(width).await.expect("seed");
+            let _ = worker.run(rx).await;
+        });
+    }
 }
 
 /// The composition-root wiring, materialized for the test (what `server::router()` builds from
 /// `DATABASE_URL`): read repos + write ports (incl. the command journal + status bus) over the pool.
-fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
+fn schema_over(pool: &PgPool, status_bus: infrastructure::OperationStatusBus) -> server::graphql_schema::CaptainSchema {
     let restaurants: Arc<dyn RestaurantReadRepository> =
         Arc::new(PgRestaurantRepository::new(pool.clone()));
     let prospection: Arc<dyn ProspectionReadRepository> =
@@ -151,6 +197,8 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
         Arc::new(infrastructure::persistence::PgRefundProcessState::new(pool.clone()));
     let journal: Arc<dyn application::journal::CommandJournal> =
         Arc::new(PgCommandJournal::new(pool.clone()));
+    let mailbox: Arc<dyn application::mailbox::Mailbox> =
+        Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()));
     server::graphql_schema::build_schema(
         Some(server::graphql_schema::ReadDeps {
             restaurants,
@@ -180,7 +228,8 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             pm_state,
             refund_state,
             journal,
-            status_bus: infrastructure::OperationStatusBus::default(),
+            mailbox,
+            status_bus,
             // #112: no session storage needed for the write-path test — the noop store.
             auth_sessions: std::sync::Arc::new(application::auth_sessions::NoopAuthSessionStore),
             // ADR-20260728-011344: this test drives no slug configuration, so a permissive local
@@ -255,7 +304,11 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
     };
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
-    let schema = schema_over(&pool);
+    // One shared status bus: the workers publish terminal transitions on it, the schema's
+    // operationStatusChanged streams from it.
+    let status_bus = infrastructure::OperationStatusBus::default();
+    spawn_mailbox_workers(&pool, status_bus.clone());
+    let schema = schema_over(&pool, status_bus);
 
     // 1) The mutation returns the uniform acceptance (PENDING, not duplicate); the spawned handler
     //    appends the RestaurantRegistered row with correlation_id = acceptance.correlationId and

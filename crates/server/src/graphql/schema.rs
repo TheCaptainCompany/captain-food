@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use async_graphql::Schema;
 use application::journal::CommandJournal;
+use application::mailbox::Mailbox;
 use application::pm_state::{PaymentProcessStateStore, RefundProcessStateStore};
 use application::generated::services::{IdentityService, PaymentService};
 use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
@@ -76,6 +77,10 @@ pub struct WriteDeps {
     /// The durable command journal every mutation writes BEFORE handling (acceptance-first,
     /// ADR-20260720-015300/-015500) — also the `operationStatus` read.
     pub journal: Arc<dyn CommandJournal>,
+    /// The actor mailbox (#242 flip): the aggregate-routed mutations' acceptance door — an
+    /// `inbound_messages` insert the partitioned worker delivers; also the mailbox-first
+    /// `operationStatus` read.
+    pub mailbox: Arc<dyn Mailbox>,
     /// The in-process journal-transition broadcast feeding `operationStatusChanged`.
     pub status_bus: OperationStatusBus,
     /// Cookie-pickup parking (#112): VerifyPhone/verify-email park the provider session here for
@@ -127,6 +132,7 @@ pub fn build_schema(
         builder = builder.data(w.pm_state);
         builder = builder.data(w.refund_state);
         builder = builder.data(w.journal);
+        builder = builder.data(w.mailbox);
         builder = builder.data(w.status_bus);
         builder = builder.data(w.auth_sessions);
         builder = builder.data(w.slug_reservations);
