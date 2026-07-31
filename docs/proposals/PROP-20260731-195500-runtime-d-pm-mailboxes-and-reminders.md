@@ -1,6 +1,8 @@
 # PROP-20260731-195500 — Runtime D: PM mailboxes, typed reminders, and the last non-mailbox door
 
-**Status**: OPEN — awaiting product-owner scope choices on decisions D-A, D-B, D-C below
+**Status**: APPROVED (product-owner, in-session 2026-07-31) — choices **D-A = A2** (two-phase
+payment delivery), **D-B = B2** (chained PM facts), **D-C = C2** (event-lineage reminder
+triggers); recorded in [ADR-20260731-203000](../adr/ADR-20260731-203000-runtime-d-choices-a2-b2-c2.md)
 **Tracking issue**: [#272 "Runtime D: PM mailboxes (placeOrder/refund flip), reminders machinery, activations — continuation of #242"](https://github.com/TheCaptainCompany/captain-food/issues/272)
 **Realizing PR**: TBD (fresh branch from `main` after [#270 "actor mailbox runtime (consolidated)"](https://github.com/TheCaptainCompany/captain-food/pull/270) merges)
 **Context**: [PROP-20260728-152752](PROP-20260728-152752-actor-mailbox-write-path.md) §3.4 ·
