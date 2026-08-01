@@ -24,8 +24,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use actor_runtime::{
-    claim_due_lanes, complete_fenced, steal_lane, CompletionError, Delivery, HandlerVerdict,
-    InboundMessage, MailboxWorker, MessageHandler, WorkerConfig,
+    claim_due_lanes, steal_lane, CompletionError, Delivery, HandlerVerdict, InboundMessage,
+    MailboxWorker, MessageHandler, WorkerConfig,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
@@ -221,9 +221,13 @@ async fn promotion_is_visible_to_the_same_pass_but_never_queue_jumps() {
 // Suspension semantics — head-of-line blocking per lane, isolation, ordered resume.
 // ================================================================================================
 
-/// Fails every delivery on `broken_partition` while `broken` holds — the poisoned-head stand-in.
+/// Fails exactly ONE message — the lane's head — while `broken` holds. Keying the failure on the
+/// head's id (not its partition) is what makes the probe able to DETECT a head-skipping drain: a
+/// runtime that moved past the poisoned head would deliver the rows behind it successfully, and
+/// the head-of-line assertions below would see them. Failing the whole partition instead would
+/// pass either way — the port-5 vacuous-probe trap.
 struct SuspendingHandler {
-    broken_partition: i16,
+    broken_head: uuid::Uuid,
     broken: AtomicBool,
 }
 
@@ -235,7 +239,7 @@ impl MessageHandler for SuspendingHandler {
         message: &InboundMessage,
         _prepared: actor_runtime::Prepared,
     ) -> Result<Delivery, sqlx::Error> {
-        if message.partition == self.broken_partition && self.broken.load(Ordering::SeqCst) {
+        if message.message_id == self.broken_head && self.broken.load(Ordering::SeqCst) {
             return Err(sqlx::Error::Protocol("suspended: head delivery failing".into()));
         }
         probe(tx, message).await?;
@@ -250,16 +254,6 @@ async fn failing_head_suspends_exactly_its_lane_and_resumes_in_order() {
     let pool = PgPool::connect(&url).await.expect("connect");
     setup(&pool).await;
 
-    let handler = Arc::new(SuspendingHandler { broken_partition: 1, broken: AtomicBool::new(true) });
-    let w = MailboxWorker::new(
-        pool.clone(),
-        "w-A",
-        ACTOR_TYPE,
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
-        handler.clone(),
-    );
-    w.seed(4).await.expect("seed");
-
     let lane1: Vec<(uuid::Uuid, i64)> = {
         let mut v = Vec::new();
         for n in 1..=3u128 {
@@ -269,6 +263,17 @@ async fn failing_head_suspends_exactly_its_lane_and_resumes_in_order() {
     };
     let (g1, _) = enqueue(&pool, 2, 0xB2, 11, "COMMAND").await;
     let (g2, _) = enqueue(&pool, 2, 0xB2, 12, "COMMAND").await;
+
+    let handler =
+        Arc::new(SuspendingHandler { broken_head: lane1[0].0, broken: AtomicBool::new(true) });
+    let w = MailboxWorker::new(
+        pool.clone(),
+        "w-A",
+        ACTOR_TYPE,
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        handler.clone(),
+    );
+    w.seed(4).await.expect("seed");
 
     // Pass 1: lane 1's head fails — the lane suspends; lane 2 flows to empty IN THE SAME PASS.
     w.claim().await.expect("claim");
@@ -300,10 +305,15 @@ async fn failing_head_suspends_exactly_its_lane_and_resumes_in_order() {
 
 /// Delivers normally, but the post-commit hook of `steal_on` hands the lane to `thief` — landing
 /// exactly BETWEEN the first full batch and the between-batch heartbeat, the boundary under test.
+/// `attempts` counts handler ENTRIES (not commits): the boundary recheck's whole purpose is to
+/// stop the stale owner from RUNNING further handlers that could only fence out, so the test must
+/// count attempts — the completion fence alone would also stop the commits and leave the probe
+/// table identical.
 struct BatchBoundaryThief {
     pool: PgPool,
     steal_on: uuid::Uuid,
     thief: &'static str,
+    attempts: std::sync::atomic::AtomicU64,
 }
 
 #[async_trait::async_trait]
@@ -314,6 +324,7 @@ impl MessageHandler for BatchBoundaryThief {
         message: &InboundMessage,
         _prepared: actor_runtime::Prepared,
     ) -> Result<Delivery, sqlx::Error> {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
         probe(tx, message).await?;
         if message.message_id == self.steal_on {
             let pool = self.pool.clone();
@@ -375,16 +386,18 @@ async fn batch_boundary_rechecks_authority_and_backlog_survives_exactly_once() {
     for n in 11..=15u128 {
         lane2_rows.push(enqueue(&pool, 2, 0xE2, n, "COMMAND").await);
     }
+    let thief_handler = Arc::new(BatchBoundaryThief {
+        pool: pool.clone(),
+        steal_on: lane2_rows[1].0,
+        thief: "w-thief",
+        attempts: std::sync::atomic::AtomicU64::new(0),
+    });
     let victim = MailboxWorker::new(
         pool.clone(),
         "w-victim",
         ACTOR_TYPE,
         WorkerConfig { batch: 2, lease_seconds: 300, ..WorkerConfig::default() },
-        Arc::new(BatchBoundaryThief {
-            pool: pool.clone(),
-            steal_on: lane2_rows[1].0,
-            thief: "w-thief",
-        }),
+        thief_handler.clone(),
     );
     // Phase A's worker holds every lane live — the victim takes lane 2 the deterministic way.
     let lane2 = steal_lane(&pool, ACTOR_TYPE, 2, "w-victim", 300)
@@ -395,6 +408,12 @@ async fn batch_boundary_rechecks_authority_and_backlog_survives_exactly_once() {
     assert!(
         matches!(out, Err(CompletionError::FencedOut)),
         "the batch boundary must stop a drain whose authority is gone: {out:?}"
+    );
+    assert_eq!(
+        thief_handler.attempts.load(Ordering::SeqCst),
+        2,
+        "the boundary recheck must stop the stale owner from RUNNING a third handler — \
+         fencing its commit afterwards is the backstop, not the discipline"
     );
 
     let thief_lane = claim_due_lanes(&pool, ACTOR_TYPE, "w-thief", 300, 100)
