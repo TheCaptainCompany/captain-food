@@ -26,10 +26,26 @@ async fn main() {
         .acquire_timeout(Duration::from_secs(10))
         .connect_lazy(&url)
         .unwrap_or_else(|e| panic!("DATABASE_URL pool init failed: {e}"));
-    // Standalone deployment (ADR-20260731-122500): mirror + ENQUEUE on the shared mailbox;
-    // the monolith's per-actor-type MailboxWorkers deliver (same database, lease-competed).
-    let mailbox = Arc::new(PgMailbox::new(pool.clone()));
-    let ingestor = Arc::new(CoopCycleWebhookIngestor::new(Arc::new(PgRawCoopCycleEvents::new(pool)), mailbox));
+    // Standalone deployment (ADR-20260731-122500): mirror + ENQUEUE on the shared mailbox; by
+    // default the monolith's MailboxWorkers deliver (same database, lease-competed). With
+    // RUN_MAILBOX_WORKERS on (#272 D3), THIS process also runs the DeliveryJob lane so delivery
+    // facts keep flowing while the monolith is down.
+    let nudges = Arc::new(infrastructure::persistence::mailbox_store::MailboxNudges::default());
+    let mailbox = Arc::new(PgMailbox::new(pool.clone()).with_nudges(nudges.clone()));
+    let ingestor = Arc::new(CoopCycleWebhookIngestor::new(
+        Arc::new(PgRawCoopCycleEvents::new(pool.clone())),
+        mailbox,
+    ));
+    if infrastructure::mailbox::standalone_workers_enabled() {
+        infrastructure::mailbox::spawn_standalone_workers(
+            pool,
+            "coopcycle",
+            &["DeliveryJob"],
+            Arc::new(infrastructure::FailClosedPaymentGateway),
+            nudges,
+            Default::default(),
+        );
+    }
     let state = CoopCycleWebhookState { ingestor: Some(ingestor), registry: Arc::new(registry) };
 
     let addr = format!("0.0.0.0:{port}");

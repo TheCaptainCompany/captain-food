@@ -32,7 +32,24 @@ async fn main() {
             let store = Arc::new(PgEventStore::new(pool.clone()));
             // WORKER-channel command journal (ADR-20260720-015300): every enricher/connect send is
             // journaled before handling, so redeliveries dedupe instead of double-applying.
-            let mailbox = Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()));
+            let nudges =
+                Arc::new(infrastructure::persistence::mailbox_store::MailboxNudges::default());
+            let mailbox = Arc::new(
+                infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())
+                    .with_nudges(nudges.clone()),
+            );
+            // RUN_MAILBOX_WORKERS (#272 D3): the connect/import lanes this adapter's enricher
+            // and connect flow enqueue on — delivered HERE when the monolith is down.
+            if infrastructure::mailbox::standalone_workers_enabled() {
+                infrastructure::mailbox::spawn_standalone_workers(
+                    pool.clone(),
+                    "hubrise",
+                    &["RestaurantAccount", "Restaurant", "Catalog"],
+                    Arc::new(infrastructure::FailClosedPaymentGateway),
+                    nudges.clone(),
+                    Default::default(),
+                );
+            }
             let connections = Arc::new(PgHubRiseConnections::new(pool.clone()));
             let restaurants = Arc::new(PgRestaurantRepository::new(pool));
             state.enricher = Some(Arc::new(HubRiseEnricher::new(

@@ -7,8 +7,10 @@ mod activation;
 mod enqueue;
 mod handler;
 mod pm_delivery;
+mod standalone;
 
 pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, StreamActivations};
+pub use standalone::{spawn_standalone_workers, standalone_deps, standalone_workers_enabled};
 pub use enqueue::{
     cancel_reminder, enqueue_inbound_fact, enqueue_worker_command, inbound_fact_for,
     inbound_message_id, inbound_namespace, reminder_message_id, schedule_reminder,

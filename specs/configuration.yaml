@@ -421,6 +421,22 @@ keys:
       authority never — the ownership_version fence is commit-time). Keep at roughly a third of
       MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
 
+  RUN_MAILBOX_WORKERS:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      Standalone adapter workers (#272 D3, deferred from the PR #270 review): ON in a webhook
+      adapter's own deployment, the binary runs MailboxWorkers for exactly the lanes its
+      ingestor feeds — so facts keep being DELIVERED (not just accepted) while the monolith is
+      down. OFF (the default), the adapter only mirrors + enqueues and the monolith's fleet
+      delivers. The trade-off the flip accepts: the status/event buses are in-process, so a
+      fact delivered by the adapter process never reaches the monolith's push subscribers
+      (polls unaffected) — which is why this is a deployment posture, not a default. Read by
+      the adapter binaries only; the monolith ignores it (its composition root always runs the
+      full fleet).
+
   ACTOR_ACTIVATIONS:
     type: bool
     scalar:
