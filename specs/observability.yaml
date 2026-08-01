@@ -30,9 +30,15 @@ description: >
 
 # =====================================================================
 # command-acceptance — the acceptance-first GraphQL dispatch pipeline (ADR-20260720-015500)
-# mutation (metadata?) -> sync validate/journal (command_journal: RECEIVED | duplicate | Conflict)
-#   -> MutationAcceptance echoed -> async dispatch to the pure handler -> terminal journal status
-#   (SUCCEEDED | REJECTED | FAILED) -> operationStatus/operationStatusChanged.
+# mutation (metadata?) -> sync validate + DURABLE ACCEPTANCE INSERT -> MutationAcceptance echoed
+#   -> async handling -> terminal status (SUCCEEDED | REJECTED | FAILED)
+#   -> operationStatus/operationStatusChanged.
+# TWO acceptance doors carry the same contract since the mailbox flip (#242 Runtime C /
+# #272 Runtime D1): an aggregate- or PM-addressed command's acceptance is the `inbound_messages`
+# row (the worker delivers and completes it — dispatch_outcome `enqueued`); the gated-off legacy
+# arm's acceptance is the `command_journal` row (spawned handler — dispatch_outcome `spawned`).
+# The three PM commands (placeOrder/approveRefund/denyRefund) pick per request on
+# PM_MAILBOX_DELIVERY; the span names and metrics below are emitted identically on both arms.
 # Binds the WHOLE dispatch surface (`surface: graphql`), not one command — every mutation flows
 # through it. Per-workflow contracts (place-order, ...) remain the deep-dive complement.
 # =====================================================================
@@ -68,13 +74,17 @@ command-acceptance:
       required: true
       attributes:
         - { key: "business.message_id", type: string, required: true }
-        - { key: "business.dispatch_outcome", type: string, required: true }   # spawned | duplicate_skipped
+        - { key: "business.dispatch_outcome", type: string, required: true }   # spawned | enqueued | duplicate_skipped
 
   metrics:
     - { name: "commands_accepted_total", type: counter, attributes: ["channel"] }
     - { name: "command_duplicates_total", type: counter, attributes: ["channel"] }   # duplicate: true acceptances — client retry correctness (#17)
     - { name: "command_sync_conflicts_total", type: counter, attributes: ["command_type"] }   # sync Conflict rate: messageId reuse with a different payload (ADR-20260720-015500 §2)
-    - { name: "command_completion_ms", type: histogram, attributes: ["status"] }   # journal insert → terminal status; status = SUCCEEDED | REJECTED | FAILED (REJECTED/FAILED split)
+    # Acceptance insert → COMMITTED terminal status; status = SUCCEEDED | REJECTED | FAILED
+    # (REJECTED/FAILED split). Emitted by the legacy spawn completion (journal insert as t0) AND
+    # by the mailbox delivery's post-commit observer (the row's received_at as t0) — the metric
+    # never goes dark when a command flips arms (#272 D1).
+    - { name: "command_completion_ms", type: histogram, attributes: ["status"] }
 
   status_rules:
     success:
@@ -94,6 +104,13 @@ command-acceptance:
 # place-order — the V0 checkout saga (highest risk: external Stripe call)
 # Cart (OPEN) -> PlaceOrder -> PaymentIntentCreated -> [Stripe] -> PaymentCaptured
 #   -> OrderPlaced + CartCheckedOut   (or PaymentFailed -> abort, cart stays OPEN)
+#
+# Under PM_MAILBOX_DELIVERY (#272 D1, ADR-20260801-023000) the SAME spans ride a different
+# topology: the command leg is a PlaceOrderProcess mailbox delivery whose PREPARE phase carries
+# command.validate/cart.read/pricing.compute/payment.intent.create (no transaction open), the
+# fenced commit carries event.store.append, and the capture leg is a chained PM-lane delivery
+# (B2) instead of a saga-runner tick. Correlate by correlation_id across the hops — the
+# acceptance-first note below applies doubly: THREE mailbox rows now share one correlation.
 # =====================================================================
 place-order:
   feature: place-order

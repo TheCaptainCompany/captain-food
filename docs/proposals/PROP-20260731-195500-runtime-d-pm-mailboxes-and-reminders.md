@@ -203,13 +203,25 @@ sequenceDiagram
 | **A2 ✓** | **Two-phase delivery**: delivery 1 validates/prices and commits the frozen checkout fast; a post-commit step calls Stripe (idempotency key = `orderId`) and enqueues the outcome as a fact on the same lane; delivery 2 records `PaymentIntentCreated` | No HTTP inside any tx (peak-safe); retry-safe by construction (idempotency key + mailbox pk dedupe); every step a supervisable mailbox row; matches the webhook ACL pattern | One extra mailbox hop per checkout; the frozen checkout lives in the PM state store between deliveries |
 | A3 | Keep the spawned task for the gateway leg | Smallest diff | A non-mailbox execution leg survives (against ADR-20260731-122500); unfenced, invisible to supervision — the #270 review's orphaned-work class returns |
 
-## Decision D-B — who receives the Stripe facts (DECIDED: B2)
+## Decision D-B — who receives the Stripe facts (DECIDED: B2, realized in-tx — ADR-20260801-053000)
 
 | | Option | Pros | Cons |
 |---|---|---|---|
 | B1 | Keep as-is (Payment lane records; saga runner reacts off the log) | Zero routing change | The PM reaction stays unfenced and invisible; two delivery mechanisms forever |
-| **B2 ✓** | **Chain**: Payment lane records (unchanged); the delivery's post-commit hook enqueues a PM-addressed copy on the order's lane (`UUIDv5(orderId, factType)`, cause-chained); the saga runner retires | Both consumers durable, fenced, ordered per order; stream ownership untouched; causality visible | One extra row per payment fact; a (nudged, ~immediate) chain hop before order materialization |
+| **B2 ✓** | **Chain**: Payment lane records (unchanged); a PM-addressed copy is enqueued on the order's lane, cause-chained; the saga runner's Stripe-fact triggers retire | Both consumers durable, fenced, ordered per order; stream ownership untouched; causality visible | One extra row per payment fact; a (nudged, ~immediate) chain hop before order materialization |
 | B3 | Facts go only to the PM lane; the PM writes the Payment stream | One row | Moves Payment record semantics into the PM; cross-stream appends re-create the foreign-writer conflicts the #270 review closed |
+
+**Realization** ([ADR-20260801-053000](../adr/ADR-20260801-053000-b2-chain-rides-the-completion-transaction.md),
+two refinements over the sketch): the chain hop rides the **recording transaction itself**, not a
+post-commit hook — a post-commit enqueue leaves a crash window in which the payment fact is
+durable but its saga hop is lost (the recorded-payment-nobody-acts-on failure); only the wake-up
+nudge stays post-commit. And the chain identity is
+`UUIDv5(orderId, "{factType}:{causing mailbox row id}")` — stable under webhook redelivery (the
+causing row's id is itself deterministic), while two DISTINCT same-type facts on one order (a
+second attempt's `PaymentFailed`, a second partial refund's settlement) each keep their own hop,
+where the sketched `UUIDv5(orderId, factType)` would silently swallow the second. The runner's
+retirement is scoped to D-B: PlaceOrderProcess leaves it whole; RefundProcess keeps its
+refund-OPENING order-fact legs until their own runtime item; full retirement at the default flip.
 
 ## Sequence — UC1 under A2 + B2
 
@@ -280,14 +292,32 @@ drill-down is declared as a `gaps` entry until its query exists.
   erasure needs (bookkeeping export) must consciously opt out via a hand-written PM.
 - The DSL grows three sections and seven validator rules — spec surface the team must learn.
 
+## Realization state (D1 — landed on PR #273, GATED)
+
+The flip is IMPLEMENTED behind **`PM_MAILBOX_DELIVERY`** (configuration.yaml, default false —
+gate-then-stabilize; the default flip is its own one-line ADR after staging smoke). One gate
+controls all three moving parts so the two worlds never interleave:
+
+- **Resolvers**: the generated PM resolvers (placeOrder/approveRefund/denyRefund) carry BOTH
+  arms and pick per request — mailbox delivery through the PREPARE phase
+  (ADR-20260801-023000: the UNCHANGED application handler runs against staging stores with no
+  transaction open, Stripe idempotency keys `intent:{orderId}` / `refund:{intent}:{amount}`;
+  ONE fenced commit flushes events + PM row + verdict), or the legacy journal+spawn.
+- **Chaining**: the Payment lane chains the Stripe facts to the PM lanes in the recording
+  transaction (Decision D-B realization above).
+- **Runner**: the saga runner drops exactly the Stripe-fact triggers.
+
+`command_journal` retirement is sequenced reads-first as planned: `operationStatus` has read
+mailbox-then-journal since Runtime C, the gated-off legacy arm still writes the journal, and the
+DROP (with the journal sweep's retirement) rides the default-flip deploy.
+`command_completion_ms` is emitted on BOTH arms (the mailbox delivery's post-commit observer —
+which also lit it back up for every Runtime-C-flipped command).
+
 ## Unresolved questions
 
 - ~~A2's realization shape~~ — RESOLVED 2026-08-01 as R2
   ([ADR-20260801-023000](../adr/ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md),
-  see Decision D-A). D1 sequencing findings that stand: the appendix actors.yaml entries land
-  strictly WITH the D-A wiring, never alone (the router would otherwise route the PM commands to
-  the full legacy handlers — HTTP-in-tx); `command_journal` retirement sequences as reads-first,
-  DROP at the default-flip deploy (the gated-off legacy arm still writes it).
+  see Decision D-A) and IMPLEMENTED (see Realization state).
 
 - Retention windows per data category (legal/product input; configuration layer) — including
   whether the financial skeleton is exported before phase 2 or survives via a longer window.
@@ -297,10 +327,11 @@ drill-down is declared as a `gaps` entry until its query exists.
   scope; the mechanism here may generalize, not assumed.
 - The `UnsettledInvoices` rejection awaits the invoicing concept (noted, no development).
 
-## Appendix — the validated `PlaceOrderProcess` / `RefundProcess` entries
+## Appendix — the `PlaceOrderProcess` / `RefundProcess` entries (LANDED in actors.yaml, PR #273)
 
-Gate-green against `main` (0 validator errors). Lands in actors.yaml only WITH the D-A wiring
-(the generated addressing flips the three mutations the moment these exist).
+Landed together with the D-A wiring and the gated resolvers, as required (the generated
+addressing flips the three mutations the moment these exist — the gate makes that flip a
+request-time choice instead of an outright cutover).
 
 ```yaml
 PlaceOrderProcess:

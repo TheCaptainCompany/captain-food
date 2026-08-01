@@ -151,9 +151,13 @@ under a dedicated user (`pguser`) inside the scratchpad dies mid-session with "P
 on the data directory, and every DB-gated suite then fails with PoolTimedOut/Connection refused
 (cost: a full server-suite failure mis-read as a code regression, 2026-07-31). Recovery recipe:
 re-`chmod o+x` every path component from `/tmp/claude-0` down to the scratchpad, `rm -f
-<pgdata>/postmaster.pid`, then `su pguser -c "pg_ctl -D <pgdata> -o '-k /tmp -p 5433 -c
-listen_addresses=127.0.0.1 -c fsync=off' start"`. Diagnose "tests suddenly failing" with
-`pg_isready`/`psql` FIRST, before reading a single line of code.
+<pgdata>/postmaster.pid`, then `su pguser -c "/usr/lib/postgresql/16/bin/pg_ctl -D <pgdata> -o
+'-k /tmp -p 5433 -c listen_addresses=127.0.0.1 -c fsync=off' start"` — the FULL binary path:
+`pg_ctl` is not on `pguser`'s PATH even though `psql` is on root's (cost: one dead recovery
+attempt, 2026-08-01). A cross-session note: the pgdata lives in the PREVIOUS session's
+scratchpad directory (session-specific paths), so a resumed branch reuses it by absolute path —
+don't initdb a fresh cluster when yesterday's is one `pg_ctl start` away. Diagnose "tests
+suddenly failing" with `pg_isready`/`psql` FIRST, before reading a single line of code.
 
 **While a background agent owns the branch checkout, edit `main` through a git WORKTREE**
 (`git worktree add <scratchpad>/main-wt origin/main -b <tmp>` → edit → push `<tmp>:main` →

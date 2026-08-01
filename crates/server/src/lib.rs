@@ -462,6 +462,9 @@ pub fn router() -> Router {
                     slug_reservations: Arc::new(
                         infrastructure::PgSlugReservationRepository::new(pool.clone()),
                     ),
+                    // The Runtime D1 flip (#272, ADR-20260801-023000, gate-then-stabilize): the
+                    // gated PM resolvers pick mailbox-vs-legacy from this at request time.
+                    pm_mailbox_delivery: config.pm_mailbox_delivery,
                     auth_sessions: {
                         // Encrypted parking store when AUTH_SESSION_KEY is set; else stays the no-op
                         // (fail-closed: no key ⇒ no session cookies, never plaintext at rest).
@@ -553,7 +556,10 @@ pub fn router() -> Router {
                     .expect("payment service binding (services.yaml)");
                     let runner = ProcessManagerRunner::new(pool.clone())
                         .with_partner(partner)
-                        .with_payments(saga_payments);
+                        .with_payments(saga_payments)
+                        // Runtime D1 (#272): with PM mailboxes on, the Stripe-fact triggers are
+                        // chained to the PM lanes by the mailbox — this runner must not race them.
+                        .with_pm_mailboxes(config.pm_mailbox_delivery);
                     saga_status = Some(runner.status());
                     tokio::spawn(runner.run_loop());
                     tracing::info!(worker = "saga_runner", running = true, toggle = "RUN_PROCESS_MANAGERS", "worker running in-process");
@@ -656,7 +662,12 @@ pub fn router() -> Router {
                             // The declared reminder windows (actors.yaml `after:` →
                             // configuration.yaml), so `schedules:` deliveries start their
                             // clocks from configuration, never a constant (ADR-20260731-214500).
-                            .with_reminder_windows(config.reminder_windows()),
+                            .with_reminder_windows(config.reminder_windows())
+                            // Runtime D1 (#272, B2): a recorded Stripe fact chains its
+                            // PM-addressed copy in the SAME completion transaction, and the PM
+                            // lane's worker is nudged post-commit.
+                            .with_pm_fact_chaining(config.pm_mailbox_delivery)
+                            .with_nudges(mailbox_nudges.clone()),
                     );
                     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(
                         operation_status_bus.clone(),

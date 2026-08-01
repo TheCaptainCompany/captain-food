@@ -3814,6 +3814,75 @@ impl MutationRoot {
         );
         let __rx = __receive.clone();
         async move {
+        // THE RUNTIME D1 FLIP GATE (#272 D1, ADR-20260801-023000, gate-then-stabilize):
+        // a PROCESS-MANAGER command ships BOTH arms and PM_MAILBOX_DELIVERY (default false)
+        // picks at request time -- mailbox delivery through the prepare phase, or the legacy
+        // journal+spawn. Flipping the default is a separate, recorded decision (its own ADR)
+        // after the gated form is smoked; the client contract is byte-identical on both arms.
+        if ctx.data::<crate::graphql::PmMailboxDelivery>().map(|f| f.0).unwrap_or(false) {
+        let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
+        // payload the domain command cannot deserialize.
+        let _cmd: domain::generated::commands::PlaceOrder = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        // run_identity: both ids are mandatory in every contract and both may be server-generated.
+        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let entry = application::mailbox::MailboxEntry {
+            message_id: env.message_id,
+            kind: "COMMAND".into(),
+            actor_type: "PlaceOrderProcess".into(),
+            actor_id,
+            partition: actor_runtime::stable_partition(&actor_id, 100),
+            message_type: "PlaceOrder".into(),
+            payload: payload_json.clone(),
+            payload_hash: application::journal::payload_hash(&payload_json),
+            channel: "GRAPHQL".into(),
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            source: None,
+            external_id: None,
+        };
+        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
+        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
+        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __inserted {
+            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
+                if payload_hash != entry.payload_hash {
+                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                    // acceptance outcome the contract does NOT count as success.
+                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                    telemetry::meters::acceptance::sync_conflict("PlaceOrder");
+                    return Err(conflict_error(env.message_id));
+                }
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
+                let _ = telemetry::spans::command_dispatch(
+                    &env.message_id.to_string(),
+                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,
+                );
+                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+                return Ok(acceptance(&env, mailbox_status_api(status), true));
+            }
+            application::mailbox::MailboxInsertOutcome::Inserted => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
+            }
+        }
+        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion
+        // (its StatusBusObserver publishes the terminal transition post-commit).
+        let _ = telemetry::spans::command_dispatch(
+            &env.message_id.to_string(),
+            telemetry::dispatch_outcome::ENQUEUED,
+        );
+        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+        } else {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
@@ -3900,6 +3969,7 @@ impl MutationRoot {
             complete_operation(journal, status_bus, message_id, correlation_id, outcome, __journaled_at).await;
         }.instrument(__dispatch));
         Ok(acceptance(&env, OperationStatus::PENDING, false))
+        }
         }
         .instrument(__receive)
         .await
@@ -4766,6 +4836,75 @@ impl MutationRoot {
         );
         let __rx = __receive.clone();
         async move {
+        // THE RUNTIME D1 FLIP GATE (#272 D1, ADR-20260801-023000, gate-then-stabilize):
+        // a PROCESS-MANAGER command ships BOTH arms and PM_MAILBOX_DELIVERY (default false)
+        // picks at request time -- mailbox delivery through the prepare phase, or the legacy
+        // journal+spawn. Flipping the default is a separate, recorded decision (its own ADR)
+        // after the gated form is smoked; the client contract is byte-identical on both arms.
+        if ctx.data::<crate::graphql::PmMailboxDelivery>().map(|f| f.0).unwrap_or(false) {
+        let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
+        // payload the domain command cannot deserialize.
+        let _cmd: domain::generated::commands::ApproveRefund = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        // run_identity: both ids are mandatory in every contract and both may be server-generated.
+        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let entry = application::mailbox::MailboxEntry {
+            message_id: env.message_id,
+            kind: "COMMAND".into(),
+            actor_type: "RefundProcess".into(),
+            actor_id,
+            partition: actor_runtime::stable_partition(&actor_id, 100),
+            message_type: "ApproveRefund".into(),
+            payload: payload_json.clone(),
+            payload_hash: application::journal::payload_hash(&payload_json),
+            channel: "GRAPHQL".into(),
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            source: None,
+            external_id: None,
+        };
+        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
+        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
+        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __inserted {
+            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
+                if payload_hash != entry.payload_hash {
+                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                    // acceptance outcome the contract does NOT count as success.
+                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                    telemetry::meters::acceptance::sync_conflict("ApproveRefund");
+                    return Err(conflict_error(env.message_id));
+                }
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
+                let _ = telemetry::spans::command_dispatch(
+                    &env.message_id.to_string(),
+                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,
+                );
+                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+                return Ok(acceptance(&env, mailbox_status_api(status), true));
+            }
+            application::mailbox::MailboxInsertOutcome::Inserted => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
+            }
+        }
+        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion
+        // (its StatusBusObserver publishes the terminal transition post-commit).
+        let _ = telemetry::spans::command_dispatch(
+            &env.message_id.to_string(),
+            telemetry::dispatch_outcome::ENQUEUED,
+        );
+        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+        } else {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
@@ -4852,6 +4991,7 @@ impl MutationRoot {
         }.instrument(__dispatch));
         Ok(acceptance(&env, OperationStatus::PENDING, false))
         }
+        }
         .instrument(__receive)
         .await
     }
@@ -4866,6 +5006,75 @@ impl MutationRoot {
         );
         let __rx = __receive.clone();
         async move {
+        // THE RUNTIME D1 FLIP GATE (#272 D1, ADR-20260801-023000, gate-then-stabilize):
+        // a PROCESS-MANAGER command ships BOTH arms and PM_MAILBOX_DELIVERY (default false)
+        // picks at request time -- mailbox delivery through the prepare phase, or the legacy
+        // journal+spawn. Flipping the default is a separate, recorded decision (its own ADR)
+        // after the gated form is smoked; the client contract is byte-identical on both arms.
+        if ctx.data::<crate::graphql::PmMailboxDelivery>().map(|f| f.0).unwrap_or(false) {
+        let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
+        // payload the domain command cannot deserialize.
+        let _cmd: domain::generated::commands::DenyRefund = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        // run_identity: both ids are mandatory in every contract and both may be server-generated.
+        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let entry = application::mailbox::MailboxEntry {
+            message_id: env.message_id,
+            kind: "COMMAND".into(),
+            actor_type: "RefundProcess".into(),
+            actor_id,
+            partition: actor_runtime::stable_partition(&actor_id, 100),
+            message_type: "DenyRefund".into(),
+            payload: payload_json.clone(),
+            payload_hash: application::journal::payload_hash(&payload_json),
+            channel: "GRAPHQL".into(),
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            source: None,
+            external_id: None,
+        };
+        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
+        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
+        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __inserted {
+            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
+                if payload_hash != entry.payload_hash {
+                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                    // acceptance outcome the contract does NOT count as success.
+                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                    telemetry::meters::acceptance::sync_conflict("DenyRefund");
+                    return Err(conflict_error(env.message_id));
+                }
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
+                let _ = telemetry::spans::command_dispatch(
+                    &env.message_id.to_string(),
+                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,
+                );
+                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+                return Ok(acceptance(&env, mailbox_status_api(status), true));
+            }
+            application::mailbox::MailboxInsertOutcome::Inserted => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
+            }
+        }
+        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion
+        // (its StatusBusObserver publishes the terminal transition post-commit).
+        let _ = telemetry::spans::command_dispatch(
+            &env.message_id.to_string(),
+            telemetry::dispatch_outcome::ENQUEUED,
+        );
+        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+        } else {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
         let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
@@ -4950,6 +5159,7 @@ impl MutationRoot {
             complete_operation(journal, status_bus, message_id, correlation_id, outcome, __journaled_at).await;
         }.instrument(__dispatch));
         Ok(acceptance(&env, OperationStatus::PENDING, false))
+        }
         }
         .instrument(__receive)
         .await

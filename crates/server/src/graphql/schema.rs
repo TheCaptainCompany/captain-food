@@ -91,6 +91,9 @@ pub struct WriteDeps {
     /// decision backed by a real `UNIQUE` constraint, never a lookup against the eventually-consistent
     /// `Restaurant` projection.
     pub slug_reservations: Arc<dyn application::queries::SlugReservationRepository>,
+    /// The Runtime D1 flip (`PM_MAILBOX_DELIVERY`, #272): the gated PM resolvers pick their arm
+    /// from this at request time — see [`super::PmMailboxDelivery`].
+    pub pm_mailbox_delivery: bool,
 }
 
 /// Build the master schema served under every role path. With `Some(deps)`/`Some(writes)` the
@@ -136,6 +139,7 @@ pub fn build_schema(
         builder = builder.data(w.status_bus);
         builder = builder.data(w.auth_sessions);
         builder = builder.data(w.slug_reservations);
+        builder = builder.data(super::PmMailboxDelivery(w.pm_mailbox_delivery));
     }
     if let Some(bus) = events {
         builder = builder.data(bus);

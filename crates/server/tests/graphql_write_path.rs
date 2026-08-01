@@ -236,6 +236,9 @@ fn schema_over(pool: &PgPool, status_bus: infrastructure::OperationStatusBus) ->
             // double is enough (see `AlwaysFreeSlugs` — deliberately NOT reused in production, where
             // the arbiter is a real UNIQUE constraint).
             slug_reservations: std::sync::Arc::new(AlwaysFreeSlugs),
+            // Runtime D1 (#272): the write-path test exercises the LEGACY arm (gate off) — the
+            // mailbox arm is covered end-to-end by infrastructure/tests/pm_prepare_delivery.rs.
+            pm_mailbox_delivery: false,
         }),
         // No event bus: this test exercises the POST write path, not the domain-fact subscriptions.
         None,

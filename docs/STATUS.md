@@ -45,13 +45,27 @@
 > policy shapes (windowed engine delays, undo, child enumeration) REFUSE construction. GATED
 > `RUN_DELETION_ENGINE` default **false** (gate-then-stabilize — the default flip is its own
 > one-line ADR after staging smoke); readiness at `GET /deletion`. E2E `deletion_engine` green.
-> Next: D1 (A2 two-phase placeOrder + B2 chained facts + journal retirement + observability
-> rewrite). ✅ D1 UNBLOCKED (2026-08-01): the product owner chose **R2 — prepare-outside-tx
-> single delivery** ([ADR-20260801-023000](adr/ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md)):
-> the runtime gains a `prepare` phase (validate/price + Stripe call before the fenced commit,
-> idempotency key = orderId); a sync decline stays the legacy `REJECTED PaymentDeclined` on
-> operationStatus — client contract byte-identical. Standing sequencing: appendix entries land
-> WITH the D-A wiring only; journal DROP after the default flip.
+> ✅ **D1 LANDED on the #272 branch (2026-08-01), GATED `PM_MAILBOX_DELIVERY` default false**
+> (gate-then-stabilize; default flip = its own one-line ADR after staging smoke): the runtime
+> gained the **PREPARE phase** ([ADR-20260801-023000](adr/ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md)
+> R2 — handler work with NO transaction open, then ONE fenced commit); the three PM commands
+> (placeOrder/approveRefund/denyRefund) run their UNCHANGED application handlers in prepare over
+> staging stores (new `StagingPaymentProcessState`/`StagingRefundProcessState`; executor-generic
+> generated pm-state upserts flush the run rows in-tx), Stripe idempotency keys
+> `intent:{orderId}` / `refund:{intent}:{amount}` make redelivery re-runs land on the SAME
+> gateway object, and a sync decline commits the byte-identical legacy `REJECTED PaymentDeclined`.
+> B2 realized IN-TX ([ADR-20260801-053000](adr/ADR-20260801-053000-b2-chain-rides-the-completion-transaction.md)):
+> the Payment lane chains `PaymentCaptured`/`PaymentFailed`→PlaceOrderProcess and
+> `PaymentRefunded`→RefundProcess inside the recording transaction (identity
+> `UUIDv5(orderId, factType:causingRow)`, cause-chained, post-commit nudge); the PM lanes run
+> the saga event legs fenced; the runner drops exactly the Stripe-fact triggers behind the gate.
+> actors.yaml gained the PlaceOrderProcess/RefundProcess entries WITH the wiring; the generated
+> PM resolvers carry BOTH arms (gated at request time). `command_completion_ms` now also emits
+> from the mailbox delivery's post-commit observer (was dark for every Runtime-C-flipped
+> command); observability contracts rewritten in the same change. `operationStatus` reads were
+> already mailbox-first; journal DROP rides the default-flip deploy. E2E `pm_prepare_delivery`
+> (5 tests incl. the full capture chain) green. Remaining D: D3 (activations, rebalancing,
+> test ports).
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).

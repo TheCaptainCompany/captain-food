@@ -592,6 +592,22 @@ impl DeliveryObserver for StatusBusObserver {
         if message.kind != "COMMAND" {
             return;
         }
+        // `command_completion_ms{status}` — acceptance insert → committed terminal status, the
+        // mailbox-era emission of the command-acceptance contract's histogram (#272 D1: the
+        // metric must not go dark when a command leaves the journal+spawn path; this also lights
+        // it back up for every Runtime-C-flipped command). Measured from the row's `received_at`
+        // — the durable acceptance instant, same contract meaning as the journal insert.
+        let status_label = match verdict {
+            HandlerVerdict::Succeeded | HandlerVerdict::Ignored | HandlerVerdict::Duplicate => {
+                "SUCCEEDED"
+            }
+            HandlerVerdict::Rejected(_) => "REJECTED",
+            HandlerVerdict::Failed(_) => "FAILED",
+        };
+        let elapsed_ms = (chrono::Utc::now() - message.received_at)
+            .num_milliseconds()
+            .max(0) as f64;
+        telemetry::meters::acceptance::completed(status_label, elapsed_ms);
         use domain::generated::scalars::CommandJournalStatus as J;
         let status = match verdict {
             HandlerVerdict::Succeeded | HandlerVerdict::Ignored | HandlerVerdict::Duplicate => {

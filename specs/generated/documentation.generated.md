@@ -3526,7 +3526,7 @@ The INTERNAL (staff-only) notes on an order's conversation — deliberately a SE
 | <a id="type-conversationinternalnotes--admininvited"></a>`adminInvited` | `boolean` | ✅ |
 | <a id="type-conversationinternalnotes--mutedparticipants"></a>`mutedParticipants` | [[📦 `MutedParticipant`](#entity-mutedparticipant)] | ✅ |
 
-### 🎭 Actors _(9)_
+### 🎭 Actors _(11)_
 
 <a id="actor-cart"></a>
 #### 🎭 Actor: `Cart`
@@ -3684,6 +3684,141 @@ _🧩 aggregate_ — A per-customer store-credit ledger; id = customerId (the ag
 | --- | --- | --- |
 | [📩 `GrantCustomerCredit`](#command-grantcustomercredit) | [⚡ `CustomerCreditGranted`](#event-customercreditgranted) | — |
 | [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit) | [⚡ `CustomerCreditConsumed`](#event-customercreditconsumed) | [⛔ `InsufficientCustomerCredit`](#error-insufficientcustomercredit) |
+
+<a id="actor-placeorderprocess"></a>
+#### 🎭 Actor: `PlaceOrderProcess`
+
+_⚙️ process manager_ — The checkout saga (ADR-0004, acceptance-first ADR-20260720-015500): PlaceOrder validates the cart against the live catalog, prices server-side, creates the Stripe PaymentIntent and freezes the checkout as PaymentIntentCreated -- the ORDER IS NOT PLACED YET. The order materializes only when Stripe reports the capture: the PaymentCaptured reaction re-materializes the frozen checkout from PaymentIntentCreated's log (no external store) and emits OrderPlaced idempotently. A PaymentFailed reaction records the outcome on the process state; the customer retries by resubmitting checkout.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantNotFound`](#error-restaurantnotfound), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
+| [⚡ `PaymentCaptured`](#event-paymentcaptured) | [⚡ `OrderPlaced`](#event-orderplaced) | — |
+| [⚡ `PaymentFailed`](#event-paymentfailed) | _Inbound Stripe fact: the failure lands on the process state; the customer's resubmit is the retry._ | — |
+
+Sequence (generated from the typed steps):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant IN as Inbox (trigger)
+  participant PM as PlaceOrderProcess (decides)
+  participant ST as payment_process_manager (state)
+  participant RM_Cart as Cart (read model)
+  participant RM_Restaurant as Restaurant (read model)
+  participant PT_payment as port payment (adapter)
+  participant AG_Payment as Payment (aggregate)
+  participant AG_Order as Order (aggregate)
+  participant AG_Cart as Cart (aggregate)
+  rect rgb(245,245,245)
+  IN->>PM: PlaceOrder (command)
+  PM->>RM_Cart: read as cart [cart_id=PlaceOrder.cartId]
+  PM--xIN: throws CartNotFound
+  PM--xIN: throws CartNotOpen unless cart.status == OPEN
+  PM--xIN: throws CartEmpty
+  PM->>RM_Restaurant: read as restaurant [restaurant_id=PlaceOrder.restaurantId]
+  PM--xIN: throws RestaurantPaused
+  PM--xIN: throws CannotOrderTestRestaurant
+  PM--xIN: throws DeliveryAddressRequired
+  PM--xIN: throws OutsideDeliveryArea
+  PM--xIN: throws PriceUnresolvable
+  PM--xIN: throws PriceMismatch
+  PM->>PT_payment: request
+  PM--xIN: throws PaymentDeclined
+  PM->>AG_Payment: deliver PaymentIntentCreated — the aggregate records it
+  PM->>ST: set cart_id=PlaceOrder.cartId, order_id=PlaceOrder.orderId, payment_intent_id=payment.request, process_status=AWAITING_PAYMENT_RESULT, payment_status=PENDING
+  end
+  rect rgb(245,245,245)
+  IN->>PM: PaymentCaptured (event)
+  PM->>ST: by payment_intent_id=PaymentCaptured.paymentIntentId
+  PM--xIN: throws PaymentEventOrphaned
+  PM->>ST: expect process_status=AWAITING_PAYMENT_RESULT
+  PM->>AG_Order: deliver OrderPlaced — the aggregate records it
+  PM->>AG_Cart: deliver CartCheckedOut — the aggregate records it
+  PM->>ST: set payment_status=CAPTURED, process_status=ORDER_PLACED, last_processed_stripe_event_id=envelope.event_id
+  end
+  rect rgb(245,245,245)
+  IN->>PM: PaymentFailed (event)
+  PM->>ST: by payment_intent_id=PaymentFailed.paymentIntentId
+  PM--xIN: throws PaymentEventOrphaned
+  PM->>ST: expect process_status=AWAITING_PAYMENT_RESULT
+  PM->>ST: set payment_status=FAILED, process_status=FAILED, last_processed_stripe_event_id=envelope.event_id
+  end
+```
+
+<a id="actor-refundprocess"></a>
+#### 🎭 Actor: `RefundProcess`
+
+_⚙️ process manager_ — The refund saga: records the staff decision on an OPEN refund (RefundOpened is emitted by the order-lifecycle commands -- RejectOrder, CancelOrder -- not by this saga's receives), drives the Stripe refund on approval, and closes idempotently when Stripe reports the PaymentRefunded fact. Approval and denial are restaurant/admin decisions on a pending refund; anything else is RefundNotPending.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `ApproveRefund`](#command-approverefund) | [⚡ `RefundApproved`](#event-refundapproved) | [⛔ `RefundNotPending`](#error-refundnotpending) |
+| [📩 `DenyRefund`](#command-denyrefund) | [⚡ `RefundDenied`](#event-refunddenied) | [⛔ `RefundNotPending`](#error-refundnotpending) |
+| [⚡ `PaymentRefunded`](#event-paymentrefunded) | _Inbound Stripe fact: close the refund saga idempotently._ | — |
+
+Sequence (generated from the typed steps):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant IN as Inbox (trigger)
+  participant PM as RefundProcess (decides)
+  participant ST as refund_process_manager (state)
+  participant RM_OrderTracking as OrderTracking (read model)
+  participant AG_Payment as Payment (aggregate)
+  participant PT_payment as port payment (adapter)
+  rect rgb(245,245,245)
+  IN->>PM: OrderRejectedByRestaurant (event)
+  PM->>RM_OrderTracking: read as order [order_id=OrderRejectedByRestaurant.orderId]
+  Note over PM: skip unless order.payment_status == CAPTURED
+  PM->>AG_Payment: deliver RefundOpened — the aggregate records it
+  PM->>ST: set order_id=OrderRejectedByRestaurant.orderId, payment_intent_id=order.payment_intent_id, process_status=PENDING_APPROVAL, reason=OrderRejectedByRestaurant.reason
+  end
+  rect rgb(245,245,245)
+  IN->>PM: OrderCancelledByCustomer (event)
+  PM->>RM_OrderTracking: read as order [order_id=OrderCancelledByCustomer.orderId]
+  Note over PM: skip unless order.payment_status == CAPTURED
+  PM->>AG_Payment: deliver RefundOpened — the aggregate records it
+  PM->>ST: set order_id=OrderCancelledByCustomer.orderId, payment_intent_id=order.payment_intent_id, process_status=PENDING_APPROVAL, reason=OrderCancelledByCustomer.reason
+  end
+  rect rgb(245,245,245)
+  IN->>PM: OrderCancelledByRestaurant (event)
+  PM->>RM_OrderTracking: read as order [order_id=OrderCancelledByRestaurant.orderId]
+  Note over PM: skip unless order.payment_status == CAPTURED
+  PM->>AG_Payment: deliver RefundOpened — the aggregate records it
+  PM->>ST: set order_id=OrderCancelledByRestaurant.orderId, payment_intent_id=order.payment_intent_id, process_status=PENDING_APPROVAL, reason=OrderCancelledByRestaurant.reason
+  end
+  rect rgb(245,245,245)
+  IN->>PM: RefundRequested (event)
+  PM->>RM_OrderTracking: read as order [order_id=RefundRequested.orderId]
+  Note over PM: skip unless order.payment_status == CAPTURED
+  PM->>AG_Payment: deliver RefundOpened — the aggregate records it
+  PM->>ST: set order_id=RefundRequested.orderId, payment_intent_id=order.payment_intent_id, process_status=PENDING_APPROVAL, reason=RefundRequested.reason
+  end
+  rect rgb(245,245,245)
+  IN->>PM: ApproveRefund (command)
+  PM->>ST: by order_id=ApproveRefund.orderId
+  PM--xIN: throws RefundNotPending unless state.process_status == PENDING_APPROVAL
+  PM->>PT_payment: refund
+  PM->>AG_Payment: deliver RefundApproved — the aggregate records it
+  PM->>ST: set process_status=APPROVED_AWAITING_SETTLEMENT, approved_amount_cents=ApproveRefund.amount, reason=ApproveRefund.reason
+  end
+  rect rgb(245,245,245)
+  IN->>PM: DenyRefund (command)
+  PM->>ST: by order_id=DenyRefund.orderId
+  PM--xIN: throws RefundNotPending unless state.process_status == PENDING_APPROVAL
+  PM->>AG_Payment: deliver RefundDenied — the aggregate records it
+  PM->>ST: set process_status=DENIED, reason=DenyRefund.reason
+  end
+  rect rgb(245,245,245)
+  IN->>PM: PaymentRefunded (event)
+  PM->>ST: by order_id=PaymentRefunded.orderId; expect process_status=APPROVED_AWAITING_SETTLEMENT
+  PM->>ST: set refund_id=PaymentRefunded.refundId, process_status=REFUNDED
+  end
+```
 
 <a id="actor-placeorderprocess"></a>
 #### 🎭 Actor: `PlaceOrderProcess`
@@ -5796,7 +5931,7 @@ _Delivering the due OrderExpired reminder records the fact with record semantics
 
 - **Verified by**: [🧪 `TestOrderExpiredRecorded`](#test-testorderexpiredrecorded), [🧪 `TestOrderExpiredRedeliveryIsNoOp`](#test-testorderexpiredredeliveryisnoop)
 
-### 🧪 Tests _(9)_
+### 🧪 Tests _(11)_
 
 **[🎭 `Cart`](#actor-cart)**
 
@@ -6579,6 +6714,180 @@ _Consuming store credit again for the same order is a benign no-op (exactly-once
 - **When**: [📩 `ConsumeCustomerCredit`](#command-consumecustomercredit)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `CreditConsumedAtMostOncePerOrder`](#rule-creditconsumedatmostonceperorder)
+
+**[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
+
+<a id="test-testplaceordercreatespaymentintent"></a>
+#### 🧪 Test: `TestPlaceOrderCreatesPaymentIntent`
+
+_Checkout reads the open cart, prices it, and creates a Stripe payment intent_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent), [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
+
+<a id="test-testplaceorderrecomputespriceserverside"></a>
+#### 🧪 Test: `TestPlaceOrderRecomputesPriceServerSide`
+
+_Checkout recomputes every line total and the order total from the live catalog; a matching client confirmation total passes_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderrejectspricemismatch"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsPriceMismatch`
+
+_A client confirmation total that diverges from the server-recomputed total rejects the checkout (server is the price authority)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `PriceMismatch`](#error-pricemismatch)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderrejectsunresolvableprice"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsUnresolvablePrice`
+
+_A cart line whose price cannot be resolved from the live catalog rejects the checkout fail-closed (never the client's number)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `PriceUnresolvable`](#error-priceunresolvable)
+- **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderisrejected"></a>
+#### 🧪 Test: `TestPlaceOrderIsRejected`
+
+_Rejects checkout when the restaurant is paused, the cart is empty, the delivery address is missing or out of area, or the payment is declined_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CartStarted`](#event-cartstarted)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CartEmpty`](#error-cartempty), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PaymentDeclined`](#error-paymentdeclined)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+
+<a id="test-testplaceorderrejectstestrestaurantforliveorder"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsTestRestaurantForLiveOrder`
+
+_A production (LIVE) order against a TEST restaurant is rejected (test-mode isolation)_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant)
+- **Verifies**: [📐 `OrderTestModeIsolation`](#rule-ordertestmodeisolation)
+
+<a id="test-testplaceorderpaymentcapturedplacesorder"></a>
+#### 🧪 Test: `TestPlaceOrderPaymentCapturedPlacesOrder`
+
+_On payment capture the saga materializes the order and closes the cart_
+
+- **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
+- **Verifies**: [📐 `OrderMaterializedOnPaymentCapture`](#rule-ordermaterializedonpaymentcapture)
+
+<a id="test-testplaceorderpaymentfailedplacesnothing"></a>
+#### 🧪 Test: `TestPlaceOrderPaymentFailedPlacesNothing`
+
+_On payment failure the saga aborts and places no order (cart stays open)_
+
+- **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **When**: [📩 `PaymentFailed`](#command-paymentfailed)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
+
+<a id="test-testpaymentcaptureorphanisflagged"></a>
+#### 🧪 Test: `TestPaymentCaptureOrphanIsFlagged`
+
+_A capture matching no checkout run aborts the saga with a typed error (never a silent skip)_
+
+- **Given**: _(none)_
+- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
+- **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
+
+**[🎭 `RefundProcess`](#actor-refundprocess)**
+
+<a id="test-testrefundonorderrejected"></a>
+#### 🧪 Test: `TestRefundOnOrderRejected`
+
+_Requests a Stripe refund when an order is rejected by the restaurant_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
+
+<a id="test-testrefundonordercancelledbycustomer"></a>
+#### 🧪 Test: `TestRefundOnOrderCancelledByCustomer`
+
+_Requests a Stripe refund when the customer cancels the order_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
+
+<a id="test-testrefundonordercancelledbyrestaurant"></a>
+#### 🧪 Test: `TestRefundOnOrderCancelledByRestaurant`
+
+_Requests a Stripe refund when the restaurant cancels the order_
+
+- **Given**: _(none)_
+- **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
+
+<a id="test-testrefundonrefundrequested"></a>
+#### 🧪 Test: `TestRefundOnRefundRequested`
+
+_Validates eligibility and requests a Stripe refund on a customer refund request_
+
+- **Given**: _(none)_
+- **When**: [📩 `RefundRequested`](#command-refundrequested)
+- **Then**: [⚡ `RefundOpened`](#event-refundopened)
+- **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
+
+<a id="test-testrefundsettledfactrecorded"></a>
+#### 🧪 Test: `TestRefundSettledFactRecorded`
+
+_Records the settled refund fact reported back by Stripe_
+
+- **Given**: _(none)_
+- **When**: [📩 `PaymentRefunded`](#command-paymentrefunded)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
+
+<a id="test-testrefundapprovedbyadmin"></a>
+#### 🧪 Test: `TestRefundApprovedByAdmin`
+
+_The restaurant or an admin approves the pending refund: Stripe refund requested, decision recorded on the Payment_
+
+- **Given**: [⚡ `RefundRequested`](#event-refundrequested)
+- **When**: [📩 `ApproveRefund`](#command-approverefund)
+- **Then**: [⚡ `RefundApproved`](#event-refundapproved)
+- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
+
+<a id="test-testrefunddeniedbyadmin"></a>
+#### 🧪 Test: `TestRefundDeniedByAdmin`
+
+_The restaurant or an admin denies the pending refund: the run closes with the decision recorded on the Payment_
+
+- **Given**: [⚡ `RefundRequested`](#event-refundrequested)
+- **When**: [📩 `DenyRefund`](#command-denyrefund)
+- **Then**: [⚡ `RefundDenied`](#event-refunddenied)
+- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
+
+<a id="test-testrefunddecisionrejectedwhennotpending"></a>
+#### 🧪 Test: `TestRefundDecisionRejectedWhenNotPending`
+
+_A refund decision on an order with no refund pending approval is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `ApproveRefund`](#command-approverefund)
+- **Thrown**: [⛔ `RefundNotPending`](#error-refundnotpending)
+- **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
 
 **[🎭 `PlaceOrderProcess`](#actor-placeorderprocess)**
 
@@ -9953,7 +10262,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="error-conflict"></a>⛔ `Conflict` | Concurrent modification (optimistic-concurrency version clash); retry. | 🇬🇧 This item was modified meanwhile. Please retry. | 🇫🇷 Cet élément a été modifié entre-temps. Veuillez réessayer. | — |
 | <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path. | 🇬🇧 Too many requests. Please slow down. | 🇫🇷 Trop de requêtes. Veuillez patienter. | — |
 | <a id="error-internal"></a>⛔ `Internal` | Unexpected server error. | 🇬🇧 Something went wrong on our side. | 🇫🇷 Une erreur est survenue de notre côté. | — |
-| <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite) |
+| <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
