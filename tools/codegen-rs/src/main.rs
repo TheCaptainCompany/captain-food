@@ -14,6 +14,27 @@ pub(crate) use std::path::PathBuf;
 
 pub(crate) use serde_yaml::Value;
 
+// Module map (#277 split — pure code motion out of the former single-file main.rs). Everything is
+// re-exported pub(crate) at the crate root, so modules share one flat namespace via `use crate::*;`
+// exactly as they did when this was one file.
+mod api; // GraphQL surface parsing (api.yaml) + SDL emitter
+mod c4; // C4/actor model structs, parse_actors, Structurizr/Mermaid emitters
+mod config; // configuration.yaml parse + §12 validation + typed-reader emitter
+mod emit; // generated-artifact emitters, one module per artifact family
+mod model; // spec loading, Model, $ref primitives, Issue/Coverage/Report
+mod refs; // Kind, REF_CONTRACT, classify — the §1b ref-kind contract
+mod validate; // validator sections; run order lives in validate() (validate::core)
+#[cfg(test)]
+mod tests;
+
+pub(crate) use api::*;
+pub(crate) use c4::*;
+pub(crate) use config::*;
+pub(crate) use emit::*;
+pub(crate) use model::*;
+pub(crate) use refs::*;
+pub(crate) use validate::*;
+
 fn arg_value(args: &[String], flag: &str) -> Option<String> {
     args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1).cloned())
 }
@@ -334,21 +355,3 @@ fn main() {
     }
     eprintln!("✓ wrote {}", css_path.display());
 }
-
-#[cfg(test)]
-mod tests;
-
-mod emit;
-pub(crate) use emit::*;
-mod validate;
-pub(crate) use validate::*;
-mod config;
-pub(crate) use config::*;
-mod c4;
-pub(crate) use c4::*;
-mod api;
-pub(crate) use api::*;
-mod model;
-pub(crate) use model::*;
-mod refs;
-pub(crate) use refs::*;
