@@ -12131,8 +12131,15 @@ fn emit_server_mutation(model: &Model) -> String {
         if wired_mutation_dispatch(&m.name).is_some() {
             if let Some(addr) = addressing.get(&m.command) {
                 let actor_id_expr = match &addr.identity_prop {
+                    // A DECLARED identity property that is missing or unparsable fails AT THE
+                    // DOOR — the same rule the worker-channel enqueue helper enforces (#272 D3,
+                    // id-minting unification): silently minting a random lane id would park the
+                    // command on an arbitrary lane and break the per-aggregate serialization the
+                    // mailbox exists to give. (The typed input normally catches this first; this
+                    // is the door's own guarantee, not the input layer's.)
                     Some(prop) => format!(
-                        "let actor_id = payload_json.get(\"{prop}\").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);"
+                        "let actor_id = payload_json.get(\"{prop}\").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new(\"{command}: identity property '{prop}' missing or not a uuid -- unaddressable\"))?;",
+                        command = m.command,
                     ),
                     None => "// Birth command: the handler mints the aggregate id; this one only routes the mailbox lane.\n        let actor_id = uuid::Uuid::now_v7();".to_string(),
                 };

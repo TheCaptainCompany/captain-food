@@ -58,6 +58,27 @@ impl EntryTracker {
     }
 }
 
+/// TEST THE FIXTURE (ADR-20260730-234918 port 5, Proto.Actor's gate-the-scanner lesson): a probe
+/// that cannot detect a violation is indistinguishable from no violations. Prove the tracker
+/// counts a genuine overlap and does NOT count sequential entries before trusting its readings.
+#[test]
+fn the_overlap_probe_detects_a_violation() {
+    let t = EntryTracker::default();
+    let actor = uuid::Uuid::from_u128(7);
+    t.enter(actor);
+    t.enter(actor); // second concurrent entry — the violation shape
+    assert_eq!(t.overlaps_observed.load(Ordering::Relaxed), 1, "a real overlap must register");
+    t.exit(actor);
+    t.exit(actor);
+    t.enter(actor); // sequential re-entry — NOT an overlap
+    t.exit(actor);
+    assert_eq!(t.overlaps_observed.load(Ordering::Relaxed), 1, "sequential entries must not");
+    let other = uuid::Uuid::from_u128(8);
+    t.enter(actor);
+    t.enter(other); // different actor — NOT an overlap
+    assert_eq!(t.overlaps_observed.load(Ordering::Relaxed), 1, "cross-actor entries must not");
+}
+
 /// Records each delivery (worker, actor, position) THROUGH the completion transaction — the
 /// count that cannot lie about what committed — while tracking in-memory entry concurrency.
 struct ProbeHandler {

@@ -48,7 +48,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AddCartLine: identity property 'cartId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -125,7 +125,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveCartLine: identity property 'cartId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -202,7 +202,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeCartLineQuantity: identity property 'cartId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -279,7 +279,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RegisterRestaurantAccount: identity property 'restaurantAccountId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -356,7 +356,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateRestaurantAccount: identity property 'restaurantAccountId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -433,7 +433,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("DeleteRestaurantAccount: identity property 'restaurantAccountId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -510,7 +510,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RegisterRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -588,7 +588,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfigureRestaurantSlug: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -665,7 +665,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ActivateRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -742,7 +742,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -819,7 +819,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("DeactivateRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -896,7 +896,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -973,7 +973,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeOrderAcceptanceMode: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1050,7 +1050,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateRestaurantGoogleBusinessProfile: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1127,7 +1127,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkRestaurantClosed: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1204,7 +1204,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ClaimRestaurantListing: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1281,7 +1281,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("OptOutRestaurantListing: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1358,7 +1358,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeRestaurantListingStatus: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1435,7 +1435,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfigureGoogleBusinessProfileOrderLink: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1512,7 +1512,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("VerifyGoogleBusinessProfileOrderLink: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1589,7 +1589,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RecordProspectContact: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1666,7 +1666,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkProspectCold: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1743,7 +1743,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RecordProspectReply: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1820,7 +1820,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CreateCatalog: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1897,7 +1897,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AddProduct: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -1974,7 +1974,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateProduct: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2051,7 +2051,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveProduct: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2128,7 +2128,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AddCatalogCategory: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2205,7 +2205,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateCatalogCategory: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2282,7 +2282,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveCatalogCategory: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2359,7 +2359,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AddOptionList: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2436,7 +2436,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateOptionList: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2513,7 +2513,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveOptionList: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2590,7 +2590,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateOfferStock: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2667,7 +2667,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ImportCatalog: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2822,7 +2822,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("VerifyPhone: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2899,7 +2899,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RequestEmailVerification: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -2976,7 +2976,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfirmEmailVerification: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3053,7 +3053,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RequestPhoneChange: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3130,7 +3130,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfirmPhoneChange: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3207,7 +3207,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeLanguage: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3284,7 +3284,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkRestaurantAsFavorite: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3361,7 +3361,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UnmarkRestaurantAsFavorite: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3438,7 +3438,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateCustomerInfo: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3515,7 +3515,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("SetCustomerPreferences: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3592,7 +3592,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("SetCustomerAddress: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3669,7 +3669,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveCustomerAddress: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3746,7 +3746,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("SetCustomerPaymentMethod: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -3842,7 +3842,7 @@ impl MutationRoot {
             telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
             return Ok(acceptance(&env, journal_status_api(prior.status), true));
         }
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("PlaceOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4019,7 +4019,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AcceptOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4096,7 +4096,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RejectOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4173,7 +4173,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("StartPreparation: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4250,7 +4250,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkOrderReady: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4327,7 +4327,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkOrderDelivered: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4404,7 +4404,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CancelOrderByCustomer: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4481,7 +4481,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CancelOrderByRestaurant: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4558,7 +4558,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RateOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4635,7 +4635,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RateRestaurant: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4716,7 +4716,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("TipOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4793,7 +4793,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RequestRefund: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -4889,7 +4889,7 @@ impl MutationRoot {
             telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
             return Ok(acceptance(&env, journal_status_api(prior.status), true));
         }
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ApproveRefund: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5084,7 +5084,7 @@ impl MutationRoot {
             telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
             return Ok(acceptance(&env, journal_status_api(prior.status), true));
         }
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("DenyRefund: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5259,7 +5259,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("riderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("riderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeRiderStatus: identity property 'riderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5336,7 +5336,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AcceptDelivery: identity property 'deliveryJobId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5413,7 +5413,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfirmPickup: identity property 'deliveryJobId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5490,7 +5490,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CompleteDelivery: identity property 'deliveryJobId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5567,7 +5567,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CancelDelivery: identity property 'deliveryJobId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5648,7 +5648,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RegisterDeliveryPartnerAvailability: identity property 'registrationId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5725,7 +5725,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ApproveDeliveryPartnerAvailability: identity property 'registrationId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5802,7 +5802,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RevokeDeliveryPartnerAvailability: identity property 'registrationId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5879,7 +5879,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("OpenConversation: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -5956,7 +5956,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("PostMessage: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6033,7 +6033,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RecordMessageTranslation: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6110,7 +6110,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("EscalateToAdmin: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6187,7 +6187,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MuteParticipant: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6264,7 +6264,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UnmuteParticipant: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6341,7 +6341,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("OpenReclamation: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6418,7 +6418,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ResolveReclamation: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6495,7 +6495,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RejectReclamation: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6572,7 +6572,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ReopenReclamation: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
@@ -6649,7 +6649,7 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
-        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
+        let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AttachReclamationEvidence: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
             kind: "COMMAND".into(),
