@@ -6,8 +6,9 @@
 - **Date**: 2026-07-31 (living document — this is the CURRENT state of the design; prior states
   are in this file's git history, per ADR-20260801-020000)
 - **Tracking issue**: [#272 "Runtime D: PM mailboxes (placeOrder/refund flip), reminders machinery, activations — continuation of #242"](https://github.com/TheCaptainCompany/captain-food/issues/272)
-- **Realized by**: [PR #273 "Runtime D — PM mailboxes (two-phase payment delivery), typed reminders, activations"](https://github.com/TheCaptainCompany/captain-food/pull/273)
-  (branch `272-runtime-d-pm-mailboxes-reminders`)
+- **Realized by**: D2 merged via [PR #273](https://github.com/TheCaptainCompany/captain-food/pull/273)
+  (2026-08-01); the D1/D3 remainder continues under
+  [#275 "Runtime D remainder: D1 — the R2 payment flip (prepare-phase delivery), then D3"](https://github.com/TheCaptainCompany/captain-food/issues/275)
 
 **Context**: [PROP-20260728-152752](PROP-20260728-152752-actor-mailbox-write-path.md) §3.4 ·
 [ADR-20260731-120825](../adr/ADR-20260731-120825-actor-messages-typed-inside-the-actor.md) ·
