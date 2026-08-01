@@ -129,7 +129,15 @@ technical worker deletes the stream from `domain_events` + `domain_stream` → r
 No per-aggregate erasure PMs; a bespoke PM stays the escape hatch for aggregates needing custom
 steps (e.g. a bookkeeping export before stream deletion).
 
-## Decision D-A — where the Stripe call lives in a mailbox delivery (DECIDED: A2)
+## Decision D-A — where the Stripe call lives in a mailbox delivery (DECIDED: A2 — strategy; realization shape OPEN)
+
+The STRATEGY is decided: no HTTP inside any transaction, retry-safety via the Stripe idempotency
+key (= `orderId`), every step supervisable. Its REALIZATION reopened when D1 met the actual
+runtime primitive (`complete_fenced` runs the handler inside the transaction; `post_commit` is a
+sync closure): literal two-row A2 moves the synchronous `PaymentDeclined` off `operationStatus`
+onto `paymentStatus` — a client-contract change — while a prepare-outside-tx SINGLE-delivery
+realization keeps the contract byte-identical with the same peak/retry safety. **D1 is blocked on
+this product-owner call** — full analysis under "A2's realization shape" in Unresolved questions.
 
 | | Option | Pros | Cons |
 |---|---|---|---|
