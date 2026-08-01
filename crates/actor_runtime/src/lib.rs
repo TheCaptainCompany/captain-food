@@ -32,7 +32,10 @@ pub mod schedule;
 pub mod worker;
 
 pub use completion::{complete_fenced, CompletionError};
-pub use lease::{claim_due_lanes, heartbeat, release_lane, seed_partitions, steal_lane, Lane};
+pub use lease::{
+    claim_due_lanes, heartbeat, ownership_census, release_lane, seed_partitions, steal_from,
+    steal_lane, Lane, OwnershipCensus,
+};
 pub use message::{Delivery, DeliveryObserver, HandlerVerdict, InboundMessage, MessageHandler, Prepared};
 pub use partition::stable_partition;
 pub use schedule::promote_due;

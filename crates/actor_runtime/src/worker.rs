@@ -9,7 +9,9 @@ use sqlx::PgPool;
 use tokio::sync::Notify;
 
 use crate::completion::{complete_fenced, CompletionError};
-use crate::lease::{claim_due_lanes, heartbeat, release_lane, seed_partitions, Lane};
+use crate::lease::{
+    claim_due_lanes, heartbeat, ownership_census, release_lane, seed_partitions, steal_from, Lane,
+};
 use crate::message::{DeliveryObserver, InboundMessage, MessageHandler};
 
 /// Tuning knobs — the host wires these from ITS configuration source (specs/configuration.yaml:
@@ -114,6 +116,61 @@ impl MailboxWorker {
         }
         self.lanes.lock().await.extend(claimed);
         Ok(n)
+    }
+
+    /// The FAIR-SHARE REBALANCE (PROP-20260728-152752 §3.1, deferred from the #270 review: a
+    /// first instance claims every lane and renews forever, so a second instance would idle
+    /// without this): while this worker holds fewer than `total / instances` lanes (floored) and
+    /// some LIVE peer holds more than that share, steal ONE of the largest peer's lanes — then
+    /// re-take the census and decide again, up to `max_claims_per_pass` steals per pass. Fresh
+    /// census per steal + stop-at-the-floor is what makes this converge instead of thrash: a
+    /// worker at its floor is never a thief, a worker above the floor is always the first
+    /// victim, and no decision is ever made on stale counts. The victim keeps believing until
+    /// its next heartbeat or completion, both of which fail on the bumped `ownership_version` —
+    /// dual belief, never dual authority.
+    ///
+    /// Returns how many lanes were stolen. Only called when a pass claimed nothing — while
+    /// UNCLAIMED lanes exist, [`Self::claim`] is the (cheaper, uncontended) path to fair.
+    pub async fn rebalance(&self) -> sqlx::Result<u64> {
+        let mut stolen = 0u64;
+        while (stolen as i64) < self.config.max_claims_per_pass {
+            let census = ownership_census(&self.pool, &self.actor_type, &self.worker_id).await?;
+            let fair = census.fair_share();
+            if census.mine >= fair {
+                break;
+            }
+            let Some((victim, lanes)) = census.largest_other else {
+                break;
+            };
+            if lanes <= fair {
+                break;
+            }
+            let Some(lane) = steal_from(
+                &self.pool,
+                &self.actor_type,
+                &victim,
+                &self.worker_id,
+                self.config.lease_seconds,
+            )
+            .await?
+            else {
+                // The victim's live lanes vanished under us (concurrent steal / expiry) — a
+                // fresh census next iteration or next pass sorts it out.
+                break;
+            };
+            tracing::info!(
+                worker = %self.worker_id,
+                actor_type = %self.actor_type,
+                partition = lane.partition,
+                from = %victim,
+                mine = census.mine,
+                fair,
+                "mailbox: rebalance -- stole one lane from the largest owner"
+            );
+            self.lanes.lock().await.push(lane);
+            stolen += 1;
+        }
+        Ok(stolen)
     }
 
     /// Renew every owned lease; DROP lanes whose renewal fails (stolen/re-claimed — in-flight
@@ -262,8 +319,19 @@ impl MailboxWorker {
             if let Err(e) = self.promote().await {
                 tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: promotion failed -- retrying next pass");
             }
-            if let Err(e) = self.claim().await {
-                tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: claim failed -- retrying next pass");
+            match self.claim().await {
+                Ok(0) => {
+                    // Nothing claimable — every lane is live-owned. If the spread is unfair
+                    // (deploy overlap, a scaled-up replica set), take one lane from the largest
+                    // owner; the next passes converge the rest.
+                    if let Err(e) = self.rebalance().await {
+                        tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: rebalance failed -- retrying next pass");
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: claim failed -- retrying next pass");
+                }
             }
             if let Err(e) = self.drain().await {
                 tracing::error!(worker = %self.worker_id, error = %e, "mailbox: drain pass failed");
