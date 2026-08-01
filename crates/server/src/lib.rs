@@ -126,7 +126,18 @@ pub fn wire() -> HealthDto {
 /// table (ADR-20260728-143000 follow-up): the worker writes all three on every drain and the quarantine
 /// (`status = 'POISON'` after 10 consecutive failures) depends on the counter, so a build without them
 /// would fail every mark and retry a broken row forever.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260728160000;
+/// `20260731143000` = the ACTOR MAILBOX (`20260731063000` creates `inbound_messages`, `20260731143000`
+/// backfills `inbound_events` into it and DROPS it) plus the enum-text conversions
+/// (`20260730043100`-`20260730043600`). Every flipped resolver and every adapter ACL now enqueues on
+/// `inbound_messages`, so a build without those tables cannot serve a single mutation.
+///
+/// This constant was left at `20260728160000` while those nine migrations landed, which made the
+/// readiness gate INERT for exactly the failure it exists to catch: a new instance would read
+/// `applied >= required`, report `ok`, take traffic, and fail every write on
+/// `relation "inbound_messages" does not exist`. The deploy runbook (ADR-20260730-051500) explicitly
+/// relies on this gate holding the new binary at 503 until `db-migrate` lands — deploy runs FIRST and
+/// the schema follows, so the gate is the only thing covering the window between them.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260731143000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
