@@ -152,3 +152,112 @@ pub(super) async fn flush_pm_rows_in_tx(
     }
     Ok(())
 }
+
+// ================================================================================================
+// B2 — chained PM facts (ADR-20260731-203000 D-B): the Payment lane records the inbound Stripe
+// fact (unchanged), and the SAME completion transaction enqueues a PM-addressed copy on the
+// order's lane, cause-chained to the recording row. In-tx rather than the post-commit hook the
+// decision sketched: atomic with the recorded fact, so no crash window can record a payment and
+// lose its saga hop. The saga runner's Stripe-fact triggers retire behind the same gate.
+// ================================================================================================
+
+/// Which PM lane (if any) one recorded Payment fact chains to, and under which lane key.
+/// `None` = not a chained fact type. The lane key is the ORDER (B2: the PM's identity); when the
+/// fact does not carry it, the run row correlates intent → order; an orphan fact (no run) falls
+/// back to a deterministic surrogate lane so the PM leg still runs — and flags
+/// `PaymentEventOrphaned` on the chained row, supervisable, never silently dropped.
+pub(super) async fn chain_target_of(
+    deps: &CommandDeps,
+    event: &domain::generated::events::DomainEvent,
+) -> Result<Option<(&'static str, uuid::Uuid)>, sqlx::Error> {
+    use domain::generated::events::DomainEvent as E;
+    let by_intent = |intent: &domain::generated::scalars::PaymentIntentId| {
+        let intent = intent.clone();
+        async move {
+            deps.pm_state
+                .by_payment_intent(&intent)
+                .await
+                // A transient lookup failure aborts the delivery (retry) — guessing a lane would
+                // scatter one order's facts across lanes and break per-order serialization.
+                .map_err(|e| sqlx::Error::Protocol(e.to_string()))
+                .map(|row| row.map(|r| r.order_id.0))
+        }
+    };
+    match event {
+        E::PaymentCaptured(e) => {
+            let order = match e.order_id {
+                Some(order_id) => Some(order_id.0),
+                None => by_intent(&e.payment_intent_id).await?,
+            };
+            Ok(Some((
+                "PlaceOrderProcess",
+                order.unwrap_or_else(|| {
+                    super::surrogate_actor_id("PlaceOrderProcess", &e.payment_intent_id.0)
+                }),
+            )))
+        }
+        E::PaymentFailed(e) => Ok(Some((
+            "PlaceOrderProcess",
+            by_intent(&e.payment_intent_id).await?.unwrap_or_else(|| {
+                super::surrogate_actor_id("PlaceOrderProcess", &e.payment_intent_id.0)
+            }),
+        ))),
+        E::PaymentRefunded(e) => Ok(Some(("RefundProcess", e.order_id.0))),
+        _ => Ok(None),
+    }
+}
+
+/// Enqueue the PM-addressed copy INSIDE the completion transaction. Identity is deterministic —
+/// `UUIDv5(lane key, "{factType}:{causing message_id}")` — so a redelivered recording collides on
+/// the pk instead of double-chaining, while two DISTINCT same-type facts for one order (a second
+/// payment attempt's failure, a second partial refund's settlement) each keep their own hop
+/// (the decided `UUIDv5(orderId, factType)` key alone would silently drop the second).
+/// Returns the chained actor type for the post-commit nudge, or `None` when nothing chains.
+pub(super) async fn chain_pm_copy_in_tx(
+    deps: &CommandDeps,
+    tx: &mut Transaction<'_, Postgres>,
+    message: &InboundMessage,
+    event: &domain::generated::events::DomainEvent,
+) -> Result<Option<&'static str>, sqlx::Error> {
+    let Some((actor_type, actor_id)) = chain_target_of(deps, event).await? else {
+        return Ok(None);
+    };
+    // The lane keyspace WIDTH is the actor's seeded registry row count — the same source the
+    // workers seeded from, so the chain can never address a partition no worker drains.
+    let width: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mailbox_partitions WHERE actor_type = $1")
+            .bind(actor_type)
+            .fetch_one(&mut **tx)
+            .await?;
+    if width == 0 {
+        return Err(sqlx::Error::Protocol(format!(
+            "PM fact chaining is on but '{actor_type}' has no seeded lanes — start its worker first"
+        )));
+    }
+    let chained_id = uuid::Uuid::new_v5(
+        &actor_id,
+        format!("{}:{}", message.message_type, message.message_id).as_bytes(),
+    );
+    sqlx::query(
+        "INSERT INTO inbound_messages \
+           (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
+            payload_hash, channel, user_id, user_type, correlation_id, cause_id) \
+         VALUES ($1, 'EVENT', $2, $3, $4, $5, $6, $7, 'WORKER', $8, $9, $10, $11) \
+         ON CONFLICT (message_id) DO NOTHING",
+    )
+    .bind(chained_id)
+    .bind(actor_type)
+    .bind(actor_id)
+    .bind(actor_runtime::stable_partition(&actor_id, width as u16))
+    .bind(&message.message_type)
+    .bind(&message.payload)
+    .bind(&message.payload_hash)
+    .bind(message.user_id)
+    .bind(&message.user_type)
+    .bind(message.correlation_id)
+    // The causality chain: the chained hop's cause is the Payment-lane row that recorded it.
+    .bind(message.message_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(Some(actor_type))
+}

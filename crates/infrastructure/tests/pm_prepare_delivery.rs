@@ -601,3 +601,144 @@ async fn approve_refund_flushes_fact_and_run_row_in_one_commit() {
     assert_eq!(run.get::<String, _>("process_status"), "APPROVED_AWAITING_SETTLEMENT");
     assert_eq!(run.get::<Option<i64>, _>("approved_amount_cents"), Some(500));
 }
+
+/// The full UC1 second half under B2 (ADR-20260731-203000): the Payment lane records the inbound
+/// `PaymentCaptured` AND enqueues the PM-addressed copy in the SAME commit; the PlaceOrderProcess
+/// lane then materializes the order from the frozen checkout — durable, fenced, cause-chained.
+#[tokio::test]
+async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+    seed_checkout_world(&pool, true).await;
+
+    let gateway = Arc::new(StubGateway::default());
+
+    // Leg 1 — the checkout: PlaceOrder through the prepare phase (frozen checkout + PM row).
+    enqueue_pm(&pool, "PlaceOrderProcess", uid(ORDER), 0xA1, "PlaceOrder", place_order_payload(None))
+        .await;
+    let pm_worker = worker_over(&pool, "PlaceOrderProcess", deps_over(&pool, gateway.clone())).await;
+    assert_eq!(drain_all(&pm_worker).await, 1);
+
+    // Leg 2 — the inbound Stripe fact on the Payment lane, with B2 chaining ON.
+    let payment_actor = infrastructure::mailbox::surrogate_actor_id("Payment", "pi_prepare_test");
+    let captured = serde_json::json!({
+        "eventType": "PaymentCaptured",
+        "payload": {
+            "paymentIntentId": "pi_prepare_test",
+            "orderId": uid(ORDER),
+            "restaurantId": uid(RESTAURANT),
+            "amount": { "amountCents": 1960, "currency": "EUR" },
+        }
+    });
+    let fact_id = uid(0xFAC7);
+    sqlx::query(
+        "INSERT INTO inbound_messages \
+           (message_id, kind, actor_type, actor_id, partition, message_type, payload, payload_hash, \
+            channel, user_type, correlation_id, source, external_id) \
+         VALUES ($1, 'EVENT', 'Payment', $2, $3, 'PaymentCaptured', $4, 'hFACT', 'EXTERNAL', \
+                 'EXTERNAL', $1, 'stripe', 'evt_1')",
+    )
+    .bind(fact_id)
+    .bind(payment_actor)
+    .bind(actor_runtime::stable_partition(&payment_actor, 100))
+    .bind(&captured)
+    .execute(&pool)
+    .await
+    .expect("enqueue payment fact");
+
+    // The Payment lane's worker, WITH B2 chaining on: the recorded fact must chain in-tx.
+    let chaining_handler = Arc::new(
+        MailboxCommandHandler::new(deps_over(&pool, gateway.clone())).with_pm_fact_chaining(true),
+    );
+    let chained_worker = MailboxWorker::new(
+        pool.clone(),
+        "w-PAY",
+        "Payment",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        chaining_handler,
+    );
+    chained_worker.seed(100).await.expect("seed payment lanes");
+    chained_worker.claim().await.expect("claim payment lanes");
+    assert_eq!(drain_all(&chained_worker).await, 1, "the payment fact delivers");
+
+    // The fact is recorded on the Payment stream AND the chained hop exists — one commit.
+    let recorded: i64 = sqlx::query(
+        "SELECT count(*) AS n FROM domain_events WHERE stream_name = 'Payment-pi_prepare_test' \
+         AND event_type = 'PaymentCaptured'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count")
+    .get("n");
+    assert_eq!(recorded, 1);
+    let chained = sqlx::query(
+        "SELECT message_id, actor_id, cause_id, status FROM inbound_messages \
+         WHERE actor_type = 'PlaceOrderProcess' AND kind = 'EVENT' AND message_type = 'PaymentCaptured'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the chained PM copy exists");
+    assert_eq!(chained.get::<uuid::Uuid, _>("actor_id"), uid(ORDER), "lane = the order");
+    assert_eq!(chained.get::<Option<uuid::Uuid>, _>("cause_id"), Some(fact_id), "cause-chained");
+    let chained_id: uuid::Uuid = chained.get("message_id");
+    assert_eq!(
+        chained_id,
+        uuid::Uuid::new_v5(&uid(ORDER), format!("PaymentCaptured:{fact_id}").as_bytes()),
+        "deterministic chain identity"
+    );
+
+    // Leg 3 — the PM lane delivers the chained copy: OrderPlaced + CartCheckedOut + resolved run.
+    pm_worker.claim().await.expect("re-claim pm lanes");
+    assert_eq!(drain_all(&pm_worker).await, 1, "the chained hop delivers");
+
+    let order_events: Vec<String> = sqlx::query(
+        "SELECT event_type FROM domain_events WHERE stream_name = $1 ORDER BY version",
+    )
+    .bind(format!("Order-{}", uid(ORDER)))
+    .fetch_all(&pool)
+    .await
+    .expect("order stream")
+    .iter()
+    .map(|r| r.get("event_type"))
+    .collect();
+    assert_eq!(order_events, vec!["OrderPlaced".to_string()], "the order materialized");
+    let cart_status: Vec<String> = sqlx::query(
+        "SELECT event_type FROM domain_events WHERE stream_name = $1 ORDER BY version",
+    )
+    .bind(format!("Cart-{}", uid(CART)))
+    .fetch_all(&pool)
+    .await
+    .expect("cart stream")
+    .iter()
+    .map(|r| r.get("event_type"))
+    .collect();
+    assert!(cart_status.contains(&"CartCheckedOut".to_string()), "{cart_status:?}");
+    let run = sqlx::query(
+        "SELECT process_status, payment_status, client_secret FROM payment_process_manager WHERE cart_id = $1",
+    )
+    .bind(uid(CART))
+    .fetch_one(&pool)
+    .await
+    .expect("run row");
+    assert_eq!(run.get::<String, _>("process_status"), "ORDER_PLACED");
+    assert_eq!(run.get::<String, _>("payment_status"), "CAPTURED");
+    assert_eq!(run.get::<Option<String>, _>("client_secret"), None, "spent credential NULLed");
+
+    // Redelivering the chained hop is benign: the run row's expect skips it (IGNORED).
+    sqlx::query("UPDATE inbound_messages SET status = 'RECEIVED', completed_at = NULL WHERE message_id = $1")
+        .bind(chained_id)
+        .execute(&pool)
+        .await
+        .expect("force redelivery");
+    assert_eq!(drain_all(&pm_worker).await, 1);
+    let redelivered: String =
+        sqlx::query("SELECT status FROM inbound_messages WHERE message_id = $1")
+            .bind(chained_id)
+            .fetch_one(&pool)
+            .await
+            .expect("row")
+            .get("status");
+    assert_eq!(redelivered, "IGNORED", "a re-delivered capture is a benign skip");
+}
