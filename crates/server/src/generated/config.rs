@@ -448,78 +448,78 @@ impl Config {
         let web_assets_dir = web_assets_dir.unwrap_or_else(|| "/app/web-assets".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
         if let Some(v) = Some(database_url.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^postgres(ql)?://", v) {
-                problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: r"^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
+            if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
+                problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
             }
         }
         if let Some(v) = Some(supabase_url.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "SUPABASE_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "SUPABASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Supabase Auth base URL for the passwordless OTP/magic-link flows. Unset, the identity service is the fail-closed stand-in and every login is refused." });
             }
         }
         if let Some(v) = Some(supabase_jwks_url.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "SUPABASE_JWKS_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous." });
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "SUPABASE_JWKS_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "JWKS endpoint used to verify Supabase-issued JWTs. Unset, tokens cannot be verified and every authenticated request falls back to anonymous." });
             }
         }
         if let Some(v) = Some(auth_session_key.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", v) {
-                problems.invalid.push(InvalidKey { name: "AUTH_SESSION_KEY", scalar: "AuthSessionKey", pattern: r"^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", gates: "AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest. Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login." });
+            if !v.is_empty() && !matches_pattern("^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", v) {
+                problems.invalid.push(InvalidKey { name: "AUTH_SESSION_KEY", scalar: "AuthSessionKey", pattern: "^([0-9a-fA-F]{64}|[A-Za-z0-9+/]{43}=)$", gates: "AES-256-GCM key (32 bytes, 64 hex chars or base64) encrypting parked auth sessions at rest. Unset OR malformed, the store is the no-op: parking succeeds, claiming yields nothing, and login SILENTLY degrades to anonymous-only. Rotating it invalidates every in-flight login." });
             }
         }
         if let Some(v) = Some(stripe_secret_key.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^sk_(test|live)_[A-Za-z0-9]+$", v) {
-                problems.invalid.push(InvalidKey { name: "STRIPE_SECRET_KEY", scalar: "StripeSecretKey", pattern: r"^sk_(test|live)_[A-Za-z0-9]+$", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
+            if !v.is_empty() && !matches_pattern("^sk_(test|live)_[A-Za-z0-9]+$", v) {
+                problems.invalid.push(InvalidKey { name: "STRIPE_SECRET_KEY", scalar: "StripeSecretKey", pattern: "^sk_(test|live)_[A-Za-z0-9]+$", gates: "Stripe API key for PaymentIntents. Unset, the payment gateway is the fail-closed stand-in and no checkout can complete. The `sk_test_` / `sk_live_` prefix determines the MODE, which is reported (never the key) so \"is production actually live?\" is answerable." });
             }
         }
         if let Some(v) = Some(stripe_webhook_secret.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^whsec_[A-Za-z0-9_-]+$", v) {
-                problems.invalid.push(InvalidKey { name: "STRIPE_WEBHOOK_SECRET", scalar: "StripeWebhookSecret", pattern: r"^whsec_[A-Za-z0-9_-]+$", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
+            if !v.is_empty() && !matches_pattern("^whsec_[A-Za-z0-9_-]+$", v) {
+                problems.invalid.push(InvalidKey { name: "STRIPE_WEBHOOK_SECRET", scalar: "StripeWebhookSecret", pattern: "^whsec_[A-Za-z0-9_-]+$", gates: "HMAC secret verifying `POST /adapters/stripe/webhooks` signatures. Unset, the endpoint fails closed (503) and PaymentCaptured NEVER REACHES THE DOMAIN — the customer is charged and the restaurant is never told. Stripe issues a DIFFERENT secret per mode: it must be switched together with STRIPE_SECRET_KEY." });
             }
         }
         if let Some(v) = honeycomb_api_key.as_deref() {
-            if !v.is_empty() && !matches_pattern(r"^[A-Za-z0-9_]{20,120}$", v) {
-                problems.invalid.push(InvalidKey { name: "HONEYCOMB_API_KEY", scalar: "HoneycombIngestKey", pattern: r"^[A-Za-z0-9_]{20,120}$", gates: "Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is not constructed at all and the app runs with local structured logs only — every span is built and dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation. This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and Query API use) has a different shape and is rejected at startup rather than failing as an opaque 401 on the first export." });
+            if !v.is_empty() && !matches_pattern("^[A-Za-z0-9_]{20,120}$", v) {
+                problems.invalid.push(InvalidKey { name: "HONEYCOMB_API_KEY", scalar: "HoneycombIngestKey", pattern: "^[A-Za-z0-9_]{20,120}$", gates: "Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is not constructed at all and the app runs with local structured logs only — every span is built and dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation. This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and Query API use) has a different shape and is rejected at startup rather than failing as an opaque 401 on the first export." });
             }
         }
         if let Some(v) = Some(honeycomb_api_endpoint.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "HONEYCOMB_API_ENDPOINT", scalar: "HttpsUrl", pattern: r"^https?://", gates: "OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an account that does not hold the key and telemetry is silently absent." });
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "HONEYCOMB_API_ENDPOINT", scalar: "HttpsUrl", pattern: "^https?://", gates: "OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an account that does not hold the key and telemetry is silently absent." });
             }
         }
         if let Some(v) = Some(otel_traces_sample_ratio.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^(0(\\.[0-9]+)?|1(\\.0+)?)$", v) {
-                problems.invalid.push(InvalidKey { name: "OTEL_TRACES_SAMPLE_RATIO", scalar: "TraceSampleRatio", pattern: r"^(0(\\.[0-9]+)?|1(\\.0+)?)$", gates: "Head-sampling probability, parent-respecting. Baked at `1.0` (keep everything) because PROP-170500 D2's reasoning holds at V0 volume: \"head-sampling would mostly discard the interesting traces\". This is the dial to turn DOWN if ingest cost becomes real — turning it down before there is volume buys nothing and loses the traces that explain the incidents. Set to 0 and traces stop; the metrics and logs continue, so the app looks healthy while being undiagnosable." });
+            if !v.is_empty() && !matches_pattern("^(0(\\.[0-9]+)?|1(\\.0+)?)$", v) {
+                problems.invalid.push(InvalidKey { name: "OTEL_TRACES_SAMPLE_RATIO", scalar: "TraceSampleRatio", pattern: "^(0(\\.[0-9]+)?|1(\\.0+)?)$", gates: "Head-sampling probability, parent-respecting. Baked at `1.0` (keep everything) because PROP-170500 D2's reasoning holds at V0 volume: \"head-sampling would mostly discard the interesting traces\". This is the dial to turn DOWN if ingest cost becomes real — turning it down before there is volume buys nothing and loses the traces that explain the incidents. Set to 0 and traces stop; the metrics and logs continue, so the app looks healthy while being undiagnosable." });
             }
         }
         if let Some(v) = Some(log_level.as_str()) {
-            if !v.is_empty() && !matches_pattern(r"^(?i)(trace|debug|info|warn|error)$", v) {
-                problems.invalid.push(InvalidKey { name: "LOG_LEVEL", scalar: "LogLevel", pattern: r"^(?i)(trace|debug|info|warn|error)$", gates: "Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default." });
+            if !v.is_empty() && !matches_pattern("^(?i)(trace|debug|info|warn|error)$", v) {
+                problems.invalid.push(InvalidKey { name: "LOG_LEVEL", scalar: "LogLevel", pattern: "^(?i)(trace|debug|info|warn|error)$", gates: "Minimum severity for the structured JSON log layer. At `error` the boot report and every worker lifecycle line disappear, which is how a paused pipeline becomes invisible (issue #220) — so the baked value stays `info` and `debug` is an incident tool, not a default." });
             }
         }
         if let Some(v) = avelo37_api_base_url.as_deref() {
-            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "AVELO37_API_BASE_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "Base-URL override pointing the client at a staging or mock Avelo37. Unset, the client uses its own production constant -- hence no `default` here, which would duplicate it." });
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "AVELO37_API_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Base-URL override pointing the client at a staging or mock Avelo37. Unset, the client uses its own production constant -- hence no `default` here, which would duplicate it." });
             }
         }
         if let Some(v) = uber_direct_base_url.as_deref() {
-            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "UBER_DIRECT_BASE_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "API base-URL override (tests point this at a local mock). Unset, the adapter's own production constant applies -- no `default` here for the same reason." });
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "UBER_DIRECT_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "API base-URL override (tests point this at a local mock). Unset, the adapter's own production constant applies -- no `default` here for the same reason." });
             }
         }
         if let Some(v) = uber_direct_token_url.as_deref() {
-            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "UBER_DIRECT_TOKEN_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "OAuth2 token-endpoint override. Unset, the adapter's own constant applies." });
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "UBER_DIRECT_TOKEN_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "OAuth2 token-endpoint override. Unset, the adapter's own constant applies." });
             }
         }
         if let Some(v) = hubrise_api_base_url.as_deref() {
-            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "HUBRISE_API_BASE_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies." });
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "HUBRISE_API_BASE_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "HubRise API base-URL override (mock/staging). Unset, the adapter's own constant applies." });
             }
         }
         if let Some(v) = hubrise_connect_redirect_url.as_deref() {
-            if !v.is_empty() && !matches_pattern(r"^https?://", v) {
-                problems.invalid.push(InvalidKey { name: "HUBRISE_CONNECT_REDIRECT_URL", scalar: "HttpsUrl", pattern: r"^https?://", gates: "Public URL HubRise redirects back to after consent (this deployable's `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent." });
+            if !v.is_empty() && !matches_pattern("^https?://", v) {
+                problems.invalid.push(InvalidKey { name: "HUBRISE_CONNECT_REDIRECT_URL", scalar: "HttpsUrl", pattern: "^https?://", gates: "Public URL HubRise redirects back to after consent (this deployable's `/adapters/hubrise/oauth/callback`). Unset, the connect flow returns 503 rather than starting an OAuth round-trip it cannot finish. It must match the redirect registered on the HubRise app EXACTLY — a mismatch fails at HubRise's end, after the restaurant has already given consent." });
             }
         }
         (

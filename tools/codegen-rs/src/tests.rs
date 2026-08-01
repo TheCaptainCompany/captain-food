@@ -1572,6 +1572,75 @@ keys:
     }
 
     #[test]
+    /// The generated config reader must enforce the pattern the SPEC declares -- byte for byte.
+    ///
+    /// It did not. The emitter escaped each pattern for a normal Rust string literal
+    /// (`\\` -> `\\\\`) and then wrote it into a RAW one (`r"..."`), where escapes are not processed.
+    /// So `^(0(\\.[0-9]+)?|1(\\.0+)?)$` reached the regex engine with a LITERAL backslash in it and could
+    /// never match `1.0` -- the app reported its own baked, valid default as INVALID. On the
+    /// `development` profile that is a warning and the boot continues; on **production and staging the
+    /// boot is REFUSED**, so this was a latent production-boot blocker that only stayed hidden because
+    /// production was running the development profile.
+    ///
+    /// `make validate` cannot catch it: the validator compiles the DECODED pattern from the spec and is
+    /// perfectly happy. The defect exists only in the emitted text, which is exactly what this asserts.
+    #[test]
+    fn generated_config_patterns_match_the_spec_byte_for_byte() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let generated = std::fs::read_to_string(root.join("crates/server/src/generated/config.rs"))
+            .expect("generated config reader must exist -- run `make generate`");
+        let scalars = std::fs::read_to_string(root.join("specs/scalars.yaml"))
+            .expect("specs/scalars.yaml must exist");
+        let scalars: serde_yaml::Value =
+            serde_yaml::from_str(&scalars).expect("scalars.yaml parses");
+
+        // The raw-literal form is the bug itself: escapes written for a normal literal, emitted where
+        // they are taken verbatim. Pinned directly so a revert fails loudly rather than subtly.
+        assert!(
+            !generated.contains("matches_pattern(r\"") && !generated.contains("pattern: r\""),
+            "config patterns must be emitted as NORMAL string literals -- a raw literal takes the \
+             emitter's escaping verbatim and doubles every backslash in the regex"
+        );
+
+        // `scalar: "NAME", pattern: "LITERAL"` -- LITERAL may contain escaped quotes.
+        let re = regex::Regex::new(r#"scalar: "([A-Za-z0-9_]+)", pattern: "((?:[^"\\]|\\.)*)""#)
+            .expect("extractor compiles");
+        let found: Vec<_> = re.captures_iter(&generated).collect();
+        assert!(
+            !found.is_empty(),
+            "no pattern literals found in the generated reader -- the extractor or the emitted shape \
+             changed, and a silently-empty guard is worse than none"
+        );
+
+        for c in found {
+            let name = &c[1];
+            // Undo Rust's normal-string escaping to recover what the regex engine actually receives.
+            let mut actual = String::new();
+            let mut chars = c[2].chars();
+            while let Some(ch) = chars.next() {
+                if ch == '\\' {
+                    match chars.next() {
+                        Some(next) => actual.push(next), // \\ -> \ , \" -> "
+                        None => actual.push(ch),
+                    }
+                } else {
+                    actual.push(ch);
+                }
+            }
+            let expected = scalars
+                .get(name)
+                .and_then(|s| s.get("pattern"))
+                .and_then(|p| p.as_str())
+                .unwrap_or_else(|| panic!("scalar {name} has no pattern in scalars.yaml"));
+            assert_eq!(
+                actual, expected,
+                "scalar {name}: the generated reader enforces a DIFFERENT regex than the spec declares"
+            );
+            regex::Regex::new(&actual)
+                .unwrap_or_else(|e| panic!("scalar {name}: emitted pattern does not compile: {e}"));
+        }
+    }
+
     fn makefile_recipe_lines_are_ascii() {
         // CARGO_MANIFEST_DIR (= tools/codegen-rs) is the one anchor that holds both locally and
         // in CI; the repo Makefile is two levels up. A guard that silently no-ops when it cannot
