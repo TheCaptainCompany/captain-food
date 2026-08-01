@@ -266,3 +266,17 @@ RefundResolutionCappedAtCaptured:
   description: >
     A refund resolution can never refund more than the order's captured total; a PARTIAL_REFUND amount
     over the captured total is rejected before any Stripe refund is driven (#207).
+
+# --- Order retention & deletion (GDPR pilot: ADR-20260731-153000/-160000/-214500, #272) ---
+TerminalOrderSchedulesItsExpiry:
+  description: >
+    Every order reaching a terminal state (delivered, rejected or cancelled) schedules its
+    OrderExpired reminder ORDER_RETENTION_WINDOW_DAYS out. One pending expiry per order — the
+    deterministic reminder identity guarantees it: a later terminal fact postpones the SAME
+    scheduled row in place, it never duplicates it (ADR-20260731-150500, #272).
+OrderExpiryIsRecordedNeverRejected:
+  description: >
+    Delivering the due OrderExpired reminder records the fact with record semantics: Recorded the
+    first time, a benign no-op when the order is already expired — a retention deadline's passage
+    cannot be refused, so REJECTED is not a possible verdict for this delivery
+    (ADR-20260731-153000 §1a, #272).

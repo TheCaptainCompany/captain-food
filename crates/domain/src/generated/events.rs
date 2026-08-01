@@ -1038,6 +1038,24 @@ pub struct CustomerCreditConsumed {
     pub order_id: OrderId,
 }
 
+/// The order's retention window elapsed — at this moment the order IS expired: no discussion, no rejection possible (ADR-20260731-153000 §1a: a FACT, never a command). Scheduled by the Order actor's OrderExpired reminder when a terminal lifecycle fact is recorded (`schedules:` on the terminal receives, ADR-20260731-214500 §2), delivered by the promotion pass when due, and recorded with record semantics (Recorded, or Ignored/Duplicate — never Rejected). Recording it starts the order's exit from the system (ADR-20260731-160000): projections fold it to tombstone their rows, and the generic deletion engine reacts to the recorded fact with the journey that ends in the OrderDeleted receipt. The erasure ACTION on this recording is a STUB until the engine's journey lands (#194 "GDPR erasure").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderExpired {
+    pub order_id: OrderId,
+}
+
+/// The deletion receipt (ADR-20260731-160000 §6): recorded on the DELETION LEDGER stream — never on the (about-to-be / already deleted) order streams — when the generic deletion engine's journey completes (projection checkpoints verified → technical tombstone appended → streams deleted from domain_events + domain_stream). Carries PSEUDONYMOUS domain references only: whose order was erased must remain answerable (GDPR accountability), but never the erased personal payloads (address, phone, conversation content — those are gone).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderDeleted {
+    pub order_id: OrderId,
+    pub restaurant_id: RestaurantId,
+    pub customer_id: Option<CustomerId>,
+    pub policy: String,
+    pub tombstone_event_id: Option<String>,
+}
+
 /// Every business event as a typed, adjacently-tagged union: `{ "eventType": <name>, "payload": { … } }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "eventType", content = "payload")]
@@ -1149,4 +1167,6 @@ pub enum DomainEvent {
     ReclamationEvidenceAttached(ReclamationEvidenceAttached),
     CustomerCreditGranted(CustomerCreditGranted),
     CustomerCreditConsumed(CustomerCreditConsumed),
+    OrderExpired(OrderExpired),
+    OrderDeleted(OrderDeleted),
 }

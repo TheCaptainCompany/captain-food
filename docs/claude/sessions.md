@@ -44,6 +44,13 @@ not compiled dependencies. `find target/debug/deps -maxdepth 1 -type f -size +50
 costs a full recompile of ~200 crates. Two ENOSPC build failures in one session were both cured by
 this plus dropping `incremental/`.
 
+**Don't flip `CARGO_INCREMENTAL` mid-session (2026-08-01):** toggling it changes the crate
+metadata hashes, so the next build writes a SECOND full set of workspace artifacts next to the
+old one — flipping to `0` right after deleting `incremental/` re-exhausted the allowance during
+the very build meant to save space. Pick one mode for the whole session; if you must switch,
+delete the workspace-crate artifacts (`lib{server,web,application,infrastructure,domain,…}-*`
+and the test binaries in `deps/`) in the same breath.
+
 Never tell the user the container is unrecoverable — clean up first; a fresh session is the fallback,
 not the first move.
 

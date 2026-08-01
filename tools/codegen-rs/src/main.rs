@@ -1168,6 +1168,21 @@ fn validate(model: &Model) -> Report {
     }
     let mut produced_events: BTreeSet<String> = emitted_events.clone();
     produced_events.extend(consumed_events.iter().cloned());
+    // Declarative deletion (ADR-20260731-214500): the generic engine RECORDS each declared
+    // `receipt` fact (on the deletion ledger) and CONSUMES each trigger/undo fact — a fact that
+    // exists only in a `deletion:` block is engine vocabulary, not an orphan.
+    for d in parse_deletions(model) {
+        if let Some(e) = d.receipt_ref.as_deref().and_then(ref_name) {
+            produced_events.insert(e);
+        }
+        for t in &d.triggers {
+            for r in t.on.iter().chain(t.cancelled_on.iter()) {
+                if let Some(e) = ref_name(r) {
+                    produced_events.insert(e);
+                }
+            }
+        }
+    }
     for e in map_keys(model.defs.get("events.yaml")) {
         if !produced_events.contains(&e) {
             issues.push(warn(
@@ -5053,13 +5068,21 @@ fn validate_reminders_and_deletion(model: &Model, issues: &mut Vec<Issue>) {
     // ---- deletion blocks ----
     for d in &deletions {
         let at = format!("actors.yaml/{}/deletion", d.actor);
-        // The actor's declared state fields — what a `match.state` may bind to.
-        let state_fields: BTreeSet<String> = actors
+        // The actor's declared state fields — what a `match.state` may bind to. The typed
+        // `identity` ref IMPLICITLY declares its field (the stream key exists before any fold,
+        // same doctrine as `is_implicit_identity_state_ref`), so a self-trigger may match on it
+        // without forcing an explicit `state:` entry into the aggregate.
+        let mut state_fields: BTreeSet<String> = actors
             .get(d.actor.as_str())
             .and_then(|n| n.get("state"))
             .and_then(|s| s.as_mapping())
             .map(|m| m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect())
             .unwrap_or_default();
+        if let Some(f) =
+            actors.get(d.actor.as_str()).and_then(|n| actor_identity_field(n, &d.actor))
+        {
+            state_fields.insert(f);
+        }
         match &d.receipt_ref {
             None => issues.push(err(
                 "deletion-ref-unresolved",
@@ -10357,6 +10380,40 @@ fn emit_config(model: &Model) -> String {
     }
     out.push_str("            },\n            problems,\n        )\n    }\n\n");
 
+    // ---- Reminder / deletion windows (ADR-20260731-214500) ------------------------------------
+    // Every configuration key an actors.yaml `reminders.*.after` or `deletion.triggers[*].after`
+    // names, resolved to its runtime value — what the composition root hands the mailbox delivery
+    // glue and the deletion engine. Generated so a new window key can never silently miss the
+    // hand-off (the map grows with the declaration, not with someone remembering).
+    {
+        let mut window_keys: BTreeSet<String> = BTreeSet::new();
+        for r in parse_reminders(model) {
+            if let Some(k) = r.after_ref.as_deref().and_then(config_key_ref_name) {
+                window_keys.insert(k);
+            }
+        }
+        for d in parse_deletions(model) {
+            for t in &d.triggers {
+                if let Some(k) = t.after_ref.as_deref().and_then(config_key_ref_name) {
+                    window_keys.insert(k);
+                }
+            }
+        }
+        out.push_str(
+            "    /// The declared reminder/deletion window keys (actors.yaml `after:` refs), each with its\n\
+             \x20   /// resolved runtime value in DAYS — handed to the mailbox delivery glue so scheduling\n\
+             \x20   /// reads configuration, never a constant (ADR-20260731-214500).\n\
+             \x20   pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, i64> {\n\
+             \x20       [\n",
+        );
+        for k in &window_keys {
+            let declared = keys.iter().any(|c| &c.name == k);
+            assert!(declared, "config: window key {} named by actors.yaml is not a server-consumed configuration key", k);
+            out.push_str(&format!("            (\"{}\", self.{}),\n", k, field(k)));
+        }
+        out.push_str("        ]\n        .into_iter()\n        .collect()\n    }\n\n");
+    }
+
     // ---- Boot report -------------------------------------------------------------------------
     out.push_str(
         "    /// What actually resolved, for the boot log. Secrets render as `set` / `unset`, never as a\n\
@@ -12454,6 +12511,96 @@ fn emit_infra_deletion_policy(model: &Model) -> Option<String> {
     }
     out.push_str("];\n");
     Some(out)
+}
+
+/// Emit `crates/application/src/generated/reminders.rs` — the scheduling table the `schedules:`
+/// declarations expand to (ADR-20260731-214500 §2): per (actor, received message), the reminders a
+/// SUCCESSFUL delivery (re)declares. The mailbox delivery glue applies it inside the completion
+/// transaction; the generated behaviour tests assert it as the handler's third observable effect.
+/// Always emitted (an empty catalog renders an empty table) so the hand-written
+/// `application::reminders` runtime compiles against a stable module.
+fn emit_app_reminders(model: &Model) -> String {
+    let actors = parse_actors(model);
+    let reminders = parse_reminders(model);
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/actors.yaml `reminders:` + `schedules:`\n// declarations (ADR-20260731-214500 §2) — do not edit by hand. One row per (actor, received\n// message, reminder): a SUCCESSFUL delivery of `on_message` (re)declares the reminder — the\n// handler's third observable effect, applied by the mailbox delivery glue inside the completion\n// transaction and asserted by the generated behaviour tests (schedule + reschedule-in-place,\n// ADR-20260731-150500).\n\n/// One declared scheduling effect.\npub struct ReminderSchedule {\n    pub actor_type: &'static str,\n    /// The receives message (command or event name) whose successful delivery schedules.\n    pub on_message: &'static str,\n    /// The reminder's name — the identity axis: `message_id = UUIDv5(actor_id, reminder)`.\n    pub reminder: &'static str,\n    /// The payload FACT type (events.yaml vocabulary) recorded at delivery (ADR-20260731-153000 §1a).\n    pub payload_event: &'static str,\n    /// The actor's identity property — the single payload field of the reminder fact.\n    pub identity_prop: &'static str,\n    /// configuration.yaml key naming the window, in DAYS (`_DAYS` suffix enforced at generation).\n    pub after_days_key: &'static str,\n    /// The key's spec default — what the behaviour tests schedule with; production reads Config.\n    pub after_default_days: i64,\n}\n\npub const REMINDER_SCHEDULES: &[ReminderSchedule] = &[\n",
+    );
+    for actor in &actors {
+        for entry in &actor.receives {
+            let on_message = match reminder_ref_parts(&entry.message_ref) {
+                Some((_, rname)) => {
+                    reminder_payload_event(model, &entry.message_ref).unwrap_or(rname)
+                }
+                None => match ref_name(&entry.message_ref) {
+                    Some(m) => m,
+                    None => continue,
+                },
+            };
+            for sref in &entry.schedules {
+                let Some((ractor, rname)) = reminder_ref_parts(sref) else { continue };
+                let Some(rem) = reminders.iter().find(|r| r.actor == ractor && r.name == rname)
+                else {
+                    continue; // §2f `schedules-unresolved` owns the report; generation stays quiet.
+                };
+                let payload_event = ref_name(&rem.payload_ref).unwrap_or_else(|| {
+                    panic!("reminders: {}/{} payload ref unresolved", ractor, rname)
+                });
+                // The generic payload builder fills the identity property ALONE — a reminder fact
+                // requiring more would be silently under-filled at delivery, so fail generation.
+                let identity = model
+                    .defs
+                    .get("actors.yaml")
+                    .and_then(|m| m.get(actor.name.as_str()))
+                    .and_then(|def| actor_identity_field(def, &actor.name))
+                    .unwrap_or_else(|| {
+                        panic!("reminders: actor {} schedules {} but declares no typed identity", actor.name, rname)
+                    });
+                if let Some(props) = resolve_ref(model, &rem.payload_ref, "actors.yaml")
+                    .and_then(|d| d.get("required"))
+                    .and_then(|r| r.as_sequence())
+                {
+                    for p in props.iter().filter_map(|v| v.as_str()) {
+                        assert_eq!(
+                            p,
+                            identity.as_str(),
+                            "reminders: {}'s payload fact {} requires property '{}' — the generic builder fills only the identity ('{}'); extend the builder before declaring it",
+                            rname, payload_event, p, identity
+                        );
+                    }
+                }
+                let after_key = rem
+                    .after_ref
+                    .as_deref()
+                    .and_then(config_key_ref_name)
+                    .unwrap_or_else(|| {
+                        panic!("reminders: {}/{} declares no `after` window — a scheduled receive needs one until dynamic scheduling has a use case", ractor, rname)
+                    });
+                assert!(
+                    after_key.ends_with("_DAYS"),
+                    "reminders: window key {} must be day-granular (`_DAYS`) — extend the emitter for other units when a use case lands",
+                    after_key
+                );
+                let default_days = model
+                    .defs
+                    .get("configuration.yaml")
+                    .and_then(|c| c.get("keys"))
+                    .and_then(|k| k.get(after_key.as_str()))
+                    .and_then(|k| k.get("default"))
+                    .and_then(|d| d.as_i64())
+                    .unwrap_or_else(|| {
+                        panic!("reminders: configuration key {} has no integer default", after_key)
+                    });
+                out.push_str(&format!(
+                    "    ReminderSchedule {{ actor_type: \"{}\", on_message: \"{}\", reminder: \"{}\", payload_event: \"{}\", identity_prop: \"{}\", after_days_key: \"{}\", after_default_days: {} }},\n",
+                    actor.name, on_message, rname, payload_event, identity, after_key, default_days
+                ));
+            }
+        }
+    }
+    out.push_str(
+        "];\n\n/// The reminders a successful delivery of `on_message` to `actor_type` (re)declares.\npub fn reminder_schedules_for(\n    actor_type: &str,\n    on_message: &str,\n) -> impl Iterator<Item = &'static ReminderSchedule> {\n    let (actor_type, on_message) = (actor_type.to_owned(), on_message.to_owned());\n    REMINDER_SCHEDULES\n        .iter()\n        .filter(move |s| s.actor_type == actor_type && s.on_message == on_message)\n}\n",
+    );
+    out
 }
 
 /// Emit `crates/server/src/graphql/generated/subscription.rs` — the `SubscriptionRoot`, mirroring
@@ -14741,6 +14888,33 @@ fn bt_pm_event_call(pm: &str, event: &str) -> String {
 /// Emit `crates/application/src/generated/behaviour_tests.rs`.
 fn emit_behaviour_tests(model: &Model) -> String {
     let owners = bt_event_owners(model);
+    // (actor, inbox message) → reminder names its receive `schedules:` (ADR-20260731-214500 §2):
+    // every curated test whose WHEN hits such a receive also asserts the scheduling effect —
+    // schedule at +window, then reschedule IN PLACE (ADR-20260731-150500) — as generated code.
+    let mut schedules_of: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for a in &parse_actors(model) {
+        for e in &a.receives {
+            if e.schedules.is_empty() {
+                continue;
+            }
+            let msg = match reminder_ref_parts(&e.message_ref) {
+                Some((_, rname)) => {
+                    reminder_payload_event(model, &e.message_ref).unwrap_or(rname)
+                }
+                None => match ref_name(&e.message_ref) {
+                    Some(m) => m,
+                    None => continue,
+                },
+            };
+            let names: Vec<String> = e
+                .schedules
+                .iter()
+                .filter_map(|r| reminder_ref_parts(r))
+                .map(|(_, n)| n)
+                .collect();
+            schedules_of.entry((a.name.clone(), msg)).or_default().extend(names);
+        }
+    }
     let tests_doc = model.defs.get("tests.yaml").expect("tests.yaml");
     let fixtures = tests_doc.get("fixtures").and_then(|f| f.as_mapping()).cloned().unwrap_or_default();
     let tests = tests_doc.get("tests").and_then(|t| t.as_mapping()).cloned().unwrap_or_default();
@@ -14999,6 +15173,35 @@ fn emit_behaviour_tests(model: &Model) -> String {
                     key,
                     expected.join(",\n        ")
                 ));
+            }
+            // The handler's third observable effect (ADR-20260731-214500 §2): a receive declaring
+            // `schedules:` also asserts, in the SAME accepted-case test, that the reminder lands
+            // SCHEDULED at +window and that re-declaring postpones the ONE pending row in place.
+            if let Some(names) = schedules_of.get(&(actor.clone(), msg.clone())) {
+                let (agg, id_prop, uuid_keyed) = bt_agg(&actor).unwrap_or_else(|| {
+                    panic!("behaviour-tests: {}: schedules on non-aggregate actor {}", key, actor)
+                });
+                assert!(
+                    uuid_keyed,
+                    "behaviour-tests: {}: scheduling assertions only support uuid-keyed aggregates (got {}) — extend when a use case lands",
+                    key, agg
+                );
+                let id = wdata
+                    .get(id_prop)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_else(|| {
+                        panic!("behaviour-tests: {}: when.data lacks '{}' — the scheduling assertion needs the instance id", key, id_prop)
+                    });
+                for rname in names {
+                    out.push_str(&format!(
+                        "    // schedules: {rname} — the third observable effect (ADR-20260731-214500 §2)\n    {{\n        use crate::mailbox::MailboxScheduleOutcome;\n        let mailbox = crate::mailbox::mem::MemMailbox::default();\n        let actor_id = support::uid(\"{id}\");\n        let spec = crate::generated::reminders::reminder_schedules_for(\"{actor}\", \"{msg}\")\n            .find(|s| s.reminder == \"{rname}\")\n            .expect(\"{key}: schedule declared in actors.yaml\");\n        let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);\n        let first = crate::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)\n            .await\n            .expect(\"{key}: declare\");\n        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), \"{key}: expected a fresh SCHEDULED row, got {{first:?}}\");\n        let row = crate::reminders::reminder_message_id(actor_id, spec.reminder);\n        assert_eq!(mailbox.scheduled_at(row), Some(t1), \"{key}: due at +window\");\n        let t2 = t1 + chrono::Duration::days(1);\n        let again = crate::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)\n            .await\n            .expect(\"{key}: redeclare\");\n        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), \"{key}: re-declaring must postpone the SAME row (ADR-20260731-150500), got {{again:?}}\");\n        assert_eq!(mailbox.scheduled_at(row), Some(t2), \"{key}: the pending occurrence moved in place\");\n        assert_eq!(mailbox.entries().len(), 1, \"{key}: one pending occurrence per (actor, purpose)\");\n    }}\n",
+                        rname = rname,
+                        id = id,
+                        actor = actor,
+                        msg = msg,
+                        key = key,
+                    ));
+                }
             }
         }
         out.push_str("}\n\n");
@@ -15334,8 +15537,9 @@ fn main() {
         ("services.rs", emit_services_application(&model)),
         ("process_managers.rs", emit_pm_orchestrators(&model)),
         ("handlers.rs", emit_application_handlers(&model)),
+        ("reminders.rs", emit_app_reminders(&model)),
         ("behaviour_tests.rs", emit_behaviour_tests(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod process_managers;\npub mod services;\npub mod handlers;\n#[cfg(test)]\npub mod behaviour_tests;\n".to_string()),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod process_managers;\npub mod services;\npub mod handlers;\npub mod reminders;\n#[cfg(test)]\npub mod behaviour_tests;\n".to_string()),
     ] {
         let path = app_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
@@ -18054,7 +18258,7 @@ CatalogDeleted:
   properties:
     catalogId: { $ref: 'scalars.yaml#/CatalogId' }
 "#;
-    const RD_CONFIG: &str = "keys:\n  ORDER_RETENTION_WINDOW:\n    type: int\n    default: 365\n    gates: \"Retention window for terminal orders.\"\n";
+    const RD_CONFIG: &str = "keys:\n  ORDER_RETENTION_WINDOW_DAYS:\n    type: int\n    default: 365\n    gates: \"Retention window for terminal orders.\"\n";
 
     /// The pilot shapes of ADR-20260731-214500: a windowed reminder + windowed deletion trigger
     /// with an undo (`Order`), and a child-declared PROPAGATION trigger with a typed `match`
@@ -18066,7 +18270,7 @@ Order:
   reminders:
     OrderExpired:
       payload: { $ref: 'events.yaml#/OrderExpired' }
-      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW' }
+      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
       reschedule: in-place
   receives:
     - message: { $ref: 'events.yaml#/OrderPlaced' }
@@ -18078,7 +18282,7 @@ Order:
   deletion:
     triggers:
       - on: [{ $ref: 'events.yaml#/OrderExpired' }]
-        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW' }
+        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
         cancelled_on: [{ $ref: 'events.yaml#/OrderPlaced' }]
     receipt: { $ref: 'events.yaml#/OrderDeleted' }
 Catalog:
@@ -18204,7 +18408,7 @@ Catalog:
         // Order dies on CatalogDeleted, Catalog dies on OrderDeleted — each lists the other's
         // receipt as its trigger, so the emergent tree is a 2-cycle.
         let issues = rd_issues(
-            "Order:\n  type: aggregate\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/CatalogDeleted' }]\n        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW' }\n    receipt: { $ref: 'events.yaml#/OrderDeleted' }\nCatalog:\n  type: aggregate\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/OrderDeleted' }]\n        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW' }\n    receipt: { $ref: 'events.yaml#/CatalogDeleted' }\n",
+            "Order:\n  type: aggregate\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/CatalogDeleted' }]\n        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }\n    receipt: { $ref: 'events.yaml#/OrderDeleted' }\nCatalog:\n  type: aggregate\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/OrderDeleted' }]\n        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }\n    receipt: { $ref: 'events.yaml#/CatalogDeleted' }\n",
         );
         assert_eq!(rules_of(&issues), vec!["deletion-tree-cycle"], "{:?}", issues.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
         assert!(issues[0].message.contains("Catalog") && issues[0].message.contains("Order"), "{}", issues[0].message);
@@ -18218,7 +18422,7 @@ Catalog:
         for needle in [
             "actor_type: \"Order\"",
             "on: &[\"OrderExpired\"]",
-            "after_config_key: Some(\"ORDER_RETENTION_WINDOW\")",
+            "after_config_key: Some(\"ORDER_RETENTION_WINDOW_DAYS\")",
             "cancelled_on: &[\"OrderPlaced\"]",
             "receipt: \"OrderDeleted\"",
             "actor_type: \"Catalog\"",
@@ -18232,6 +18436,51 @@ Catalog:
     }
 
     #[test]
+    fn deletion_self_match_may_bind_the_implicit_identity_field() {
+        // The Order pilot's shape (#272 D2): the deletion trigger is the actor's own recorded
+        // expiry fact, matched on the IDENTITY field — which the typed `identity` ref declares
+        // implicitly (no explicit `state:` entry needed, same doctrine as
+        // `is_implicit_identity_state_ref`).
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/OrderExpired' }]\n        match:\n          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }\n          state: { $ref: '#/Order/state/orderId' }\n    receipt: { $ref: 'events.yaml#/OrderDeleted' }\n",
+        );
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn reminder_schedule_table_renders_the_declared_effect() {
+        let table = emit_app_reminders(&rd_model(RD_ACTORS_VALID));
+        for needle in [
+            "actor_type: \"Order\"",
+            "on_message: \"OrderPlaced\"",
+            "reminder: \"OrderExpired\"",
+            "payload_event: \"OrderExpired\"",
+            "identity_prop: \"orderId\"",
+            "after_days_key: \"ORDER_RETENTION_WINDOW_DAYS\"",
+            "after_default_days: 365",
+        ] {
+            assert!(table.contains(needle), "missing `{}` in:\n{}", needle, table);
+        }
+        // No declarations → an EMPTY table, but the module still renders (the hand-written
+        // application::reminders runtime compiles against a stable module).
+        let empty = emit_app_reminders(&rd_model("Order:\n  type: aggregate\n  receives: []\n"));
+        assert!(empty.contains("REMINDER_SCHEDULES: &[ReminderSchedule] = &[\n];"), "{}", empty);
+    }
+
+    #[test]
+    fn deletion_receipt_and_trigger_facts_are_not_orphans() {
+        // Section 3's `event-orphan` walk: a fact that exists only in a `deletion:` block is
+        // engine vocabulary — the receipt is RECORDED on the ledger, the triggers CONSUMED.
+        let model = rd_model(RD_ACTORS_VALID);
+        let Report { issues, .. } = validate(&model);
+        assert!(
+            !issues.iter().any(|i| i.rule == "event-orphan" && (i.location.contains("OrderDeleted") || i.location.contains("CatalogDeleted") || i.location.contains("RestaurantDeleted"))),
+            "{:?}",
+            issues.iter().filter(|i| i.rule == "event-orphan").map(|i| &i.location).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn documentation_renders_reminders_and_deletion_only_when_declared() {
         let md = emit_documentation(&rd_model(RD_ACTORS_VALID));
         for needle in [
@@ -18240,7 +18489,7 @@ Catalog:
             "⏰ schedules `OrderExpired`",
             "Deletion (declarative, generic engine — ADR-20260731-214500):",
             "_immediate (propagation)_",
-            "⚙️ `ORDER_RETENTION_WINDOW`",
+            "⚙️ `ORDER_RETENTION_WINDOW_DAYS`",
         ] {
             assert!(md.contains(needle), "missing `{}` in the actor docs", needle);
         }
@@ -18408,15 +18657,36 @@ Catalog:
     }
 
     #[test]
-    fn real_specs_declare_no_reminders_or_deletion_and_gain_no_issues() {
-        // The DSL support lands BEFORE any spec delta (#272 D2): the committed catalog must parse
-        // to zero reminders/deletions, emit no deletion table, trip none of the new rules, and keep
-        // validating with zero errors — the byte-level artifact stability is CI's drift gate.
+    fn real_specs_carry_the_order_retention_pilot_and_gain_no_issues() {
+        // The Order pilot IS in the committed catalog (#272 D2): one reminder (OrderExpired,
+        // windowed, rescheduled in place), one deletion block (self-trigger on the recorded
+        // expiry, receipt OrderDeleted) — and the whole catalog keeps validating with zero
+        // errors and none of the §2f rules tripping.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
-        assert!(parse_reminders(&model).is_empty(), "no actor declares `reminders:` yet");
-        assert!(parse_deletions(&model).is_empty(), "no actor declares `deletion:` yet");
-        assert!(emit_infra_deletion_policy(&model).is_none(), "no deletion → no generated table");
+        let reminders = parse_reminders(&model);
+        assert_eq!(
+            reminders.iter().map(|r| (r.actor.as_str(), r.name.as_str())).collect::<Vec<_>>(),
+            vec![("Order", "OrderExpired")],
+            "the Order pilot is the one declared reminder"
+        );
+        let deletions = parse_deletions(&model);
+        assert_eq!(
+            deletions.iter().map(|d| d.actor.as_str()).collect::<Vec<_>>(),
+            vec!["Order"],
+            "the Order pilot is the one declared deletion block"
+        );
+        let table = emit_infra_deletion_policy(&model).expect("Order declares deletion → table emitted");
+        assert!(table.contains("receipt: \"OrderDeleted\""), "{}", table);
+        let schedules = emit_app_reminders(&model);
+        for on in ["MarkOrderDelivered", "RejectOrder", "CancelOrderByCustomer", "CancelOrderByRestaurant"] {
+            assert!(
+                schedules.contains(&format!("on_message: \"{}\"", on)),
+                "terminal receive {} must schedule the expiry:\n{}",
+                on,
+                schedules
+            );
+        }
         let Report { issues, .. } = validate(&model);
         const NEW_RULES: [&str; 10] = [
             "reminder-identity-declared",
@@ -18435,8 +18705,8 @@ Catalog:
             assert!(i.level != Level::Error, "real specs must stay 0-error: {} at {}: {}", i.rule, i.location, i.message);
         }
         let md = emit_documentation(&model);
-        assert!(!md.contains("Reminders (self-scheduled facts"), "doc section must not render on unchanged specs");
-        assert!(!md.contains("Deletion (declarative"), "doc section must not render on unchanged specs");
+        assert!(md.contains("Reminders (self-scheduled facts"), "the pilot renders its doc section");
+        assert!(md.contains("Deletion (declarative"), "the pilot renders its doc section");
     }
 
     // ─── §13 — proposal hygiene (#272 — CLAUDE.md "Named concerns" + docs/proposals/README.md) ──

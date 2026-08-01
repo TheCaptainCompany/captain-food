@@ -648,7 +648,11 @@ pub fn router() -> Router {
                     };
                     let handler = Arc::new(
                         infrastructure::mailbox::MailboxCommandHandler::new(deps)
-                            .with_event_bus(event_bus.clone()),
+                            .with_event_bus(event_bus.clone())
+                            // The declared reminder windows (actors.yaml `after:` →
+                            // configuration.yaml), so `schedules:` deliveries start their
+                            // clocks from configuration, never a constant (ADR-20260731-214500).
+                            .with_reminder_windows(config.reminder_windows()),
                     );
                     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(
                         operation_status_bus.clone(),

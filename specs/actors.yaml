@@ -496,6 +496,25 @@ Order:
       - { from: [PLACED], event: { $ref: 'events.yaml#/OrderCancelledByCustomer' }, to: CANCELLED_BY_CUSTOMER }
       - { from: [ACCEPTED, PREPARING, READY], event: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }, to: CANCELLED_BY_RESTAURANT }
     terminal: [DELIVERED, REJECTED, CANCELLED_BY_CUSTOMER, CANCELLED_BY_RESTAURANT]
+  # GDPR retention pilot (ADR-20260731-153000/-160000/-214500, #272): every terminal receive
+  # `schedules:` the OrderExpired reminder (reschedule in place — the LAST terminal fact wins the
+  # clock); the promotion pass delivers it when due and the delivery RECORDS the fact (record
+  # semantics — never Rejected). The `deletion:` block then reacts to the RECORDED OrderExpired:
+  # the window lives on the REMINDER (not the trigger) because the expiry must be a recorded
+  # business fact projections can fold to tombstone (ADR-20260731-160000 §2) — an engine-internal
+  # timer would erase read models without a foldable cause in the log.
+  reminders:
+    OrderExpired:
+      payload: { $ref: 'events.yaml#/OrderExpired' }
+      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
+      reschedule: in-place        # ADR-20260731-150500: re-declaring postpones the SAME row
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/OrderExpired' }]
+        match:
+          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }
+          state: { $ref: '#/Order/state/orderId' }
+    receipt: { $ref: 'events.yaml#/OrderDeleted' }
   receives:
     - message: { $ref: 'events.yaml#/OrderPlaced' }
       emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
@@ -529,21 +548,29 @@ Order:
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
     - message: { $ref: 'commands.yaml#/RejectOrder' }
       emits: [{ $ref: 'events.yaml#/OrderRejectedByRestaurant' }]
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
     - message: { $ref: 'commands.yaml#/CancelOrderByCustomer' }
       emits: [{ $ref: 'events.yaml#/OrderCancelledByCustomer' }]
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
     - message: { $ref: 'commands.yaml#/CancelOrderByRestaurant' }
       emits: [{ $ref: 'events.yaml#/OrderCancelledByRestaurant' }]
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
     - message: { $ref: 'commands.yaml#/RateOrder' }
       emits: [{ $ref: 'events.yaml#/OrderRated' }]
       throws:
@@ -573,6 +600,13 @@ Order:
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+    - message: { $ref: '#/Order/reminders/OrderExpired' }
+      emits: [{ $ref: 'events.yaml#/OrderExpired' }]
+      effect: >
+        The promotion pass delivered the retention reminder: record the expiry with record
+        semantics — Recorded, or Ignored (stream already gone) / Duplicate (already expired) —
+        NEVER Rejected (ADR-20260731-153000 §1a: the deadline's passage cannot be refused). The
+        erasure ACTION on this recording is the deletion engine's journey (deletion: block above).
 
 Payment:
   type: aggregate

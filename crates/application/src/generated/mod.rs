@@ -5,5 +5,6 @@ pub mod pm_state;
 pub mod process_managers;
 pub mod services;
 pub mod handlers;
+pub mod reminders;
 #[cfg(test)]
 pub mod behaviour_tests;

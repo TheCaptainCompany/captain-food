@@ -219,6 +219,8 @@ pub struct Config {
     pub mailbox_heartbeat_seconds: i64,
     /// Global default for activation passivation (PROP-20260728-152752 §3.5): an in-memory actor unsolicited for this long is dropped, its next message paying one rehydration fold. Per-actor overrides live in actors.yaml (mailbox.activations.idle_seconds). Zero would disable the cache; too high and idle aggregates hold memory the LRU bound must then evict. Reader lands with the #242 slice-4 activations.
     pub actor_activation_idle_seconds: i64,
+    /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
+    pub order_retention_window_days: i64,
     /// Events per projection unit-of-work flush (PROP-20260730-230803 §2, 100–1000): one transaction per THIS MANY events instead of one per event. Higher = fewer fsyncs but a larger replay window after a crash and a bigger in-memory identity map. Reader lands with the #267 batched projector.
     pub projection_batch_size: i64,
     /// Early-flush bound on the projection identity map (PROP-20260730-230803 §4): a batch whose loaded row states outgrow this flushes before reaching PROJECTION_BATCH_SIZE, keeping wide rows (catalog imports) from ballooning the projector. Reader lands with the #267 batched projector.
@@ -376,6 +378,7 @@ impl Config {
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
         let actor_activation_idle_seconds = raw("ACTOR_ACTIVATION_IDLE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(300);
+        let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         let projection_batch_size = raw("PROJECTION_BATCH_SIZE").and_then(|v| v.parse::<i64>().ok()).unwrap_or(500);
         let projection_batch_memory_mb = raw("PROJECTION_BATCH_MEMORY_MB").and_then(|v| v.parse::<i64>().ok()).unwrap_or(64);
         let projection_partitions = raw("PROJECTION_PARTITIONS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(16);
@@ -522,6 +525,7 @@ impl Config {
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
                 actor_activation_idle_seconds,
+                order_retention_window_days,
                 projection_batch_size,
                 projection_batch_memory_mb,
                 projection_partitions,
@@ -558,6 +562,17 @@ impl Config {
         )
     }
 
+    /// The declared reminder/deletion window keys (actors.yaml `after:` refs), each with its
+    /// resolved runtime value in DAYS — handed to the mailbox delivery glue so scheduling
+    /// reads configuration, never a constant (ADR-20260731-214500).
+    pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, i64> {
+        [
+            ("ORDER_RETENTION_WINDOW_DAYS", self.order_retention_window_days),
+        ]
+        .into_iter()
+        .collect()
+    }
+
     /// What actually resolved, for the boot log. Secrets render as `set` / `unset`, never as a
     /// value; a key declaring `mode_of: stripe` additionally reports its derived mode, so
     /// "is production actually live?" is answerable without reading a secret.
@@ -584,6 +599,7 @@ impl Config {
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATION_IDLE_SECONDS = {}\n", self.actor_activation_idle_seconds));
+        out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out.push_str(&format!("  PROJECTION_BATCH_SIZE      = {}\n", self.projection_batch_size));
         out.push_str(&format!("  PROJECTION_BATCH_MEMORY_MB = {}\n", self.projection_batch_memory_mb));
         out.push_str(&format!("  PROJECTION_PARTITIONS      = {}\n", self.projection_partitions));
@@ -620,7 +636,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 52;
+pub const KEY_COUNT: usize = 53;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -646,6 +662,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
     "ACTOR_ACTIVATION_IDLE_SECONDS",
+    "ORDER_RETENTION_WINDOW_DAYS",
     "PROJECTION_BATCH_SIZE",
     "PROJECTION_BATCH_MEMORY_MB",
     "PROJECTION_PARTITIONS",

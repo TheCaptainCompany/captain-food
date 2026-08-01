@@ -99,10 +99,10 @@ pub struct InboundFact {
 }
 
 /// The fixed UUIDv5 namespace for inbound identities (same as the retired drain worker's system
-/// principals — deterministic, stable across deliveries and deployments).
-pub fn inbound_namespace() -> uuid::Uuid {
-    uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, b"https://captain.food/integrations/inbound")
-}
+/// principals — deterministic, stable across deliveries and deployments). Owned by
+/// `application::reminders` since the reminders runtime landed (#272 D2) — one namespace, one
+/// dedupe axis; re-exported here so every adapter keeps its import path.
+pub use application::reminders::inbound_namespace;
 
 /// The mailbox identity of an inbound fact: `UUIDv5(source:external_id)`.
 pub fn inbound_message_id(source: &str, external_id: &str) -> uuid::Uuid {
@@ -169,10 +169,8 @@ pub enum ScheduleOutcome {
 
 /// The mailbox identity of a reminder: `UUIDv5(actor_id, purpose)` in the inbound namespace
 /// (PROP-20260728-152752 §3.4) — deterministic, so every re-declaration of the same purpose
-/// converges on ONE pending row (ADR-20260731-150500 §1).
-pub fn reminder_message_id(actor_id: uuid::Uuid, reminder_name: &str) -> uuid::Uuid {
-    uuid::Uuid::new_v5(&inbound_namespace(), format!("{actor_id}:{reminder_name}").as_bytes())
-}
+/// converges on ONE pending row (ADR-20260731-150500 §1). Owned by `application::reminders`.
+pub use application::reminders::reminder_message_id;
 
 /// Declare (or re-declare) one reminder: kind MESSAGE, channel WORKER, `message_type` = the
 /// reminder's payload FACT type (ADR-20260731-153000 §1a — the scheduled message is an event,

@@ -313,6 +313,9 @@ fixtures:
   orderCancelledByRestaurant:
     type: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }
     data: { orderId: "order-1", restaurantId: "resto-1", reason: "Kitchen closed" }
+  orderExpired:
+    type: { $ref: 'events.yaml#/OrderExpired' }
+    data: { orderId: "order-1" }
   orderRated:
     type: { $ref: 'events.yaml#/OrderRated' }
     data: { orderId: "order-1", restaurantId: "resto-1", riderThumb: "UP" }
@@ -1822,8 +1825,13 @@ tests:
       - { $ref: '#/fixtures/orderMarkedReady' }
 
   TestOrderDelivered:
-    name: "The order is delivered to the customer"
-    rules: [{ $ref: 'rules.yaml#/OrderLifecycleStatusMachine' }]
+    name: "The order is delivered to the customer (and its retention clock starts)"
+    rules:
+      - { $ref: 'rules.yaml#/OrderLifecycleStatusMachine' }
+      # The generated scheduling assertions ride this test: a receive declaring `schedules:`
+      # asserts the reminder lands SCHEDULED at +window, and that re-declaring postpones the
+      # SAME row in place (ADR-20260731-214500 §2 — the handler's third observable effect).
+      - { $ref: 'rules.yaml#/TerminalOrderSchedulesItsExpiry' }
     actor: { $ref: 'actors.yaml#/Order' }
     given:
       - { $ref: '#/fixtures/orderPlaced' }
@@ -1870,6 +1878,32 @@ tests:
       data: { orderId: "order-1", restaurantId: "resto-1", reason: "Kitchen closed" }
     then:
       - { $ref: '#/fixtures/orderCancelledByRestaurant' }
+
+  TestOrderExpiredRecorded:
+    name: "The delivered retention reminder records the expiry fact (record semantics, never rejected)"
+    rules: [{ $ref: 'rules.yaml#/OrderExpiryIsRecordedNeverRejected' }]
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderDelivered' }
+    when:
+      type: { $ref: 'events.yaml#/OrderExpired' }
+      data: { orderId: "order-1" }
+    then:
+      - { $ref: '#/fixtures/orderExpired' }
+
+  TestOrderExpiredRedeliveryIsNoOp:
+    name: "A redelivered expiry reminder is a benign no-op — the order is already expired"
+    rules: [{ $ref: 'rules.yaml#/OrderExpiryIsRecordedNeverRejected' }]
+    actor: { $ref: 'actors.yaml#/Order' }
+    given:
+      - { $ref: '#/fixtures/orderPlaced' }
+      - { $ref: '#/fixtures/orderDelivered' }
+      - { $ref: '#/fixtures/orderExpired' }
+    when:
+      type: { $ref: 'events.yaml#/OrderExpired' }
+      data: { orderId: "order-1" }
+    then: []
 
   TestOrderLifecycleRejectsSkippedTransition:
     name: "Rejects a move the declared Order state machine does not contain (accepting an already-accepted order)"

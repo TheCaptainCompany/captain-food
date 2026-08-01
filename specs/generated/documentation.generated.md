@@ -3562,15 +3562,29 @@ _🧩 aggregate_ — A single order through its lifecycle. Born from OrderPlaced
 | [📩 `AcceptOrder`](#command-acceptorder) | [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | [📩 `StartPreparation`](#command-startpreparation) | [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | [📩 `MarkOrderReady`](#command-markorderready) | [⚡ `OrderMarkedReady`](#event-ordermarkedready) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
-| [📩 `MarkOrderDelivered`](#command-markorderdelivered) | [⚡ `OrderDelivered`](#event-orderdelivered) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
-| [📩 `RejectOrder`](#command-rejectorder) | [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
-| [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer) | [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
-| [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant) | [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
+| [📩 `MarkOrderDelivered`](#command-markorderdelivered) | [⚡ `OrderDelivered`](#event-orderdelivered), ⏰ schedules `OrderExpired` | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
+| [📩 `RejectOrder`](#command-rejectorder) | [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), ⏰ schedules `OrderExpired` | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
+| [📩 `CancelOrderByCustomer`](#command-cancelorderbycustomer) | [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), ⏰ schedules `OrderExpired` | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
+| [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant) | [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), ⏰ schedules `OrderExpired` | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
 | [📩 `RateOrder`](#command-rateorder) | [⚡ `OrderRated`](#event-orderrated) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `OrderAlreadyRated`](#error-orderalreadyrated) |
 | [📩 `RateRestaurant`](#command-raterestaurant) | [⚡ `RestaurantRated`](#event-restaurantrated) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `RestaurantAlreadyRated`](#error-restaurantalreadyrated) |
 | [📩 `RecordDeliverySatisfaction`](#command-recorddeliverysatisfaction) | [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `DeliverySatisfactionAlreadyRecorded`](#error-deliverysatisfactionalreadyrecorded) |
 | [📩 `TipOrder`](#command-tiporder) | [⚡ `OrderTipped`](#event-ordertipped) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus), [⛔ `InvalidTipRecipient`](#error-invalidtiprecipient) |
 | [📩 `RequestRefund`](#command-requestrefund) | [⚡ `RefundRequested`](#event-refundrequested) | [⛔ `OrderNotFound`](#error-ordernotfound), [⛔ `InvalidOrderStatus`](#error-invalidorderstatus) |
+| ⏰ `OrderExpired` _(reminder)_ | [⚡ `OrderExpired`](#event-orderexpired) | — |
+
+Reminders (self-scheduled facts — ADR-20260731-214500):
+
+| Reminder | Payload | After | Reschedule |
+| --- | --- | --- | --- |
+| ⏰ `OrderExpired` | [⚡ `OrderExpired`](#event-orderexpired) | ⚙️ `ORDER_RETENTION_WINDOW_DAYS` | in-place |
+
+Deletion (declarative, generic engine — ADR-20260731-214500):
+
+| On | Window | Cancelled on | Match |
+| --- | --- | --- | --- |
+| [⚡ `OrderExpired`](#event-orderexpired) | _immediate (propagation)_ | — | [⚡ `OrderExpired`.`orderId`](#event-orderexpired--orderid) ↔ `state.orderId` |
+- **Receipt**: [⚡ `OrderDeleted`](#event-orderdeleted)
 
 Lifecycle (generated from the declared state machine):
 
@@ -4526,7 +4540,7 @@ Attach an evidence photo (opaque, framework-managed attachment ref) to an existi
 | <a id="command-attachreclamationevidence--reclamationid"></a>`reclamationId` | [🔤 `ReclamationId`](#scalar-reclamationid) | ✅ |  |
 | <a id="command-attachreclamationevidence--attachmentref"></a>`attachmentRef` | [🔤 `AttachmentRef`](#scalar-attachmentref) | ✅ |  |
 
-### ⚡ Events _(39)_
+### ⚡ Events _(40)_
 
 <a id="event-cartboundtocustomer"></a>
 #### ⚡ Event: `CartBoundToCustomer`
@@ -5143,6 +5157,19 @@ Store credit was spent by a customer at checkout (id = customerId). `amount` (Mo
 | <a id="event-customercreditconsumed--amount"></a>`amount` | [📦 `Money`](#entity-money) | ✅ |  |
 | <a id="event-customercreditconsumed--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 
+<a id="event-orderexpired"></a>
+#### ⚡ Event: `OrderExpired`
+
+The order's retention window elapsed — at this moment the order IS expired: no discussion, no rejection possible (ADR-20260731-153000 §1a: a FACT, never a command). Scheduled by the Order actor's OrderExpired reminder when a terminal lifecycle fact is recorded (`schedules:` on the terminal receives, ADR-20260731-214500 §2), delivered by the promotion pass when due, and recorded with record semantics (Recorded, or Ignored/Duplicate — never Rejected). Recording it starts the order's exit from the system (ADR-20260731-160000): projections fold it to tombstone their rows, and the generic deletion engine reacts to the recorded fact with the journey that ends in the OrderDeleted receipt. The erasure ACTION on this recording is a STUB until the engine's journey lands (#194 "GDPR erasure").
+
+- **Emitted by**: [🎭 `Order`](#actor-order)
+- **Consumed by**: —
+- **Projected into**: _non-projected (saga/transient)_
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-orderexpired--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+
 ### 📦 Entities _(15)_
 
 <a id="entity-money"></a>
@@ -5431,7 +5458,7 @@ One reclamation-lifecycle entry woven into the per-order conversation thread (re
 | <a id="error-rejectionreasonrequired"></a>⛔ `RejectionReasonRequired` | A reclamation was rejected without a (non-empty) reason; a rejection must record why the claim was declined (rules.yaml#/ReclamationRejectionCarriesAReason) (#151).  | 🇬🇧 A reason is required to reject a reclamation. | 🇫🇷 Un motif est requis pour rejeter une réclamation. | [📩 `RejectReclamation`](#command-rejectreclamation) |
 | <a id="error-partialrefundamountrequired"></a>⛔ `PartialRefundAmountRequired` | A reclamation was resolved as PARTIAL_REFUND without a refund amount; a partial refund must carry the amount to refund (rules.yaml#/PartialRefundResolutionCarriesAnAmount) (#151).  | 🇬🇧 A refund amount is required for a partial refund. | 🇫🇷 Un montant de remboursement est requis pour un remboursement partiel. | [📩 `ResolveReclamation`](#command-resolvereclamation) |
 
-### 📐 Business rules _(46)_
+### 📐 Business rules _(48)_
 
 <a id="rule-cartpricedfromlivecatalog"></a>
 #### 📐 Rule: `CartPricedFromLiveCatalog`
@@ -5755,6 +5782,20 @@ _A refund resolution can never refund more than the order's captured total; a PA
 
 - **Verified by**: [🧪 `TestReclamationProcessRefundOverCapturedRejected`](#test-testreclamationprocessrefundovercapturedrejected)
 
+<a id="rule-terminalorderschedulesitsexpiry"></a>
+#### 📐 Rule: `TerminalOrderSchedulesItsExpiry`
+
+_Every order reaching a terminal state (delivered, rejected or cancelled) schedules its OrderExpired reminder ORDER_RETENTION_WINDOW_DAYS out. One pending expiry per order — the deterministic reminder identity guarantees it: a later terminal fact postpones the SAME scheduled row in place, it never duplicates it (ADR-20260731-150500, #272)._
+
+- **Verified by**: [🧪 `TestOrderDelivered`](#test-testorderdelivered)
+
+<a id="rule-orderexpiryisrecordedneverrejected"></a>
+#### 📐 Rule: `OrderExpiryIsRecordedNeverRejected`
+
+_Delivering the due OrderExpired reminder records the fact with record semantics: Recorded the first time, a benign no-op when the order is already expired — a retention deadline's passage cannot be refused, so REJECTED is not a possible verdict for this delivery (ADR-20260731-153000 §1a, #272)._
+
+- **Verified by**: [🧪 `TestOrderExpiredRecorded`](#test-testorderexpiredrecorded), [🧪 `TestOrderExpiredRedeliveryIsNoOp`](#test-testorderexpiredredeliveryisnoop)
+
 ### 🧪 Tests _(9)_
 
 **[🎭 `Cart`](#actor-cart)**
@@ -5884,12 +5925,12 @@ _Restaurant marks the order ready for pickup/delivery_
 <a id="test-testorderdelivered"></a>
 #### 🧪 Test: `TestOrderDelivered`
 
-_The order is delivered to the customer_
+_The order is delivered to the customer (and its retention clock starts)_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderMarkedReady`](#event-ordermarkedready)
 - **When**: [📩 `MarkOrderDelivered`](#command-markorderdelivered)
 - **Then**: [⚡ `OrderDelivered`](#event-orderdelivered)
-- **Verifies**: [📐 `OrderLifecycleStatusMachine`](#rule-orderlifecyclestatusmachine)
+- **Verifies**: [📐 `OrderLifecycleStatusMachine`](#rule-orderlifecyclestatusmachine), [📐 `TerminalOrderSchedulesItsExpiry`](#rule-terminalorderschedulesitsexpiry)
 
 <a id="test-testorderrejected"></a>
 #### 🧪 Test: `TestOrderRejected`
@@ -5920,6 +5961,26 @@ _Restaurant cancels an order it had accepted_
 - **When**: [📩 `CancelOrderByRestaurant`](#command-cancelorderbyrestaurant)
 - **Then**: [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
 - **Verifies**: [📐 `OrderLifecycleStatusMachine`](#rule-orderlifecyclestatusmachine)
+
+<a id="test-testorderexpiredrecorded"></a>
+#### 🧪 Test: `TestOrderExpiredRecorded`
+
+_The delivered retention reminder records the expiry fact (record semantics, never rejected)_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderDelivered`](#event-orderdelivered)
+- **When**: [📩 `OrderExpired`](#command-orderexpired)
+- **Then**: [⚡ `OrderExpired`](#event-orderexpired)
+- **Verifies**: [📐 `OrderExpiryIsRecordedNeverRejected`](#rule-orderexpiryisrecordedneverrejected)
+
+<a id="test-testorderexpiredredeliveryisnoop"></a>
+#### 🧪 Test: `TestOrderExpiredRedeliveryIsNoOp`
+
+_A redelivered expiry reminder is a benign no-op — the order is already expired_
+
+- **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderExpired`](#event-orderexpired)
+- **When**: [📩 `OrderExpired`](#command-orderexpired)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `OrderExpiryIsRecordedNeverRejected`](#rule-orderexpiryisrecordedneverrejected)
 
 <a id="test-testorderlifecyclerejectsskippedtransition"></a>
 #### 🧪 Test: `TestOrderLifecycleRejectsSkippedTransition`
@@ -9767,6 +9828,25 @@ Calibratable Uber Eats split/fee assumptions for the estimated comparison (ADR-0
 | <a id="type-ubersplitpolicy--avgdeliveryfeecents"></a>`avgDeliveryFeeCents` | `integer` | ✅ |
 | <a id="type-ubersplitpolicy--platformfeepct"></a>`platformFeePct` | `number` | ✅ |
 | <a id="type-ubersplitpolicy--effectivefrom"></a>`effectiveFrom` | `string` _date-time_ | ✅ |
+
+### ⚡ Events _(1)_
+
+<a id="event-orderdeleted"></a>
+#### ⚡ Event: `OrderDeleted`
+
+The deletion receipt (ADR-20260731-160000 §6): recorded on the DELETION LEDGER stream — never on the (about-to-be / already deleted) order streams — when the generic deletion engine's journey completes (projection checkpoints verified → technical tombstone appended → streams deleted from domain_events + domain_stream). Carries PSEUDONYMOUS domain references only: whose order was erased must remain answerable (GDPR accountability), but never the erased personal payloads (address, phone, conversation content — those are gone).
+
+- **Emitted by**: _inbound / external_
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-orderdeleted--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-orderdeleted--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-orderdeleted--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ⬜ | Null for a guest order — the accountability reference, not personal data. |
+| <a id="event-orderdeleted--policy"></a>`policy` | `string` | ✅ | The configuration key naming the retention window under which erasure ran (ORDER_RETENTION_WINDOW_DAYS). |
+| <a id="event-orderdeleted--tombstoneeventid"></a>`tombstoneEventId` | `string` | ⬜ | The technical tombstone event (envelope-level, ADR-20260731-160000 §5) that instructed the stream deletion — the receipt's 'deleted, thanks to tombstone <id>' stamp. |
 
 ### 📦 Entities _(3)_
 

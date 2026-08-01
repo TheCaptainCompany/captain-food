@@ -22,24 +22,38 @@ use crate::persistence::status_bus::{OperationStatusBus, OperationUpdate};
 
 use super::flush_staged_in_tx;
 
-/// The COMMAND-kind delivery glue. EVENT/MESSAGE kinds are later C/D slices (the adapter inbox
-/// flip and the reminders promotion) — until then they complete FAILED with a routing error so a
-/// misrouted row is loud, never silently swallowed.
+/// The delivery glue for all three kinds: COMMAND (generated router), EVENT (adapted inbound
+/// facts) and MESSAGE (promoted reminders, ADR-20260731-153000 — record semantics, like EVENT).
+/// An unroutable kind or type completes FAILED with a routing error so a misrouted row is loud,
+/// never silently swallowed.
 pub struct MailboxCommandHandler {
     deps: CommandDeps,
     /// When present, each committed delivery publishes its appended events on the in-process bus
     /// (the GraphQL domain-fact subscriptions) — POST-COMMIT, via the runtime's Delivery hook,
     /// exactly where the pool-backed PgEventStore publishes.
     event_bus: Option<EventBus>,
+    /// Reminder window keys → DAYS (`Config::reminder_windows()`): what `apply_schedules_in_tx`
+    /// resolves a `schedules:` declaration's `after` against. Empty = no windows wired; a
+    /// delivery that then needs one aborts for retry (wiring bug, never a terminal verdict).
+    reminder_windows: std::collections::HashMap<&'static str, i64>,
 }
 
 impl MailboxCommandHandler {
     pub fn new(deps: CommandDeps) -> Self {
-        Self { deps, event_bus: None }
+        Self { deps, event_bus: None, reminder_windows: Default::default() }
     }
 
     pub fn with_event_bus(mut self, bus: EventBus) -> Self {
         self.event_bus = Some(bus);
+        self
+    }
+
+    /// Wire the configured reminder windows (composition root: `Config::reminder_windows()`).
+    pub fn with_reminder_windows(
+        mut self,
+        windows: std::collections::HashMap<&'static str, i64>,
+    ) -> Self {
+        self.reminder_windows = windows;
         self
     }
 }
@@ -51,13 +65,16 @@ impl MessageHandler for MailboxCommandHandler {
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
     ) -> Result<Delivery, sqlx::Error> {
-        if message.kind == "EVENT" {
-            return self.handle_inbound_event(tx, message).await;
+        if message.kind == "EVENT" || message.kind == "MESSAGE" {
+            // Both kinds RECORD facts: EVENT carries an adapted inbound business fact, MESSAGE a
+            // promoted reminder's payload fact (ADR-20260731-153000 §1a) — same record semantics,
+            // same route.
+            return self.handle_recorded_fact(tx, message).await;
         }
         if message.kind != "COMMAND" {
             return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                 "code": "Internal",
-                "context": { "detail": format!("kind {} not routed yet (#242 later slices)", message.kind) }
+                "context": { "detail": format!("unroutable mailbox kind '{}'", message.kind) }
             }))));
         }
 
@@ -116,7 +133,14 @@ impl MessageHandler for MailboxCommandHandler {
             Some(Ok(())) => {
                 let staged = staging.take_staged();
                 match flush_staged_in_tx(tx, &staged).await {
-                    Ok(()) => self.fanout_delivery(&staged),
+                    Ok(()) => {
+                        // The handler's third observable effect (ADR-20260731-214500 §2): a
+                        // successful delivery (re)declares its `schedules:` reminders in the
+                        // SAME transaction — commit and clock start together or not at all.
+                        super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
+                            .await?;
+                        self.fanout_delivery(&staged)
+                    }
                     // A version clash at commit time: a concurrent writer (a legacy-path PM leg,
                     // another lane) moved the stream between the handler's load and this flush.
                     // ABORT the delivery — the row stays RECEIVED and the retry re-runs the
@@ -151,12 +175,14 @@ impl MessageHandler for MailboxCommandHandler {
 }
 
 impl MailboxCommandHandler {
-    /// The kind-EVENT delivery route (ADR-20260731-122500): adapted inbound BUSINESS facts, the
-    /// mailbox-era home of the retired InboundEventsDrainWorker's routing. The aggregate's
-    /// fold-based dedupe stays authoritative — its verdict is PERSISTED on the row (a no-change
-    /// decision lands IGNORED, a redelivered fact DUPLICATE, per ADR-20260728-011344 D6), and the
-    /// staged events flush into the SAME fenced transaction as every command delivery.
-    async fn handle_inbound_event(
+    /// The kind-EVENT / kind-MESSAGE delivery route (ADR-20260731-122500): adapted inbound
+    /// BUSINESS facts (the mailbox-era home of the retired InboundEventsDrainWorker's routing)
+    /// and promoted reminder facts (ADR-20260731-153000 §1a — record semantics, never Rejected).
+    /// The aggregate's fold-based dedupe stays authoritative — its verdict is PERSISTED on the
+    /// row (a no-change decision lands IGNORED, a redelivered fact DUPLICATE, per
+    /// ADR-20260728-011344 D6), and the staged events flush into the SAME fenced transaction as
+    /// every command delivery.
+    async fn handle_recorded_fact(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
@@ -203,10 +229,17 @@ impl MailboxCommandHandler {
                 )
                 .await
             }
+            // The reminders pilot (ADR-20260731-153000): the promoted OrderExpired MESSAGE
+            // records the expiry on its order's stream — Recorded / AlreadyRecorded / NoChange,
+            // never a rejection (a retention deadline's passage cannot be refused).
+            E::OrderExpired(_) => {
+                application::commands::record_inbound_order_event(store.as_ref(), event, &actor)
+                    .await
+            }
             _ => {
                 return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                     "code": "Internal",
-                    "context": { "detail": format!("no delivery route for inbound event type '{}'", message.message_type) }
+                    "context": { "detail": format!("no delivery route for inbound fact type '{}'", message.message_type) }
                 }))))
             }
         };
@@ -218,7 +251,12 @@ impl MailboxCommandHandler {
                     // PaymentCaptured must reach `paymentStatusChanged` exactly like a
                     // command-emitted fact — the retired drain published through
                     // PgEventStore::with_bus, and the checkout screen's push depends on it.
-                    Ok(()) => self.fanout_delivery(&staged),
+                    Ok(()) => {
+                        // Recorded facts may declare `schedules:` too (same third-effect rule).
+                        super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
+                            .await?;
+                        self.fanout_delivery(&staged)
+                    }
                     // Version clash at flush: someone appended between load and commit. That
                     // someone is NOT necessarily a redelivery of this fact — the legacy-path PM
                     // legs write the same Payment streams until Runtime D — so a terminal

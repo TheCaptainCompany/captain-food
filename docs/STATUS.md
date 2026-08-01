@@ -28,6 +28,15 @@
 > [PROP-20260731-195500](proposals/PROP-20260731-195500-runtime-d-pm-mailboxes-and-reminders.md)
 > choices A2 (two-phase payment delivery) / B2 (chained PM facts) / C2 (event-lineage reminder
 > triggers), ADR-20260731-203000.
+> ✅ **D2 Order retention pilot LANDED on the #272 branch (2026-08-01)**: `OrderExpired`/
+> `OrderDeleted` events + `ORDER_RETENTION_WINDOW_DAYS`; the Order actor's `reminders:`/
+> `schedules:`/`deletion:` blocks (explicit-chain shape, ADR-20260801-010134 — window on the
+> REMINDER because the expiry must be a recorded, foldable fact); generated `REMINDER_SCHEDULES`
+> + `Config::reminder_windows()` + `DELETION_POLICIES` tables; `apply_schedules_in_tx` starts
+> the clock INSIDE the completion transaction; the kind-MESSAGE delivery route records the
+> promoted fact (Recorded/Duplicate/Ignored — never Rejected); behaviour tests assert schedule +
+> reschedule-in-place per terminal receive; E2E `mailbox_retention` proves the loop on PG.
+> Next: the generic deletion engine over `DELETION_POLICIES`, then D1 (A2/B2 flip).
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).

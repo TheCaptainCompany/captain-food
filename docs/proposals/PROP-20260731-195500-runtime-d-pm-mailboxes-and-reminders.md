@@ -93,13 +93,31 @@ Catalog:
           state: { $ref: '#/Catalog/state/restaurantId' }
     receipt: { $ref: 'events.yaml#/CatalogDeleted' }
 
-Order:
+Order:                       # the IMPLEMENTED pilot (#272 D2, ADR-20260801-010134): the window
+  reminders:                 # rides the REMINDER because the elapsed retention must be a
+    OrderExpired:            # RECORDED, foldable business fact (ADR-20260731-160000 §2) — the
+      payload: { $ref: 'events.yaml#/OrderExpired' }        # deletion trigger reacts to the fact
+      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
+      reschedule: in-place
+  receives:
+    # the four terminal receives each declare, alongside emits/throws:
+    #   schedules: [{ $ref: '#/Order/reminders/OrderExpired' }]
+    - message: { $ref: '#/Order/reminders/OrderExpired' }
+      emits: [{ $ref: 'events.yaml#/OrderExpired' }]        # record semantics — never Rejected
   deletion:
     triggers:
-      - on: [{ $ref: 'events.yaml#/OrderDelivered' }, { $ref: 'events.yaml#/OrderCancelled' }]
-        after: { $ref: 'configuration.yaml#/ORDER_RETENTION_WINDOW' }
+      - on: [{ $ref: 'events.yaml#/OrderExpired' }]
+        match:               # typed self-match — the identity field, implicitly declared
+          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }
+          state: { $ref: '#/Order/state/orderId' }
     receipt: { $ref: 'events.yaml#/OrderDeleted' }
 ```
+
+The two trigger kinds split by whether an intermediate business fact exists
+(ADR-20260801-010134): `after:` ON A DELETION TRIGGER is for pure-delay journeys whose cause is
+already recorded (the Restaurant cooling window above); when the elapsed window must itself
+become a foldable fact (Order's expiry — projections tombstone by folding it), the window rides
+a declared REMINDER and the deletion trigger consumes the recorded fact.
 
 **One generic deletion engine** (infrastructure, written once, parameterized by the generated
 `DELETION_POLICIES` table) runs the decided journey for every declaring actor: verify projection
@@ -160,11 +178,11 @@ sequenceDiagram
     participant E as Generic deletion engine
     participant L as domain_events
 
-    O->>M: deletion trigger schedules the reminder — UUIDv5(orderId,"erase"),<br/>scheduled_at = now + ORDER_RETENTION_WINDOW (re-declare = reschedule in place)
+    O->>M: the terminal receive's `schedules:` declares OrderExpired IN the completion tx —<br/>UUIDv5(orderId,"OrderExpired"), scheduled_at = now + ORDER_RETENTION_WINDOW_DAYS<br/>(re-declare = reschedule in place)
     Note over M: status SCHEDULED, no position yet
     P->>M: due? promote: stamp position, SCHEDULED → RECEIVED
     W->>M: deliver (head-of-line on the order's lane)
-    W->>L: record the deletion fact — Recorded | Ignored | Duplicate (never Rejected)
+    W->>L: record OrderExpired — Recorded | Ignored | Duplicate (never Rejected)
     E->>L: checkpoints verified → technical tombstone event
     E->>L: technical worker deletes the streams (domain_events + domain_stream)
     E->>L: OrderDeleted receipt on the deletion ledger
