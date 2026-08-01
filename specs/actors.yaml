@@ -55,10 +55,14 @@ description: >
 # `requires.acting` compares `actor.id` against (type-checked end to end). Roles without a domain
 # identity (PUBLIC, ADMIN, EXTERNAL) are deliberately absent: they can never satisfy an `acting`
 # entry except the explicit keyword `any`.
-# Each aggregate declares `identity` (the payload property that IS the instance id — the mailbox's
-# actor_id and the stream id) and `mailbox.partitions` (the FIXED keyspace width; worker scaling
-# leases ranges of it and never changes it). Validated by pr-*/id-*/mb-* (id-not-in-payload warns
-# while birth-command id minting is unresolved — #242 slice 3).
+# Each aggregate declares `identity` as a TYPED same-actor state-field $ref
+# (`identity: { $ref: '#/<Actor>/state/<field>' }`, ADR-20260731-214500 consequences): the field
+# names the payload property that IS the instance id — the mailbox's actor_id and the stream id.
+# The identity field is the STREAM KEY, implicitly declared by this ref (it exists before any fold),
+# so it needs no explicit `state:` entry. `mailbox.partitions` is the FIXED keyspace width; worker
+# scaling leases ranges of it and never changes it. Validated by pr-*/identity-*/id-*/mb-*
+# (identity-property-not-on-command / id-not-in-payload warn while birth-command id minting is
+# unresolved — #242 slice 3).
 
 principals:
   CUSTOMER:           { id: { $ref: 'scalars.yaml#/CustomerId' } }
@@ -70,7 +74,7 @@ principals:
 
 RestaurantAccount:
   type: aggregate
-  identity: restaurantAccountId
+  identity: { $ref: '#/RestaurantAccount/state/restaurantAccountId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A restaurant account (HubRise: restaurant) that owns one or more Restaurant locations."
@@ -92,7 +96,7 @@ RestaurantAccount:
 
 Restaurant:
   type: aggregate
-  identity: restaurantId
+  identity: { $ref: '#/Restaurant/state/restaurantId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -216,7 +220,7 @@ Restaurant:
 
 Prospect:
   type: aggregate
-  identity: restaurantId     # a prospect row IS the restaurant listing (stream Prospect-{restaurantId})
+  identity: { $ref: '#/Prospect/state/restaurantId' }   # a prospect row IS the restaurant listing (stream Prospect-{restaurantId})
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -241,7 +245,7 @@ Prospect:
 
 DeliveryPartnerRegistration:
   type: aggregate
-  identity: registrationId
+  identity: { $ref: '#/DeliveryPartnerRegistration/state/registrationId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -267,7 +271,7 @@ DeliveryPartnerRegistration:
 
 Catalog:
   type: aggregate
-  identity: catalogId
+  identity: { $ref: '#/Catalog/state/catalogId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A restaurant catalog: catalog, category tree, products, offers (SKUs), option lists and per-offer stock."
@@ -343,7 +347,7 @@ Catalog:
 
 Customer:
   type: aggregate
-  identity: customerId
+  identity: { $ref: '#/Customer/state/customerId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A customer identity, keyed by phone number and linked to the auth provider user (authRef)."
@@ -418,7 +422,7 @@ Customer:
 
 Cart:
   type: aggregate
-  identity: cartId
+  identity: { $ref: '#/Cart/state/cartId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A visitor's in-progress selection for one restaurant, built (possibly as a guest) before checkout. Validated incrementally; converted to an Order by PlaceOrderProcess."
@@ -471,7 +475,7 @@ Cart:
 
 Order:
   type: aggregate
-  identity: orderId
+  identity: { $ref: '#/Order/state/orderId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A single order through its lifecycle. Born from OrderPlaced (delivered by PlaceOrderProcess and recorded here), then driven to a terminal state."
@@ -572,7 +576,7 @@ Order:
 
 Payment:
   type: aggregate
-  identity: paymentIntentId  # the stream is Payment-{paymentIntentId} (crates/domain/src/payment.rs)
+  identity: { $ref: '#/Payment/state/paymentIntentId' }   # the stream is Payment-{paymentIntentId} (crates/domain/src/payment.rs)
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state."
@@ -612,7 +616,7 @@ Payment:
 
 DeliveryJob:
   type: aggregate
-  identity: deliveryJobId
+  identity: { $ref: '#/DeliveryJob/state/deliveryJobId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -741,7 +745,7 @@ DeliveryJob:
     
 Rider:
   type: aggregate
-  identity: riderId
+  identity: { $ref: '#/Rider/state/riderId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A rider identity, linked to the auth provider user (authRef)."
@@ -780,7 +784,7 @@ Rider:
 
 Conversation:
   type: aggregate
-  identity: orderId          # a conversation's identity IS its order (ADR-20260725-015921)
+  identity: { $ref: '#/Conversation/state/orderId' }   # a conversation's identity IS its order (ADR-20260725-015921)
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   # PILOT of the declared-state DSL (PROP-20260728-135632 §2.1, Approved — validation-only in
@@ -839,8 +843,8 @@ Conversation:
       # added) when slice 2 generates the precondition. RIDER deliberately absent = denied.
       requires:
         acting:
-          CUSTOMER:   state.customerId
-          RESTAURANT: state.restaurantId
+          CUSTOMER:   { $ref: '#/Conversation/state/customerId' }
+          RESTAURANT: { $ref: '#/Conversation/state/restaurantId' }
           ADMIN:      any
         claims:
           authorRole: actor.role
@@ -874,7 +878,7 @@ Conversation:
 
 Reclamation:
   type: aggregate
-  identity: reclamationId
+  identity: { $ref: '#/Reclamation/state/reclamationId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -934,7 +938,7 @@ Reclamation:
 
 CustomerCredit:
   type: aggregate
-  identity: customerId       # one credit ledger per customer (stream CustomerCredit-{customerId})
+  identity: { $ref: '#/CustomerCredit/state/customerId' }   # one credit ledger per customer (stream CustomerCredit-{customerId})
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >

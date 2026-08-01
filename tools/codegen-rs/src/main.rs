@@ -703,8 +703,14 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("actors.yaml", "*.deletion.receipt",                     &[Kind::Event]),
     ("actors.yaml", "*.lifecycle.status",               &[Kind::EnumScalar]),
     // The actor-mailbox addressing layer (ADR-20260730-231500, PROP-20260728-152752 §2/§2.4):
-    // `principals` maps each authenticated role to its resolved domain-identity scalar.
+    // `principals` maps each authenticated role to its resolved domain-identity scalar; `identity`
+    // is a TYPED same-actor state-field ref (ADR-20260731-214500 consequences — the field is
+    // implicitly declared by the ref itself, see `is_implicit_identity_state_ref`; §2d proves it).
     ("actors.yaml", "principals.*.id",                  &[Kind::Scalar]),
+    ("actors.yaml", "*.identity",                       &[Kind::StateField]),
+    // Write-side per-instance authorization (#235): a non-`any` acting entry binds the role to a
+    // DECLARED state field of the same actor (`any` stays a bare keyword, not a ref).
+    ("actors.yaml", "*.receives[*].requires.acting.*",  &[Kind::StateField]),
     // Declared aggregate state (PROP-20260728-135632 §2.1): typed fields with event(-property)
     // lineage — `from`/`removedBy` carry properties (latest/set) or whole events (flag/count);
     // `of` is the set element type (single scalar, or a named map for composite elements).
@@ -1038,7 +1044,12 @@ fn validate(model: &Model) -> Report {
                 cov.refs += 1;
                 if parse_ref(&r).is_none() {
                     issues.push(err("ref-format", loc, format!("Malformed $ref '{}'.", r)));
-                } else if resolve_ref(model, &r, f).is_none() {
+                } else if resolve_ref(model, &r, f).is_none()
+                    && !is_implicit_identity_state_ref(model, &r, f)
+                {
+                    // The identity state field is implicitly declared by the actor's own typed
+                    // `identity` ref (the stream key needs no fold entry) — see
+                    // `is_implicit_identity_state_ref`; §2d proves the declaration's shape.
                     issues.push(err("ref-dangling", loc, format!("$ref '{}' does not resolve.", r)));
                 }
             }
@@ -4346,6 +4357,42 @@ fn message_property_exists(model: &Model, message_ref: &str, prop: &str) -> bool
         .is_some()
 }
 
+/// The payload-property NAME an actor's TYPED `identity` declares —
+/// `identity: { $ref: '#/<Actor>/state/<field>' }` (ADR-20260731-214500 consequences: typed $refs
+/// everywhere; the bare-string form is a hard §2d error, `identity-untyped`). Returns `None` for a
+/// missing identity, a bare string, or a ref of any other shape (wrong file/actor/path — §2d's
+/// `identity-state-field-missing`). Generation (command addressing) reads through this helper so
+/// validator and emitters can never disagree on the field.
+fn actor_identity_field(def: &Value, actor: &str) -> Option<String> {
+    let r = def.get("identity")?.get("$ref")?.as_str()?;
+    let pr = parse_ref(r)?;
+    if !pr.file.is_empty() && pr.file != "actors.yaml" {
+        return None;
+    }
+    (pr.path.len() == 3 && pr.path[0] == actor && pr.path[1] == "state")
+        .then(|| pr.path[2].clone())
+}
+
+/// True when `r` points at an actor's IMPLICIT identity state field: `#/<Actor>/state/<field>`
+/// where `<field>` is exactly what that actor's typed `identity` declares. The identity is the
+/// STREAM KEY — it exists before any fold — so it is declared by the `identity` ref itself, not by
+/// an explicit `state:` entry (forcing one into every aggregate would add fold fields that change
+/// the generated states.rs for no behaviour). §1 exempts these refs from `ref-dangling`; §2d's
+/// `identity-state-field-missing` owns the shape proof.
+fn is_implicit_identity_state_ref(model: &Model, r: &str, ctx: &str) -> bool {
+    let Some(pr) = parse_ref(r) else { return false };
+    let file = if pr.file.is_empty() { ctx } else { pr.file.as_str() };
+    if file != "actors.yaml" || pr.path.len() != 3 || pr.path[1] != "state" {
+        return false;
+    }
+    model
+        .defs
+        .get("actors.yaml")
+        .and_then(|m| m.get(pr.path[0].as_str()))
+        .and_then(|def| actor_identity_field(def, &pr.path[0]))
+        .is_some_and(|f| f == pr.path[2])
+}
+
 /// §2d — the actor-mailbox ADDRESSING layer (ADR-20260730-231500, PROP-20260728-152752 §2):
 /// the file-header `principals` map (role → domain-identity scalar), each aggregate's `identity`
 /// (the payload property that addresses its instances = the stream id) and `mailbox.partitions`
@@ -4353,8 +4400,20 @@ fn message_property_exists(model: &Model, message_ref: &str, prop: &str) -> bool
 ///   - `pr-role-unknown` (error): a principals key that is not a scalars.yaml#/UserType value;
 ///   - `mb-partitions-range` (error): partitions outside 1..=32767 (smallint keyspace);
 ///   - `id-missing` (warn, adoption — like lc-missing): an aggregate with no `identity`;
-///   - `id-not-in-payload` (warn until the slice-3 dispatch settles birth-command id minting,
-///     PROP-20260728-152752 §8): a received message whose payload lacks the identity property.
+///   - `identity-untyped` (error, ADR-20260731-214500 consequences): a bare-string `identity` —
+///     the catalog is fully migrated to `identity: { $ref: '#/<Actor>/state/<field>' }`;
+///   - `identity-state-field-missing` (error): an identity $ref that does not land on a state
+///     field of the SAME actor (`#/<Actor>/state/<field>`) — the identity field is the stream key,
+///     implicitly declared by this very ref (an explicit `state:` entry of the name also counts);
+///   - `identity-property-not-on-command` (warn — CALIBRATED, see below): a received COMMAND whose
+///     payload lacks the identity property. Warn, not error, because the current generation
+///     legitimately tolerates it: `command_addressing` maps such a command to `identity_prop:
+///     None` and the edge mints an ADDRESSING-ONLY actor_id (correct for a birth/side-effect
+///     command whose id the server mints — today exactly `RequestPhoneVerification`). Making this
+///     an error needs a DSL marker for server-minted ids first (a plan-mode decision);
+///   - `id-not-in-payload` (warn, PROP-20260728-152752 §8): the same gap on a received EVENT
+///     (fan-out facts may key differently — the Payment refund legs); reminder self-messages are
+///     exempt (the reminder row itself carries the actor_id, so no payload key is needed).
 fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
     let actors = match model.defs.get("actors.yaml") {
         Some(Value::Mapping(m)) => m,
@@ -4390,7 +4449,7 @@ fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
                 ));
             }
         }
-        let Some(identity) = node.get("identity").and_then(|x| x.as_str()) else {
+        let Some(identity_node) = node.get("identity") else {
             issues.push(warn(
                 "id-missing",
                 format!("actors.yaml/{}", name),
@@ -4401,19 +4460,61 @@ fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
             ));
             continue;
         };
+        if let Some(bare) = identity_node.as_str() {
+            issues.push(err(
+                "identity-untyped",
+                format!("actors.yaml/{}", name),
+                format!(
+                    "identity is the bare string '{bare}' — migrate to the typed form `identity: {{ $ref: '#/{name}/state/{bare}' }}` (ADR-20260731-214500 consequences: typed $refs everywhere).",
+                ),
+            ));
+            continue;
+        }
+        let Some(identity) = actor_identity_field(node, name) else {
+            let raw = identity_node
+                .get("$ref")
+                .and_then(|r| r.as_str())
+                .unwrap_or("<no $ref>");
+            issues.push(err(
+                "identity-state-field-missing",
+                format!("actors.yaml/{}", name),
+                format!(
+                    "identity $ref '{raw}' does not land on a state field of '{name}' — expected `#/{name}/state/<field>` (the identity IS the actor's stream-key state field, declared by this ref; an explicit `state:` entry of that name also satisfies it).",
+                ),
+            ));
+            continue;
+        };
         for entry in node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten() {
             let Some(mref) = entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str()) else {
                 continue;
             };
-            if !message_property_exists(model, mref, identity) {
-                issues.push(warn(
-                    "id-not-in-payload",
-                    format!("actors.yaml/{}", name),
-                    format!(
-                        "'{}' does not carry identity property '{}' — a birth message minting its id, or a gap the slice-3 dispatch must resolve.",
-                        mref, identity
-                    ),
-                ));
+            // A reminder self-message needs no identity property: the reminder ROW carries the
+            // actor_id (message_id = UUIDv5(actor_id, name)), so delivery is self-addressed.
+            if reminder_ref_parts(mref).is_some() {
+                continue;
+            }
+            if !message_property_exists(model, mref, &identity) {
+                let is_command =
+                    ref_target_file(mref, "actors.yaml").as_deref() == Some("commands.yaml");
+                if is_command {
+                    issues.push(warn(
+                        "identity-property-not-on-command",
+                        format!("actors.yaml/{}", name),
+                        format!(
+                            "command '{}' has no payload property '{}' — the mailbox mints an ADDRESSING-ONLY actor_id for it (legitimate only when the server mints the id; a non-birth command missing it would mis-address every delivery).",
+                            mref, identity
+                        ),
+                    ));
+                } else {
+                    issues.push(warn(
+                        "id-not-in-payload",
+                        format!("actors.yaml/{}", name),
+                        format!(
+                            "'{}' does not carry identity property '{}' — a birth message minting its id, or a gap the slice-3 dispatch must resolve.",
+                            mref, identity
+                        ),
+                    ));
+                }
             }
         }
     }
@@ -4445,7 +4546,11 @@ fn event_property_type_ref(model: &Model, event: &str, prop: &str) -> Option<Str
 ///     property's $ref;
 ///   - `st-shape` (error): mode/shape contradictions (set without `of`; flag/count lineage that
 ///     names properties; latest lineage that names whole events);
-///   - `req-state-unknown` (error): `acting` naming an undeclared state field;
+///   - `requires-acting-untyped` (error, ADR-20260731-214500 consequences): an acting value that
+///     is a bare `state.<field>` path string (or any non-`any` bare string) — migrated to the
+///     typed form `{ $ref: '#/<Actor>/state/<field>' }`; `any` stays a bare keyword;
+///   - `req-state-unknown` (error): an acting $ref that is not a same-actor `#/<Actor>/state/…`
+///     ref, or that names an undeclared state field;
 ///   - `req-principal-type` (error): the acting role's principals id scalar differs from the
 ///     state field's type;
 ///   - `req-principal-missing` (error): a non-`any` acting entry for a role absent from
@@ -4563,14 +4668,54 @@ fn validate_actor_state(model: &Model, issues: &mut Vec<Issue>) {
             let mref = entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str()).unwrap_or("");
             let rsite = || site(format!("/requires[{}]", mref));
             for (rk, rv) in req.get("acting").and_then(|a| a.as_mapping()).into_iter().flatten() {
-                let (Some(role), Some(val)) = (rk.as_str(), rv.as_str()) else { continue };
-                if val == "any" {
+                let Some(role) = rk.as_str() else { continue };
+                // `any` is the only bare keyword; every binding value is a typed same-actor
+                // state-field $ref (ADR-20260731-214500 consequences: typed $refs everywhere).
+                let field: String = if let Some(val) = rv.as_str() {
+                    if val == "any" {
+                        continue;
+                    }
+                    let suggested = val.strip_prefix("state.").unwrap_or("<field>");
+                    issues.push(err(
+                        "requires-acting-untyped",
+                        rsite(),
+                        format!(
+                            "acting.{role} is the bare string '{val}' — migrate to `{{ $ref: '#/{name}/state/{suggested}' }}` (`any` is the only bare keyword)."
+                        ),
+                    ));
                     continue;
-                }
-                let Some(field) = val.strip_prefix("state.") else {
-                    issues.push(err("req-state-unknown", rsite(), format!("acting.{} must be `any` or `state.<field>`, got '{}'.", role, val)));
+                } else if let Some(r) = rv.get("$ref").and_then(|x| x.as_str()) {
+                    match parse_ref(r) {
+                        Some(pr)
+                            if (pr.file.is_empty() || pr.file == "actors.yaml")
+                                && pr.path.len() == 3
+                                && pr.path[0] == name
+                                && pr.path[1] == "state" =>
+                        {
+                            pr.path[2].clone()
+                        }
+                        _ => {
+                            issues.push(err(
+                                "req-state-unknown",
+                                rsite(),
+                                format!(
+                                    "acting.{role} $ref '{r}' must point at a state field of the SAME actor (`#/{name}/state/<field>`)."
+                                ),
+                            ));
+                            continue;
+                        }
+                    }
+                } else {
+                    issues.push(err(
+                        "requires-acting-untyped",
+                        rsite(),
+                        format!(
+                            "acting.{role} must be `any` or a `$ref` to `#/{name}/state/<field>`."
+                        ),
+                    ));
                     continue;
                 };
+                let field = field.as_str();
                 let Some(ftype) = state_types.get(field) else {
                     issues.push(err("req-state-unknown", rsite(), format!("acting.{} references undeclared state field '{}'.", role, field)));
                     continue;
@@ -4614,10 +4759,10 @@ struct ReminderDef {
     name: String,
     /// `payload.$ref` — MUST target events.yaml (fact vocabulary, ADR-20260731-153000 §1a).
     payload_ref: String,
-    /// Deterministic-identity formula (string form, `UUIDv5(actor_id, purpose)` — the typed-ref
-    /// migration is a follow-up, ADR-20260731-214500 consequences).
-    #[allow(dead_code)]
-    identity: Option<String>,
+    /// A declared `identity:` field — always an ERROR (`reminder-identity-declared`): a reminder's
+    /// identity is DERIVED, `UUIDv5(actor_id, reminder name)` (the runtime's `reminder_message_id`
+    /// computes it), never declared (ADR-20260731-214500 consequences).
+    identity_declared: bool,
     /// Optional default window: `after.$ref` into configuration.yaml keys.
     after_ref: Option<String>,
     /// Reschedule semantics — only `in-place` exists (ADR-20260731-150500).
@@ -4701,7 +4846,7 @@ fn parse_reminders(model: &Model) -> Vec<ReminderDef> {
                     .and_then(|r| r.as_str())
                     .unwrap_or("")
                     .to_string(),
-                identity: rv.get("identity").and_then(|x| x.as_str()).map(str::to_string),
+                identity_declared: rv.get("identity").is_some(),
                 after_ref: rv
                     .get("after")
                     .and_then(|p| p.get("$ref"))
@@ -4774,6 +4919,9 @@ fn parse_deletions(model: &Model) -> Vec<DeletionDef> {
 ///     `configuration.yaml#/keys/<KEY>` ref (never a bare string);
 ///   - `reminder-reschedule-unknown` (error): a `reschedule` value other than `in-place` — the only
 ///     semantics that exist (ADR-20260731-150500);
+///   - `reminder-identity-declared` (error): a reminder declaring `identity:` — it is DERIVED
+///     (`UUIDv5(actor_id, reminder name)`, the runtime's `reminder_message_id`), never declared
+///     (ADR-20260731-214500 consequences);
 ///   - `reminder-without-receive` (error): a declared reminder the SAME actor does not receive —
 ///     strong typing means handler-proof, per actor (ADR-20260731-120825 §2);
 ///   - `receive-without-reminder` (error): a receives message ref into a `reminders:` section that
@@ -4831,6 +4979,13 @@ fn validate_reminders_and_deletion(model: &Model, issues: &mut Vec<Issue>) {
                     format!("reschedule '{}' — only `in-place` exists (ADR-20260731-150500).", rs),
                 ));
             }
+        }
+        if r.identity_declared {
+            issues.push(err(
+                "reminder-identity-declared",
+                at.clone(),
+                "reminder `identity` is DERIVED — UUIDv5(actor_id, reminder name), computed by the runtime's reminder_message_id — never declared; remove the field (ADR-20260731-214500 consequences).".into(),
+            ));
         }
     }
 
@@ -12150,7 +12305,10 @@ fn command_addressing(model: &Model) -> BTreeMap<String, CommandAddress> {
     let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") else { return map };
     for (k, def) in actors {
         let Some(actor) = k.as_str().filter(|s| *s != "principals") else { continue };
-        let Some(identity) = def.get("identity").and_then(|i| i.as_str()) else { continue };
+        // The TYPED identity form (`identity: { $ref: '#/<Actor>/state/<field>' }`,
+        // ADR-20260731-214500 consequences) — the bare-string form is a hard validator error
+        // (`identity-untyped`), and generation only runs on a 0-error catalog.
+        let Some(identity) = actor_identity_field(def, actor) else { continue };
         let Some(width) = def
             .get("mailbox")
             .and_then(|m| m.get("partitions"))
@@ -12167,8 +12325,8 @@ fn command_addressing(model: &Model) -> BTreeMap<String, CommandAddress> {
             let Some(rest) = r.strip_prefix("commands.yaml#/") else { continue };
             map.entry(rest.to_string()).or_insert_with(|| CommandAddress {
                 actor_type: actor.to_string(),
-                identity_prop: message_property_exists(model, r, identity)
-                    .then(|| identity.to_string()),
+                identity_prop: message_property_exists(model, r, &identity)
+                    .then(|| identity.clone()),
                 partitions: width as u16,
             });
         }
@@ -17904,11 +18062,10 @@ CatalogDeleted:
     const RD_ACTORS_VALID: &str = r#"
 Order:
   type: aggregate
-  identity: orderId
+  identity: { $ref: '#/Order/state/orderId' }
   reminders:
     OrderExpired:
       payload: { $ref: 'events.yaml#/OrderExpired' }
-      identity: orderId
       after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW' }
       reschedule: in-place
   receives:
@@ -18093,6 +18250,164 @@ Catalog:
     }
 
     #[test]
+    fn reminder_identity_is_derived_never_declared() {
+        // ADR-20260731-214500 consequences: a reminder's identity is UUIDv5(actor_id, name) —
+        // the runtime's reminder_message_id computes it; declaring it is a hard error.
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n      identity: orderId\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["reminder-identity-declared"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].location.ends_with("Order/reminders/OrderExpired"), "{}", issues[0].location);
+        assert!(issues[0].message.contains("UUIDv5"), "{}", issues[0].message);
+    }
+
+    // ─── typed identity / requires $refs (ADR-20260731-214500 consequences, #272 D2) ────────────
+
+    fn mb_issues(actors_yaml: &str) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_mailbox_addressing(&rd_model(actors_yaml), &mut issues);
+        issues
+    }
+
+    #[test]
+    fn actor_identity_bare_string_is_a_hard_error() {
+        let issues = mb_issues(
+            "Order:\n  type: aggregate\n  identity: orderId\n  receives: []\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["identity-untyped"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(
+            issues[0].message.contains("#/Order/state/orderId"),
+            "the error suggests the exact typed form: {}",
+            issues[0].message
+        );
+    }
+
+    #[test]
+    fn actor_identity_ref_must_target_a_same_actor_state_field() {
+        // Another actor's state field is NOT this actor's identity — the ref must be
+        // `#/<SameActor>/state/<field>`.
+        let wrong_actor = mb_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Catalog/state/orderId' }\n  receives: []\n",
+        );
+        assert_eq!(rules_of(&wrong_actor), vec!["identity-state-field-missing"], "{:?}", wrong_actor.iter().map(|i| &i.message).collect::<Vec<_>>());
+        let wrong_path = mb_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: 'events.yaml#/OrderPlaced/properties/orderId' }\n  receives: []\n",
+        );
+        assert_eq!(rules_of(&wrong_path), vec!["identity-state-field-missing"], "{:?}", wrong_path.iter().map(|i| &i.message).collect::<Vec<_>>());
+        // The well-formed typed ref is clean — the identity field is IMPLICITLY declared by the
+        // ref itself (no explicit `state:` entry needed: the stream key exists before any fold).
+        let ok = mb_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: []\n",
+        );
+        assert!(ok.is_empty(), "{:?}", ok.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn implicit_identity_state_ref_is_exempt_from_ref_dangling() {
+        let m = rd_model(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  receives: []\n",
+        );
+        // The identity's own self-ref names the implicit stream-key field…
+        assert!(is_implicit_identity_state_ref(&m, "#/Order/state/orderId", "actors.yaml"));
+        assert!(is_implicit_identity_state_ref(&m, "actors.yaml#/Order/state/orderId", "tests.yaml"));
+        // …but any OTHER field, actor or file stays a dangling ref.
+        assert!(!is_implicit_identity_state_ref(&m, "#/Order/state/ghost", "actors.yaml"));
+        assert!(!is_implicit_identity_state_ref(&m, "#/Catalog/state/orderId", "actors.yaml"));
+        assert!(!is_implicit_identity_state_ref(&m, "events.yaml#/Order/state/orderId", "actors.yaml"));
+    }
+
+    #[test]
+    fn missing_identity_property_warns_split_by_message_kind() {
+        // PlaceOrder (a command with no properties) → identity-property-not-on-command;
+        // CatalogDeleted (an event without orderId) → id-not-in-payload; the reminder
+        // self-message is exempt (the reminder row itself carries the actor_id).
+        let issues = mb_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n  receives:\n    - message: { $ref: 'commands.yaml#/PlaceOrder' }\n      emits: []\n    - message: { $ref: 'events.yaml#/CatalogDeleted' }\n      emits: []\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n",
+        );
+        assert_eq!(
+            rules_of(&issues),
+            vec!["identity-property-not-on-command", "id-not-in-payload"],
+            "{:?}",
+            issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>()
+        );
+        assert!(issues.iter().all(|i| i.level == Level::Warning), "both stay WARN — the mailbox mints an addressing-only id (calibration, see §2d doc)");
+    }
+
+    /// The §2e fixture: a declared state field with clean lineage, a typed acting ref over it.
+    const REQ_SCALARS: &str = "CustomerId: { type: string }\nOrderId: { type: string }\n";
+    const REQ_EVENTS: &str = "ConversationOpened:\n  type: object\n  properties:\n    customerId: { $ref: 'scalars.yaml#/CustomerId' }\n";
+    const REQ_ACTOR_HEAD: &str = "principals:\n  CUSTOMER: { id: { $ref: 'scalars.yaml#/CustomerId' } }\nConversation:\n  type: aggregate\n  identity: { $ref: '#/Conversation/state/orderId' }\n  state:\n    customerId:\n      type: { $ref: 'scalars.yaml#/CustomerId' }\n      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/customerId' }]\n  receives:\n    - message: { $ref: 'commands.yaml#/PostMessage' }\n      emits: [{ $ref: 'events.yaml#/ConversationOpened' }]\n";
+
+    fn req_issues(acting: &str) -> Vec<Issue> {
+        let actors = format!("{}      requires:\n        acting:\n{}", REQ_ACTOR_HEAD, acting);
+        let m = inline_model(&[
+            ("scalars.yaml", REQ_SCALARS),
+            ("events.yaml", REQ_EVENTS),
+            ("commands.yaml", "PostMessage:\n  type: object\n"),
+            ("actors.yaml", actors.as_str()),
+        ]);
+        let mut issues = Vec::new();
+        validate_actor_state(&m, &mut issues);
+        issues
+    }
+
+    #[test]
+    fn requires_acting_typed_ref_and_any_keyword_are_clean() {
+        let issues = req_issues("          CUSTOMER: { $ref: '#/Conversation/state/customerId' }\n          ADMIN: any\n");
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn requires_acting_bare_state_path_is_a_hard_error() {
+        let issues = req_issues("          CUSTOMER: state.customerId\n");
+        assert_eq!(rules_of(&issues), vec!["requires-acting-untyped"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(
+            issues[0].message.contains("#/Conversation/state/customerId"),
+            "the error suggests the exact typed form: {}",
+            issues[0].message
+        );
+    }
+
+    #[test]
+    fn requires_acting_ref_must_resolve_to_a_declared_same_actor_state_field() {
+        // Wrong actor → shape error; right shape but undeclared field → unknown-field error
+        // (acting refs are STRICT: unlike `identity`, they bind to explicitly declared fold
+        // state — the folded value is what the authorization compares against).
+        let wrong_actor = req_issues("          CUSTOMER: { $ref: '#/Order/state/customerId' }\n");
+        assert_eq!(rules_of(&wrong_actor), vec!["req-state-unknown"], "{:?}", wrong_actor.iter().map(|i| &i.message).collect::<Vec<_>>());
+        let ghost_field = req_issues("          CUSTOMER: { $ref: '#/Conversation/state/ghost' }\n");
+        assert_eq!(rules_of(&ghost_field), vec!["req-state-unknown"], "{:?}", ghost_field.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(ghost_field[0].message.contains("undeclared state field"), "{}", ghost_field[0].message);
+    }
+
+    #[test]
+    fn typed_identity_migration_keeps_generated_runtime_byte_identical() {
+        // The string-path → typed-$ref migration changes DECLARATION SYNTAX only: the identity
+        // property NAMES are unchanged, so the frozen routing contract (command_router.rs) and
+        // the declared-state folds (states.rs) must regenerate byte-identically against the
+        // committed files — any diff here means the migration changed semantics, not syntax.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let router = emit_infra_command_router(&model);
+        let committed_router = std::fs::read_to_string(root.join("crates/infrastructure/src/generated/command_router.rs")).expect("committed command_router.rs");
+        assert_eq!(router, committed_router, "command_router.rs must stay byte-identical across the typed-identity migration");
+        let states = emit_domain_states(&model);
+        let committed_states = std::fs::read_to_string(root.join("crates/domain/src/generated/states.rs")).expect("committed states.rs");
+        assert_eq!(states, committed_states, "states.rs must stay byte-identical across the typed-requires migration");
+        // 0 errors, and the CALIBRATION holds: exactly one command legitimately lacks its
+        // identity property (RequestPhoneVerification — the server mints the customer id), which
+        // is why identity-property-not-on-command is a WARN, not an error (§2d doc).
+        let Report { issues, .. } = validate(&model);
+        for i in &issues {
+            assert!(i.level != Level::Error, "real specs must stay 0-error: {} at {}: {}", i.rule, i.location, i.message);
+        }
+        let cmd_warns: Vec<&Issue> = issues.iter().filter(|i| i.rule == "identity-property-not-on-command").collect();
+        assert_eq!(cmd_warns.len(), 1, "{:?}", cmd_warns.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
+        assert_eq!(cmd_warns[0].location, "actors.yaml/Customer");
+        assert!(cmd_warns[0].message.contains("RequestPhoneVerification"), "{}", cmd_warns[0].message);
+    }
+
+    #[test]
     fn real_specs_declare_no_reminders_or_deletion_and_gain_no_issues() {
         // The DSL support lands BEFORE any spec delta (#272 D2): the committed catalog must parse
         // to zero reminders/deletions, emit no deletion table, trip none of the new rules, and keep
@@ -18103,7 +18418,8 @@ Catalog:
         assert!(parse_deletions(&model).is_empty(), "no actor declares `deletion:` yet");
         assert!(emit_infra_deletion_policy(&model).is_none(), "no deletion → no generated table");
         let Report { issues, .. } = validate(&model);
-        const NEW_RULES: [&str; 9] = [
+        const NEW_RULES: [&str; 10] = [
+            "reminder-identity-declared",
             "reminder-without-receive",
             "receive-without-reminder",
             "schedules-unresolved",
