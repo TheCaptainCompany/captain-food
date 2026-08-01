@@ -1,0 +1,552 @@
+use crate::*;
+
+// ─── Ref-KIND contract (§1b) ────────────────────────────────────────────────────────────────────
+// Resolving is not enough: a `$ref` must point at the right KIND of thing. `state_table` must be a
+// process-manager state table — not merely "some table under database/tables/"; a screen resolver must
+// be a query, not a mutation; an actor `emits` must be an event, not a command. §1b makes that a
+// declared, exhaustive contract instead of the ad-hoc per-site checks scattered through §2–§11.
+//
+// It is FAIL-CLOSED: a `$ref` site not covered by REF_CONTRACT is an error, so a new ref-carrying field
+// cannot be added to the DSL without declaring what it may point at.
+
+/// What a `$ref` target IS — finer than the file it lives in (a table file holds several kinds).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Kind {
+    Command,
+    /// A `commands.yaml` definition NO actor receives: a shared payload sub-object (e.g. `CartLine`),
+    /// not a business intention. Legal inside `properties`, never as an actor's message.
+    PayloadObject,
+    Event,
+    /// A single property of a command/event/entity — `<file>#/<Def>/properties/<p>`.
+    MessageProperty,
+    Error,
+    Rule,
+    Scalar,
+    /// A scalar with an `enum` member list (a state/status type).
+    EnumScalar,
+    Entity,
+    /// An `actors.yaml` event-sourced aggregate.
+    Aggregate,
+    /// A per-actor typed self-message — `actors.yaml#/<Actor>/reminders/<Name>` (ADR-20260731-214500).
+    Reminder,
+    /// A declared aggregate state field — `actors.yaml#/<Actor>/state/<field>` (PROP-20260728-135632 §2.1).
+    StateField,
+    /// A `configuration.yaml#/keys/<KEY>` runtime-configuration key (PROP-20260729-004500).
+    ConfigKey,
+    /// A `processmanager.yaml` state-table orchestrator.
+    ProcessManager,
+    Service,
+    ServiceOperation,
+    Query,
+    Mutation,
+    Subscription,
+    ApiType,
+    ApiInput,
+    Test,
+    /// A `tests.yaml#/fixtures/<f>` expected-outcome fixture.
+    Fixture,
+    /// A `translations.yaml` / `<surface>.translations.yaml` i18n key.
+    TranslationKey,
+    /// A generated fold VIEW over `domain_events` (`database/projection_views.yaml`).
+    ProjectionView,
+    /// A MATERIALIZED read-model table fed by an app projector (`tables/projection_tables.yaml`).
+    ProjectionTable,
+    /// A process manager's private state table (`tables/process_managers.yaml`).
+    PmStateTable,
+    /// A seed/config table configured by the repo seed script (`tables/referential.yaml`).
+    ReferentialTable,
+    /// A write-path journal — `command_journal` / `inbound_events` (`tables/journals.yaml`).
+    JournalTable,
+    /// Adapter-owned raw staging (`tables/integration_staging.yaml`).
+    StagingTable,
+    /// Integration connection storage (`tables/integration_connections.yaml`).
+    ConnectionTable,
+    /// `domain_events` / `domain_stream` (`tables/eventstore.yaml`).
+    EventStoreTable,
+    /// A column of any of the table kinds above.
+    TableColumn,
+    Screen,
+    Persona,
+    /// An `observability.yaml` workflow contract.
+    ObservabilityWorkflow,
+}
+
+impl Kind {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Kind::Command => "command",
+            Kind::PayloadObject => "payload object",
+            Kind::Event => "event",
+            Kind::MessageProperty => "message property",
+            Kind::Error => "error",
+            Kind::Rule => "rule",
+            Kind::Scalar => "scalar",
+            Kind::EnumScalar => "enum scalar",
+            Kind::Entity => "entity",
+            Kind::Aggregate => "aggregate",
+            Kind::Reminder => "actor reminder",
+            Kind::StateField => "actor state field",
+            Kind::ConfigKey => "configuration key",
+            Kind::ProcessManager => "process manager",
+            Kind::Service => "service",
+            Kind::ServiceOperation => "service operation",
+            Kind::Query => "query",
+            Kind::Mutation => "mutation",
+            Kind::Subscription => "subscription",
+            Kind::ApiType => "api output type",
+            Kind::ApiInput => "api input type",
+            Kind::Test => "behaviour test",
+            Kind::Fixture => "test fixture",
+            Kind::TranslationKey => "translation key",
+            Kind::ProjectionView => "projection view",
+            Kind::ProjectionTable => "projection table",
+            Kind::PmStateTable => "process-manager state table",
+            Kind::ReferentialTable => "referential table",
+            Kind::JournalTable => "journal table",
+            Kind::StagingTable => "staging table",
+            Kind::ConnectionTable => "connection table",
+            Kind::EventStoreTable => "event-store table",
+            Kind::TableColumn => "table column",
+            Kind::Screen => "screen",
+            Kind::Persona => "persona",
+            Kind::ObservabilityWorkflow => "observability workflow",
+        }
+    }
+}
+
+pub(crate) fn kind_list(kinds: &[Kind]) -> String {
+    kinds.iter().map(|k| k.name()).collect::<Vec<_>>().join(" or ")
+}
+
+/// What KIND the target of a resolved `$ref` is: `(file, pointer segments, resolved node)` → `Kind`.
+/// `None` = the pointer lands somewhere with no declared kind (e.g. mid-tree) — §1b reports it, which
+/// keeps the classifier honest as the DSL grows.
+pub(crate) fn classify(file: &str, path: &[String], node: &Value, handled: &BTreeSet<String>) -> Option<Kind> {
+    let seg = |i: usize| path.get(i).map(|s| s.as_str());
+    let top = path.len() == 1;
+    // A table column: `<table>/columns/<col>` in any database/tables/*.yaml file.
+    let table_column = path.len() == 3 && seg(1) == Some("columns");
+    let table_kind = |k: Kind| -> Option<Kind> {
+        if top {
+            Some(k)
+        } else if table_column {
+            Some(Kind::TableColumn)
+        } else {
+            None
+        }
+    };
+    match file {
+        "commands.yaml" | "events.yaml" | "entities.yaml" => {
+            let base = match file {
+                // A commands.yaml entry is a COMMAND when an actor receives it; otherwise it is a
+                // shared payload sub-object (mirrors §3's value-object derivation). A genuinely
+                // unhandled command is reported by §3's `command-unhandled`.
+                "commands.yaml" => match path.first() {
+                    Some(n) if handled.contains(n.as_str()) => Kind::Command,
+                    _ => Kind::PayloadObject,
+                },
+                "events.yaml" => Kind::Event,
+                _ => Kind::Entity,
+            };
+            if top {
+                Some(base)
+            } else if path.len() == 3 && seg(1) == Some("properties") {
+                Some(Kind::MessageProperty)
+            } else {
+                None
+            }
+        }
+        "errors.yaml" => top.then_some(Kind::Error),
+        "rules.yaml" => top.then_some(Kind::Rule),
+        "scalars.yaml" => top.then(|| {
+            if node.get("enum").is_some() { Kind::EnumScalar } else { Kind::Scalar }
+        }),
+        // `principals` is the file-header role → identity-scalar map (PROP-20260728-152752 §2.4),
+        // not an actor — excluded so it never registers as a phantom aggregate. Below the actor:
+        // `<Actor>/reminders/<Name>` is a typed self-message (ADR-20260731-214500) and
+        // `<Actor>/state/<field>` a declared state field (what a deletion `match.state` binds to).
+        "actors.yaml" => match (top, seg(1), path.len()) {
+            (true, _, _) => (path.first().map(String::as_str) != Some("principals")).then_some(Kind::Aggregate),
+            (false, Some("reminders"), 3) => Some(Kind::Reminder),
+            (false, Some("state"), 3) => Some(Kind::StateField),
+            _ => None,
+        },
+        // Runtime configuration (PROP-20260729-004500): `keys/<KEY>` is what a `deletion.after` /
+        // `reminders.*.after` window binds to (ADR-20260731-214500 — a $ref, never a bare string).
+        "configuration.yaml" => (path.len() == 2 && seg(0) == Some("keys")).then_some(Kind::ConfigKey),
+        "processmanager.yaml" => top.then_some(Kind::ProcessManager),
+        "services.yaml" => {
+            if top {
+                Some(Kind::Service)
+            } else if path.len() == 3 && seg(1) == Some("operations") {
+                Some(Kind::ServiceOperation)
+            } else {
+                None
+            }
+        }
+        "api.yaml" => match (seg(0), path.len()) {
+            (Some("queries"), 2) => Some(Kind::Query),
+            (Some("mutations"), 2) => Some(Kind::Mutation),
+            (Some("subscriptions"), 2) => Some(Kind::Subscription),
+            (Some("types"), 2) => Some(Kind::ApiType),
+            (Some("inputs"), 2) => Some(Kind::ApiInput),
+            _ => None,
+        },
+        "stories.yaml" => top.then_some(Kind::Persona),
+        "tests.yaml" => match (seg(0), path.len()) {
+            (Some("fixtures"), 2) => Some(Kind::Fixture),
+            (Some("tests"), 2) => Some(Kind::Test),
+            _ => None,
+        },
+        "observability.yaml" => top.then_some(Kind::ObservabilityWorkflow),
+        "database/projection_views.yaml" => {
+            if top {
+                Some(Kind::ProjectionView)
+            } else if table_column {
+                Some(Kind::TableColumn)
+            } else {
+                None
+            }
+        }
+        "database/tables/projection_tables.yaml" => table_kind(Kind::ProjectionTable),
+        "database/tables/process_managers.yaml" => table_kind(Kind::PmStateTable),
+        "database/tables/referential.yaml" => table_kind(Kind::ReferentialTable),
+        "database/tables/journals.yaml" => table_kind(Kind::JournalTable),
+        "database/tables/integration_staging.yaml" => table_kind(Kind::StagingTable),
+        "database/tables/integration_connections.yaml" => table_kind(Kind::ConnectionTable),
+        "database/tables/eventstore.yaml" => table_kind(Kind::EventStoreTable),
+        f if f.ends_with(".translations.yaml") || f == "translations.yaml" => {
+            top.then_some(Kind::TranslationKey)
+        }
+        f if f.starts_with("screens/") => match (seg(0), path.len()) {
+            (Some("screens"), 2) => Some(Kind::Screen),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Glob over a `$ref` LOCATION: `*` matches any run of characters except `.` (so it stands for one
+/// definition name / list index / map key), `**` matches anything including `.`.
+pub(crate) fn glob_match(pat: &[u8], s: &[u8]) -> bool {
+    if pat.starts_with(b"**") {
+        let rest = &pat[2..];
+        if rest.is_empty() {
+            return true;
+        }
+        return (0..=s.len()).any(|i| glob_match(rest, &s[i..]));
+    }
+    match (pat.first(), s.first()) {
+        (None, None) => true,
+        (None, _) => false,
+        (Some(b'*'), _) => {
+            let rest = &pat[1..];
+            let mut i = 0usize;
+            loop {
+                if glob_match(rest, &s[i..]) {
+                    return true;
+                }
+                if i >= s.len() || s[i] == b'.' {
+                    return false;
+                }
+                i += 1;
+            }
+        }
+        (Some(pc), Some(sc)) if pc == sc => glob_match(&pat[1..], &s[1..]),
+        _ => false,
+    }
+}
+
+pub(crate) fn glob(pat: &str, s: &str) -> bool {
+    glob_match(pat.as_bytes(), s.as_bytes())
+}
+
+/// The contract: `(source-file glob, ref-site location glob, allowed target kinds)`.
+/// The location is the `$ref`'s path INSIDE its file (the leading `<file>.` is stripped), with list
+/// indices as `[n]`. Order matters only for readability — every entry is tried, and a site with no
+/// entry is an error (`ref-site-undeclared`).
+#[rustfmt::skip]
+pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
+    // Payload shapes: a property/context/arg is a scalar, a value object, or (in api.yaml) a declared type.
+    ("commands.yaml",  "*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::PayloadObject]),
+    ("events.yaml",    "*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::PayloadObject]),
+    ("entities.yaml",  "*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
+    ("errors.yaml",    "*.context.**",     &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
+
+    // Configuration keys are TYPED (PROP-20260729-004500): each binds the scalar whose `pattern` the
+    // generated reader enforces at startup, so "present" is checked against "usable".
+    ("configuration.yaml", "keys.*.scalar", &[Kind::Scalar, Kind::EnumScalar]),
+
+    // Actors (aggregates): the inbox and the lifecycle state machine. A `message` may also be the
+    // actor's own reminder (`#/<Actor>/reminders/<Name>` — ADR-20260731-214500; §2f proves same-actor).
+    ("actors.yaml", "*.receives[*].message",            &[Kind::Command, Kind::Event, Kind::Reminder]),
+    ("actors.yaml", "*.receives[*].emits[*]",           &[Kind::Event]),
+    ("actors.yaml", "*.receives[*].throws[*]",          &[Kind::Error]),
+    // Reminders (typed self-messages, ADR-20260731-120825/-150500/-153000/-214500): the payload is an
+    // events.yaml FACT (record semantics — never a command), the optional window a configuration key.
+    ("actors.yaml", "*.reminders.*.payload",            &[Kind::Event]),
+    ("actors.yaml", "*.reminders.*.after",              &[Kind::ConfigKey]),
+    // A receive declares the reminders it (re)schedules — the handler's third observable effect.
+    ("actors.yaml", "*.receives[*].schedules[*]",       &[Kind::Reminder]),
+    // Declarative deletion (ADR-20260731-214500): triggers/undo/receipt are events, the window a
+    // configuration key, and a propagation `match` is STRONGLY TYPED (event property ↔ state field).
+    ("actors.yaml", "*.deletion.triggers[*].on[*]",           &[Kind::Event]),
+    ("actors.yaml", "*.deletion.triggers[*].after",           &[Kind::ConfigKey]),
+    ("actors.yaml", "*.deletion.triggers[*].cancelled_on[*]", &[Kind::Event]),
+    ("actors.yaml", "*.deletion.triggers[*].match.event",     &[Kind::MessageProperty]),
+    ("actors.yaml", "*.deletion.triggers[*].match.state",     &[Kind::StateField]),
+    ("actors.yaml", "*.deletion.receipt",                     &[Kind::Event]),
+    ("actors.yaml", "*.lifecycle.status",               &[Kind::EnumScalar]),
+    // The actor-mailbox addressing layer (ADR-20260730-231500, PROP-20260728-152752 §2/§2.4):
+    // `principals` maps each authenticated role to its resolved domain-identity scalar; `identity`
+    // is a TYPED same-actor state-field ref (ADR-20260731-214500 consequences — the field is
+    // implicitly declared by the ref itself, see `is_implicit_identity_state_ref`; §2d proves it).
+    ("actors.yaml", "principals.*.id",                  &[Kind::Scalar]),
+    ("actors.yaml", "*.identity",                       &[Kind::StateField]),
+    // Write-side per-instance authorization (#235): a non-`any` acting entry binds the role to a
+    // DECLARED state field of the same actor (`any` stays a bare keyword, not a ref).
+    ("actors.yaml", "*.receives[*].requires.acting.*",  &[Kind::StateField]),
+    // Declared aggregate state (PROP-20260728-135632 §2.1): typed fields with event(-property)
+    // lineage — `from`/`removedBy` carry properties (latest/set) or whole events (flag/count);
+    // `of` is the set element type (single scalar, or a named map for composite elements).
+    ("actors.yaml", "*.state.*.type",                   &[Kind::Scalar, Kind::EnumScalar]),
+    ("actors.yaml", "*.state.*.from[*]",                &[Kind::MessageProperty, Kind::Event]),
+    ("actors.yaml", "*.state.*.removedBy[*]",           &[Kind::MessageProperty, Kind::Event]),
+    ("actors.yaml", "*.state.*.of",                     &[Kind::Scalar, Kind::EnumScalar]),
+    ("actors.yaml", "*.state.*.of.*",                   &[Kind::Scalar, Kind::EnumScalar]),
+    ("actors.yaml", "*.lifecycle.initial[*].event",     &[Kind::Event]),
+    ("actors.yaml", "*.lifecycle.transitions[*].event", &[Kind::Event]),
+
+    // Process managers: state-table orchestrators (ADR-20260719-…). The state table is a PM state
+    // table — not any table; reads hit read models; deliver/send target aggregates.
+    ("processmanager.yaml", "*.state_table",                            &[Kind::PmStateTable]),
+    ("processmanager.yaml", "*.ports.*",                                &[Kind::Service]),
+    ("processmanager.yaml", "*.receives[*].message",                    &[Kind::Command, Kind::Event]),
+    // Wrapper-seam arms a linear step pipeline cannot express (REPLACEMENT/REFUND, #159/#207): a leg may
+    // DECLARE the events it emits / errors it throws from its hand-written wrapper, merged with the
+    // step-derived set, so the behaviour-test coverage checks (test-then-not-emitted / -thrown) see them.
+    ("processmanager.yaml", "*.receives[*].emits[*]",                   &[Kind::Event]),
+    ("processmanager.yaml", "*.receives[*].throws[*]",                  &[Kind::Error]),
+    ("processmanager.yaml", "*.receives[*].steps[*].read.model",        &[Kind::ProjectionTable, Kind::ProjectionView]),
+    ("processmanager.yaml", "*.receives[*].steps[*].read.where.*.from", &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].guard.throws",      &[Kind::Error]),
+    ("processmanager.yaml", "*.receives[*].steps[*].deliver.event",     &[Kind::Event]),
+    ("processmanager.yaml", "*.receives[*].steps[*].deliver.to",        &[Kind::Aggregate]),
+    ("processmanager.yaml", "*.receives[*].steps[*].deliver.with.*.from", &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].send.command",      &[Kind::Command]),
+    ("processmanager.yaml", "*.receives[*].steps[*].send.to",           &[Kind::Aggregate]),
+    ("processmanager.yaml", "*.receives[*].steps[*].send.with.*.from",  &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].state.by.*.from",   &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].state.expect.*.from", &[Kind::MessageProperty]),
+    ("processmanager.yaml", "*.receives[*].steps[*].state.set.*.from",  &[Kind::MessageProperty]),
+
+    // Service catalog (outbound ports). An input may be a domain EVENT: an outbound call sometimes
+    // hands the adapter the FACT verbatim (`delivery.offer_job` takes the DeliveryRequested birth
+    // fact that carries pickup/dropoff) rather than a parallel entity that would drift from it.
+    ("services.yaml", "*.operations.*.input.*",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::Event]),
+    ("services.yaml", "*.operations.*.output.*", &[Kind::Scalar, Kind::EnumScalar, Kind::Entity]),
+    ("services.yaml", "*.operations.*.errors[*]", &[Kind::Error]),
+
+    // GraphQL surface. A mutation dispatches a COMMAND; a type binds to a READ MODEL (never to
+    // domain_events, never to a journal/staging table).
+    ("api.yaml", "types.*.properties.**",   &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::ApiType]),
+    ("api.yaml", "types.*.reads[*]",        &[Kind::ProjectionView, Kind::ProjectionTable, Kind::ReferentialTable]),
+    ("api.yaml", "inputs.*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::ApiInput]),
+    ("api.yaml", "queries.*.args.*",        &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),
+    ("api.yaml", "queries.*.returns",       &[Kind::ApiType]),
+    ("api.yaml", "mutations.*.command",     &[Kind::Command]),
+    ("api.yaml", "mutations.*.args.*",      &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),
+    ("api.yaml", "mutations.*.returns",     &[Kind::ApiType]),
+    ("api.yaml", "subscriptions.*.args.*",  &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),
+    ("api.yaml", "subscriptions.*.returns", &[Kind::ApiType]),
+
+    // Story map: every step is an API operation the persona performs.
+    ("stories.yaml", "*.activities.*.steps.*", &[Kind::Query, Kind::Mutation, Kind::Subscription]),
+
+    // Behaviour tests (ADR-0032).
+    ("tests.yaml", "fixtures.*.type",   &[Kind::Event]),
+    ("tests.yaml", "tests.*.rules[*]",  &[Kind::Rule]),
+    ("tests.yaml", "tests.*.actor",     &[Kind::Aggregate, Kind::ProcessManager]),
+    ("tests.yaml", "tests.*.when.type", &[Kind::Command, Kind::Event]),
+    ("tests.yaml", "tests.*.given[*]",  &[Kind::Fixture]),
+    ("tests.yaml", "tests.*.then[*]",   &[Kind::Fixture]),
+    ("tests.yaml", "tests.*.thrown[*]", &[Kind::Error]),
+
+    // Observability contracts bind to the domain they diagnose.
+    ("observability.yaml", "*.workflow.saga",           &[Kind::ProcessManager]),
+    ("observability.yaml", "*.workflow.aggregate",      &[Kind::Aggregate]),
+    ("observability.yaml", "*.workflow.command",        &[Kind::Command]),
+    ("observability.yaml", "*.workflow.emits[*]",       &[Kind::Event]),
+    ("observability.yaml", "*.workflow.inbound[*]",     &[Kind::Event]),
+    ("observability.yaml", "*.run_identity[*].businessKey", &[Kind::Scalar, Kind::EnumScalar]),
+
+    // Read models. `from` is event LINEAGE (a whole event for occurrence columns, a property
+    // otherwise); `fk` is the read-navigation graph, so it must name a COLUMN.
+    ("database/projection_views.yaml", "nonProjectedEvents[*]", &[Kind::Event]),
+    ("database/projection_views.yaml", "*.tombstone",           &[Kind::Event]),
+    ("database/projection_views.yaml", "*.fedBy[*]",            &[Kind::Event]),
+    ("database/projection_views.yaml", "*.columns.*.type",      &[Kind::Scalar, Kind::EnumScalar]),
+    ("database/projection_views.yaml", "*.columns.*.from[*]",   &[Kind::Event, Kind::MessageProperty]),
+    ("database/projection_views.yaml", "*.columns.*.fk",        &[Kind::TableColumn]),
+
+    // Real tables (globbed): every column types to a domain scalar; FKs name a column.
+    ("database/tables/*.yaml", "*.tombstone",         &[Kind::Event]),
+    ("database/tables/*.yaml", "*.fedBy[*]",          &[Kind::Event]),
+    ("database/tables/*.yaml", "*.columns.*.type",    &[Kind::Scalar, Kind::EnumScalar]),
+    ("database/tables/*.yaml", "*.columns.*.from[*]", &[Kind::Event, Kind::MessageProperty]),
+    ("database/tables/*.yaml", "*.columns.*.fk",      &[Kind::TableColumn]),
+
+    // SDUI screens (ADR-0033/0037): reads are queries, writes are mutations, live updates are
+    // subscriptions — and EVERY other ref in the (free-form, deeply nested) UI tree is an i18n key,
+    // which is what `screen-ref-out-of-scope` already asserts. Order matters: first match wins.
+    ("screens/*.yaml", "resolvers.**",     &[Kind::Query]),
+    ("screens/*.yaml", "actions.**",       &[Kind::Mutation]),
+    ("screens/*.yaml", "**.subscription",  &[Kind::Subscription]),
+    ("screens/*.yaml", "**",               &[Kind::TranslationKey]),
+
+    // C4 model (source DSL, not generated): containers/components bind to the actors they realize.
+    ("architecture/c4-l2.yaml", "boundedContexts.*.aggregates[*]",      &[Kind::Aggregate]),
+    ("architecture/c4-l2.yaml", "containers.*.realizes[*]",             &[Kind::Aggregate, Kind::ProcessManager]),
+    ("architecture/c4-l2.yaml", "boundedContexts.*.processManagers[*]", &[Kind::ProcessManager]),
+    ("architecture/c4-l3.yaml", "components.*.handles[*]", &[Kind::Aggregate, Kind::ProcessManager]),
+    ("architecture/c4-l3.yaml", "components.*.updates[*]", &[Kind::ProjectionView, Kind::ProjectionTable]),
+];
+
+/// The DSL's own FIELD names — every other segment of a `$ref` location is a definition/instance name
+/// (a command, a screen, a column, a persona…). Used only to turn an undeclared site into a suggested
+/// contract pattern: field names stay literal, name positions become `*`.
+pub(crate) const STRUCTURAL_SEGMENTS: &[&str] = &[
+    "actions", "activities", "actor", "after", "args", "by", "call", "cancelled_on", "columns",
+    "command", "content", "context", "deletion", "deliver", "emits", "event", "expect", "fixtures",
+    "from", "from_hook", "given", "guard", "inputs",
+    "acting", "claims", "identity", "lifecycle", "mailbox", "match", "message", "messages", "model",
+    "mutations", "of", "on", "operations", "params", "payload", "ports", "principals", "receipt",
+    "reminders", "removedBy", "requires",
+    "properties", "queries", "read", "reads", "receives", "resolvers", "returns", "rules",
+    "schedules", "screens", "send", "set", "state", "state_table", "status", "steps",
+    "subscriptions", "tests", "then", "throws", "thrown", "to", "transitions", "triggers", "type",
+    "types", "when", "where", "with", "workflows",
+];
+
+/// Turn a concrete `$ref` site into the contract pattern that would cover it: list indices → `[*]`,
+/// definition/instance names → `*`, DSL field names kept literal.
+pub(crate) fn normalize_site(site: &str) -> String {
+    site.split('.')
+        .map(|part| {
+            // Split a segment into its name and any trailing `[index]` suffixes.
+            let (name, idx) = match part.find('[') {
+                Some(i) => (&part[..i], &part[i..]),
+                None => (part, ""),
+            };
+            let name = if STRUCTURAL_SEGMENTS.contains(&name) { name } else { "*" };
+            let mut idx_out = String::new();
+            let mut depth = 0;
+            for ch in idx.chars() {
+                match ch {
+                    '[' => {
+                        depth += 1;
+                        idx_out.push_str("[*");
+                    }
+                    ']' => {
+                        depth -= 1;
+                        idx_out.push(']');
+                    }
+                    _ if depth > 0 => {}
+                    c => idx_out.push(c),
+                }
+            }
+            format!("{}{}", name, idx_out)
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// §1b — every `$ref` site must be declared, and its target must be of an allowed kind.
+pub(crate) fn validate_ref_kinds(model: &Model, issues: &mut Vec<Issue>) {
+    // Which commands.yaml entries are real COMMANDS (received by an actor or a process manager) —
+    // the rest are shared payload sub-objects. See `Kind::PayloadObject`.
+    let mut handled: BTreeSet<String> = BTreeSet::new();
+    for f in ["actors.yaml", "processmanager.yaml"] {
+        let mut refs = Vec::new();
+        if let Some(v) = model.defs.get(f) {
+            collect_refs(v, f, &mut refs);
+        }
+        for (loc, r) in refs {
+            let site = loc.strip_prefix(f).and_then(|s| s.strip_prefix('.')).unwrap_or(&loc);
+            if glob("*.receives[*].message", site) && ref_target_file(&r, f).as_deref() == Some("commands.yaml") {
+                if let Some(n) = ref_name(&r) {
+                    handled.insert(n);
+                }
+            }
+        }
+    }
+    // Undeclared sites are reported once per NORMALIZED pattern (definition name and list indices
+    // wildcarded), so the message doubles as the contract line to add.
+    let mut undeclared: BTreeMap<String, (String, String, usize)> = BTreeMap::new();
+    for (f, v) in &model.defs {
+        let file = f.as_str();
+        let mut refs = Vec::new();
+        collect_refs(v, file, &mut refs);
+        for (loc, r) in refs {
+            let site = loc.strip_prefix(file).and_then(|s| s.strip_prefix('.')).unwrap_or(&loc);
+            let allowed: Option<&[Kind]> = REF_CONTRACT
+                .iter()
+                .find(|(fg, lg, _)| glob(fg, file) && glob(lg, site))
+                .map(|(_, _, k)| *k);
+            let allowed = match allowed {
+                Some(k) => k,
+                None => {
+                    let e = undeclared
+                        .entry(format!("{}|{}", file, normalize_site(site)))
+                        .or_insert((loc.clone(), site.to_string(), 0));
+                    e.2 += 1;
+                    continue;
+                }
+            };
+            // Kind check (dangling/malformed refs are §1's job — skip what does not resolve).
+            let pr = match parse_ref(&r) {
+                Some(p) => p,
+                None => continue,
+            };
+            let target_file = if pr.file.is_empty() { file.to_string() } else { pr.file.clone() };
+            let node = match resolve_ref(model, &r, file) {
+                Some(n) => n,
+                None => continue,
+            };
+            match classify(&target_file, &pr.path, node, &handled) {
+                Some(k) if allowed.contains(&k) => {}
+                Some(k) => {
+                    // A commands.yaml entry only counts as a COMMAND once an actor receives it —
+                    // spell that out rather than leaving "is a payload object" to be decoded.
+                    let hint = if k == Kind::PayloadObject && allowed.contains(&Kind::Command) {
+                        " (no actor or process manager receives it — wire it into an inbox, or move it to entities.yaml if it is a payload shape)"
+                    } else {
+                        ""
+                    };
+                    issues.push(err(
+                        "ref-kind",
+                        loc.clone(),
+                        format!("$ref '{}' is a {}; this site requires a {}{}.", r, k.name(), kind_list(allowed), hint),
+                    ))
+                }
+                None => issues.push(err(
+                    "ref-kind-unknown",
+                    loc.clone(),
+                    format!("$ref '{}' does not name a classifiable definition (expected a {}).", r, kind_list(allowed)),
+                )),
+            }
+        }
+    }
+    for (key, (example, example_site, count)) in undeclared {
+        let (file, norm) = key.split_once('|').unwrap_or(("?", "?"));
+        issues.push(err(
+            "ref-site-undeclared",
+            example,
+            format!(
+                "no ref-kind contract for the $ref site '{}' ({} occurrence(s)) — declare what it may point at, e.g. (\"{}\", \"{}\", &[…]) in REF_CONTRACT.",
+                example_site, count, file, norm
+            ),
+        ));
+    }
+}
+

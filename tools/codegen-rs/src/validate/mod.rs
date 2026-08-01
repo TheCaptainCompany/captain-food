@@ -15,3 +15,7 @@ pub(crate) mod services;
 pub(crate) use services::*;
 pub(crate) mod translations;
 pub(crate) use translations::*;
+pub(crate) mod shape;
+pub(crate) use shape::*;
+pub(crate) mod core;
+pub(crate) use core::*;
