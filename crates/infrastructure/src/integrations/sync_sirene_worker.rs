@@ -100,7 +100,7 @@ const EXTERNAL_USER_TYPE: &str = "EXTERNAL";
 /// small enough that a genuinely broken one stops costing anything within a sweep or two.
 const MAX_SYNC_ATTEMPTS: i32 = 10;
 
-/// The `inbound_events.source` this adapter owns. `(source, external_id)` is the delivery-level dedupe,
+/// The `inbound_messages.source` this adapter owns. `(source, external_id)` is the delivery-level dedupe,
 /// and unlike `command_journal`'s `last_seen_at`-seeded message_id it is STABLE across sweeps
 /// (ADR-20260728-011344).
 const SIRENE_SOURCE: &str = "sirene";
@@ -159,7 +159,7 @@ pub struct SireneSyncSummary {
     /// Inbound registry facts STAGED for the drain (ADR-20260728-011344). No longer "commands issued",
     /// and no longer conflating new prospects with replays: what each staged fact turned out to MEAN
     /// (created / updated / no-change) is the drain's verdict, readable as
-    /// `SELECT status, count(*) FROM inbound_events WHERE source = 'sirene'`. This counter only says how
+    /// `SELECT status, count(*) FROM inbound_messages WHERE source = 'sirene'`. This counter only says how
     /// many rows we handed over.
     pub registered: u64,
     /// `MarkRestaurantClosed` issued (NON_PARTNER prospects only).
@@ -189,8 +189,8 @@ pub struct SireneSyncSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowOutcome {
     /// HANDED OVER to the inbox, verdict not yet known. The ACL translated the record and staged an
-    /// inbound fact; the aggregate has not decided anything yet — `InboundEventsDrainWorker` delivers it
-    /// and writes the verdict onto `inbound_events.status`. Calling this SYNCED would claim more than
+    /// inbound fact; the aggregate has not decided anything yet — the Restaurant lane's MailboxWorker
+    /// delivers it and the verdict lands on `inbound_messages.status`. Calling this SYNCED would claim more than
     /// this worker knows: a later delivery failure or rejection would leave the mirror asserting a
     /// success that never happened. `reconcile_staged` resolves it on a later pass.
     ///
@@ -625,29 +625,39 @@ impl SireneSyncWorker {
     /// delivers it and the AGGREGATE decides. Without this step the mirror would permanently claim a
     /// success it never observed.
     ///
-    /// The join key is the one the ACL already writes: `inbound_events.external_id = '{siret}:{hash}'`,
+    /// The join key is the one the ACL already writes: `inbound_messages.external_id = '{siret}:{hash}'`,
     /// which is exactly `siret || ':' || payload_hash` on the staging row. One statement, no per-row
     /// round-trip.
     ///
-    /// Verdict mapping (`InboundEventStatus`, stored as TEXT):
-    /// - DELIVERED — the aggregate decided a fact and it was appended;
+    /// Verdict mapping (`InboundMessageStatus`, stored as TEXT):
+    /// - SUCCEEDED — the aggregate decided a fact and it was appended;
     /// - IGNORED — the aggregate decided nothing had changed;
     /// - DUPLICATE — this delivery had already been consumed.
     ///
     /// All three are SUCCESSFUL terminal outcomes: the record reached the domain and the domain is now
     /// correct about it. "Nothing changed" is a real answer, not a failure — conflating it with one is
-    /// what made a sweep unable to distinguish 200,000 registrations from 200,000 no-ops. FAILED is
-    /// surfaced as FAILED. RECEIVED is still in flight and left alone.
+    /// what made a sweep unable to distinguish 200,000 registrations from 200,000 no-ops. ANY other
+    /// terminal verdict (FAILED today; REJECTED/CANCELLED should a recorded fact ever produce them)
+    /// surfaces as FAILED and keeps the payload — success is enumerated, never inferred from
+    /// "not FAILED". RECEIVED/SCHEDULED are still in flight and left alone.
     async fn reconcile_staged(&self, summary: &mut SireneSyncSummary) -> Result<(), DomainError> {
         let resolved = sqlx::query(
             // The payload is dropped HERE, in the same statement that records the verdict — never
             // before it. A FAILED verdict keeps the payload: that is the row that may need
             // re-translating, and it is the only original we hold.
+            // DEFENSIVE verdict mapping: only the three SUCCESS verdicts resolve SYNCED and drop
+            // the payload; anything else terminal (FAILED today; REJECTED/CANCELLED should they
+            // ever reach a recorded fact) lands FAILED and KEEPS the payload — the only original
+            // we hold, and the row that may need re-translating. An enumerated "not FAILED means
+            // success" would silently assert a sync that never happened the day a new terminal
+            // verdict appears (#272 review, 2026-08-01).
             "UPDATE external_sirene_restaurants s \
-                SET status = CASE WHEN i.status = 'FAILED' THEN 'FAILED' ELSE 'SYNCED' END, \
-                    synced_at = CASE WHEN i.status = 'FAILED' THEN s.synced_at \
-                                     ELSE COALESCE(i.completed_at, now()) END, \
-                    payload = CASE WHEN i.status = 'FAILED' THEN s.payload ELSE NULL END \
+                SET status = CASE WHEN i.status IN ('SUCCEEDED', 'IGNORED', 'DUPLICATE') \
+                                  THEN 'SYNCED' ELSE 'FAILED' END, \
+                    synced_at = CASE WHEN i.status IN ('SUCCEEDED', 'IGNORED', 'DUPLICATE') \
+                                     THEN COALESCE(i.completed_at, now()) ELSE s.synced_at END, \
+                    payload = CASE WHEN i.status IN ('SUCCEEDED', 'IGNORED', 'DUPLICATE') \
+                                   THEN NULL ELSE s.payload END \
                FROM inbound_messages i \
               WHERE s.status = 'STAGED' \
                 AND i.source = $1 \

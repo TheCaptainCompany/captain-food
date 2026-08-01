@@ -432,6 +432,12 @@ enum Kind {
     Entity,
     /// An `actors.yaml` event-sourced aggregate.
     Aggregate,
+    /// A per-actor typed self-message — `actors.yaml#/<Actor>/reminders/<Name>` (ADR-20260731-214500).
+    Reminder,
+    /// A declared aggregate state field — `actors.yaml#/<Actor>/state/<field>` (PROP-20260728-135632 §2.1).
+    StateField,
+    /// A `configuration.yaml#/keys/<KEY>` runtime-configuration key (PROP-20260729-004500).
+    ConfigKey,
     /// A `processmanager.yaml` state-table orchestrator.
     ProcessManager,
     Service,
@@ -483,6 +489,9 @@ impl Kind {
             Kind::EnumScalar => "enum scalar",
             Kind::Entity => "entity",
             Kind::Aggregate => "aggregate",
+            Kind::Reminder => "actor reminder",
+            Kind::StateField => "actor state field",
+            Kind::ConfigKey => "configuration key",
             Kind::ProcessManager => "process manager",
             Kind::Service => "service",
             Kind::ServiceOperation => "service operation",
@@ -558,8 +567,18 @@ fn classify(file: &str, path: &[String], node: &Value, handled: &BTreeSet<String
             if node.get("enum").is_some() { Kind::EnumScalar } else { Kind::Scalar }
         }),
         // `principals` is the file-header role → identity-scalar map (PROP-20260728-152752 §2.4),
-        // not an actor — excluded so it never registers as a phantom aggregate.
-        "actors.yaml" => (top && path.first().map(String::as_str) != Some("principals")).then_some(Kind::Aggregate),
+        // not an actor — excluded so it never registers as a phantom aggregate. Below the actor:
+        // `<Actor>/reminders/<Name>` is a typed self-message (ADR-20260731-214500) and
+        // `<Actor>/state/<field>` a declared state field (what a deletion `match.state` binds to).
+        "actors.yaml" => match (top, seg(1), path.len()) {
+            (true, _, _) => (path.first().map(String::as_str) != Some("principals")).then_some(Kind::Aggregate),
+            (false, Some("reminders"), 3) => Some(Kind::Reminder),
+            (false, Some("state"), 3) => Some(Kind::StateField),
+            _ => None,
+        },
+        // Runtime configuration (PROP-20260729-004500): `keys/<KEY>` is what a `deletion.after` /
+        // `reminders.*.after` window binds to (ADR-20260731-214500 — a $ref, never a bare string).
+        "configuration.yaml" => (path.len() == 2 && seg(0) == Some("keys")).then_some(Kind::ConfigKey),
         "processmanager.yaml" => top.then_some(Kind::ProcessManager),
         "services.yaml" => {
             if top {
@@ -663,14 +682,35 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     // generated reader enforces at startup, so "present" is checked against "usable".
     ("configuration.yaml", "keys.*.scalar", &[Kind::Scalar, Kind::EnumScalar]),
 
-    // Actors (aggregates): the inbox and the lifecycle state machine.
-    ("actors.yaml", "*.receives[*].message",            &[Kind::Command, Kind::Event]),
+    // Actors (aggregates): the inbox and the lifecycle state machine. A `message` may also be the
+    // actor's own reminder (`#/<Actor>/reminders/<Name>` — ADR-20260731-214500; §2f proves same-actor).
+    ("actors.yaml", "*.receives[*].message",            &[Kind::Command, Kind::Event, Kind::Reminder]),
     ("actors.yaml", "*.receives[*].emits[*]",           &[Kind::Event]),
     ("actors.yaml", "*.receives[*].throws[*]",          &[Kind::Error]),
+    // Reminders (typed self-messages, ADR-20260731-120825/-150500/-153000/-214500): the payload is an
+    // events.yaml FACT (record semantics — never a command), the optional window a configuration key.
+    ("actors.yaml", "*.reminders.*.payload",            &[Kind::Event]),
+    ("actors.yaml", "*.reminders.*.after",              &[Kind::ConfigKey]),
+    // A receive declares the reminders it (re)schedules — the handler's third observable effect.
+    ("actors.yaml", "*.receives[*].schedules[*]",       &[Kind::Reminder]),
+    // Declarative deletion (ADR-20260731-214500): triggers/undo/receipt are events, the window a
+    // configuration key, and a propagation `match` is STRONGLY TYPED (event property ↔ state field).
+    ("actors.yaml", "*.deletion.triggers[*].on[*]",           &[Kind::Event]),
+    ("actors.yaml", "*.deletion.triggers[*].after",           &[Kind::ConfigKey]),
+    ("actors.yaml", "*.deletion.triggers[*].cancelled_on[*]", &[Kind::Event]),
+    ("actors.yaml", "*.deletion.triggers[*].match.event",     &[Kind::MessageProperty]),
+    ("actors.yaml", "*.deletion.triggers[*].match.state",     &[Kind::StateField]),
+    ("actors.yaml", "*.deletion.receipt",                     &[Kind::Event]),
     ("actors.yaml", "*.lifecycle.status",               &[Kind::EnumScalar]),
     // The actor-mailbox addressing layer (ADR-20260730-231500, PROP-20260728-152752 §2/§2.4):
-    // `principals` maps each authenticated role to its resolved domain-identity scalar.
+    // `principals` maps each authenticated role to its resolved domain-identity scalar; `identity`
+    // is a TYPED same-actor state-field ref (ADR-20260731-214500 consequences — the field is
+    // implicitly declared by the ref itself, see `is_implicit_identity_state_ref`; §2d proves it).
     ("actors.yaml", "principals.*.id",                  &[Kind::Scalar]),
+    ("actors.yaml", "*.identity",                       &[Kind::StateField]),
+    // Write-side per-instance authorization (#235): a non-`any` acting entry binds the role to a
+    // DECLARED state field of the same actor (`any` stays a bare keyword, not a ref).
+    ("actors.yaml", "*.receives[*].requires.acting.*",  &[Kind::StateField]),
     // Declared aggregate state (PROP-20260728-135632 §2.1): typed fields with event(-property)
     // lineage — `from`/`removedBy` carry properties (latest/set) or whole events (flag/count);
     // `of` is the set element type (single scalar, or a named map for composite elements).
@@ -781,13 +821,16 @@ const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
 /// (a command, a screen, a column, a persona…). Used only to turn an undeclared site into a suggested
 /// contract pattern: field names stay literal, name positions become `*`.
 const STRUCTURAL_SEGMENTS: &[&str] = &[
-    "actions", "activities", "actor", "args", "by", "call", "columns", "command", "content", "context",
-    "deliver", "emits", "expect", "fixtures", "from", "from_hook", "given", "guard", "inputs",
-    "acting", "claims", "identity", "lifecycle", "mailbox", "message", "messages", "model",
-    "mutations", "of", "operations", "params", "ports", "principals", "removedBy", "requires",
-    "properties", "queries", "read", "reads", "receives", "resolvers", "returns", "rules", "screens",
-    "send", "set", "state", "state_table", "status", "steps", "subscriptions", "tests", "then",
-    "throws", "thrown", "to", "transitions", "type", "types", "when", "where", "with", "workflows",
+    "actions", "activities", "actor", "after", "args", "by", "call", "cancelled_on", "columns",
+    "command", "content", "context", "deletion", "deliver", "emits", "event", "expect", "fixtures",
+    "from", "from_hook", "given", "guard", "inputs",
+    "acting", "claims", "identity", "lifecycle", "mailbox", "match", "message", "messages", "model",
+    "mutations", "of", "on", "operations", "params", "payload", "ports", "principals", "receipt",
+    "reminders", "removedBy", "requires",
+    "properties", "queries", "read", "reads", "receives", "resolvers", "returns", "rules",
+    "schedules", "screens", "send", "set", "state", "state_table", "status", "steps",
+    "subscriptions", "tests", "then", "throws", "thrown", "to", "transitions", "triggers", "type",
+    "types", "when", "where", "with", "workflows",
 ];
 
 /// Turn a concrete `$ref` site into the contract pattern that would cover it: list indices → `[*]`,
@@ -1001,7 +1044,12 @@ fn validate(model: &Model) -> Report {
                 cov.refs += 1;
                 if parse_ref(&r).is_none() {
                     issues.push(err("ref-format", loc, format!("Malformed $ref '{}'.", r)));
-                } else if resolve_ref(model, &r, f).is_none() {
+                } else if resolve_ref(model, &r, f).is_none()
+                    && !is_implicit_identity_state_ref(model, &r, f)
+                {
+                    // The identity state field is implicitly declared by the actor's own typed
+                    // `identity` ref (the stream key needs no fold entry) — see
+                    // `is_implicit_identity_state_ref`; §2d proves the declaration's shape.
                     issues.push(err("ref-dangling", loc, format!("$ref '{}' does not resolve.", r)));
                 }
             }
@@ -1033,6 +1081,13 @@ fn validate(model: &Model) -> Report {
             } else if ref_target_file(&entry.message_ref, "actors.yaml").as_deref() == Some("events.yaml") {
                 if let Some(n) = ref_name(&entry.message_ref) {
                     consumed_events.insert(n);
+                }
+            } else if reminder_ref_parts(&entry.message_ref).is_some() {
+                // A reminder self-message (ADR-20260731-214500): §2f proves it resolves on the SAME
+                // actor. Its payload FACT counts as consumed — the delivery records it (record
+                // semantics, ADR-20260731-153000) — so the event is not an orphan.
+                if let Some(ev) = reminder_payload_event(model, &entry.message_ref) {
+                    consumed_events.insert(ev);
                 }
             } else {
                 issues.push(err(
@@ -1071,6 +1126,8 @@ fn validate(model: &Model) -> Report {
     validate_lifecycles(model, &mut issues);
     validate_mailbox_addressing(model, &mut issues);
     validate_actor_state(model, &mut issues);
+    // --- 2f. Reminders + declarative deletion (ADR-20260731-214500) ------------------------------
+    validate_reminders_and_deletion(model, &mut issues);
     {
         let lcs = parse_lifecycles(model);
         cov.lifecycles = lcs.len();
@@ -1111,6 +1168,21 @@ fn validate(model: &Model) -> Report {
     }
     let mut produced_events: BTreeSet<String> = emitted_events.clone();
     produced_events.extend(consumed_events.iter().cloned());
+    // Declarative deletion (ADR-20260731-214500): the generic engine RECORDS each declared
+    // `receipt` fact (on the deletion ledger) and CONSUMES each trigger/undo fact — a fact that
+    // exists only in a `deletion:` block is engine vocabulary, not an orphan.
+    for d in parse_deletions(model) {
+        if let Some(e) = d.receipt_ref.as_deref().and_then(ref_name) {
+            produced_events.insert(e);
+        }
+        for t in &d.triggers {
+            for r in t.on.iter().chain(t.cancelled_on.iter()) {
+                if let Some(e) = ref_name(r) {
+                    produced_events.insert(e);
+                }
+            }
+        }
+    }
     for e in map_keys(model.defs.get("events.yaml")) {
         if !produced_events.contains(&e) {
             issues.push(warn(
@@ -1625,9 +1697,15 @@ fn validate(model: &Model) -> Report {
         for a in &actors {
             let mut by_msg: HashMap<String, usize> = HashMap::new();
             for e in &a.receives {
-                let msg = match ref_name(&e.message_ref) {
-                    Some(m) => m,
-                    None => continue,
+                // A reminder receive is keyed by its PAYLOAD event (record semantics,
+                // ADR-20260731-153000): the delivery records that fact, so that is the vocabulary a
+                // behaviour test's `when.type` names (tests.*.when.type must be a command or event).
+                let msg = match reminder_ref_parts(&e.message_ref) {
+                    Some((_, rname)) => reminder_payload_event(model, &e.message_ref).unwrap_or(rname),
+                    None => match ref_name(&e.message_ref) {
+                        Some(m) => m,
+                        None => continue,
+                    },
                 };
                 let emits: BTreeSet<String> = e.emits.iter().filter_map(|r| ref_name(r)).collect();
                 let throws: BTreeSet<String> = e.throws.iter().filter_map(|r| ref_name(r)).collect();
@@ -3293,6 +3371,8 @@ struct Receive {
     message_ref: String,
     emits: Vec<String>, // raw $ref strings
     throws: Vec<String>,
+    /// Reminders this handler (re)schedules — raw same-actor `$ref`s (ADR-20260731-214500 §2).
+    schedules: Vec<String>,
     effect: Option<String>,
 }
 struct Ctx {
@@ -3408,8 +3488,9 @@ fn parse_actors(model: &Model) -> Vec<Actor> {
                         .to_string();
                     let emits = ref_strings(e.get("emits"));
                     let throws = ref_strings(e.get("throws"));
+                    let schedules = ref_strings(e.get("schedules"));
                     let effect = e.get("effect").and_then(|x| x.as_str()).map(|s| s.to_string());
-                    receives.push(Receive { message_ref, emits, throws, effect });
+                    receives.push(Receive { message_ref, emits, throws, schedules, effect });
                 }
             }
             out.push(Actor {
@@ -3497,7 +3578,7 @@ fn parse_actors(model: &Model) -> Vec<Actor> {
                         }
                     }
                     let effect = e.get("description").and_then(|x| x.as_str()).map(|s| s.to_string());
-                    receives.push(Receive { message_ref, emits, throws, effect });
+                    receives.push(Receive { message_ref, emits, throws, schedules: Vec::new(), effect });
                 }
             }
             out.push(Actor {
@@ -4291,6 +4372,42 @@ fn message_property_exists(model: &Model, message_ref: &str, prop: &str) -> bool
         .is_some()
 }
 
+/// The payload-property NAME an actor's TYPED `identity` declares —
+/// `identity: { $ref: '#/<Actor>/state/<field>' }` (ADR-20260731-214500 consequences: typed $refs
+/// everywhere; the bare-string form is a hard §2d error, `identity-untyped`). Returns `None` for a
+/// missing identity, a bare string, or a ref of any other shape (wrong file/actor/path — §2d's
+/// `identity-state-field-missing`). Generation (command addressing) reads through this helper so
+/// validator and emitters can never disagree on the field.
+fn actor_identity_field(def: &Value, actor: &str) -> Option<String> {
+    let r = def.get("identity")?.get("$ref")?.as_str()?;
+    let pr = parse_ref(r)?;
+    if !pr.file.is_empty() && pr.file != "actors.yaml" {
+        return None;
+    }
+    (pr.path.len() == 3 && pr.path[0] == actor && pr.path[1] == "state")
+        .then(|| pr.path[2].clone())
+}
+
+/// True when `r` points at an actor's IMPLICIT identity state field: `#/<Actor>/state/<field>`
+/// where `<field>` is exactly what that actor's typed `identity` declares. The identity is the
+/// STREAM KEY — it exists before any fold — so it is declared by the `identity` ref itself, not by
+/// an explicit `state:` entry (forcing one into every aggregate would add fold fields that change
+/// the generated states.rs for no behaviour). §1 exempts these refs from `ref-dangling`; §2d's
+/// `identity-state-field-missing` owns the shape proof.
+fn is_implicit_identity_state_ref(model: &Model, r: &str, ctx: &str) -> bool {
+    let Some(pr) = parse_ref(r) else { return false };
+    let file = if pr.file.is_empty() { ctx } else { pr.file.as_str() };
+    if file != "actors.yaml" || pr.path.len() != 3 || pr.path[1] != "state" {
+        return false;
+    }
+    model
+        .defs
+        .get("actors.yaml")
+        .and_then(|m| m.get(pr.path[0].as_str()))
+        .and_then(|def| actor_identity_field(def, &pr.path[0]))
+        .is_some_and(|f| f == pr.path[2])
+}
+
 /// §2d — the actor-mailbox ADDRESSING layer (ADR-20260730-231500, PROP-20260728-152752 §2):
 /// the file-header `principals` map (role → domain-identity scalar), each aggregate's `identity`
 /// (the payload property that addresses its instances = the stream id) and `mailbox.partitions`
@@ -4298,8 +4415,20 @@ fn message_property_exists(model: &Model, message_ref: &str, prop: &str) -> bool
 ///   - `pr-role-unknown` (error): a principals key that is not a scalars.yaml#/UserType value;
 ///   - `mb-partitions-range` (error): partitions outside 1..=32767 (smallint keyspace);
 ///   - `id-missing` (warn, adoption — like lc-missing): an aggregate with no `identity`;
-///   - `id-not-in-payload` (warn until the slice-3 dispatch settles birth-command id minting,
-///     PROP-20260728-152752 §8): a received message whose payload lacks the identity property.
+///   - `identity-untyped` (error, ADR-20260731-214500 consequences): a bare-string `identity` —
+///     the catalog is fully migrated to `identity: { $ref: '#/<Actor>/state/<field>' }`;
+///   - `identity-state-field-missing` (error): an identity $ref that does not land on a state
+///     field of the SAME actor (`#/<Actor>/state/<field>`) — the identity field is the stream key,
+///     implicitly declared by this very ref (an explicit `state:` entry of the name also counts);
+///   - `identity-property-not-on-command` (warn — CALIBRATED, see below): a received COMMAND whose
+///     payload lacks the identity property. Warn, not error, because the current generation
+///     legitimately tolerates it: `command_addressing` maps such a command to `identity_prop:
+///     None` and the edge mints an ADDRESSING-ONLY actor_id (correct for a birth/side-effect
+///     command whose id the server mints — today exactly `RequestPhoneVerification`). Making this
+///     an error needs a DSL marker for server-minted ids first (a plan-mode decision);
+///   - `id-not-in-payload` (warn, PROP-20260728-152752 §8): the same gap on a received EVENT
+///     (fan-out facts may key differently — the Payment refund legs); reminder self-messages are
+///     exempt (the reminder row itself carries the actor_id, so no payload key is needed).
 fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
     let actors = match model.defs.get("actors.yaml") {
         Some(Value::Mapping(m)) => m,
@@ -4323,6 +4452,9 @@ fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
             Some(s) if s != "principals" => s,
             _ => continue,
         };
+        // The activations sub-block is legal on ANY mailbox actor (aggregate or PM) — validate
+        // it before the aggregate-only addressing checks below.
+        validate_mailbox_activations(node, name, issues);
         if node.get("type").and_then(|x| x.as_str()) != Some("aggregate") {
             continue;
         }
@@ -4335,7 +4467,7 @@ fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
                 ));
             }
         }
-        let Some(identity) = node.get("identity").and_then(|x| x.as_str()) else {
+        let Some(identity_node) = node.get("identity") else {
             issues.push(warn(
                 "id-missing",
                 format!("actors.yaml/{}", name),
@@ -4346,20 +4478,113 @@ fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
             ));
             continue;
         };
+        if let Some(bare) = identity_node.as_str() {
+            issues.push(err(
+                "identity-untyped",
+                format!("actors.yaml/{}", name),
+                format!(
+                    "identity is the bare string '{bare}' — migrate to the typed form `identity: {{ $ref: '#/{name}/state/{bare}' }}` (ADR-20260731-214500 consequences: typed $refs everywhere).",
+                ),
+            ));
+            continue;
+        }
+        let Some(identity) = actor_identity_field(node, name) else {
+            let raw = identity_node
+                .get("$ref")
+                .and_then(|r| r.as_str())
+                .unwrap_or("<no $ref>");
+            issues.push(err(
+                "identity-state-field-missing",
+                format!("actors.yaml/{}", name),
+                format!(
+                    "identity $ref '{raw}' does not land on a state field of '{name}' — expected `#/{name}/state/<field>` (the identity IS the actor's stream-key state field, declared by this ref; an explicit `state:` entry of that name also satisfies it).",
+                ),
+            ));
+            continue;
+        };
         for entry in node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten() {
             let Some(mref) = entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str()) else {
                 continue;
             };
-            if !message_property_exists(model, mref, identity) {
-                issues.push(warn(
-                    "id-not-in-payload",
-                    format!("actors.yaml/{}", name),
-                    format!(
-                        "'{}' does not carry identity property '{}' — a birth message minting its id, or a gap the slice-3 dispatch must resolve.",
-                        mref, identity
-                    ),
-                ));
+            // A reminder self-message needs no identity property: the reminder ROW carries the
+            // actor_id (message_id = UUIDv5(actor_id, name)), so delivery is self-addressed.
+            if reminder_ref_parts(mref).is_some() {
+                continue;
             }
+            if !message_property_exists(model, mref, &identity) {
+                let is_command =
+                    ref_target_file(mref, "actors.yaml").as_deref() == Some("commands.yaml");
+                if is_command {
+                    issues.push(warn(
+                        "identity-property-not-on-command",
+                        format!("actors.yaml/{}", name),
+                        format!(
+                            "command '{}' has no payload property '{}' — the mailbox mints an ADDRESSING-ONLY actor_id for it (legitimate only when the server mints the id; a non-birth command missing it would mis-address every delivery).",
+                            mref, identity
+                        ),
+                    ));
+                } else {
+                    issues.push(warn(
+                        "id-not-in-payload",
+                        format!("actors.yaml/{}", name),
+                        format!(
+                            "'{}' does not carry identity property '{}' — a birth message minting its id, or a gap the slice-3 dispatch must resolve.",
+                            mref, identity
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// The optional `mailbox.activations` sub-block (PROP-20260728-152752 §3.5, #272 D3): `false`
+/// opts the actor out of the ACTOR_ACTIVATIONS-gated held-state cache; a mapping tunes it
+/// (`enabled`, `idle_seconds` — the per-actor passivation override). Anything else is a shape
+/// error: a knob that parses to nothing would silently run the global defaults.
+fn validate_mailbox_activations(node: &Value, name: &str, issues: &mut Vec<Issue>) {
+    let Some(act) = node.get("mailbox").and_then(|m| m.get("activations")) else {
+        return;
+    };
+    match act {
+        Value::Bool(_) => {}
+        Value::Mapping(m) => {
+            for (k, v) in m {
+                match k.as_str() {
+                    Some("enabled") => {
+                        if v.as_bool().is_none() {
+                            issues.push(err(
+                                "mb-activations-shape",
+                                format!("actors.yaml/{}", name),
+                                format!("mailbox.activations.enabled must be a bool, got {:?}.", v),
+                            ));
+                        }
+                    }
+                    Some("idle_seconds") => {
+                        if !v.as_i64().map(|n| n >= 1).unwrap_or(false) {
+                            issues.push(err(
+                                "mb-activations-shape",
+                                format!("actors.yaml/{}", name),
+                                format!("mailbox.activations.idle_seconds must be an integer >= 1, got {:?} (to disable the cache for this actor, use `activations: false`).", v),
+                            ));
+                        }
+                    }
+                    other => {
+                        issues.push(err(
+                            "mb-activations-shape",
+                            format!("actors.yaml/{}", name),
+                            format!("mailbox.activations knows only `enabled` and `idle_seconds`, got {:?}.", other),
+                        ));
+                    }
+                }
+            }
+        }
+        other => {
+            issues.push(err(
+                "mb-activations-shape",
+                format!("actors.yaml/{}", name),
+                format!("mailbox.activations must be a bool or a {{enabled, idle_seconds}} mapping, got {:?}.", other),
+            ));
         }
     }
 }
@@ -4390,7 +4615,11 @@ fn event_property_type_ref(model: &Model, event: &str, prop: &str) -> Option<Str
 ///     property's $ref;
 ///   - `st-shape` (error): mode/shape contradictions (set without `of`; flag/count lineage that
 ///     names properties; latest lineage that names whole events);
-///   - `req-state-unknown` (error): `acting` naming an undeclared state field;
+///   - `requires-acting-untyped` (error, ADR-20260731-214500 consequences): an acting value that
+///     is a bare `state.<field>` path string (or any non-`any` bare string) — migrated to the
+///     typed form `{ $ref: '#/<Actor>/state/<field>' }`; `any` stays a bare keyword;
+///   - `req-state-unknown` (error): an acting $ref that is not a same-actor `#/<Actor>/state/…`
+///     ref, or that names an undeclared state field;
 ///   - `req-principal-type` (error): the acting role's principals id scalar differs from the
 ///     state field's type;
 ///   - `req-principal-missing` (error): a non-`any` acting entry for a role absent from
@@ -4508,14 +4737,54 @@ fn validate_actor_state(model: &Model, issues: &mut Vec<Issue>) {
             let mref = entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str()).unwrap_or("");
             let rsite = || site(format!("/requires[{}]", mref));
             for (rk, rv) in req.get("acting").and_then(|a| a.as_mapping()).into_iter().flatten() {
-                let (Some(role), Some(val)) = (rk.as_str(), rv.as_str()) else { continue };
-                if val == "any" {
+                let Some(role) = rk.as_str() else { continue };
+                // `any` is the only bare keyword; every binding value is a typed same-actor
+                // state-field $ref (ADR-20260731-214500 consequences: typed $refs everywhere).
+                let field: String = if let Some(val) = rv.as_str() {
+                    if val == "any" {
+                        continue;
+                    }
+                    let suggested = val.strip_prefix("state.").unwrap_or("<field>");
+                    issues.push(err(
+                        "requires-acting-untyped",
+                        rsite(),
+                        format!(
+                            "acting.{role} is the bare string '{val}' — migrate to `{{ $ref: '#/{name}/state/{suggested}' }}` (`any` is the only bare keyword)."
+                        ),
+                    ));
                     continue;
-                }
-                let Some(field) = val.strip_prefix("state.") else {
-                    issues.push(err("req-state-unknown", rsite(), format!("acting.{} must be `any` or `state.<field>`, got '{}'.", role, val)));
+                } else if let Some(r) = rv.get("$ref").and_then(|x| x.as_str()) {
+                    match parse_ref(r) {
+                        Some(pr)
+                            if (pr.file.is_empty() || pr.file == "actors.yaml")
+                                && pr.path.len() == 3
+                                && pr.path[0] == name
+                                && pr.path[1] == "state" =>
+                        {
+                            pr.path[2].clone()
+                        }
+                        _ => {
+                            issues.push(err(
+                                "req-state-unknown",
+                                rsite(),
+                                format!(
+                                    "acting.{role} $ref '{r}' must point at a state field of the SAME actor (`#/{name}/state/<field>`)."
+                                ),
+                            ));
+                            continue;
+                        }
+                    }
+                } else {
+                    issues.push(err(
+                        "requires-acting-untyped",
+                        rsite(),
+                        format!(
+                            "acting.{role} must be `any` or a `$ref` to `#/{name}/state/<field>`."
+                        ),
+                    ));
                     continue;
                 };
+                let field = field.as_str();
                 let Some(ftype) = state_types.get(field) else {
                     issues.push(err("req-state-unknown", rsite(), format!("acting.{} references undeclared state field '{}'.", role, field)));
                     continue;
@@ -4547,6 +4816,517 @@ fn validate_actor_state(model: &Model, issues: &mut Vec<Issue>) {
                 }
             }
         }
+    }
+}
+
+// ─── §2f — actor reminders + declarative deletion (ADR-20260731-214500) ─────────────────────────
+
+/// A declared per-actor typed self-message (`reminders:`, ADR-20260731-120825 as renamed by
+/// ADR-20260731-214500). Tolerant parsing (missing pieces → empty/None); §2f reports the holes.
+struct ReminderDef {
+    actor: String,
+    name: String,
+    /// `payload.$ref` — MUST target events.yaml (fact vocabulary, ADR-20260731-153000 §1a).
+    payload_ref: String,
+    /// A declared `identity:` field — always an ERROR (`reminder-identity-declared`): a reminder's
+    /// identity is DERIVED, `UUIDv5(actor_id, reminder name)` (the runtime's `reminder_message_id`
+    /// computes it), never declared (ADR-20260731-214500 consequences).
+    identity_declared: bool,
+    /// Optional default window: `after.$ref` into configuration.yaml keys.
+    after_ref: Option<String>,
+    /// Reschedule semantics — only `in-place` exists (ADR-20260731-150500).
+    reschedule: Option<String>,
+}
+
+/// One `deletion.triggers[*]` entry: `on` + optional window (`after`), undo (`cancelled_on`) and
+/// the strongly-typed propagation `match` (event property ↔ child state field).
+struct DeletionTriggerDef {
+    on: Vec<String>,
+    after_ref: Option<String>,
+    cancelled_on: Vec<String>,
+    match_event_ref: Option<String>,
+    match_state_ref: Option<String>,
+    has_match: bool,
+}
+
+/// A parsed `deletion:` block of an actors.yaml actor (ADR-20260731-214500 §3).
+struct DeletionDef {
+    actor: String,
+    triggers: Vec<DeletionTriggerDef>,
+    /// `receipt.$ref` — the business fact recorded on the deletion ledger when the journey completes.
+    receipt_ref: Option<String>,
+}
+
+/// `(actor, reminder)` when `r` points into an actors.yaml `reminders:` section — the self-message
+/// form `#/<Actor>/reminders/<Name>` (or spelled `actors.yaml#/<Actor>/reminders/<Name>`).
+fn reminder_ref_parts(r: &str) -> Option<(String, String)> {
+    let pr = parse_ref(r)?;
+    if !pr.file.is_empty() && pr.file != "actors.yaml" {
+        return None;
+    }
+    if pr.path.len() == 3 && pr.path[1] == "reminders" {
+        Some((pr.path[0].clone(), pr.path[2].clone()))
+    } else {
+        None
+    }
+}
+
+/// The events.yaml event name a reminder message ref delivers (its `payload.$ref`), or None.
+fn reminder_payload_event(model: &Model, message_ref: &str) -> Option<String> {
+    let (actor, name) = reminder_ref_parts(message_ref)?;
+    let payload = model
+        .defs
+        .get("actors.yaml")?
+        .get(actor.as_str())?
+        .get("reminders")?
+        .get(name.as_str())?
+        .get("payload")?
+        .get("$ref")?
+        .as_str()?;
+    if ref_target_file(payload, "actors.yaml").as_deref() != Some("events.yaml") {
+        return None;
+    }
+    ref_name(payload)
+}
+
+/// The configuration key name a window `$ref` denotes (`configuration.yaml#/keys/<KEY>`), or None
+/// when the ref has any other shape.
+fn config_key_ref_name(r: &str) -> Option<String> {
+    let pr = parse_ref(r)?;
+    (pr.file == "configuration.yaml" && pr.path.len() == 2 && pr.path[0] == "keys")
+        .then(|| pr.path[1].clone())
+}
+
+/// Parse every actor's `reminders:` map, in actors.yaml order.
+fn parse_reminders(model: &Model) -> Vec<ReminderDef> {
+    let mut out = Vec::new();
+    let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") else { return out };
+    for (k, node) in actors {
+        let Some(actor) = k.as_str().filter(|s| *s != "principals") else { continue };
+        let Some(rem) = node.get("reminders").and_then(|r| r.as_mapping()) else { continue };
+        for (rk, rv) in rem {
+            let Some(name) = rk.as_str() else { continue };
+            out.push(ReminderDef {
+                actor: actor.to_string(),
+                name: name.to_string(),
+                payload_ref: rv
+                    .get("payload")
+                    .and_then(|p| p.get("$ref"))
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                identity_declared: rv.get("identity").is_some(),
+                after_ref: rv
+                    .get("after")
+                    .and_then(|p| p.get("$ref"))
+                    .and_then(|r| r.as_str())
+                    .map(str::to_string),
+                reschedule: rv.get("reschedule").and_then(|x| x.as_str()).map(str::to_string),
+            });
+        }
+    }
+    out
+}
+
+/// Parse every actor's `deletion:` block, in actors.yaml order.
+fn parse_deletions(model: &Model) -> Vec<DeletionDef> {
+    let mut out = Vec::new();
+    let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") else { return out };
+    for (k, node) in actors {
+        let Some(actor) = k.as_str().filter(|s| *s != "principals") else { continue };
+        let Some(del) = node.get("deletion") else { continue };
+        let triggers = del
+            .get("triggers")
+            .and_then(|t| t.as_sequence())
+            .map(|seq| {
+                seq.iter()
+                    .map(|t| {
+                        let m = t.get("match");
+                        DeletionTriggerDef {
+                            on: ref_strings(t.get("on")),
+                            after_ref: t
+                                .get("after")
+                                .and_then(|a| a.get("$ref"))
+                                .and_then(|r| r.as_str())
+                                .map(str::to_string),
+                            cancelled_on: ref_strings(t.get("cancelled_on")),
+                            match_event_ref: m
+                                .and_then(|x| x.get("event"))
+                                .and_then(|e| e.get("$ref"))
+                                .and_then(|r| r.as_str())
+                                .map(str::to_string),
+                            match_state_ref: m
+                                .and_then(|x| x.get("state"))
+                                .and_then(|s| s.get("$ref"))
+                                .and_then(|r| r.as_str())
+                                .map(str::to_string),
+                            has_match: m.is_some(),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(DeletionDef {
+            actor: actor.to_string(),
+            triggers,
+            receipt_ref: del
+                .get("receipt")
+                .and_then(|r| r.get("$ref"))
+                .and_then(|r| r.as_str())
+                .map(str::to_string),
+        });
+    }
+    out
+}
+
+/// §2f — the `reminders:` / `schedules:` / `deletion:` DSL (ADR-20260731-214500, refining
+/// ADR-20260731-120825/-150500/-153000). Each rule maps to a way the declarations could silently
+/// stop being trustworthy:
+///   - `reminder-payload-not-event` (error): a reminder payload that is not an events.yaml FACT —
+///     record semantics only, never a command (ADR-20260731-153000 §1a);
+///   - `reminder-after-unresolved` (error): a reminder window that is not a resolving
+///     `configuration.yaml#/keys/<KEY>` ref (never a bare string);
+///   - `reminder-reschedule-unknown` (error): a `reschedule` value other than `in-place` — the only
+///     semantics that exist (ADR-20260731-150500);
+///   - `reminder-identity-declared` (error): a reminder declaring `identity:` — it is DERIVED
+///     (`UUIDv5(actor_id, reminder name)`, the runtime's `reminder_message_id`), never declared
+///     (ADR-20260731-214500 consequences);
+///   - `reminder-without-receive` (error): a declared reminder the SAME actor does not receive —
+///     strong typing means handler-proof, per actor (ADR-20260731-120825 §2);
+///   - `receive-without-reminder` (error): a receives message ref into a `reminders:` section that
+///     does not resolve to a reminder declared on that same actor;
+///   - `schedules-unresolved` (error): a `schedules:` entry that is not a resolving SAME-actor
+///     reminder ref (scheduling is the handler's third observable effect);
+///   - `deletion-ref-unresolved` (error): a deletion `on`/`cancelled_on`/`receipt` that is not a
+///     resolving events.yaml event, an `after` that is not a resolving configuration key, an empty
+///     `on`/`triggers` list, or a missing `receipt`;
+///   - `deletion-match-untyped` (error): a propagation trigger (no `after`) without a `match`, or a
+///     `match` whose `event` is not a property of a triggering `on` event / whose `state` is not a
+///     declared state field of THIS actor — bare string paths are barred (ADR-20260731-214500 §3);
+///   - `deletion-tree-cycle` (error): the propagation graph (edge A → B when B's `on` lists A's
+///     `receipt` fact) must be acyclic — the dependency tree EMERGES from child declarations, and a
+///     cycle would make the generic engine chase its own tail.
+fn validate_reminders_and_deletion(model: &Model, issues: &mut Vec<Issue>) {
+    let reminders = parse_reminders(model);
+    let deletions = parse_deletions(model);
+    let declared: BTreeSet<(String, String)> =
+        reminders.iter().map(|r| (r.actor.clone(), r.name.clone())).collect();
+
+    // ---- reminders: payload / window / reschedule hygiene ----
+    for r in &reminders {
+        let at = format!("actors.yaml/{}/reminders/{}", r.actor, r.name);
+        let payload_ok = ref_target_file(&r.payload_ref, "actors.yaml").as_deref()
+            == Some("events.yaml")
+            && resolve_ref(model, &r.payload_ref, "actors.yaml").is_some();
+        if !payload_ok {
+            issues.push(err(
+                "reminder-payload-not-event",
+                at.clone(),
+                format!(
+                    "reminder payload must be a resolving events.yaml FACT (record semantics, ADR-20260731-153000), got '{}'.",
+                    r.payload_ref
+                ),
+            ));
+        }
+        if let Some(a) = &r.after_ref {
+            let resolves = config_key_ref_name(a)
+                .map(|_| resolve_ref(model, a, "actors.yaml").is_some())
+                .unwrap_or(false);
+            if !resolves {
+                issues.push(err(
+                    "reminder-after-unresolved",
+                    at.clone(),
+                    format!("`after` must be a resolving configuration.yaml#/keys/<KEY> ref, got '{}'.", a),
+                ));
+            }
+        }
+        if let Some(rs) = &r.reschedule {
+            if rs != "in-place" {
+                issues.push(err(
+                    "reminder-reschedule-unknown",
+                    at.clone(),
+                    format!("reschedule '{}' — only `in-place` exists (ADR-20260731-150500).", rs),
+                ));
+            }
+        }
+        if r.identity_declared {
+            issues.push(err(
+                "reminder-identity-declared",
+                at.clone(),
+                "reminder `identity` is DERIVED — UUIDv5(actor_id, reminder name), computed by the runtime's reminder_message_id — never declared; remove the field (ADR-20260731-214500 consequences).".into(),
+            ));
+        }
+    }
+
+    // ---- receives ↔ reminders (both ways) + schedules, per actors.yaml actor ----
+    let actors = match model.defs.get("actors.yaml") {
+        Some(Value::Mapping(m)) => m,
+        _ => return,
+    };
+    // (actor, reminder) pairs some receives entry handles — for `reminder-without-receive`.
+    let mut received: BTreeSet<(String, String)> = BTreeSet::new();
+    for (k, node) in actors {
+        let Some(actor) = k.as_str().filter(|s| *s != "principals") else { continue };
+        for (i, entry) in
+            node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten().enumerate()
+        {
+            let at = format!("actors.yaml/{}.receives[{}]", actor, i);
+            if let Some(mref) =
+                entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str())
+            {
+                if let Some((ra, rn)) = reminder_ref_parts(mref) {
+                    if ra != actor || !declared.contains(&(ra.clone(), rn.clone())) {
+                        issues.push(err(
+                            "receive-without-reminder",
+                            format!("{}.message", at),
+                            format!(
+                                "message '{}' does not resolve to a reminder declared on '{}' — a reminder is one actor talking to ITSELF (ADR-20260731-120825).",
+                                mref, actor
+                            ),
+                        ));
+                    } else {
+                        received.insert((ra, rn));
+                    }
+                }
+            }
+            for (j, sref) in ref_strings(entry.get("schedules")).into_iter().enumerate() {
+                let ok = reminder_ref_parts(&sref)
+                    .map(|(ra, rn)| ra == actor && declared.contains(&(ra.clone(), rn)))
+                    .unwrap_or(false);
+                if !ok {
+                    issues.push(err(
+                        "schedules-unresolved",
+                        format!("{}.schedules[{}]", at, j),
+                        format!(
+                            "'{}' does not resolve to a reminder declared on '{}' (expected #/{}/reminders/<Name>).",
+                            sref, actor, actor
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    for r in &reminders {
+        if !received.contains(&(r.actor.clone(), r.name.clone())) {
+            issues.push(err(
+                "reminder-without-receive",
+                format!("actors.yaml/{}/reminders/{}", r.actor, r.name),
+                format!(
+                    "no receives entry on '{}' handles this reminder — add {{ message: {{ $ref: '#/{}/reminders/{}' }} }} (strong typing means handler-proof, ADR-20260731-120825).",
+                    r.actor, r.actor, r.name
+                ),
+            ));
+        }
+    }
+
+    // ---- deletion blocks ----
+    for d in &deletions {
+        let at = format!("actors.yaml/{}/deletion", d.actor);
+        // The actor's declared state fields — what a `match.state` may bind to. The typed
+        // `identity` ref IMPLICITLY declares its field (the stream key exists before any fold,
+        // same doctrine as `is_implicit_identity_state_ref`), so a self-trigger may match on it
+        // without forcing an explicit `state:` entry into the aggregate.
+        let mut state_fields: BTreeSet<String> = actors
+            .get(d.actor.as_str())
+            .and_then(|n| n.get("state"))
+            .and_then(|s| s.as_mapping())
+            .map(|m| m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        if let Some(f) =
+            actors.get(d.actor.as_str()).and_then(|n| actor_identity_field(n, &d.actor))
+        {
+            state_fields.insert(f);
+        }
+        match &d.receipt_ref {
+            None => issues.push(err(
+                "deletion-ref-unresolved",
+                at.clone(),
+                "deletion declares no `receipt` — the completing fact recorded on the deletion ledger (ADR-20260731-160000 §6).".into(),
+            )),
+            Some(r) => {
+                let ok = ref_target_file(r, "actors.yaml").as_deref() == Some("events.yaml")
+                    && resolve_ref(model, r, "actors.yaml").is_some();
+                if !ok {
+                    issues.push(err(
+                        "deletion-ref-unresolved",
+                        format!("{}.receipt", at),
+                        format!("receipt must be a resolving events.yaml event, got '{}'.", r),
+                    ));
+                }
+            }
+        }
+        if d.triggers.is_empty() {
+            issues.push(err(
+                "deletion-ref-unresolved",
+                at.clone(),
+                "deletion declares no `triggers` — nothing would ever start the journey.".into(),
+            ));
+        }
+        for (i, t) in d.triggers.iter().enumerate() {
+            let tat = format!("{}.triggers[{}]", at, i);
+            if t.on.is_empty() {
+                issues.push(err(
+                    "deletion-ref-unresolved",
+                    tat.clone(),
+                    "trigger declares no `on` events — it can never fire.".into(),
+                ));
+            }
+            let mut on_events: BTreeSet<String> = BTreeSet::new();
+            for (key, refs) in [("on", &t.on), ("cancelled_on", &t.cancelled_on)] {
+                for (j, r) in refs.iter().enumerate() {
+                    let ok = ref_target_file(r, "actors.yaml").as_deref() == Some("events.yaml")
+                        && resolve_ref(model, r, "actors.yaml").is_some();
+                    if !ok {
+                        issues.push(err(
+                            "deletion-ref-unresolved",
+                            format!("{}.{}[{}]", tat, key, j),
+                            format!("'{}' is not a resolving events.yaml event.", r),
+                        ));
+                    } else if key == "on" {
+                        if let Some(n) = ref_name(r) {
+                            on_events.insert(n);
+                        }
+                    }
+                }
+            }
+            if let Some(a) = &t.after_ref {
+                let resolves = config_key_ref_name(a)
+                    .map(|_| resolve_ref(model, a, "actors.yaml").is_some())
+                    .unwrap_or(false);
+                if !resolves {
+                    issues.push(err(
+                        "deletion-ref-unresolved",
+                        format!("{}.after", tat),
+                        format!("`after` must be a resolving configuration.yaml#/keys/<KEY> ref, got '{}'.", a),
+                    ));
+                }
+            }
+            // `match` — required for propagation (no `after`), allowed with one; always typed.
+            if !t.has_match {
+                if t.after_ref.is_none() {
+                    issues.push(err(
+                        "deletion-match-untyped",
+                        tat.clone(),
+                        "propagation trigger (no `after`) needs a typed `match` — the engine enumerates child instances by it (ADR-20260731-214500 §3).".into(),
+                    ));
+                }
+                continue;
+            }
+            match &t.match_event_ref {
+                None => issues.push(err(
+                    "deletion-match-untyped",
+                    format!("{}.match", tat),
+                    "match declares no `event` — a $ref to the triggering event's property is required.".into(),
+                )),
+                Some(r) => {
+                    let parts = lineage_parts(r);
+                    match parts {
+                        Some((ev, Some(_))) if resolve_ref(model, r, "actors.yaml").is_some() => {
+                            if !on_events.contains(ev) {
+                                issues.push(err(
+                                    "deletion-match-untyped",
+                                    format!("{}.match.event", tat),
+                                    format!("match.event names '{}', which is not one of this trigger's `on` events.", ev),
+                                ));
+                            }
+                        }
+                        _ => issues.push(err(
+                            "deletion-match-untyped",
+                            format!("{}.match.event", tat),
+                            format!("'{}' is not a resolving events.yaml#/<Event>/properties/<prop> ref.", r),
+                        )),
+                    }
+                }
+            }
+            match &t.match_state_ref {
+                None => issues.push(err(
+                    "deletion-match-untyped",
+                    format!("{}.match", tat),
+                    "match declares no `state` — a $ref to this actor's state field is required.".into(),
+                )),
+                Some(r) => {
+                    let ok = parse_ref(r)
+                        .filter(|pr| pr.file.is_empty() || pr.file == "actors.yaml")
+                        .filter(|pr| {
+                            pr.path.len() == 3
+                                && pr.path[0] == d.actor
+                                && pr.path[1] == "state"
+                                && state_fields.contains(&pr.path[2])
+                        })
+                        .is_some();
+                    if !ok {
+                        issues.push(err(
+                            "deletion-match-untyped",
+                            format!("{}.match.state", tat),
+                            format!(
+                                "'{}' is not a declared state field of '{}' (expected #/{}/state/<field>).",
+                                r, d.actor, d.actor
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- deletion propagation tree: acyclic ----
+    // Edge A → B when B's `on` lists A's `receipt` fact (the child declares how it dies).
+    let receipt_of: BTreeMap<&str, String> = deletions
+        .iter()
+        .filter_map(|d| d.receipt_ref.as_deref().and_then(ref_name).map(|e| (d.actor.as_str(), e)))
+        .collect();
+    let mut edges: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for d in &deletions {
+        let on: BTreeSet<String> =
+            d.triggers.iter().flat_map(|t| t.on.iter()).filter_map(|r| ref_name(r)).collect();
+        for (parent, receipt) in &receipt_of {
+            if on.contains(receipt) {
+                edges.entry(parent).or_default().push(d.actor.as_str());
+            }
+        }
+    }
+    // DFS with an explicit path; each cycle is reported once, keyed by its sorted member set.
+    let mut reported: BTreeSet<Vec<String>> = BTreeSet::new();
+    fn dfs<'a>(
+        node: &'a str,
+        edges: &BTreeMap<&'a str, Vec<&'a str>>,
+        path: &mut Vec<&'a str>,
+        done: &mut BTreeSet<&'a str>,
+        reported: &mut BTreeSet<Vec<String>>,
+        issues: &mut Vec<Issue>,
+    ) {
+        if let Some(pos) = path.iter().position(|n| *n == node) {
+            let cycle: Vec<&str> = path[pos..].to_vec();
+            let mut key: Vec<String> = cycle.iter().map(|s| s.to_string()).collect();
+            key.sort();
+            if reported.insert(key) {
+                issues.push(err(
+                    "deletion-tree-cycle",
+                    format!("actors.yaml/{}/deletion", cycle[0]),
+                    format!(
+                        "deletion propagation cycle: {} -> {} — the emergent dependency tree must be acyclic (ADR-20260731-214500).",
+                        cycle.join(" -> "),
+                        node
+                    ),
+                ));
+            }
+            return;
+        }
+        if done.contains(node) {
+            return;
+        }
+        path.push(node);
+        for next in edges.get(node).cloned().unwrap_or_default() {
+            dfs(next, edges, path, done, reported, issues);
+        }
+        path.pop();
+        done.insert(node);
+    }
+    let mut done: BTreeSet<&str> = BTreeSet::new();
+    let roots: Vec<&str> = edges.keys().copied().collect();
+    for root in roots {
+        let mut path = Vec::new();
+        dfs(root, &edges, &mut path, &mut done, &mut reported, issues);
     }
 }
 
@@ -6237,13 +7017,24 @@ fn emit_documentation(model: &Model) -> String {
     // with a declared `lifecycle` embed their state diagram (ADR-20260720-004419).
     let pm_seq: HashMap<String, String> = pm_sequence_map(model).into_iter().collect();
     let lc_state: HashMap<String, String> = lifecycle_state_map(model).into_iter().collect();
+    let all_reminders = parse_reminders(model);
+    let all_deletions = parse_deletions(model);
     let actor_docs: Vec<Doc> = actors.iter().map(|a| {
         let rows: Vec<Vec<String>> = a.receives.iter().map(|e| {
-            let msg_name = ref_name(&e.message_ref).unwrap_or_else(|| "?".to_string());
-            let is_cmd = e.message_ref.starts_with("commands.yaml#/");
-            let msg = dlink(if is_cmd { "command" } else { "event" }, &msg_name);
+            // A reminder self-message (ADR-20260731-214500) has no cross-file anchor — render it
+            // inline with its ⏰ marker; commands/events keep their links.
+            let msg = match reminder_ref_parts(&e.message_ref) {
+                Some((_, rname)) => format!("⏰ `{}` _(reminder)_", rname),
+                None => {
+                    let msg_name = ref_name(&e.message_ref).unwrap_or_else(|| "?".to_string());
+                    let is_cmd = e.message_ref.starts_with("commands.yaml#/");
+                    dlink(if is_cmd { "command" } else { "event" }, &msg_name)
+                }
+            };
             let emits = {
-                let s = e.emits.iter().map(|r| dlink("event", &ref_name(r).unwrap_or_default())).collect::<Vec<_>>().join(", ");
+                let mut cells: Vec<String> = e.emits.iter().map(|r| dlink("event", &ref_name(r).unwrap_or_default())).collect();
+                cells.extend(e.schedules.iter().filter_map(|r| reminder_ref_parts(r)).map(|(_, n)| format!("⏰ schedules `{}`", n)));
+                let s = cells.join(", ");
                 if s.is_empty() { e.effect.as_deref().map(|x| format!("_{}_", x)).unwrap_or_else(|| "—".to_string()) } else { s }
             };
             let throws = {
@@ -6258,6 +7049,30 @@ fn emit_documentation(model: &Model) -> String {
             format!("\n_{}_{}\n", kind, a.description.as_deref().map(|d| format!(" — {}", d)).unwrap_or_default()),
             md_table(&["Receives", "Emits →", "Throws"], &rows),
         ];
+        let rems: Vec<&ReminderDef> = all_reminders.iter().filter(|r| r.actor == a.name).collect();
+        if !rems.is_empty() {
+            let rrows: Vec<Vec<String>> = rems.iter().map(|r| vec![
+                format!("⏰ `{}`", r.name),
+                dlink("event", &ref_name(&r.payload_ref).unwrap_or_else(|| "?".to_string())),
+                r.after_ref.as_deref().and_then(config_key_ref_name).map(|k| format!("⚙️ `{}`", k)).unwrap_or_else(|| "—".to_string()),
+                r.reschedule.clone().unwrap_or_else(|| "in-place".to_string()),
+            ]).collect();
+            parts.push(format!("\nReminders (self-scheduled facts — ADR-20260731-214500):\n\n{}", md_table(&["Reminder", "Payload", "After", "Reschedule"], &rrows)));
+        }
+        if let Some(d) = all_deletions.iter().find(|d| d.actor == a.name) {
+            let trows: Vec<Vec<String>> = d.triggers.iter().map(|t| {
+                let on = { let s = t.on.iter().map(|r| dlink("event", &ref_name(r).unwrap_or_default())).collect::<Vec<_>>().join(", "); if s.is_empty() { "—".to_string() } else { s } };
+                let window = t.after_ref.as_deref().and_then(config_key_ref_name).map(|k| format!("⚙️ `{}`", k)).unwrap_or_else(|| "_immediate (propagation)_".to_string());
+                let cancelled = { let s = t.cancelled_on.iter().map(|r| dlink("event", &ref_name(r).unwrap_or_default())).collect::<Vec<_>>().join(", "); if s.is_empty() { "—".to_string() } else { s } };
+                let m = match (t.match_event_ref.as_deref().and_then(lineage_parts), t.match_state_ref.as_deref().and_then(parse_ref)) {
+                    (Some((ev, Some(prop))), Some(st)) => format!("{} ↔ `state.{}`", dprop_link("event", ev, prop), st.path.last().cloned().unwrap_or_default()),
+                    _ => "—".to_string(),
+                };
+                vec![on, window, cancelled, m]
+            }).collect();
+            let receipt = d.receipt_ref.as_deref().and_then(ref_name).map(|e| dlink("event", &e)).unwrap_or_else(|| "—".to_string());
+            parts.push(format!("\nDeletion (declarative, generic engine — ADR-20260731-214500):\n\n{}\n- **Receipt**: {}", md_table(&["On", "Window", "Cancelled on", "Match"], &trows), receipt));
+        }
         if a.kind == "aggregate" {
             if let Some(d) = lc_state.get(&a.name) {
                 parts.push(format!("\nLifecycle (generated from the declared state machine):\n\n```mermaid\n{}\n```", d));
@@ -6913,20 +7728,58 @@ fn emit_documentation_html(model: &Model) -> String {
     // source is rendered client-side by MERMAID_JS and stays readable as text when offline.
     let pm_seq: HashMap<String, String> = pm_sequence_map(model).into_iter().collect();
     let lc_state: HashMap<String, String> = lifecycle_state_map(model).into_iter().collect();
+    let all_reminders = parse_reminders(model);
+    let all_deletions = parse_deletions(model);
     let actor_docs: Vec<HDoc> = actors.iter().map(|a| {
         let kind = if a.kind == "aggregate" { "🧩 aggregate" } else { "⚙️ process manager" };
         let rows: Vec<Vec<String>> = a.receives.iter().map(|e| {
-            let is_cmd = e.message_ref.starts_with("commands.yaml#/");
-            let emits = { let s = e.emits.iter().map(|r| h_link("event", &ref_name(r).unwrap_or_default())).collect::<Vec<_>>().join(", "); if s.is_empty() { e.effect.as_deref().map(|x| format!("<span class=\"muted\">{}</span>", h_esc(x))).unwrap_or_else(|| "—".to_string()) } else { s } };
+            let msg = match reminder_ref_parts(&e.message_ref) {
+                Some((_, rname)) => format!("⏰ <span class=\"k-id\">{}</span> <span class=\"muted\">(reminder)</span>", h_esc(&rname)),
+                None => {
+                    let is_cmd = e.message_ref.starts_with("commands.yaml#/");
+                    h_link(if is_cmd { "command" } else { "event" }, &ref_name(&e.message_ref).unwrap_or_else(|| "?".to_string()))
+                }
+            };
+            let emits = {
+                let mut cells: Vec<String> = e.emits.iter().map(|r| h_link("event", &ref_name(r).unwrap_or_default())).collect();
+                cells.extend(e.schedules.iter().filter_map(|r| reminder_ref_parts(r)).map(|(_, n)| format!("⏰ schedules <span class=\"k-id\">{}</span>", h_esc(&n))));
+                let s = cells.join(", ");
+                if s.is_empty() { e.effect.as_deref().map(|x| format!("<span class=\"muted\">{}</span>", h_esc(x))).unwrap_or_else(|| "—".to_string()) } else { s }
+            };
             let throws = { let s = e.throws.iter().map(|r| h_link("error", &ref_name(r).unwrap_or_default())).collect::<Vec<_>>().join(", "); if s.is_empty() { "—".to_string() } else { s } };
-            vec![h_link(if is_cmd { "command" } else { "event" }, &ref_name(&e.message_ref).unwrap_or_else(|| "?".to_string())), emits, throws]
+            vec![msg, emits, throws]
         }).collect();
+        let mut extras = String::new();
+        let rems: Vec<&ReminderDef> = all_reminders.iter().filter(|r| r.actor == a.name).collect();
+        if !rems.is_empty() {
+            let rrows: Vec<Vec<String>> = rems.iter().map(|r| vec![
+                format!("⏰ <span class=\"k-id\">{}</span>", h_esc(&r.name)),
+                h_link("event", &ref_name(&r.payload_ref).unwrap_or_else(|| "?".to_string())),
+                r.after_ref.as_deref().and_then(config_key_ref_name).map(|k| format!("⚙️ <span class=\"k-const\">{}</span>", h_esc(&k))).unwrap_or_else(|| "—".to_string()),
+                h_esc(r.reschedule.as_deref().unwrap_or("in-place")),
+            ]).collect();
+            extras.push_str(&format!("<div class=\"rel\"><span class=\"lbl\">reminders (self-scheduled facts — ADR-20260731-214500):</span></div>{}", h_table(&["Reminder", "Payload", "After", "Reschedule"], &rrows)));
+        }
+        if let Some(d) = all_deletions.iter().find(|d| d.actor == a.name) {
+            let trows: Vec<Vec<String>> = d.triggers.iter().map(|t| {
+                let on = { let s = t.on.iter().map(|r| h_link("event", &ref_name(r).unwrap_or_default())).collect::<Vec<_>>().join(", "); if s.is_empty() { "—".to_string() } else { s } };
+                let window = t.after_ref.as_deref().and_then(config_key_ref_name).map(|k| format!("⚙️ <span class=\"k-const\">{}</span>", h_esc(&k))).unwrap_or_else(|| "<span class=\"muted\">immediate (propagation)</span>".to_string());
+                let cancelled = { let s = t.cancelled_on.iter().map(|r| h_link("event", &ref_name(r).unwrap_or_default())).collect::<Vec<_>>().join(", "); if s.is_empty() { "—".to_string() } else { s } };
+                let m = match (t.match_event_ref.as_deref().and_then(lineage_parts), t.match_state_ref.as_deref().and_then(parse_ref)) {
+                    (Some((ev, Some(prop))), Some(st)) => format!("{} ↔ <span class=\"k-prop\">state.{}</span>", h_plink("event", ev, prop), h_esc(&st.path.last().cloned().unwrap_or_default())),
+                    _ => "—".to_string(),
+                };
+                vec![on, window, cancelled, m]
+            }).collect();
+            let receipt = d.receipt_ref.as_deref().and_then(ref_name).map(|e| h_link("event", &e)).unwrap_or_else(|| "—".to_string());
+            extras.push_str(&format!("<div class=\"rel\"><span class=\"lbl\">deletion (declarative, generic engine — ADR-20260731-214500):</span></div>{}<div class=\"rel\"><span class=\"lbl\">receipt:</span> {}</div>", h_table(&["On", "Window", "Cancelled on", "Match"], &trows), receipt));
+        }
         let seq = if a.kind == "aggregate" {
             lc_state.get(&a.name).map(|d| format!("<div class=\"pm-seq\"><pre class=\"mermaid\">{}</pre></div>", h_esc(d))).unwrap_or_default()
         } else {
             pm_seq.get(&a.name).map(|d| format!("<div class=\"pm-seq\"><pre class=\"mermaid\">{}</pre></div>", h_esc(d))).unwrap_or_default()
         };
-        HDoc { ctx: cx.of_actor(&a.name), html: h_item("actor", "Actor", &a.name, &format!("<div class=\"rel muted\">{}</div>{}{}", kind, h_table(&["Receives", "Emits →", "Throws"], &rows), seq), a.description.as_deref()) }
+        HDoc { ctx: cx.of_actor(&a.name), html: h_item("actor", "Actor", &a.name, &format!("<div class=\"rel muted\">{}</div>{}{}{}", kind, h_table(&["Receives", "Emits →", "Throws"], &rows), extras, seq), a.description.as_deref()) }
     }).collect();
 
     // 4. Views
@@ -8598,18 +9451,28 @@ fn emit_pm_state_infrastructure(model: &Model) -> String {
             })
             .collect();
         out.push_str(&format!(
-            "    async fn upsert(&self, row: &{}Row) -> Result<(), DomainError> {{\n        let sql = format!(\n            \"INSERT INTO {} ({{{}_COLUMNS}}) \\\n             VALUES ({}) \\\n             ON CONFLICT ({}) DO UPDATE SET \\\n             {}\"\n        );\n        sqlx::query(&sql)\n",
+            "    async fn upsert(&self, row: &{}Row) -> Result<(), DomainError> {{\n        upsert_{}_with(&self.pool, row).await\n    }}\n}}\n",
+            t.base, snake
+        ));
+        // Executor-generic upsert: ONE SQL body serving both the pool-backed trait impl above and
+        // the fenced completion transaction (#272 Runtime D1, ADR-20260801-023000 — a PM row must
+        // commit atomically with the staged events and the mailbox verdict, and a hand-mirrored
+        // copy of this statement would drift silently).
+        out.push_str(&format!(
+            "\n/// Upsert one `{}` row through ANY PgExecutor — the pool (the trait impl delegates here)\n/// or the fenced completion transaction (#272 Runtime D1, ADR-20260801-023000).\npub async fn upsert_{}_with<'e, E: sqlx::PgExecutor<'e>>(executor: E, row: &{}Row) -> Result<(), DomainError> {{\n    let sql = format!(\n        \"INSERT INTO {} ({{{}_COLUMNS}}) \\\n         VALUES ({}) \\\n         ON CONFLICT ({}) DO UPDATE SET \\\n         {}\"\n    );\n    sqlx::query(&sql)\n",
+            t.table,
+            snake,
             t.base,
             t.table,
             upper,
             placeholders.join(","),
             t.pk,
-            updates.join(", \\\n             ")
+            updates.join(", \\\n         ")
         ));
         for b in &binds {
-            out.push_str(&format!("            .bind({})\n", b));
+            out.push_str(&format!("        .bind({})\n", b));
         }
-        out.push_str("            .execute(&self.pool)\n            .await\n            .map_err(db_err)?;\n        Ok(())\n    }\n}\n");
+        out.push_str("        .execute(executor)\n        .await\n        .map_err(db_err)?;\n    Ok(())\n}\n");
     }
     out
 }
@@ -9580,6 +10443,40 @@ fn emit_config(model: &Model) -> String {
         out.push_str(&format!("                {},\n", field(&k.name)));
     }
     out.push_str("            },\n            problems,\n        )\n    }\n\n");
+
+    // ---- Reminder / deletion windows (ADR-20260731-214500) ------------------------------------
+    // Every configuration key an actors.yaml `reminders.*.after` or `deletion.triggers[*].after`
+    // names, resolved to its runtime value — what the composition root hands the mailbox delivery
+    // glue and the deletion engine. Generated so a new window key can never silently miss the
+    // hand-off (the map grows with the declaration, not with someone remembering).
+    {
+        let mut window_keys: BTreeSet<String> = BTreeSet::new();
+        for r in parse_reminders(model) {
+            if let Some(k) = r.after_ref.as_deref().and_then(config_key_ref_name) {
+                window_keys.insert(k);
+            }
+        }
+        for d in parse_deletions(model) {
+            for t in &d.triggers {
+                if let Some(k) = t.after_ref.as_deref().and_then(config_key_ref_name) {
+                    window_keys.insert(k);
+                }
+            }
+        }
+        out.push_str(
+            "    /// The declared reminder/deletion window keys (actors.yaml `after:` refs), each with its\n\
+             \x20   /// resolved runtime value in DAYS — handed to the mailbox delivery glue so scheduling\n\
+             \x20   /// reads configuration, never a constant (ADR-20260731-214500).\n\
+             \x20   pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, i64> {\n\
+             \x20       [\n",
+        );
+        for k in &window_keys {
+            let declared = keys.iter().any(|c| &c.name == k);
+            assert!(declared, "config: window key {} named by actors.yaml is not a server-consumed configuration key", k);
+            out.push_str(&format!("            (\"{}\", self.{}),\n", k, field(k)));
+        }
+        out.push_str("        ]\n        .into_iter()\n        .collect()\n    }\n\n");
+    }
 
     // ---- Boot report -------------------------------------------------------------------------
     out.push_str(
@@ -11182,6 +12079,39 @@ fn wired_query_body(name: &str) -> Option<&'static str> {
 /// messageId + payload hash), spawns the handler over Arc-cloned ports, and returns the uniform
 /// `MutationAcceptance` immediately; the spawned task completes the journal row and publishes the
 /// transition on the `OperationStatusBus` for `operationStatus`/`operationStatusChanged`.
+/// The GATED process-manager resolver (#272 D1): the mailbox arm and the legacy arm in one
+/// resolver body, chosen by `PM_MAILBOX_DELIVERY` at request time (gate-then-stabilize).
+const GATED_PM_RESOLVER_TEMPLATE: &str = "    #[graphql(name = \"{name}\"{acl})]\n    async fn {fnname}(&self, ctx: &async_graphql::Context<'_>, input: {command}Input, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {{\n        // command.receive (SERVER). Opened before any fallible work so an input that fails to\n        // deserialize still leaves a span naming the command that was attempted.\n        let __receive = telemetry::spans::command_receive(\n            \"{command}\",\n            crate::graphql::acl::request_role(ctx).api_name(),\n            telemetry::CHANNEL_GRAPHQL,\n        );\n        let __rx = __receive.clone();\n        async move {{\n        // THE RUNTIME D1 FLIP GATE (#272 D1, ADR-20260801-023000, gate-then-stabilize):\n        // a PROCESS-MANAGER command ships BOTH arms and PM_MAILBOX_DELIVERY (default false)\n        // picks at request time -- mailbox delivery through the prepare phase, or the legacy\n        // journal+spawn. Flipping the default is a separate, recorded decision (its own ADR)\n        // after the gated form is smoked; the client contract is byte-identical on both arms.\n        if ctx.data::<crate::graphql::PmMailboxDelivery>().map(|f| f.0).unwrap_or(false) {{\n        let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();\n        let payload_json = command_payload(&input)?;\n        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a\n        // payload the domain command cannot deserialize.\n        let _cmd: domain::generated::commands::{command} = serde_json::from_value(payload_json.clone())\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        let env = request_envelope(ctx, &metadata);\n        // run_identity: both ids are mandatory in every contract and both may be server-generated.\n        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());\n        // Cross-arm duplicate identity (#272 review MAJOR-3): a messageId accepted on the\n        // LEGACY arm (command_journal) must replay as a duplicate here, never re-execute --\n        // the mailbox pk dedupe cannot see the journal, and the journal lives until the\n        // default-flip deploy.\n        let __journal_port = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();\n        if let Some(prior) = __journal_port.by_message(env.message_id).await.map_err(domain_error)? {{\n            if prior.entry.payload_hash != application::journal::payload_hash(&payload_json) {{\n                telemetry::meters::acceptance::sync_conflict(\"{command}\");\n                return Err(conflict_error(env.message_id));\n            }}\n            telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);\n            return Ok(acceptance(&env, journal_status_api(prior.status), true));\n        }}\n        {actor_id_expr}\n        let entry = application::mailbox::MailboxEntry {{\n            message_id: env.message_id,\n            kind: \"COMMAND\".into(),\n            actor_type: \"{actor}\".into(),\n            actor_id,\n            partition: actor_runtime::stable_partition(&actor_id, {width}),\n            message_type: \"{command}\".into(),\n            payload: payload_json.clone(),\n            payload_hash: application::journal::payload_hash(&payload_json),\n            channel: \"GRAPHQL\".into(),\n            user_id: env.user_id,\n            user_type: env.user_type.clone(),\n            correlation_id: env.correlation_id,\n            cause_id: env.cause_id,\n            session_id: env.session_id,\n            trace_id: env.trace_id.clone(),\n            source: None,\n            external_id: None,\n        }};\n        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the\n        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).\n        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());\n        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;\n        match __inserted {{\n            application::mailbox::MailboxInsertOutcome::Duplicate {{ status, payload_hash }} => {{\n                if payload_hash != entry.payload_hash {{\n                    // A reused messageId with a DIFFERENT payload is a client bug, and the only\n                    // acceptance outcome the contract does NOT count as success.\n                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);\n                    telemetry::meters::acceptance::sync_conflict(\"{command}\");\n                    return Err(conflict_error(env.message_id));\n                }}\n                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);\n                let _ = telemetry::spans::command_dispatch(\n                    &env.message_id.to_string(),\n                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,\n                );\n                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);\n                return Ok(acceptance(&env, mailbox_status_api(status), true));\n            }}\n            application::mailbox::MailboxInsertOutcome::Inserted => {{\n                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);\n            }}\n        }}\n        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion\n        // (its StatusBusObserver publishes the terminal transition post-commit).\n        let _ = telemetry::spans::command_dispatch(\n            &env.message_id.to_string(),\n            telemetry::dispatch_outcome::ENQUEUED,\n        );\n        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);\n        Ok(acceptance(&env, OperationStatus::PENDING, false))\n        }} else {{\n        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();\n        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();\n{resolve_ports}        let payload_json = command_payload(&input)?;\n        let cmd: domain::generated::commands::{command} = serde_json::from_value(payload_json.clone())\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        let env = request_envelope(ctx, &metadata);\n        // run_identity: both ids are mandatory in every contract and both may be server-generated.\n        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());\n        // Cross-arm duplicate identity (#272 review MAJOR-3, mirror direction): a messageId\n        // accepted on the MAILBOX arm must replay as a duplicate here, never re-execute --\n        // a gate rolled back mid-retry must not re-run a committed command.\n        let __mailbox_port = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();\n        if let Some(prior) = __mailbox_port.by_message(env.message_id).await.map_err(domain_error)? {{\n            if prior.payload_hash != application::journal::payload_hash(&payload_json) {{\n                telemetry::meters::acceptance::sync_conflict(\"{command}\");\n                return Err(conflict_error(env.message_id));\n            }}\n            telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);\n            return Ok(acceptance(&env, mailbox_status_api(prior.status), true));\n        }}\n        let entry = application::journal::CommandJournalEntry {{\n            message_id: env.message_id,\n            correlation_id: env.correlation_id,\n            cause_id: env.cause_id,\n            session_id: env.session_id,\n            trace_id: env.trace_id.clone(),\n            user_id: env.user_id,\n            user_type: env.user_type.clone(),\n            channel: domain::generated::scalars::CommandChannel::GRAPHQL,\n            command_type: \"{command}\".into(),\n            payload_hash: application::journal::payload_hash(&payload_json),\n            payload: payload_json,\n        }};\n        // command.journal (INTERNAL). `command_completion_ms` is measured from HERE — the contract\n        // defines it as journal insert -> terminal status, not as resolver wall-clock.\n        let __journaled_at = std::time::Instant::now();\n        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());\n        let __inserted = journal.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;\n        match __inserted {{\n            application::journal::JournalInsertOutcome::Duplicate {{ status, payload_hash }} => {{\n                if payload_hash != entry.payload_hash {{\n                    // A reused messageId with a DIFFERENT payload is a client bug, and the only\n                    // acceptance outcome the contract does NOT count as success.\n                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);\n                    telemetry::meters::acceptance::sync_conflict(\"{command}\");\n                    return Err(conflict_error(env.message_id));\n                }}\n                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);\n                let _ = telemetry::spans::command_dispatch(\n                    &env.message_id.to_string(),\n                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,\n                );\n                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);\n                return Ok(acceptance(&env, journal_status_api(status), true));\n            }}\n            application::journal::JournalInsertOutcome::Inserted => {{\n                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);\n            }}\n        }}\n        // Envelope → Actor (ADR-0041) + resolved DOMAIN identity (#235 consequence B): a CUSTOMER\n        // principal resolves auth_ref → CustomerId at the edge (the by_auth_ref bridge customer\n        // queries already use); requires.acting compares THAT, never the raw auth subject. Other\n        // roles stay None until their bridges land (#144).\n        let domain_id = if env.user_type == \"CUSTOMER\" {{\n            match (env.user_id, ctx.data::<std::sync::Arc<dyn application::queries::CustomerReadRepository>>()) {{\n                (Some(uid), Ok(customers)) => customers\n                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))\n                    .await\n                    .map_err(domain_error)?\n                    .map(|c| c.customer_id.0),\n                _ => None,\n            }}\n        }} else {{ None }};\n        let actor = application::ports::Actor {{\n            user_id: env.user_id.unwrap_or_else(uuid::Uuid::nil),\n            user_type: env.user_type.clone(),\n            domain_id,\n            correlation_id: env.correlation_id,\n            cause_id: Some(env.message_id),\n        }};\n        let (message_id, correlation_id) = (env.message_id, env.correlation_id);\n        // command.dispatch (INTERNAL) — and the parent of the handler's own spans. The spawned task is\n        // instrumented with it rather than inheriting nothing: `tokio::spawn` leaves the current span\n        // behind, so without this the whole async half of the run would be a separate, parentless trace.\n        let __dispatch = telemetry::spans::command_dispatch(\n            &message_id.to_string(),\n            telemetry::dispatch_outcome::SPAWNED,\n        );\n        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);\n        tokio::spawn(async move {{\n            let outcome = {handler_call};\n            complete_operation(journal, status_bus, message_id, correlation_id, outcome, __journaled_at).await;\n        }}.instrument(__dispatch));\n        Ok(acceptance(&env, OperationStatus::PENDING, false))\n        }}\n        }}\n        .instrument(__receive)\n        .await\n    }}\n";
+
+
+/// Render the gated template: named placeholders first, then the `{{`/`}}` escapes (the template
+/// was authored as a `format!` string; none of the substituted values contain braces).
+#[allow(clippy::too_many_arguments)]
+fn render_gated_pm_resolver(
+    name: &str,
+    acl: &str,
+    fnname: &str,
+    command: &str,
+    actor: &str,
+    width: u16,
+    actor_id_expr: &str,
+    resolve_ports: &str,
+    handler_call: &str,
+) -> String {
+    GATED_PM_RESOLVER_TEMPLATE
+        .replace("{name}", name)
+        .replace("{acl}", acl)
+        .replace("{fnname}", fnname)
+        .replace("{command}", command)
+        .replace("{actor}", actor)
+        .replace("{width}", &width.to_string())
+        .replace("{actor_id_expr}", actor_id_expr)
+        .replace("{resolve_ports}", resolve_ports)
+        .replace("{handler_call}", handler_call)
+        .replace("{{", "{")
+        .replace("}}", "}")
+}
+
 fn emit_server_mutation(model: &Model) -> String {
     let api = parse_api(model);
     let mut out = String::from(
@@ -11201,11 +12131,36 @@ fn emit_server_mutation(model: &Model) -> String {
         if wired_mutation_dispatch(&m.name).is_some() {
             if let Some(addr) = addressing.get(&m.command) {
                 let actor_id_expr = match &addr.identity_prop {
+                    // A DECLARED identity property that is missing or unparsable fails AT THE
+                    // DOOR — the same rule the worker-channel enqueue helper enforces (#272 D3,
+                    // id-minting unification): silently minting a random lane id would park the
+                    // command on an arbitrary lane and break the per-aggregate serialization the
+                    // mailbox exists to give. (The typed input normally catches this first; this
+                    // is the door's own guarantee, not the input layer's.)
                     Some(prop) => format!(
-                        "let actor_id = payload_json.get(\"{prop}\").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);"
+                        "let actor_id = payload_json.get(\"{prop}\").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new(\"{command}: identity property '{prop}' missing or not a uuid -- unaddressable\"))?;",
+                        command = m.command,
                     ),
                     None => "// Birth command: the handler mints the aggregate id; this one only routes the mailbox lane.\n        let actor_id = uuid::Uuid::now_v7();".to_string(),
                 };
+                // A PROCESS-MANAGER actor's command ships GATED (#272 D1, ADR-20260801-023000,
+                // gate-then-stabilize): both arms in one resolver, PM_MAILBOX_DELIVERY picks.
+                if addr.process_manager {
+                    let (resolve_ports, handler_call) =
+                        wired_mutation_dispatch(&m.name).expect("checked wired above");
+                    out.push_str(&render_gated_pm_resolver(
+                        &m.name,
+                        &acl,
+                        &fnname,
+                        &m.command,
+                        &addr.actor_type,
+                        addr.partitions,
+                        &actor_id_expr,
+                        &resolve_ports,
+                        &handler_call,
+                    ));
+                    continue;
+                }
                 out.push_str(&format!(
                     "    #[graphql(name = \"{name}\"{acl})]\n    async fn {fnname}(&self, ctx: &async_graphql::Context<'_>, input: {command}Input, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {{\n        // command.receive (SERVER). Opened before any fallible work so an input that fails to\n        // deserialize still leaves a span naming the command that was attempted.\n        let __receive = telemetry::spans::command_receive(\n            \"{command}\",\n            crate::graphql::acl::request_role(ctx).api_name(),\n            telemetry::CHANNEL_GRAPHQL,\n        );\n        let __rx = __receive.clone();\n        async move {{\n        let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();\n        let payload_json = command_payload(&input)?;\n        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a\n        // payload the domain command cannot deserialize.\n        let _cmd: domain::generated::commands::{command} = serde_json::from_value(payload_json.clone())\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        let env = request_envelope(ctx, &metadata);\n        // run_identity: both ids are mandatory in every contract and both may be server-generated.\n        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());\n        {actor_id_expr}\n        let entry = application::mailbox::MailboxEntry {{\n            message_id: env.message_id,\n            kind: \"COMMAND\".into(),\n            actor_type: \"{actor}\".into(),\n            actor_id,\n            partition: actor_runtime::stable_partition(&actor_id, {width}),\n            message_type: \"{command}\".into(),\n            payload: payload_json.clone(),\n            payload_hash: application::journal::payload_hash(&payload_json),\n            channel: \"GRAPHQL\".into(),\n            user_id: env.user_id,\n            user_type: env.user_type.clone(),\n            correlation_id: env.correlation_id,\n            cause_id: env.cause_id,\n            session_id: env.session_id,\n            trace_id: env.trace_id.clone(),\n            source: None,\n            external_id: None,\n        }};\n        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the\n        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).\n        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());\n        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;\n        match __inserted {{\n            application::mailbox::MailboxInsertOutcome::Duplicate {{ status, payload_hash }} => {{\n                if payload_hash != entry.payload_hash {{\n                    // A reused messageId with a DIFFERENT payload is a client bug, and the only\n                    // acceptance outcome the contract does NOT count as success.\n                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);\n                    telemetry::meters::acceptance::sync_conflict(\"{command}\");\n                    return Err(conflict_error(env.message_id));\n                }}\n                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);\n                let _ = telemetry::spans::command_dispatch(\n                    &env.message_id.to_string(),\n                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,\n                );\n                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);\n                return Ok(acceptance(&env, mailbox_status_api(status), true));\n            }}\n            application::mailbox::MailboxInsertOutcome::Inserted => {{\n                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);\n            }}\n        }}\n        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion\n        // (its StatusBusObserver publishes the terminal transition post-commit).\n        let _ = telemetry::spans::command_dispatch(\n            &env.message_id.to_string(),\n            telemetry::dispatch_outcome::ENQUEUED,\n        );\n        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);\n        Ok(acceptance(&env, OperationStatus::PENDING, false))\n        }}\n        .instrument(__receive)\n        .await\n    }}\n",
                     name = m.name,
@@ -11519,6 +12474,8 @@ struct CommandAddress {
     actor_type: String,
     identity_prop: Option<String>,
     partitions: u16,
+    /// actors.yaml `type: process-manager` — its commands flip GATED (#272 D1), never outright.
+    process_manager: bool,
 }
 
 /// command name → its mailbox address, from actors.yaml (`identity` + `mailbox.partitions` +
@@ -11529,7 +12486,10 @@ fn command_addressing(model: &Model) -> BTreeMap<String, CommandAddress> {
     let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") else { return map };
     for (k, def) in actors {
         let Some(actor) = k.as_str().filter(|s| *s != "principals") else { continue };
-        let Some(identity) = def.get("identity").and_then(|i| i.as_str()) else { continue };
+        // The TYPED identity form (`identity: { $ref: '#/<Actor>/state/<field>' }`,
+        // ADR-20260731-214500 consequences) — the bare-string form is a hard validator error
+        // (`identity-untyped`), and generation only runs on a 0-error catalog.
+        let Some(identity) = actor_identity_field(def, actor) else { continue };
         let Some(width) = def
             .get("mailbox")
             .and_then(|m| m.get("partitions"))
@@ -11546,9 +12506,11 @@ fn command_addressing(model: &Model) -> BTreeMap<String, CommandAddress> {
             let Some(rest) = r.strip_prefix("commands.yaml#/") else { continue };
             map.entry(rest.to_string()).or_insert_with(|| CommandAddress {
                 actor_type: actor.to_string(),
-                identity_prop: message_property_exists(model, r, identity)
-                    .then(|| identity.to_string()),
+                identity_prop: message_property_exists(model, r, &identity)
+                    .then(|| identity.clone()),
                 partitions: width as u16,
+                process_manager: def.get("type").and_then(|t| t.as_str())
+                    == Some("process-manager"),
             });
         }
     }
@@ -11613,6 +12575,192 @@ fn emit_infra_command_router(model: &Model) -> String {
         out.push_str(&format!("    (\"{}\", {}),\n", actor, width));
     }
     out.push_str("];\n");
+    // The per-actor activation policy (PROP-20260728-152752 §3.5, #272 D3): rendered for EVERY
+    // mailbox actor so the composition root resolves policy from the spec, never from code
+    // defaults it can drift from. Absent block = enabled under the global gate, global idle.
+    out.push_str(
+        "\n/// Per-actor ACTIVATION policy (actors.yaml `mailbox.activations`, gated globally by\n/// configuration.yaml `ACTOR_ACTIVATIONS`): `(actor_type, enabled, idle-seconds override)`.\n/// An absent spec block renders as `(true, None)` — enabled under the global gate, passivating\n/// at the global `ACTOR_ACTIVATION_IDLE_SECONDS`.\npub const ACTOR_ACTIVATIONS: &[(&str, bool, Option<i64>)] = &[\n",
+    );
+    for (actor, _) in &widths {
+        let (enabled, idle) = model
+            .defs
+            .get("actors.yaml")
+            .and_then(|m| m.get(actor.as_str()))
+            .and_then(|def| def.get("mailbox"))
+            .and_then(|m| m.get("activations"))
+            .map(|act| match act {
+                Value::Bool(b) => (*b, None),
+                Value::Mapping(m) => (
+                    m.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+                    m.get("idle_seconds").and_then(|v| v.as_i64()),
+                ),
+                _ => (true, None),
+            })
+            .unwrap_or((true, None));
+        let idle = idle.map(|n| format!("Some({})", n)).unwrap_or_else(|| "None".to_string());
+        out.push_str(&format!("    (\"{}\", {}, {}),\n", actor, enabled, idle));
+    }
+    out.push_str("];\n");
+    out
+}
+
+/// Emit `crates/infrastructure/src/generated/deletion_policy.rs` — the GENERIC deletion engine's
+/// parameter table (ADR-20260731-214500 §4): the decided journey (checkpoint verification, window,
+/// tombstone, stream deletion, receipt) is implemented ONCE in infrastructure and parameterized
+/// entirely by the actors.yaml `deletion:` declarations rendered here. Returns `None` when NO actor
+/// declares `deletion:` — the file is then not emitted at all, so the artifact set stays byte-stable
+/// until the first spec delta lands (zero-drift gate).
+fn emit_infra_deletion_policy(model: &Model) -> Option<String> {
+    let deletions = parse_deletions(model);
+    if deletions.is_empty() {
+        return None;
+    }
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/actors.yaml `deletion:` blocks\n// (ADR-20260731-214500) — do not edit by hand. The generic deletion engine's parameter table:\n// per actor type, the triggers that start (or cancel) its deletion journey and the receipt fact\n// recorded on the ledger when the journey completes. Event/config/property names are the spec's\n// own vocabulary — the engine resolves them against the event store, the typed configuration and\n// the child projection at runtime.\n\n/// One deletion trigger. `after_config_key = None` means PROPAGATION: the engine reacts to the\n/// recorded fact immediately, enumerating child instances through the typed `match` pair.\npub struct DeletionTrigger {\n    /// Event types that start the journey.\n    pub on: &'static [&'static str],\n    /// configuration.yaml key naming the window (a generated reminder, reschedule in place) —\n    /// `None` = immediate propagation.\n    pub after_config_key: Option<&'static str>,\n    /// Event types that CANCEL a pending scheduled deletion (SCHEDULED -> CANCELLED).\n    pub cancelled_on: &'static [&'static str],\n    /// Property of the triggering event carrying the parent key (propagation).\n    pub match_event_property: Option<&'static str>,\n    /// This actor's state field the parent key matches (propagation).\n    pub match_state_field: Option<&'static str>,\n}\n\n/// One actor's declared deletion policy.\npub struct DeletionPolicy {\n    pub actor_type: &'static str,\n    /// The actor's identity property (its typed `identity` ref) — the stream key: a trigger whose\n    /// `match_state_field` equals it identifies the doomed instance DIRECTLY by the event property\n    /// (self-trigger / direct key); anything else needs child-projection enumeration.\n    pub identity: &'static str,\n    pub triggers: &'static [DeletionTrigger],\n    /// The business fact recorded on the deletion ledger when the journey completes\n    /// (pseudonymous references, never erased payloads — ADR-20260731-160000 §6).\n    pub receipt: &'static str,\n}\n\npub const DELETION_POLICIES: &[DeletionPolicy] = &[\n",
+    );
+    let str_list = |refs: &[String]| -> String {
+        refs.iter()
+            .filter_map(|r| ref_name(r))
+            .map(|n| format!("\"{}\"", n))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    for d in &deletions {
+        let identity = model
+            .defs
+            .get("actors.yaml")
+            .and_then(|m| m.get(d.actor.as_str()))
+            .and_then(|def| actor_identity_field(def, &d.actor))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "    DeletionPolicy {{\n        actor_type: \"{}\",\n        identity: \"{}\",\n        triggers: &[\n",
+            d.actor, identity
+        ));
+        for t in &d.triggers {
+            let after = t
+                .after_ref
+                .as_deref()
+                .and_then(config_key_ref_name)
+                .map(|k| format!("Some(\"{}\")", k))
+                .unwrap_or_else(|| "None".to_string());
+            let m_event = t
+                .match_event_ref
+                .as_deref()
+                .and_then(lineage_parts)
+                .and_then(|(_, p)| p.map(|p| format!("Some(\"{}\")", p)))
+                .unwrap_or_else(|| "None".to_string());
+            let m_state = t
+                .match_state_ref
+                .as_deref()
+                .and_then(parse_ref)
+                .and_then(|pr| pr.path.last().cloned())
+                .map(|f| format!("Some(\"{}\")", f))
+                .unwrap_or_else(|| "None".to_string());
+            out.push_str(&format!(
+                "            DeletionTrigger {{ on: &[{}], after_config_key: {}, cancelled_on: &[{}], match_event_property: {}, match_state_field: {} }},\n",
+                str_list(&t.on),
+                after,
+                str_list(&t.cancelled_on),
+                m_event,
+                m_state
+            ));
+        }
+        out.push_str(&format!(
+            "        ],\n        receipt: \"{}\",\n    }},\n",
+            d.receipt_ref.as_deref().and_then(ref_name).unwrap_or_default()
+        ));
+    }
+    out.push_str("];\n");
+    Some(out)
+}
+
+/// Emit `crates/application/src/generated/reminders.rs` — the scheduling table the `schedules:`
+/// declarations expand to (ADR-20260731-214500 §2): per (actor, received message), the reminders a
+/// SUCCESSFUL delivery (re)declares. The mailbox delivery glue applies it inside the completion
+/// transaction; the generated behaviour tests assert it as the handler's third observable effect.
+/// Always emitted (an empty catalog renders an empty table) so the hand-written
+/// `application::reminders` runtime compiles against a stable module.
+fn emit_app_reminders(model: &Model) -> String {
+    let actors = parse_actors(model);
+    let reminders = parse_reminders(model);
+    let mut out = String::from(
+        "// GENERATED by the Captain.Food codegen from specs/actors.yaml `reminders:` + `schedules:`\n// declarations (ADR-20260731-214500 §2) — do not edit by hand. One row per (actor, received\n// message, reminder): a SUCCESSFUL delivery of `on_message` (re)declares the reminder — the\n// handler's third observable effect, applied by the mailbox delivery glue inside the completion\n// transaction and asserted by the generated behaviour tests (schedule + reschedule-in-place,\n// ADR-20260731-150500).\n\n/// One declared scheduling effect.\npub struct ReminderSchedule {\n    pub actor_type: &'static str,\n    /// The receives message (command or event name) whose successful delivery schedules.\n    pub on_message: &'static str,\n    /// The reminder's name — the identity axis: `message_id = UUIDv5(actor_id, reminder)`.\n    pub reminder: &'static str,\n    /// The payload FACT type (events.yaml vocabulary) recorded at delivery (ADR-20260731-153000 §1a).\n    pub payload_event: &'static str,\n    /// The actor's identity property — the single payload field of the reminder fact.\n    pub identity_prop: &'static str,\n    /// configuration.yaml key naming the window, in DAYS (`_DAYS` suffix enforced at generation).\n    pub after_days_key: &'static str,\n    /// The key's spec default — what the behaviour tests schedule with; production reads Config.\n    pub after_default_days: i64,\n}\n\npub const REMINDER_SCHEDULES: &[ReminderSchedule] = &[\n",
+    );
+    for actor in &actors {
+        for entry in &actor.receives {
+            let on_message = match reminder_ref_parts(&entry.message_ref) {
+                Some((_, rname)) => {
+                    reminder_payload_event(model, &entry.message_ref).unwrap_or(rname)
+                }
+                None => match ref_name(&entry.message_ref) {
+                    Some(m) => m,
+                    None => continue,
+                },
+            };
+            for sref in &entry.schedules {
+                let Some((ractor, rname)) = reminder_ref_parts(sref) else { continue };
+                let Some(rem) = reminders.iter().find(|r| r.actor == ractor && r.name == rname)
+                else {
+                    continue; // §2f `schedules-unresolved` owns the report; generation stays quiet.
+                };
+                let payload_event = ref_name(&rem.payload_ref).unwrap_or_else(|| {
+                    panic!("reminders: {}/{} payload ref unresolved", ractor, rname)
+                });
+                // The generic payload builder fills the identity property ALONE — a reminder fact
+                // requiring more would be silently under-filled at delivery, so fail generation.
+                let identity = model
+                    .defs
+                    .get("actors.yaml")
+                    .and_then(|m| m.get(actor.name.as_str()))
+                    .and_then(|def| actor_identity_field(def, &actor.name))
+                    .unwrap_or_else(|| {
+                        panic!("reminders: actor {} schedules {} but declares no typed identity", actor.name, rname)
+                    });
+                if let Some(props) = resolve_ref(model, &rem.payload_ref, "actors.yaml")
+                    .and_then(|d| d.get("required"))
+                    .and_then(|r| r.as_sequence())
+                {
+                    for p in props.iter().filter_map(|v| v.as_str()) {
+                        assert_eq!(
+                            p,
+                            identity.as_str(),
+                            "reminders: {}'s payload fact {} requires property '{}' — the generic builder fills only the identity ('{}'); extend the builder before declaring it",
+                            rname, payload_event, p, identity
+                        );
+                    }
+                }
+                let after_key = rem
+                    .after_ref
+                    .as_deref()
+                    .and_then(config_key_ref_name)
+                    .unwrap_or_else(|| {
+                        panic!("reminders: {}/{} declares no `after` window — a scheduled receive needs one until dynamic scheduling has a use case", ractor, rname)
+                    });
+                assert!(
+                    after_key.ends_with("_DAYS"),
+                    "reminders: window key {} must be day-granular (`_DAYS`) — extend the emitter for other units when a use case lands",
+                    after_key
+                );
+                let default_days = model
+                    .defs
+                    .get("configuration.yaml")
+                    .and_then(|c| c.get("keys"))
+                    .and_then(|k| k.get(after_key.as_str()))
+                    .and_then(|k| k.get("default"))
+                    .and_then(|d| d.as_i64())
+                    .unwrap_or_else(|| {
+                        panic!("reminders: configuration key {} has no integer default", after_key)
+                    });
+                out.push_str(&format!(
+                    "    ReminderSchedule {{ actor_type: \"{}\", on_message: \"{}\", reminder: \"{}\", payload_event: \"{}\", identity_prop: \"{}\", after_days_key: \"{}\", after_default_days: {} }},\n",
+                    actor.name, on_message, rname, payload_event, identity, after_key, default_days
+                ));
+            }
+        }
+    }
+    out.push_str(
+        "];\n\n/// The reminders a successful delivery of `on_message` to `actor_type` (re)declares.\npub fn reminder_schedules_for(\n    actor_type: &str,\n    on_message: &str,\n) -> impl Iterator<Item = &'static ReminderSchedule> {\n    let (actor_type, on_message) = (actor_type.to_owned(), on_message.to_owned());\n    REMINDER_SCHEDULES\n        .iter()\n        .filter(move |s| s.actor_type == actor_type && s.on_message == on_message)\n}\n",
+    );
     out
 }
 
@@ -13901,6 +15049,33 @@ fn bt_pm_event_call(pm: &str, event: &str) -> String {
 /// Emit `crates/application/src/generated/behaviour_tests.rs`.
 fn emit_behaviour_tests(model: &Model) -> String {
     let owners = bt_event_owners(model);
+    // (actor, inbox message) → reminder names its receive `schedules:` (ADR-20260731-214500 §2):
+    // every curated test whose WHEN hits such a receive also asserts the scheduling effect —
+    // schedule at +window, then reschedule IN PLACE (ADR-20260731-150500) — as generated code.
+    let mut schedules_of: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for a in &parse_actors(model) {
+        for e in &a.receives {
+            if e.schedules.is_empty() {
+                continue;
+            }
+            let msg = match reminder_ref_parts(&e.message_ref) {
+                Some((_, rname)) => {
+                    reminder_payload_event(model, &e.message_ref).unwrap_or(rname)
+                }
+                None => match ref_name(&e.message_ref) {
+                    Some(m) => m,
+                    None => continue,
+                },
+            };
+            let names: Vec<String> = e
+                .schedules
+                .iter()
+                .filter_map(|r| reminder_ref_parts(r))
+                .map(|(_, n)| n)
+                .collect();
+            schedules_of.entry((a.name.clone(), msg)).or_default().extend(names);
+        }
+    }
     let tests_doc = model.defs.get("tests.yaml").expect("tests.yaml");
     let fixtures = tests_doc.get("fixtures").and_then(|f| f.as_mapping()).cloned().unwrap_or_default();
     let tests = tests_doc.get("tests").and_then(|t| t.as_mapping()).cloned().unwrap_or_default();
@@ -14160,10 +15335,185 @@ fn emit_behaviour_tests(model: &Model) -> String {
                     expected.join(",\n        ")
                 ));
             }
+            // The handler's third observable effect (ADR-20260731-214500 §2): a receive declaring
+            // `schedules:` also asserts, in the SAME accepted-case test, that the reminder lands
+            // SCHEDULED at +window and that re-declaring postpones the ONE pending row in place.
+            if let Some(names) = schedules_of.get(&(actor.clone(), msg.clone())) {
+                let (agg, id_prop, uuid_keyed) = bt_agg(&actor).unwrap_or_else(|| {
+                    panic!("behaviour-tests: {}: schedules on non-aggregate actor {}", key, actor)
+                });
+                assert!(
+                    uuid_keyed,
+                    "behaviour-tests: {}: scheduling assertions only support uuid-keyed aggregates (got {}) — extend when a use case lands",
+                    key, agg
+                );
+                let id = wdata
+                    .get(id_prop)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_else(|| {
+                        panic!("behaviour-tests: {}: when.data lacks '{}' — the scheduling assertion needs the instance id", key, id_prop)
+                    });
+                for rname in names {
+                    out.push_str(&format!(
+                        "    // schedules: {rname} — the third observable effect (ADR-20260731-214500 §2)\n    {{\n        use crate::mailbox::MailboxScheduleOutcome;\n        let mailbox = crate::mailbox::mem::MemMailbox::default();\n        let actor_id = support::uid(\"{id}\");\n        let spec = crate::generated::reminders::reminder_schedules_for(\"{actor}\", \"{msg}\")\n            .find(|s| s.reminder == \"{rname}\")\n            .expect(\"{key}: schedule declared in actors.yaml\");\n        let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);\n        let first = crate::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)\n            .await\n            .expect(\"{key}: declare\");\n        assert!(matches!(first, MailboxScheduleOutcome::Scheduled), \"{key}: expected a fresh SCHEDULED row, got {{first:?}}\");\n        let row = crate::reminders::reminder_message_id(actor_id, spec.reminder);\n        assert_eq!(mailbox.scheduled_at(row), Some(t1), \"{key}: due at +window\");\n        let t2 = t1 + chrono::Duration::days(1);\n        let again = crate::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)\n            .await\n            .expect(\"{key}: redeclare\");\n        assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), \"{key}: re-declaring must postpone the SAME row (ADR-20260731-150500), got {{again:?}}\");\n        assert_eq!(mailbox.scheduled_at(row), Some(t2), \"{key}: the pending occurrence moved in place\");\n        assert_eq!(mailbox.entries().len(), 1, \"{key}: one pending occurrence per (actor, purpose)\");\n    }}\n",
+                        rname = rname,
+                        id = id,
+                        actor = actor,
+                        msg = msg,
+                        key = key,
+                    ));
+                }
+            }
         }
         out.push_str("}\n\n");
     }
     out
+}
+
+// ─── §13 — proposal hygiene (docs/proposals/PROP-*.md, #272) ────────────────────────────────────
+//
+// Realizes the docs/proposals/README.md header convention + the CLAUDE.md "Named concerns" rule
+// (an unchecked concern mechanically blocks `Approved`). Scope: `PROP-*.md` files ONLY — the two
+// legacy non-PROP files predate the convention and are grandfathered out by the filename filter.
+// Severities were calibrated against the committed corpus (2026-07-31: all 31 PROP-* files carry a
+// Status line and a header tracking-issue link, and every Approved one names an ADR), so all four
+// rules are ERRORS — the gate stays 0-error without grandfathering any rule down to a warning.
+
+/// Read every `docs/proposals/PROP-*.md` under the repo root, sorted for determinism. A missing
+/// directory yields an empty corpus (mirrors the tolerant `read_dir` pattern of `load_model`).
+fn load_proposal_files(root: &std::path::Path) -> Vec<(String, String)> {
+    let dir = root.join("docs/proposals");
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(&dir) {
+        let mut paths: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("PROP-") && n.ends_with(".md"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        paths.sort();
+        for p in paths {
+            if let (Some(name), Ok(content)) = (p.file_name().and_then(|n| n.to_str()), fs::read_to_string(&p)) {
+                out.push((format!("docs/proposals/{}", name), content));
+            }
+        }
+    }
+    out
+}
+
+/// The Status value: the text after `**Status**` on the first line carrying it. Tolerates both the
+/// `- **Status**:` list form and the bare `**Status**:` form used by existing files.
+fn proposal_status(content: &str) -> Option<&str> {
+    for line in content.lines() {
+        if let Some(idx) = line.find("**Status**") {
+            let rest = &line[idx + "**Status**".len()..];
+            return Some(rest.trim_start().trim_start_matches(':').trim());
+        }
+    }
+    None
+}
+
+/// True when `text` contains a FULL clickable tracking-issue link (a bare `#NN` is a dead reference
+/// in repo markdown — GitHub only auto-links it inside issues/PRs/commits).
+fn has_tracking_issue_link(text: &str) -> bool {
+    const NEEDLE: &str = "https://github.com/TheCaptainCompany/captain-food/issues/";
+    let mut rest = text;
+    while let Some(idx) = rest.find(NEEDLE) {
+        let after = &rest[idx + NEEDLE.len()..];
+        if after.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            return true;
+        }
+        rest = after;
+    }
+    false
+}
+
+/// True when an UNCHECKED `- [ ]` item exists inside a Concerns block — either the header-entry
+/// form (`- **Concerns**:` + indented checklist) or a `## Concerns` section. The scan is SCOPED to
+/// the block so unchecked checklists elsewhere in the body (e.g. scope checklists) never trip it:
+/// a heading always ends the block; the header-entry form also ends at a blank line or the next
+/// sibling `- **Field**:` entry (its own checklist items are indented `- [ ]`/`- [x]` lines).
+fn proposal_has_unresolved_concern(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+        let is_heading_marker =
+            trimmed.starts_with('#') && trimmed.trim_start_matches('#').trim().starts_with("Concerns");
+        let is_entry_marker = line.contains("**Concerns**");
+        if !(is_heading_marker || is_entry_marker) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < lines.len() {
+            let l = lines[j];
+            let t = l.trim_start();
+            if t.starts_with('#') {
+                break; // next heading ends BOTH block forms
+            }
+            if is_entry_marker && (l.trim().is_empty() || t.starts_with("- **")) {
+                break; // header-entry form: blank line or sibling header field ends the block
+            }
+            if t.starts_with("- [ ]") {
+                return true;
+            }
+            j += 1;
+        }
+        i = j.max(i + 1);
+    }
+    false
+}
+
+/// The four proposal-hygiene rules, pure over `(path, content)` pairs so unit tests can feed
+/// fixture strings and `main` feeds `load_proposal_files(repo_root)`.
+fn validate_proposal_hygiene(files: &[(String, String)]) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    for (path, content) in files {
+        let status = proposal_status(content);
+        if status.is_none() {
+            issues.push(err(
+                "proposal-status-missing",
+                path.clone(),
+                "no `**Status**` line — the header block (docs/proposals/README.md) requires one.".into(),
+            ));
+        }
+        // The tracking-issue link must sit in the HEADER (first 40 lines), as a full clickable URL
+        // (ADR-20260724-143000). Corpus-calibrated to ERROR: every committed PROP-* file passes.
+        let header: String = content.lines().take(40).collect::<Vec<_>>().join("\n");
+        if !has_tracking_issue_link(&header) {
+            issues.push(err(
+                "proposal-tracking-issue-missing",
+                path.clone(),
+                "no tracking-issue link (https://github.com/TheCaptainCompany/captain-food/issues/<N>) in the first 40 lines — every proposal has a tracking issue, named in the header as a FULL clickable link (ADR-20260724-143000).".into(),
+            ));
+        }
+        // `Approved`/`APPROVED` case-sensitively: a Proposed status mentioning "partially approved"
+        // in prose is NOT an approval (e.g. PROP-20260730-032306).
+        let approved = status.map(|s| s.contains("Approved") || s.contains("APPROVED")).unwrap_or(false);
+        if approved {
+            if proposal_has_unresolved_concern(content) {
+                issues.push(err(
+                    "proposal-approved-unresolved-concern",
+                    path.clone(),
+                    "Status is Approved but an unchecked `- [ ]` item remains in the Concerns block — an unchecked concern mechanically blocks Approved (CLAUDE.md \"Named concerns\"): resolve it by CHECKING it with a one-line resolution, never by deleting it.".into(),
+                ));
+            }
+            // Corpus-calibrated to ERROR: every Approved PROP-* file already names an ADR.
+            if !content.contains("ADR-") {
+                issues.push(err(
+                    "proposal-approved-without-decision",
+                    path.clone(),
+                    "Status is Approved but the file references no ADR (`ADR-…`) — an approval is recorded by a decision record; name the ADR that recorded it.".into(),
+                ));
+            }
+        }
+    }
+    issues
 }
 
 fn main() {
@@ -14181,7 +15531,12 @@ fn main() {
         }
     };
 
-    let Report { issues, coverage, handled_commands } = validate(&model);
+    let Report { mut issues, coverage, handled_commands } = validate(&model);
+    // ─── §13 — proposal hygiene (docs/proposals/PROP-*.md, #272) — runs alongside the spec
+    // validator: same issue list, same gate, but reads the proposals corpus from the repo root
+    // (derived from `--specs`) because proposals are markdown, not part of the YAML model.
+    let proposals = load_proposal_files(&repo_root(&specs));
+    issues.extend(validate_proposal_hygiene(&proposals));
     let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
     let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
 
@@ -14234,6 +15589,10 @@ fn main() {
     eprintln!("    - ui: {} SDUI screens — resolver/action bindings $ref real api ops (API-meets-UI), data_requirements resolve; {} translations (en+fr, params match)", coverage.screens, coverage.translations);
     eprintln!("    - observability: {} workflow contracts — $ref/surface bindings resolve, mandatory ids (correlation_id/trace_id), span kinds, success.required_spans ⊆ declared spans", coverage.obs_contracts);
     eprintln!("    - c4: bounded-context↔actor mapping (no unmapped aggregate / phantom container ref)");
+    eprintln!(
+        "    - proposals: {} docs/proposals/PROP-*.md — Status header, tracking-issue link, Concerns resolved before Approved, Approved names an ADR",
+        proposals.len()
+    );
 
     if !issues.is_empty() {
         eprintln!("• checks: {} error(s), {} warning(s)", errors.len(), warnings.len());
@@ -14339,8 +15698,9 @@ fn main() {
         ("services.rs", emit_services_application(&model)),
         ("process_managers.rs", emit_pm_orchestrators(&model)),
         ("handlers.rs", emit_application_handlers(&model)),
+        ("reminders.rs", emit_app_reminders(&model)),
         ("behaviour_tests.rs", emit_behaviour_tests(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod process_managers;\npub mod services;\npub mod handlers;\n#[cfg(test)]\npub mod behaviour_tests;\n".to_string()),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod process_managers;\npub mod services;\npub mod handlers;\npub mod reminders;\n#[cfg(test)]\npub mod behaviour_tests;\n".to_string()),
     ] {
         let path = app_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
@@ -14356,13 +15716,24 @@ fn main() {
         eprintln!("✗ create {}: {}", infra_gen.display(), e);
         std::process::exit(1);
     }
-    for (name, content) in [
+    // The deletion-engine parameter table exists only once an actor declares `deletion:`
+    // (ADR-20260731-214500) — absent, neither the file nor its mod.rs line is emitted (zero drift).
+    let deletion_policy = emit_infra_deletion_policy(&model);
+    let infra_mod = format!(
+        "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\npub mod command_router;\n{}",
+        if deletion_policy.is_some() { "pub mod deletion_policy;\n" } else { "" }
+    );
+    let mut infra_files: Vec<(&str, String)> = vec![
         ("pm_state.rs", emit_pm_state_infrastructure(&model)),
         ("service_clients.rs", emit_services_http_clients(&model)),
         ("service_bindings.rs", emit_service_bindings(&model)),
         ("command_router.rs", emit_infra_command_router(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\npub mod command_router;\n".to_string()),
-    ] {
+        ("mod.rs", infra_mod),
+    ];
+    if let Some(dp) = deletion_policy {
+        infra_files.push(("deletion_policy.rs", dp));
+    }
+    for (name, content) in infra_files {
         let path = infra_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
             eprintln!("✗ write {}: {}", path.display(), e);
@@ -17021,5 +18392,644 @@ keys:
              assignments) may keep non-ASCII; only tab-indented command text is affected.",
             offenders.join("\n")
         );
+    }
+
+    // ─── §2f — reminders + declarative deletion (ADR-20260731-214500) ───────────────────────────
+
+    const RD_SCALARS: &str = "OrderId: { type: string }\nRestaurantId: { type: string }\nCatalogId: { type: string }\n";
+    const RD_EVENTS: &str = r#"
+OrderPlaced:
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+OrderExpired:
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+OrderDeleted:
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+RestaurantDeleted:
+  type: object
+  properties:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+CatalogDeleted:
+  type: object
+  properties:
+    catalogId: { $ref: 'scalars.yaml#/CatalogId' }
+"#;
+    const RD_CONFIG: &str = "keys:\n  ORDER_RETENTION_WINDOW_DAYS:\n    type: int\n    default: 365\n    gates: \"Retention window for terminal orders.\"\n";
+
+    /// The pilot shapes of ADR-20260731-214500: a windowed reminder + windowed deletion trigger
+    /// with an undo (`Order`), and a child-declared PROPAGATION trigger with a typed `match`
+    /// (`Catalog` dies when the parent's receipt fact lands).
+    const RD_ACTORS_VALID: &str = r#"
+Order:
+  type: aggregate
+  identity: { $ref: '#/Order/state/orderId' }
+  reminders:
+    OrderExpired:
+      payload: { $ref: 'events.yaml#/OrderExpired' }
+      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
+      reschedule: in-place
+  receives:
+    - message: { $ref: 'events.yaml#/OrderPlaced' }
+      emits: []
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
+    - message: { $ref: '#/Order/reminders/OrderExpired' }
+      emits: []
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/OrderExpired' }]
+        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
+        cancelled_on: [{ $ref: 'events.yaml#/OrderPlaced' }]
+    receipt: { $ref: 'events.yaml#/OrderDeleted' }
+Catalog:
+  type: aggregate
+  state:
+    restaurantId: {}
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/RestaurantDeleted' }]
+        match:
+          event: { $ref: 'events.yaml#/RestaurantDeleted/properties/restaurantId' }
+          state: { $ref: '#/Catalog/state/restaurantId' }
+    receipt: { $ref: 'events.yaml#/CatalogDeleted' }
+"#;
+
+    fn rd_model(actors_yaml: &str) -> Model {
+        inline_model(&[
+            ("scalars.yaml", RD_SCALARS),
+            ("events.yaml", RD_EVENTS),
+            ("commands.yaml", "PlaceOrder:\n  type: object\n"),
+            ("configuration.yaml", RD_CONFIG),
+            ("actors.yaml", actors_yaml),
+        ])
+    }
+
+    fn rd_issues(actors_yaml: &str) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_reminders_and_deletion(&rd_model(actors_yaml), &mut issues);
+        issues
+    }
+
+    fn rules_of(issues: &[Issue]) -> Vec<&str> {
+        issues.iter().map(|i| i.rule).collect()
+    }
+
+    #[test]
+    fn valid_reminders_and_deletion_are_clean_in_both_gates() {
+        let m = rd_model(RD_ACTORS_VALID);
+        // §2f: the dedicated semantic rules.
+        let mut issues = Vec::new();
+        validate_reminders_and_deletion(&m, &mut issues);
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+        // §1b: every new ref site is declared in REF_CONTRACT and classifies to the right kind
+        // (payload→event, after→configuration key, schedules/message→reminder, match→property/state).
+        let mut kinds = Vec::new();
+        validate_ref_kinds(&m, &mut kinds);
+        assert!(kinds.is_empty(), "{:?}", kinds.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn reminder_without_a_same_actor_receive_is_an_error() {
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: []\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["reminder-without-receive"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].location.ends_with("Order/reminders/OrderExpired"), "{}", issues[0].location);
+    }
+
+    #[test]
+    fn receive_of_an_undeclared_reminder_is_an_error() {
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n    - message: { $ref: '#/Order/reminders/Ghost' }\n      emits: []\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["receive-without-reminder"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_receive_of_another_actors_reminder_is_an_error() {
+        // A reminder is one actor talking to ITSELF — Catalog receiving Order's reminder both
+        // fails the receive (wrong actor) and leaves the reminder itself uncovered.
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n  receives: []\nCatalog:\n  type: aggregate\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n",
+        );
+        let rules = rules_of(&issues);
+        assert!(rules.contains(&"receive-without-reminder"), "{:?}", rules);
+        assert!(rules.contains(&"reminder-without-receive"), "{:?}", rules);
+    }
+
+    #[test]
+    fn schedules_must_resolve_to_a_same_actor_reminder() {
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\nCatalog:\n  type: aggregate\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: []\n      schedules:\n        - { $ref: '#/Order/reminders/OrderExpired' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["schedules-unresolved"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].location.contains("Catalog.receives[0].schedules[0]"), "{}", issues[0].location);
+    }
+
+    #[test]
+    fn reminder_payload_must_be_an_events_yaml_fact_and_reschedule_in_place() {
+        // A command payload models the wrong thing: the deadline's passage cannot be refused
+        // (ADR-20260731-153000 §1a); and `in-place` is the only reschedule semantics that exists.
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'commands.yaml#/PlaceOrder' }\n      reschedule: cancel-and-recreate\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n",
+        );
+        let rules = rules_of(&issues);
+        assert!(rules.contains(&"reminder-payload-not-event"), "{:?}", rules);
+        assert!(rules.contains(&"reminder-reschedule-unknown"), "{:?}", rules);
+        assert_eq!(issues.len(), 2, "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn deletion_refs_must_resolve_events_window_and_receipt() {
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/Ghost' }]\n        after: { $ref: 'configuration.yaml#/keys/GHOST_WINDOW' }\n",
+        );
+        // Missing receipt + unresolved `on` event + unresolved `after` key — all deletion-ref-unresolved.
+        assert_eq!(rules_of(&issues), vec!["deletion-ref-unresolved"; 3], "{:?}", issues.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn deletion_match_is_required_for_propagation_and_strongly_typed() {
+        let issues = rd_issues(
+            "Catalog:\n  type: aggregate\n  state:\n    restaurantId: {}\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/RestaurantDeleted' }]\n      - on: [{ $ref: 'events.yaml#/RestaurantDeleted' }]\n        match:\n          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }\n          state: { $ref: '#/Catalog/state/ghostField' }\n    receipt: { $ref: 'events.yaml#/CatalogDeleted' }\n",
+        );
+        // triggers[0]: propagation without match; triggers[1]: event outside `on` + unknown state field.
+        assert_eq!(rules_of(&issues), vec!["deletion-match-untyped"; 3], "{:?}", issues.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
+        assert!(issues[1].message.contains("not one of this trigger's `on` events"), "{}", issues[1].message);
+        assert!(issues[2].message.contains("not a declared state field"), "{}", issues[2].message);
+    }
+
+    #[test]
+    fn deletion_propagation_tree_cycles_are_reported() {
+        // Order dies on CatalogDeleted, Catalog dies on OrderDeleted — each lists the other's
+        // receipt as its trigger, so the emergent tree is a 2-cycle.
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/CatalogDeleted' }]\n        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }\n    receipt: { $ref: 'events.yaml#/OrderDeleted' }\nCatalog:\n  type: aggregate\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/OrderDeleted' }]\n        after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }\n    receipt: { $ref: 'events.yaml#/CatalogDeleted' }\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["deletion-tree-cycle"], "{:?}", issues.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
+        assert!(issues[0].message.contains("Catalog") && issues[0].message.contains("Order"), "{}", issues[0].message);
+    }
+
+    #[test]
+    fn deletion_policy_table_is_emitted_only_when_declared() {
+        // No `deletion:` anywhere → no file at all (zero drift until the first spec delta lands).
+        assert!(emit_infra_deletion_policy(&rd_model("Order:\n  type: aggregate\n  receives: []\n")).is_none());
+        let table = emit_infra_deletion_policy(&rd_model(RD_ACTORS_VALID)).expect("declared → emitted");
+        for needle in [
+            "actor_type: \"Order\"",
+            "on: &[\"OrderExpired\"]",
+            "after_config_key: Some(\"ORDER_RETENTION_WINDOW_DAYS\")",
+            "cancelled_on: &[\"OrderPlaced\"]",
+            "receipt: \"OrderDeleted\"",
+            "actor_type: \"Catalog\"",
+            "after_config_key: None",
+            "match_event_property: Some(\"restaurantId\")",
+            "match_state_field: Some(\"restaurantId\")",
+            "receipt: \"CatalogDeleted\"",
+            "identity: \"orderId\"",
+        ] {
+            assert!(table.contains(needle), "missing `{}` in:\n{}", needle, table);
+        }
+    }
+
+    #[test]
+    fn deletion_self_match_may_bind_the_implicit_identity_field() {
+        // The Order pilot's shape (#272 D2): the deletion trigger is the actor's own recorded
+        // expiry fact, matched on the IDENTITY field — which the typed `identity` ref declares
+        // implicitly (no explicit `state:` entry needed, same doctrine as
+        // `is_implicit_identity_state_ref`).
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n  deletion:\n    triggers:\n      - on: [{ $ref: 'events.yaml#/OrderExpired' }]\n        match:\n          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }\n          state: { $ref: '#/Order/state/orderId' }\n    receipt: { $ref: 'events.yaml#/OrderDeleted' }\n",
+        );
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn reminder_schedule_table_renders_the_declared_effect() {
+        let table = emit_app_reminders(&rd_model(RD_ACTORS_VALID));
+        for needle in [
+            "actor_type: \"Order\"",
+            "on_message: \"OrderPlaced\"",
+            "reminder: \"OrderExpired\"",
+            "payload_event: \"OrderExpired\"",
+            "identity_prop: \"orderId\"",
+            "after_days_key: \"ORDER_RETENTION_WINDOW_DAYS\"",
+            "after_default_days: 365",
+        ] {
+            assert!(table.contains(needle), "missing `{}` in:\n{}", needle, table);
+        }
+        // No declarations → an EMPTY table, but the module still renders (the hand-written
+        // application::reminders runtime compiles against a stable module).
+        let empty = emit_app_reminders(&rd_model("Order:\n  type: aggregate\n  receives: []\n"));
+        assert!(empty.contains("REMINDER_SCHEDULES: &[ReminderSchedule] = &[\n];"), "{}", empty);
+    }
+
+    #[test]
+    fn deletion_receipt_and_trigger_facts_are_not_orphans() {
+        // Section 3's `event-orphan` walk: a fact that exists only in a `deletion:` block is
+        // engine vocabulary — the receipt is RECORDED on the ledger, the triggers CONSUMED.
+        let model = rd_model(RD_ACTORS_VALID);
+        let Report { issues, .. } = validate(&model);
+        assert!(
+            !issues.iter().any(|i| i.rule == "event-orphan" && (i.location.contains("OrderDeleted") || i.location.contains("CatalogDeleted") || i.location.contains("RestaurantDeleted"))),
+            "{:?}",
+            issues.iter().filter(|i| i.rule == "event-orphan").map(|i| &i.location).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn documentation_renders_reminders_and_deletion_only_when_declared() {
+        let md = emit_documentation(&rd_model(RD_ACTORS_VALID));
+        for needle in [
+            "Reminders (self-scheduled facts — ADR-20260731-214500):",
+            "⏰ `OrderExpired`",
+            "⏰ schedules `OrderExpired`",
+            "Deletion (declarative, generic engine — ADR-20260731-214500):",
+            "_immediate (propagation)_",
+            "⚙️ `ORDER_RETENTION_WINDOW_DAYS`",
+        ] {
+            assert!(md.contains(needle), "missing `{}` in the actor docs", needle);
+        }
+        let bare = emit_documentation(&rd_model("Order:\n  type: aggregate\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: []\n"));
+        assert!(!bare.contains("Reminders (self-scheduled facts"), "section must not render undeclared");
+        assert!(!bare.contains("Deletion (declarative"), "section must not render undeclared");
+    }
+
+    #[test]
+    fn reminder_identity_is_derived_never_declared() {
+        // ADR-20260731-214500 consequences: a reminder's identity is UUIDv5(actor_id, name) —
+        // the runtime's reminder_message_id computes it; declaring it is a hard error.
+        let issues = rd_issues(
+            "Order:\n  type: aggregate\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n      identity: orderId\n  receives:\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["reminder-identity-declared"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(issues[0].location.ends_with("Order/reminders/OrderExpired"), "{}", issues[0].location);
+        assert!(issues[0].message.contains("UUIDv5"), "{}", issues[0].message);
+    }
+
+    // ─── typed identity / requires $refs (ADR-20260731-214500 consequences, #272 D2) ────────────
+
+    fn mb_issues(actors_yaml: &str) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_mailbox_addressing(&rd_model(actors_yaml), &mut issues);
+        issues
+    }
+
+    /// `mailbox.activations` shape rules (#272 D3): a knob that parses to nothing would silently
+    /// run the global defaults — every malformed form must be a hard error, and the two legal
+    /// forms must be clean.
+    #[test]
+    fn mailbox_activations_shapes_are_validated() {
+        let base = |act: &str| {
+            format!(
+                "Order:\n  type: aggregate\n  identity: {{ $ref: '#/Order/state/orderId' }}\n  mailbox:\n    partitions: 100\n    activations: {act}\n  receives: []\n",
+            )
+        };
+        for (bad, why) in [
+            ("300", "a bare scalar is neither bool nor mapping"),
+            ("{ enabled: \"yes\" }", "enabled must be a real bool"),
+            ("{ idle_seconds: \"300\" }", "idle_seconds must be an integer"),
+            ("{ idle_seconds: 0 }", "zero would disable rather than tune -- use `activations: false`"),
+            ("{ idle_secs: 300 }", "an unknown key must not fall through to defaults"),
+        ] {
+            let issues = mb_issues(&base(bad));
+            assert_eq!(
+                rules_of(&issues),
+                vec!["mb-activations-shape"],
+                "{why}: {:?}",
+                issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+            );
+        }
+        for ok_form in ["false", "true", "{ enabled: false }", "{ idle_seconds: 60 }", "{ enabled: true, idle_seconds: 60 }"] {
+            let issues = mb_issues(&base(ok_form));
+            assert!(
+                issues.iter().all(|i| i.rule != "mb-activations-shape"),
+                "legal form '{ok_form}' flagged: {:?}",
+                issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+            );
+        }
+        // The block is legal on a PROCESS MANAGER too (any mailbox actor) — and still validated.
+        let pm = "RefundProcess:\n  type: process-manager\n  mailbox:\n    partitions: 100\n    activations: { idle_secs: 1 }\n  receives: []\n";
+        let issues = mb_issues(pm);
+        assert!(
+            issues.iter().any(|i| i.rule == "mb-activations-shape"),
+            "PM activations must be validated: {:?}",
+            issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn actor_identity_bare_string_is_a_hard_error() {
+        let issues = mb_issues(
+            "Order:\n  type: aggregate\n  identity: orderId\n  receives: []\n",
+        );
+        assert_eq!(rules_of(&issues), vec!["identity-untyped"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(
+            issues[0].message.contains("#/Order/state/orderId"),
+            "the error suggests the exact typed form: {}",
+            issues[0].message
+        );
+    }
+
+    #[test]
+    fn actor_identity_ref_must_target_a_same_actor_state_field() {
+        // Another actor's state field is NOT this actor's identity — the ref must be
+        // `#/<SameActor>/state/<field>`.
+        let wrong_actor = mb_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Catalog/state/orderId' }\n  receives: []\n",
+        );
+        assert_eq!(rules_of(&wrong_actor), vec!["identity-state-field-missing"], "{:?}", wrong_actor.iter().map(|i| &i.message).collect::<Vec<_>>());
+        let wrong_path = mb_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: 'events.yaml#/OrderPlaced/properties/orderId' }\n  receives: []\n",
+        );
+        assert_eq!(rules_of(&wrong_path), vec!["identity-state-field-missing"], "{:?}", wrong_path.iter().map(|i| &i.message).collect::<Vec<_>>());
+        // The well-formed typed ref is clean — the identity field is IMPLICITLY declared by the
+        // ref itself (no explicit `state:` entry needed: the stream key exists before any fold).
+        let ok = mb_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  receives:\n    - message: { $ref: 'events.yaml#/OrderPlaced' }\n      emits: []\n",
+        );
+        assert!(ok.is_empty(), "{:?}", ok.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn implicit_identity_state_ref_is_exempt_from_ref_dangling() {
+        let m = rd_model(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  receives: []\n",
+        );
+        // The identity's own self-ref names the implicit stream-key field…
+        assert!(is_implicit_identity_state_ref(&m, "#/Order/state/orderId", "actors.yaml"));
+        assert!(is_implicit_identity_state_ref(&m, "actors.yaml#/Order/state/orderId", "tests.yaml"));
+        // …but any OTHER field, actor or file stays a dangling ref.
+        assert!(!is_implicit_identity_state_ref(&m, "#/Order/state/ghost", "actors.yaml"));
+        assert!(!is_implicit_identity_state_ref(&m, "#/Catalog/state/orderId", "actors.yaml"));
+        assert!(!is_implicit_identity_state_ref(&m, "events.yaml#/Order/state/orderId", "actors.yaml"));
+    }
+
+    #[test]
+    fn missing_identity_property_warns_split_by_message_kind() {
+        // PlaceOrder (a command with no properties) → identity-property-not-on-command;
+        // CatalogDeleted (an event without orderId) → id-not-in-payload; the reminder
+        // self-message is exempt (the reminder row itself carries the actor_id).
+        let issues = mb_issues(
+            "Order:\n  type: aggregate\n  identity: { $ref: '#/Order/state/orderId' }\n  reminders:\n    OrderExpired:\n      payload: { $ref: 'events.yaml#/OrderExpired' }\n  receives:\n    - message: { $ref: 'commands.yaml#/PlaceOrder' }\n      emits: []\n    - message: { $ref: 'events.yaml#/CatalogDeleted' }\n      emits: []\n    - message: { $ref: '#/Order/reminders/OrderExpired' }\n      emits: []\n",
+        );
+        assert_eq!(
+            rules_of(&issues),
+            vec!["identity-property-not-on-command", "id-not-in-payload"],
+            "{:?}",
+            issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>()
+        );
+        assert!(issues.iter().all(|i| i.level == Level::Warning), "both stay WARN — the mailbox mints an addressing-only id (calibration, see §2d doc)");
+    }
+
+    /// The §2e fixture: a declared state field with clean lineage, a typed acting ref over it.
+    const REQ_SCALARS: &str = "CustomerId: { type: string }\nOrderId: { type: string }\n";
+    const REQ_EVENTS: &str = "ConversationOpened:\n  type: object\n  properties:\n    customerId: { $ref: 'scalars.yaml#/CustomerId' }\n";
+    const REQ_ACTOR_HEAD: &str = "principals:\n  CUSTOMER: { id: { $ref: 'scalars.yaml#/CustomerId' } }\nConversation:\n  type: aggregate\n  identity: { $ref: '#/Conversation/state/orderId' }\n  state:\n    customerId:\n      type: { $ref: 'scalars.yaml#/CustomerId' }\n      from: [{ $ref: 'events.yaml#/ConversationOpened/properties/customerId' }]\n  receives:\n    - message: { $ref: 'commands.yaml#/PostMessage' }\n      emits: [{ $ref: 'events.yaml#/ConversationOpened' }]\n";
+
+    fn req_issues(acting: &str) -> Vec<Issue> {
+        let actors = format!("{}      requires:\n        acting:\n{}", REQ_ACTOR_HEAD, acting);
+        let m = inline_model(&[
+            ("scalars.yaml", REQ_SCALARS),
+            ("events.yaml", REQ_EVENTS),
+            ("commands.yaml", "PostMessage:\n  type: object\n"),
+            ("actors.yaml", actors.as_str()),
+        ]);
+        let mut issues = Vec::new();
+        validate_actor_state(&m, &mut issues);
+        issues
+    }
+
+    #[test]
+    fn requires_acting_typed_ref_and_any_keyword_are_clean() {
+        let issues = req_issues("          CUSTOMER: { $ref: '#/Conversation/state/customerId' }\n          ADMIN: any\n");
+        assert!(issues.is_empty(), "{:?}", issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn requires_acting_bare_state_path_is_a_hard_error() {
+        let issues = req_issues("          CUSTOMER: state.customerId\n");
+        assert_eq!(rules_of(&issues), vec!["requires-acting-untyped"], "{:?}", issues.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(
+            issues[0].message.contains("#/Conversation/state/customerId"),
+            "the error suggests the exact typed form: {}",
+            issues[0].message
+        );
+    }
+
+    #[test]
+    fn requires_acting_ref_must_resolve_to_a_declared_same_actor_state_field() {
+        // Wrong actor → shape error; right shape but undeclared field → unknown-field error
+        // (acting refs are STRICT: unlike `identity`, they bind to explicitly declared fold
+        // state — the folded value is what the authorization compares against).
+        let wrong_actor = req_issues("          CUSTOMER: { $ref: '#/Order/state/customerId' }\n");
+        assert_eq!(rules_of(&wrong_actor), vec!["req-state-unknown"], "{:?}", wrong_actor.iter().map(|i| &i.message).collect::<Vec<_>>());
+        let ghost_field = req_issues("          CUSTOMER: { $ref: '#/Conversation/state/ghost' }\n");
+        assert_eq!(rules_of(&ghost_field), vec!["req-state-unknown"], "{:?}", ghost_field.iter().map(|i| &i.message).collect::<Vec<_>>());
+        assert!(ghost_field[0].message.contains("undeclared state field"), "{}", ghost_field[0].message);
+    }
+
+    #[test]
+    fn typed_identity_migration_keeps_generated_runtime_byte_identical() {
+        // The string-path → typed-$ref migration changes DECLARATION SYNTAX only: the identity
+        // property NAMES are unchanged, so the frozen routing contract (command_router.rs) and
+        // the declared-state folds (states.rs) must regenerate byte-identically against the
+        // committed files — any diff here means the migration changed semantics, not syntax.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let router = emit_infra_command_router(&model);
+        let committed_router = std::fs::read_to_string(root.join("crates/infrastructure/src/generated/command_router.rs")).expect("committed command_router.rs");
+        assert_eq!(router, committed_router, "command_router.rs must stay byte-identical across the typed-identity migration");
+        let states = emit_domain_states(&model);
+        let committed_states = std::fs::read_to_string(root.join("crates/domain/src/generated/states.rs")).expect("committed states.rs");
+        assert_eq!(states, committed_states, "states.rs must stay byte-identical across the typed-requires migration");
+        // 0 errors, and the CALIBRATION holds: exactly one command legitimately lacks its
+        // identity property (RequestPhoneVerification — the server mints the customer id), which
+        // is why identity-property-not-on-command is a WARN, not an error (§2d doc).
+        let Report { issues, .. } = validate(&model);
+        for i in &issues {
+            assert!(i.level != Level::Error, "real specs must stay 0-error: {} at {}: {}", i.rule, i.location, i.message);
+        }
+        let cmd_warns: Vec<&Issue> = issues.iter().filter(|i| i.rule == "identity-property-not-on-command").collect();
+        assert_eq!(cmd_warns.len(), 1, "{:?}", cmd_warns.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
+        assert_eq!(cmd_warns[0].location, "actors.yaml/Customer");
+        assert!(cmd_warns[0].message.contains("RequestPhoneVerification"), "{}", cmd_warns[0].message);
+    }
+
+    #[test]
+    fn real_specs_carry_the_order_retention_pilot_and_gain_no_issues() {
+        // The Order pilot IS in the committed catalog (#272 D2): one reminder (OrderExpired,
+        // windowed, rescheduled in place), one deletion block (self-trigger on the recorded
+        // expiry, receipt OrderDeleted) — and the whole catalog keeps validating with zero
+        // errors and none of the §2f rules tripping.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let reminders = parse_reminders(&model);
+        assert_eq!(
+            reminders.iter().map(|r| (r.actor.as_str(), r.name.as_str())).collect::<Vec<_>>(),
+            vec![("Order", "OrderExpired")],
+            "the Order pilot is the one declared reminder"
+        );
+        let deletions = parse_deletions(&model);
+        assert_eq!(
+            deletions.iter().map(|d| d.actor.as_str()).collect::<Vec<_>>(),
+            vec!["Order"],
+            "the Order pilot is the one declared deletion block"
+        );
+        let table = emit_infra_deletion_policy(&model).expect("Order declares deletion → table emitted");
+        assert!(table.contains("receipt: \"OrderDeleted\""), "{}", table);
+        let schedules = emit_app_reminders(&model);
+        for on in ["MarkOrderDelivered", "RejectOrder", "CancelOrderByCustomer", "CancelOrderByRestaurant"] {
+            assert!(
+                schedules.contains(&format!("on_message: \"{}\"", on)),
+                "terminal receive {} must schedule the expiry:\n{}",
+                on,
+                schedules
+            );
+        }
+        let Report { issues, .. } = validate(&model);
+        const NEW_RULES: [&str; 10] = [
+            "reminder-identity-declared",
+            "reminder-without-receive",
+            "receive-without-reminder",
+            "schedules-unresolved",
+            "deletion-ref-unresolved",
+            "deletion-match-untyped",
+            "deletion-tree-cycle",
+            "reminder-payload-not-event",
+            "reminder-after-unresolved",
+            "reminder-reschedule-unknown",
+        ];
+        for i in &issues {
+            assert!(!NEW_RULES.contains(&i.rule), "unexpected {} at {}: {}", i.rule, i.location, i.message);
+            assert!(i.level != Level::Error, "real specs must stay 0-error: {} at {}: {}", i.rule, i.location, i.message);
+        }
+        let md = emit_documentation(&model);
+        assert!(md.contains("Reminders (self-scheduled facts"), "the pilot renders its doc section");
+        assert!(md.contains("Deletion (declarative"), "the pilot renders its doc section");
+    }
+
+    // ─── §13 — proposal hygiene (#272 — CLAUDE.md "Named concerns" + docs/proposals/README.md) ──
+
+    fn hygiene(files: &[(&str, &str)]) -> Vec<Issue> {
+        let owned: Vec<(String, String)> =
+            files.iter().map(|(p, c)| (p.to_string(), c.to_string())).collect();
+        validate_proposal_hygiene(&owned)
+    }
+
+    fn hygiene_rules(issues: &[Issue]) -> Vec<&'static str> {
+        issues.iter().map(|i| i.rule).collect()
+    }
+
+    const TRACK: &str =
+        "- **Tracking issue**: [#9 \"t\"](https://github.com/TheCaptainCompany/captain-food/issues/9)\n";
+
+    #[test]
+    fn proposal_status_line_is_required() {
+        let list_form = format!("# PROP-x — t\n- **Status**: Proposed\n{TRACK}");
+        assert!(hygiene(&[("docs/proposals/PROP-a.md", &list_form)]).is_empty());
+        let bare_form = format!("# PROP-x — t\n**Status**: Proposed\n{TRACK}");
+        assert!(
+            hygiene(&[("docs/proposals/PROP-b.md", &bare_form)]).is_empty(),
+            "the bare `**Status**:` form used by existing files must be tolerated"
+        );
+        let missing = format!("# PROP-x — t\nno header block here\n{TRACK}");
+        let issues = hygiene(&[("docs/proposals/PROP-c.md", &missing)]);
+        assert_eq!(hygiene_rules(&issues), vec!["proposal-status-missing"]);
+        assert!(issues[0].level == Level::Error, "status is a header REQUIREMENT — error");
+    }
+
+    #[test]
+    fn proposal_tracking_issue_link_must_be_in_the_header() {
+        let ok = format!("# PROP-x — t\n- **Status**: Proposed\n{TRACK}");
+        assert!(hygiene(&[("docs/proposals/PROP-a.md", &ok)]).is_empty());
+        // A bare `#NN` is a dead reference in repo markdown — only the full URL counts.
+        let bare_number = "# PROP-x — t\n- **Status**: Proposed\n- **Tracking issue**: #272\n";
+        let issues = hygiene(&[("docs/proposals/PROP-b.md", bare_number)]);
+        assert_eq!(hygiene_rules(&issues), vec!["proposal-tracking-issue-missing"]);
+        assert!(issues[0].level == Level::Error, "corpus-calibrated: every PROP-* passes — error");
+        // A link buried past the first 40 lines is not IN THE HEADER.
+        let buried = format!("# PROP-x — t\n- **Status**: Proposed\n{}{TRACK}", "\n".repeat(45));
+        assert_eq!(
+            hygiene_rules(&hygiene(&[("docs/proposals/PROP-c.md", &buried)])),
+            vec!["proposal-tracking-issue-missing"]
+        );
+    }
+
+    #[test]
+    fn approved_proposal_blocks_on_unchecked_concern_scoped_to_the_concerns_block() {
+        // Header-entry form: an unchecked named concern under `- **Concerns**:` blocks Approved.
+        let unresolved = format!(
+            "# P\n- **Status**: Approved — ADR-20260731-000000\n{TRACK}- **Concerns**:\n  - [ ] latency: unmeasured at peak\n"
+        );
+        let issues = hygiene(&[("docs/proposals/PROP-a.md", &unresolved)]);
+        assert_eq!(hygiene_rules(&issues), vec!["proposal-approved-unresolved-concern"]);
+        assert!(issues[0].level == Level::Error);
+        // Resolving = CHECKING the item with a resolution — the checked form passes.
+        let resolved = format!(
+            "# P\n- **Status**: Approved — ADR-20260731-000000\n{TRACK}- **Concerns**:\n  - [x] latency: measured — P99 ok at peak\n"
+        );
+        assert!(hygiene(&[("docs/proposals/PROP-b.md", &resolved)]).is_empty());
+        // `## Concerns` section form: blank lines inside the section do not end it — the next
+        // heading does.
+        let section = format!(
+            "# P\n- **Status**: APPROVED (in-session) — ADR-20260731-000000\n{TRACK}\n## Concerns\n\n- [ ] naming: collides with the PM state table\n\n## Next steps\n"
+        );
+        assert_eq!(
+            hygiene_rules(&hygiene(&[("docs/proposals/PROP-c.md", &section)])),
+            vec!["proposal-approved-unresolved-concern"]
+        );
+        // SCOPED: unchecked checklists OUTSIDE the Concerns block (scope checklists, a checklist
+        // after the sibling header field that ends the entry-form block) must NOT trip the rule.
+        let scope_only = format!(
+            "# P\n- **Status**: Approved — ADR-20260731-000000\n{TRACK}- **Concerns**:\n  - [x] a: done\n- **Realized by**: ADR-20260731-000000\n\n## Scope\n- [ ] later slice, deliberately deferred\n"
+        );
+        assert!(hygiene(&[("docs/proposals/PROP-d.md", &scope_only)]).is_empty());
+        // An unchecked concern on a NON-approved proposal is fine — it is what blocks the flip.
+        let proposed = format!(
+            "# P\n- **Status**: Proposed\n{TRACK}- **Concerns**:\n  - [ ] latency: unmeasured at peak\n"
+        );
+        assert!(hygiene(&[("docs/proposals/PROP-e.md", &proposed)]).is_empty());
+    }
+
+    #[test]
+    fn approved_proposal_must_reference_a_decision_record() {
+        let no_adr = format!("# P\n- **Status**: Approved (product owner, in-session)\n{TRACK}body\n");
+        let issues = hygiene(&[("docs/proposals/PROP-a.md", &no_adr)]);
+        assert_eq!(hygiene_rules(&issues), vec!["proposal-approved-without-decision"]);
+        assert!(issues[0].level == Level::Error, "corpus-calibrated: every Approved PROP-* names an ADR — error");
+        let with_adr = format!(
+            "# P\n- **Status**: Approved\n{TRACK}Recorded by ADR-20260731-061609.\n"
+        );
+        assert!(hygiene(&[("docs/proposals/PROP-b.md", &with_adr)]).is_empty());
+        // Not Approved → no decision-record requirement.
+        let proposed = format!("# P\n- **Status**: Proposed\n{TRACK}body\n");
+        assert!(hygiene(&[("docs/proposals/PROP-c.md", &proposed)]).is_empty());
+        // Lowercase "partially approved" prose inside a Proposed status is NOT an approval
+        // (the PROP-20260730-032306 shape).
+        let partial = format!("# P\n- **Status**: Proposed (partially approved — see §3)\n{TRACK}body\n");
+        assert!(hygiene(&[("docs/proposals/PROP-d.md", &partial)]).is_empty());
+    }
+
+    #[test]
+    fn real_proposals_satisfy_the_hygiene_rules() {
+        // The committed corpus is the calibration baseline (2026-07-31): all four rules are ERRORS
+        // because every PROP-* file passes them — this test keeps that true, so the gate stays
+        // 0-error and no rule ever needs grandfathering down to a warning.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let files = load_proposal_files(&root);
+        assert!(!files.is_empty(), "expected the committed docs/proposals/PROP-*.md corpus");
+        let issues = validate_proposal_hygiene(&files);
+        let errors: Vec<String> = issues
+            .iter()
+            .filter(|i| i.level == Level::Error)
+            .map(|i| format!("{} at {}: {}", i.rule, i.location, i.message))
+            .collect();
+        assert!(errors.is_empty(), "proposal hygiene must be 0-error on the committed corpus:\n{}", errors.join("\n"));
     }
 }

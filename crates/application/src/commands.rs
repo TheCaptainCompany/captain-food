@@ -1043,6 +1043,37 @@ pub(crate) fn order_stream(id: &OrderId) -> String {
     format!("Order-{}", id.0)
 }
 
+/// Record the delivered `OrderExpired` reminder fact on its order's stream — the kind-MESSAGE
+/// delivery route (ADR-20260731-153000 §1a). Record semantics, NEVER a rejection: the retention
+/// deadline's passage cannot be refused. Recorded the first time, `AlreadyRecorded` when the
+/// order already expired (a redelivered reminder), `NoChange` when the stream is empty — the
+/// deletion journey already erased it (or it never existed), so there is nothing left to expire.
+/// The erasure ACTION on this recording is the deletion engine's journey, not this recorder
+/// (ADR-20260731-160000; STUB until [#194 "GDPR erasure"] closes the loop).
+pub async fn record_inbound_order_event(
+    store: &dyn EventStore,
+    event: DomainEvent,
+    actor: &Actor,
+) -> Result<crate::payments::RecordOutcome, DomainError> {
+    use crate::payments::RecordOutcome;
+
+    let DomainEvent::OrderExpired(expired) = &event else {
+        return Err(DomainError::Repository(format!(
+            "record_inbound_order_event routed a non-order fact: {event:?}"
+        )));
+    };
+    let stream_name = order_stream(&expired.order_id);
+    let (events, version) = store.load(&stream_name).await?;
+    if events.is_empty() {
+        return Ok(RecordOutcome::NoChange);
+    }
+    if events.iter().any(|ev| matches!(ev, DomainEvent::OrderExpired(_))) {
+        return Ok(RecordOutcome::AlreadyRecorded);
+    }
+    Repository::new(store).save(&stream_name, version, &[event], actor).await?;
+    Ok(RecordOutcome::Recorded)
+}
+
 /// Rehydrate the Order aggregate and require existence UNDER the commanding restaurant: a missing
 /// stream — or an order belonging to another restaurant (tenant scoping) — rejects with
 /// `errors.yaml#/OrderNotFound`.

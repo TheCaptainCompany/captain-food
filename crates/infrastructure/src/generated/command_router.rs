@@ -650,6 +650,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "AddOptionList" => Some(("Catalog", Some("catalogId"), 100)),
         "AddProduct" => Some(("Catalog", Some("catalogId"), 100)),
         "ApproveDeliveryPartnerAvailability" => Some(("DeliveryPartnerRegistration", Some("registrationId"), 100)),
+        "ApproveRefund" => Some(("RefundProcess", Some("orderId"), 100)),
         "AssignDeliveryToPartner" => Some(("DeliveryJob", Some("deliveryJobId"), 100)),
         "AttachReclamationEvidence" => Some(("Reclamation", Some("reclamationId"), 100)),
         "BindCartToCustomer" => Some(("Cart", Some("cartId"), 100)),
@@ -673,6 +674,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "DeactivateRestaurant" => Some(("Restaurant", Some("restaurantId"), 100)),
         "DeclineDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 100)),
         "DeleteRestaurantAccount" => Some(("RestaurantAccount", Some("restaurantAccountId"), 100)),
+        "DenyRefund" => Some(("RefundProcess", Some("orderId"), 100)),
         "EscalateDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 100)),
         "EscalateToAdmin" => Some(("Conversation", Some("orderId"), 100)),
         "GrantCustomerCredit" => Some(("CustomerCredit", Some("customerId"), 100)),
@@ -686,6 +688,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "OpenConversation" => Some(("Conversation", Some("orderId"), 100)),
         "OpenReclamation" => Some(("Reclamation", Some("reclamationId"), 100)),
         "OptOutRestaurantListing" => Some(("Restaurant", Some("restaurantId"), 100)),
+        "PlaceOrder" => Some(("PlaceOrderProcess", Some("orderId"), 100)),
         "PlaceReplacementOrder" => Some(("Order", Some("orderId"), 100)),
         "PostMessage" => Some(("Conversation", Some("orderId"), 100)),
         "RateOrder" => Some(("Order", Some("orderId"), 100)),
@@ -754,9 +757,34 @@ pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
     ("DeliveryPartnerRegistration", 100),
     ("Order", 100),
     ("Payment", 100),
+    ("PlaceOrderProcess", 100),
     ("Prospect", 100),
     ("Reclamation", 100),
+    ("RefundProcess", 100),
     ("Restaurant", 100),
     ("RestaurantAccount", 100),
     ("Rider", 100),
+];
+
+/// Per-actor ACTIVATION policy (actors.yaml `mailbox.activations`, gated globally by
+/// configuration.yaml `ACTOR_ACTIVATIONS`): `(actor_type, enabled, idle-seconds override)`.
+/// An absent spec block renders as `(true, None)` — enabled under the global gate, passivating
+/// at the global `ACTOR_ACTIVATION_IDLE_SECONDS`.
+pub const ACTOR_ACTIVATIONS: &[(&str, bool, Option<i64>)] = &[
+    ("Cart", true, None),
+    ("Catalog", true, None),
+    ("Conversation", true, None),
+    ("Customer", true, None),
+    ("CustomerCredit", true, None),
+    ("DeliveryJob", true, None),
+    ("DeliveryPartnerRegistration", true, None),
+    ("Order", true, None),
+    ("Payment", true, None),
+    ("PlaceOrderProcess", true, None),
+    ("Prospect", true, None),
+    ("Reclamation", true, None),
+    ("RefundProcess", true, None),
+    ("Restaurant", true, None),
+    ("RestaurantAccount", true, None),
+    ("Rider", true, None),
 ];

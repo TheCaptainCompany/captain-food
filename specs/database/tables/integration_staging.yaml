@@ -8,8 +8,8 @@ description: >
   exclusive needs of adaptation — dedupe, verification provenance, replay/backfill. It is NOT
   projected from `domain_events` and NOT a GraphQL `reads` target (no `reference: true`) — an
   on-app worker/ACL translates rows into ordinary domain commands (SIRENE → RegisterRestaurant,
-  HubRise → ImportCatalog) or adapted business events staged in `journals.yaml#/inbound_events`
-  (Stripe). The codegen emits its CREATE TABLE + indexes generically like any other
+  HubRise → ImportCatalog) or adapted business events enqueued on the actor mailbox
+  `journals.yaml#/inbound_messages` (Stripe). The codegen emits its CREATE TABLE + indexes generically like any other
   `database/tables/*.yaml` table; `staging: true` documents the category.
 
 external_sirene_restaurants:
@@ -63,7 +63,7 @@ external_sirene_restaurants:
     evidence, and nothing distinguishes the two. Values, written by the worker (except PENDING, written
     by the ingestion):
       * PENDING    — ingested or refreshed, not yet translated. Payload PRESENT, because the worker needs it.
-      * STAGED     — the ACL translated the record and HANDED IT OVER to `inbound_events`; the aggregate
+      * STAGED     — the ACL translated the record and HANDED IT OVER to `inbound_messages`; the aggregate
                      has not decided yet. This is an intermediate state, not a success — calling it
                      SYNCED would claim more than the worker knows, and a later delivery failure would
                      leave the mirror asserting something that never happened. Payload DROPPED (the
@@ -92,16 +92,18 @@ external_sirene_restaurants:
     concurrency-safe high-water mark), while `status` is the OUTCOME. `GROUP BY status` is the operator's
     per-sweep report.
 
-    STAGED -> SYNCED is resolved by JOINING `inbound_events`, and the join key already exists -- nothing
-    extra is stored to make it work. The ACL writes `inbound_events.external_id = '{siret}:{payload_hash}'`
-    (ADR-20260728-011344), and both halves are columns on this row, so
-    `i.external_id = s.siret || ':' || s.payload_hash` links them exactly. On each drain the worker reads
-    `inbound_events.status` for its STAGED rows and writes the verdict back: DELIVERED / IGNORED /
-    DUPLICATE all mean the record reached the domain and the domain is now correct about it (a no-change
-    verdict is a real answer, not a failure -- conflating the two is what once made a sweep unable to
-    tell 200,000 registrations from 200,000 no-ops), so all three resolve to SYNCED; FAILED surfaces as
-    FAILED; RECEIVED means still in flight and is left alone. This necessarily LAGS by at least one
-    drain, because the verdict does not exist at hand-over time.
+    STAGED -> SYNCED is resolved by JOINING `inbound_messages`, and the join key already exists --
+    nothing extra is stored to make it work. The ACL writes
+    `inbound_messages.external_id = '{siret}:{payload_hash}'` (ADR-20260728-011344), and both halves
+    are columns on this row, so `i.external_id = s.siret || ':' || s.payload_hash` links them exactly.
+    On each drain the worker reads `inbound_messages.status` for its STAGED rows and writes the verdict
+    back: SUCCEEDED / IGNORED / DUPLICATE all mean the record reached the domain and the domain is now
+    correct about it (a no-change verdict is a real answer, not a failure -- conflating the two is what
+    once made a sweep unable to tell 200,000 registrations from 200,000 no-ops), so exactly those three
+    resolve to SYNCED; ANY other terminal verdict surfaces as FAILED and keeps the payload (success is
+    enumerated, never inferred from "not FAILED"); RECEIVED/SCHEDULED mean still in flight and are left
+    alone. This necessarily LAGS by at least one drain, because the verdict does not exist at hand-over
+    time.
 
     `synced_at` is the third of that trio and answers WHEN, in wall-clock terms, this row last became a
     domain fact. It is NOT derivable from `processed_at`, and the difference is easy to miss: the worker

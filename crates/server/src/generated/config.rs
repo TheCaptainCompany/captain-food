@@ -217,8 +217,14 @@ pub struct Config {
     pub mailbox_lease_seconds: i64,
     /// Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
     pub mailbox_heartbeat_seconds: i64,
-    /// Global default for activation passivation (PROP-20260728-152752 §3.5): an in-memory actor unsolicited for this long is dropped, its next message paying one rehydration fold. Per-actor overrides live in actors.yaml (mailbox.activations.idle_seconds). Zero would disable the cache; too high and idle aggregates hold memory the LRU bound must then evict. Reader lands with the #242 slice-4 activations.
+    /// ACTIVATIONS (#272 D3, PROP-20260728-152752 §3.5): ON, each mailbox delivery folds the delivered actor's own stream through a shared held-state cache — filled on first load, extended with the committed appends strictly AFTER the fenced transaction commits (apply-after-commit), dropped on a lost version race, on lane loss, on idle expiry and under the memory bound. OFF (the default — gate-then-stabilize; the flip is its own one-line ADR after staging smoke), every delivery folds from the log, byte-identically to the pre-D3 runtime. Correctness never depends on the cache, on BOTH verdict shapes: an APPEND from a stale hold loses the UNIQUE(stream_name, version) race, and a NON-APPEND terminal verdict (a deterministic rejection, an Ignored/Duplicate record) from a cache-served fold re-asserts the stream version inside the fenced transaction — either way the delivery aborts, invalidates and refolds, out-of-band writers (saga-runner legs, peer-process fleets, the deletion engine) included.
+    pub actor_activations: bool,
+    /// Global default for activation passivation (PROP-20260728-152752 §3.5): an in-memory actor unsolicited for this long is dropped, its next message paying one rehydration fold. Per-actor overrides live in actors.yaml (mailbox.activations.idle_seconds). Zero would disable the cache; too high and idle aggregates hold memory the LRU bound must then evict. Read by the ACTOR_ACTIVATIONS-gated cache (#272 D3).
     pub actor_activation_idle_seconds: i64,
+    /// The activation cache's byte bound (PROP-20260728-152752 §3.5 "hot cache pressure evicts by size"): crossing it evicts least-recently-used held states, sized by their serialized event payloads. Idle actors expire by the clock (ACTOR_ACTIVATION_IDLE_SECONDS); this bound is the backstop for a hot Friday-peak set larger than memory should carry.
+    pub actor_activation_max_memory_mb: i64,
+    /// The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal order schedules its OrderExpired reminder this many days out; recording the delivered fact starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE window for now, set to the conservative accounting horizon (~10 years) because the per-data-category split (personal vs financial retention, a legal/product input) is still open — shortening it below the accounting horizon before that split lands would delete financial facts French commercial law retains. Rescheduling is safe: changing this value re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion engine re-reads it at delivery.
+    pub order_retention_window_days: i64,
     /// Events per projection unit-of-work flush (PROP-20260730-230803 §2, 100–1000): one transaction per THIS MANY events instead of one per event. Higher = fewer fsyncs but a larger replay window after a crash and a bigger in-memory identity map. Reader lands with the #267 batched projector.
     pub projection_batch_size: i64,
     /// Early-flush bound on the projection identity map (PROP-20260730-230803 §4): a batch whose loaded row states outgrow this flushes before reaching PROJECTION_BATCH_SIZE, keeping wide rows (catalog imports) from ballooning the projector. Reader lands with the #267 batched projector.
@@ -229,6 +235,10 @@ pub struct Config {
     pub run_projector: bool,
     /// In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires. Readiness at GET /saga.
     pub run_process_managers: bool,
+    /// The generic deletion engine (ADR-20260731-214500 §4): runs the declared deletion journeys (tombstone -> stream deletion -> ledger receipt) for every actors.yaml `deletion:` block. OFF, recorded expiry facts accumulate and no stream is ever erased — GDPR deletion pauses, data is never lost. DEFAULT OFF (gate-then-stabilize): this worker DELETES event streams; the default flips by its own one-line ADR after the gated form is smoked in staging. Readiness at GET /deletion.
+    pub run_deletion_engine: bool,
+    /// The Runtime D1 flip (#272, ADR-20260801-023000): ON, the three process-manager mutations (placeOrder / approveRefund / denyRefund) deliver through the PM mailboxes via the PREPARE phase (Stripe call with no transaction open, one fenced commit), the Payment lane chains the inbound Stripe facts to the PM lanes in the recording transaction (B2), and the saga runner's Stripe-fact triggers retire. OFF, the legacy journal+spawn path and the runner handle everything exactly as before -- the client contract is byte-identical on both arms (each arm replays the OTHER acceptance store's messageIds as duplicates, so a retry never re-executes across a flip), and every startup with the gate ON backfills un-reacted Stripe facts past the runner checkpoints onto the PM lanes (idempotent), so flipping in EITHER direction loses no saga hop. DEFAULT OFF (gate-then-stabilize): this flips the MONEY PATH; the default flips by its own one-line ADR after the gated form is smoked in staging, and command_journal DROPs only at that deploy.
+    pub pm_mailbox_delivery: bool,
     /// Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without bound.
     pub run_retention_sweep: bool,
     /// SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene.
@@ -375,7 +385,13 @@ impl Config {
         let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
+        let actor_activations = raw("ACTOR_ACTIVATIONS")
+            .or_else(|| baked("ACTOR_ACTIVATIONS", profile).map(str::to_string))
+            .map(|v| parse_bool("ACTOR_ACTIVATIONS", &v, false))
+            .unwrap_or(false);
         let actor_activation_idle_seconds = raw("ACTOR_ACTIVATION_IDLE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(300);
+        let actor_activation_max_memory_mb = raw("ACTOR_ACTIVATION_MAX_MEMORY_MB").and_then(|v| v.parse::<i64>().ok()).unwrap_or(64);
+        let order_retention_window_days = raw("ORDER_RETENTION_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3650);
         let projection_batch_size = raw("PROJECTION_BATCH_SIZE").and_then(|v| v.parse::<i64>().ok()).unwrap_or(500);
         let projection_batch_memory_mb = raw("PROJECTION_BATCH_MEMORY_MB").and_then(|v| v.parse::<i64>().ok()).unwrap_or(64);
         let projection_partitions = raw("PROJECTION_PARTITIONS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(16);
@@ -387,6 +403,14 @@ impl Config {
             .or_else(|| baked("RUN_PROCESS_MANAGERS", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_PROCESS_MANAGERS", &v, true))
             .unwrap_or(true);
+        let run_deletion_engine = raw("RUN_DELETION_ENGINE")
+            .or_else(|| baked("RUN_DELETION_ENGINE", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_DELETION_ENGINE", &v, false))
+            .unwrap_or(false);
+        let pm_mailbox_delivery = raw("PM_MAILBOX_DELIVERY")
+            .or_else(|| baked("PM_MAILBOX_DELIVERY", profile).map(str::to_string))
+            .map(|v| parse_bool("PM_MAILBOX_DELIVERY", &v, false))
+            .unwrap_or(false);
         let run_retention_sweep = raw("RUN_RETENTION_SWEEP")
             .or_else(|| baked("RUN_RETENTION_SWEEP", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_RETENTION_SWEEP", &v, true))
@@ -521,12 +545,17 @@ impl Config {
                 delivery_offer_max_ttl_seconds,
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
+                actor_activations,
                 actor_activation_idle_seconds,
+                actor_activation_max_memory_mb,
+                order_retention_window_days,
                 projection_batch_size,
                 projection_batch_memory_mb,
                 projection_partitions,
                 run_projector,
                 run_process_managers,
+                run_deletion_engine,
+                pm_mailbox_delivery,
                 run_retention_sweep,
                 run_sirene_worker,
                 run_delivery_offer_timeout,
@@ -558,6 +587,17 @@ impl Config {
         )
     }
 
+    /// The declared reminder/deletion window keys (actors.yaml `after:` refs), each with its
+    /// resolved runtime value in DAYS — handed to the mailbox delivery glue so scheduling
+    /// reads configuration, never a constant (ADR-20260731-214500).
+    pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, i64> {
+        [
+            ("ORDER_RETENTION_WINDOW_DAYS", self.order_retention_window_days),
+        ]
+        .into_iter()
+        .collect()
+    }
+
     /// What actually resolved, for the boot log. Secrets render as `set` / `unset`, never as a
     /// value; a key declaring `mode_of: stripe` additionally reports its derived mode, so
     /// "is production actually live?" is answerable without reading a secret.
@@ -583,12 +623,17 @@ impl Config {
         out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds));
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
+        out.push_str(&format!("  ACTOR_ACTIVATIONS          = {}\n", self.actor_activations));
         out.push_str(&format!("  ACTOR_ACTIVATION_IDLE_SECONDS = {}\n", self.actor_activation_idle_seconds));
+        out.push_str(&format!("  ACTOR_ACTIVATION_MAX_MEMORY_MB = {}\n", self.actor_activation_max_memory_mb));
+        out.push_str(&format!("  ORDER_RETENTION_WINDOW_DAYS = {}\n", self.order_retention_window_days));
         out.push_str(&format!("  PROJECTION_BATCH_SIZE      = {}\n", self.projection_batch_size));
         out.push_str(&format!("  PROJECTION_BATCH_MEMORY_MB = {}\n", self.projection_batch_memory_mb));
         out.push_str(&format!("  PROJECTION_PARTITIONS      = {}\n", self.projection_partitions));
         out.push_str(&format!("  RUN_PROJECTOR              = {}\n", self.run_projector));
         out.push_str(&format!("  RUN_PROCESS_MANAGERS       = {}\n", self.run_process_managers));
+        out.push_str(&format!("  RUN_DELETION_ENGINE        = {}\n", self.run_deletion_engine));
+        out.push_str(&format!("  PM_MAILBOX_DELIVERY        = {}\n", self.pm_mailbox_delivery));
         out.push_str(&format!("  RUN_RETENTION_SWEEP        = {}\n", self.run_retention_sweep));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
         out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
@@ -620,7 +665,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 52;
+pub const KEY_COUNT: usize = 57;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -645,12 +690,17 @@ pub const DECLARED_KEYS: &[&str] = &[
     "DELIVERY_OFFER_MAX_TTL_SECONDS",
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
+    "ACTOR_ACTIVATIONS",
     "ACTOR_ACTIVATION_IDLE_SECONDS",
+    "ACTOR_ACTIVATION_MAX_MEMORY_MB",
+    "ORDER_RETENTION_WINDOW_DAYS",
     "PROJECTION_BATCH_SIZE",
     "PROJECTION_BATCH_MEMORY_MB",
     "PROJECTION_PARTITIONS",
     "RUN_PROJECTOR",
     "RUN_PROCESS_MANAGERS",
+    "RUN_DELETION_ENGINE",
+    "PM_MAILBOX_DELIVERY",
     "RUN_RETENTION_SWEEP",
     "RUN_SIRENE_WORKER",
     "RUN_DELIVERY_OFFER_TIMEOUT",

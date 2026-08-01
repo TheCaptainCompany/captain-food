@@ -127,6 +127,12 @@ pub struct ProcessManagerRunner {
     /// service the GraphQL `approveRefund` mutation uses; fail-closed stand-in until the composition
     /// root injects the real Stripe adapter (the STRIPE_SECRET_KEY env-gate pattern).
     payments: Arc<dyn PaymentService>,
+    /// The Runtime D1 gate (#272, ADR-20260801-023000): when on, the STRIPE-FACT triggers retire
+    /// from this runner — the mailbox chains them to the PM lanes (B2) — and running them here
+    /// too would double-deliver (idempotent, but noisy and unfenced). The PlaceOrderProcess group
+    /// drops whole; RefundProcess keeps only its refund-OPENING legs (order facts are not in
+    /// D-B's scope). The runner retires fully at the gate's default flip.
+    pm_mailboxes: bool,
     status: Arc<Mutex<ProcessManagerStatus>>,
 }
 
@@ -143,9 +149,17 @@ impl ProcessManagerRunner {
             dispatch_config: PgDispatchStrategy::new(pool.clone()),
             partner: Arc::new(NoopDeliveryService),
             payments: Arc::new(crate::integrations::payments::FailClosedPaymentGateway),
+            pm_mailboxes: false,
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
         }
+    }
+
+    /// Retire the Stripe-fact triggers from this runner (the `PM_MAILBOX_DELIVERY` gate is on —
+    /// the mailbox chains them to the PM lanes instead, #272 Runtime D1).
+    pub fn with_pm_mailboxes(mut self, on: bool) -> Self {
+        self.pm_mailboxes = on;
+        self
     }
 
     /// Replace the delivery-partner port (the composition root injects the real ACL when it lands).
@@ -236,7 +250,20 @@ impl ProcessManagerRunner {
                 .map_err(db_err)?
                 .unwrap_or(0);
 
-        let triggers: Vec<String> = group.triggers.iter().map(|t| t.to_string()).collect();
+        // Gate-aware trigger set (#272 Runtime D1): with PM mailboxes on, the Stripe facts are
+        // chained to the PM lanes by the mailbox delivery — this runner must not race them.
+        let triggers: Vec<String> = group
+            .triggers
+            .iter()
+            .filter(|t| {
+                !(self.pm_mailboxes
+                    && matches!(**t, "PaymentCaptured" | "PaymentFailed" | "PaymentRefunded"))
+            })
+            .map(|t| t.to_string())
+            .collect();
+        if triggers.is_empty() {
+            return Ok(());
+        }
         let pending = sqlx::query(
             "SELECT position, id, correlation_id, occurred_at, event_type, payload FROM domain_events \
              WHERE position > $1 AND event_type = ANY($2) ORDER BY position",

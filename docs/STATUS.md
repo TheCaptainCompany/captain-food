@@ -32,6 +32,90 @@
 > no behavior flips) and proceed regardless; **slice 3 (mailbox migrations + resolver flip) waits
 > until the enum-text release is applied and smoked** — never stack a second unapplied migration
 > set on a paused prod.
+> ✅ **#270 MERGED (2026-07-31, squash `15864f7`)** — Runtime A+B+C + review fixes + the combined
+> actors/projector test are on `main`. **Runtime D continues on
+> [#272](https://github.com/TheCaptainCompany/captain-food/issues/272)** (branch
+> `272-runtime-d-pm-mailboxes-reminders`), under the APPROVED
+> [PROP-20260731-195500](proposals/PROP-20260731-195500-runtime-d-pm-mailboxes-and-reminders.md)
+> choices A2 (two-phase payment delivery) / B2 (chained PM facts) / C2 (event-lineage reminder
+> triggers), ADR-20260731-203000.
+> ✅ **D2 Order retention pilot LANDED on the #272 branch (2026-08-01)**: `OrderExpired`/
+> `OrderDeleted` events + `ORDER_RETENTION_WINDOW_DAYS`; the Order actor's `reminders:`/
+> `schedules:`/`deletion:` blocks (explicit-chain shape, ADR-20260801-010134 — window on the
+> REMINDER because the expiry must be a recorded, foldable fact); generated `REMINDER_SCHEDULES`
+> + `Config::reminder_windows()` + `DELETION_POLICIES` tables; `apply_schedules_in_tx` starts
+> the clock INSIDE the completion transaction; the kind-MESSAGE delivery route records the
+> promoted fact (Recorded/Duplicate/Ignored — never Rejected); behaviour tests assert schedule +
+> reschedule-in-place per terminal receive; E2E `mailbox_retention` proves the loop on PG.
+> ✅ **The GENERIC deletion engine is on the branch too (2026-08-01)**: a log-consumer worker
+> over the generated `DELETION_POLICIES` (own `projection_checkpoint` row `DeletionEngine`, scan
+> BOUNDED by the slowest projection checkpoint = phase-1 fold verification), two restart-safe
+> transactions per journey (`$StreamTombstoned` instruction → delete `domain_events` +
+> `domain_stream` + `OrderDeleted` receipt on `DeletionLedger-Order` + cursor, atomically);
+> `$`-prefixed technical rows are skipped by `PgEventStore::load` and the projector; unsupported
+> policy shapes (windowed engine delays, undo, child enumeration) REFUSE construction. GATED
+> `RUN_DELETION_ENGINE` default **false** (gate-then-stabilize — the default flip is its own
+> one-line ADR after staging smoke); readiness at `GET /deletion`. E2E `deletion_engine` green.
+> ✅ **D1 LANDED on the #272 branch (2026-08-01), GATED `PM_MAILBOX_DELIVERY` default false**
+> (gate-then-stabilize; default flip = its own one-line ADR after staging smoke): the runtime
+> gained the **PREPARE phase** ([ADR-20260801-023000](adr/ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md)
+> R2 — handler work with NO transaction open, then ONE fenced commit); the three PM commands
+> (placeOrder/approveRefund/denyRefund) run their UNCHANGED application handlers in prepare over
+> staging stores (new `StagingPaymentProcessState`/`StagingRefundProcessState`; executor-generic
+> generated pm-state upserts flush the run rows in-tx), Stripe idempotency keys
+> `intent:{orderId}` / `refund:{intent}:{amount}` make redelivery re-runs land on the SAME
+> gateway object, and a sync decline commits the byte-identical legacy `REJECTED PaymentDeclined`.
+> B2 realized IN-TX ([ADR-20260801-053000](adr/ADR-20260801-053000-b2-chain-rides-the-completion-transaction.md)):
+> the Payment lane chains `PaymentCaptured`/`PaymentFailed`→PlaceOrderProcess and
+> `PaymentRefunded`→RefundProcess inside the recording transaction (identity
+> `UUIDv5(orderId, factType:causingRow)`, cause-chained, post-commit nudge); the PM lanes run
+> the saga event legs fenced; the runner drops exactly the Stripe-fact triggers behind the gate.
+> actors.yaml gained the PlaceOrderProcess/RefundProcess entries WITH the wiring; the generated
+> PM resolvers carry BOTH arms (gated at request time). `command_completion_ms` now also emits
+> from the mailbox delivery's post-commit observer (was dark for every Runtime-C-flipped
+> command); observability contracts rewritten in the same change. `operationStatus` reads were
+> already mailbox-first; journal DROP rides the default-flip deploy. E2E `pm_prepare_delivery`
+> (7 tests incl. the full capture chain) green. The independent multi-lens review (payments
+> lens) found 1 critical + 2 major, all FIXED (`32b8605`): deterministic Stripe 4xx now terminal
+> on both arms (a Repository class retried a mailbox head row FOREVER — one bogus
+> paymentMethodId per partition could wedge every checkout lane); a startup backfill (gate ON)
+> enqueues un-reacted Stripe facts past the runner checkpoints so no flip direction loses a saga
+> hop; cross-arm duplicate identity (each gated arm replays the OTHER acceptance store's
+> messageIds — a retry never re-executes across a flip). Deferred minors: prepare-before-
+> authority-precheck rate burn; the pre-existing same-cart check-then-act window (durable fix =
+> partial unique index on payment_process_manager). Remaining D: D3 (activations, rebalancing,
+> test ports).
+> ✅ **D3 LANDED on the #272 branch (2026-08-01)** — the #270 review's deferred runtime findings
+> plus PROP-20260728-152752 §3.5's activations, each gate-then-stabilize: **fair-share lane
+> rebalancing** (census + steal-one-from-the-largest with fresh counts per steal, stop at
+> `floor(total/instances)` — converges ±1 without thrash; cluster fixture `rebalance.rs` proves
+> convergence while the victim is ALIVE, then a hard-crash expiry takeover, exactly-once +
+> per-actor order + per-identity completeness throughout = ADR-20260730-234918 ports 1–3 + the
+> port-5 probe self-test); **ACTIVATIONS gated `ACTOR_ACTIVATIONS` default false** (held-state
+> cache scoped to the delivered actor's own stream: fill on load, promote strictly POST-COMMIT,
+> invalidate on a lost version race / lane loss / idle expiry / LRU byte bound; per-actor
+> `mailbox.activations` DSL + generated policy table; E2E `mailbox_activations`: 1 rehydration
+> load across 3 deliveries, a foreign writer under a warm activation aborts→invalidates→the
+> retry refolds with no hole and no duplicate); **standalone adapter workers gated
+> `RUN_MAILBOX_WORKERS` default false** (each adapter binary can run the monolith-identical
+> fleet for its own lanes; OFF because the in-process status/event buses mean adapter-delivered
+> facts never reach monolith push subscribers — LISTEN/NOTIFY is the recorded follow-up; E2E
+> `standalone_workers`); **birth id-minting unified** (a declared identity property that fails
+> to parse errors at the GraphQL door like the worker door — never a silent random lane).
+> Stale `inbound_events` narratives in integration_staging.yaml + the SIRENE worker rewritten
+> to `inbound_messages`.
+> ✅ **D3 review round 2 (2026-08-01, full-branch, three lenses): 1 critical + 4 major, all
+> FIXED** — the activation FRESHNESS GUARD (a cache-served delivery re-asserts the stream
+> version in the fenced tx: non-append verdicts had no UNIQUE race to lose, so a stale hold
+> could durably commit a wrong REJECTED — E2E `stale_hold_cannot_commit_a_wrong_rejection`);
+> fill-epoch TOCTOU fence; deletion engine evicts erased streams from the cache; standalone
+> money lanes REFUSE an unset PM_MAILBOX_DELIVERY (+ adapter-side backfill parity); Stripe 409
+> in-flight idempotency conflicts retry instead of terminally failing a stolen-lane checkout;
+> the backfill advances the frozen pm:* checkpoints (no more O(history) restart re-scans).
+> Minors: mb-activations-shape negative tests, adapter graceful HTTP shutdown, spec-default
+> reminder windows in standalone fleets, SIRENE success-is-enumerated verdict SQL,
+> RUN_MAILBOX_WORKERS out of the server Config (`consumer`). Details in the proposal's review
+> round 2 section.
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).

@@ -236,6 +236,9 @@ pub struct AppState {
     /// Live saga-runner (process managers, actors.yaml) status when it runs in-process; `None` when
     /// not started.
     saga_status: Option<Arc<Mutex<ProcessManagerStatus>>>,
+    /// Live deletion-engine status (`RUN_DELETION_ENGINE`, ADR-20260731-214500 §4); `None` when the
+    /// gate is off.
+    deletion_status: Option<Arc<Mutex<infrastructure::DeletionEngineStatus>>>,
     /// Live SIRENE sync-worker status. Unlike the two above this is `Some` whenever a DATABASE_URL
     /// pool exists — the worker is always constructed (the ping endpoint needs it), so the snapshot
     /// can distinguish "loop not started" (`running: false`) from "no database" (`None`). That
@@ -302,6 +305,10 @@ pub fn router() -> Router {
     let mut write_deps: Option<WriteDeps> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
+    let mut deletion_status: Option<Arc<Mutex<infrastructure::DeletionEngineStatus>>> = None;
+    // The activation cache handle (ACTOR_ACTIVATIONS on), hoisted out of the worker block so the
+    // deletion engine can evict erased streams from it.
+    let mut activation_cache: Option<Arc<infrastructure::mailbox::StreamActivations>> = None;
     let mut sirene_status: Option<Arc<Mutex<infrastructure::SireneSyncStatus>>> = None;
     let mut sirene_worker: Option<Arc<SireneSyncWorker>> = None;
     let mut stripe_ingestor: Option<Arc<StripeWebhookIngestor>> = None;
@@ -458,6 +465,9 @@ pub fn router() -> Router {
                     slug_reservations: Arc::new(
                         infrastructure::PgSlugReservationRepository::new(pool.clone()),
                     ),
+                    // The Runtime D1 flip (#272, ADR-20260801-023000, gate-then-stabilize): the
+                    // gated PM resolvers pick mailbox-vs-legacy from this at request time.
+                    pm_mailbox_delivery: config.pm_mailbox_delivery,
                     auth_sessions: {
                         // Encrypted parking store when AUTH_SESSION_KEY is set; else stays the no-op
                         // (fail-closed: no key ⇒ no session cookies, never plaintext at rest).
@@ -495,6 +505,73 @@ pub fn router() -> Router {
                 // logged no-op stand-in (jobs stay open to independent riders; the bounded re-offer
                 // run row still terminates ACCEPTED/FAILED). The partner's answers always arrive
                 // asynchronously through the webhook inbox below, never this outbound call.
+                // THE FLIP-TIME BACKFILL (#272 review MAJOR-2 + re-verify residual): with the
+                // gate ON, any Stripe fact the saga runner accepted but had not reacted to
+                // before the flip has no deliverer — a PaymentCaptured with no OrderPlaced is a
+                // paid order nobody is told about. Runs STRICTLY BEFORE the saga runner's first
+                // tick (sequenced inside the runner's own task below): that first tick can
+                // advance pm:RefundProcess past an un-reacted PaymentRefunded (via the group's
+                // remaining order-fact triggers), and a backfill reading the checkpoint after
+                // that would miss the fact forever. Idempotent (deterministic ids; the legs
+                // absorb already-delivered hops); PM lanes are seeded first so the width lookup
+                // can never race the workers' own seeding.
+                let pm_backfill = {
+                    let gate_on = config.pm_mailbox_delivery;
+                    let pool = pool.clone();
+                    let nudges = mailbox_nudges.clone();
+                    async move {
+                        if !gate_on {
+                            return;
+                        }
+                        for (actor_type, width) in
+                            infrastructure::generated::command_router::ACTOR_MAILBOXES
+                        {
+                            if matches!(*actor_type, "PlaceOrderProcess" | "RefundProcess") {
+                                if let Err(e) =
+                                    actor_runtime::seed_partitions(&pool, actor_type, *width as i16)
+                                        .await
+                                {
+                                    tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill skipped; restart to retry BEFORE relying on the flip");
+                                    return;
+                                }
+                            }
+                        }
+                        let pm_state =
+                            infrastructure::persistence::PgPaymentProcessState::new(pool.clone());
+                        let mut attempt = 0u32;
+                        loop {
+                            attempt += 1;
+                            match infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(
+                                &pool, &pm_state,
+                            )
+                            .await
+                            {
+                                Ok(0) => {
+                                    tracing::info!(worker = "pm_backfill", enqueued = 0, "no un-reacted Stripe facts to backfill");
+                                    return;
+                                }
+                                Ok(n) => {
+                                    tracing::warn!(worker = "pm_backfill", enqueued = n, "backfilled un-reacted Stripe facts onto the PM lanes");
+                                    nudges.nudge("PlaceOrderProcess");
+                                    nudges.nudge("RefundProcess");
+                                    return;
+                                }
+                                Err(e) if attempt < 3 => {
+                                    tracing::warn!(worker = "pm_backfill", error = %e, attempt, "backfill failed -- retrying");
+                                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                                }
+                                Err(e) => {
+                                    // Facts stay in the log — nothing is lost — but the runner
+                                    // may now advance past them: LOUD, and a restart retries.
+                                    tracing::error!(worker = "pm_backfill", error = %e, "backfill failed after retries -- restart to retry BEFORE relying on the flip");
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                };
+                let mut pm_backfill = Some(pm_backfill);
+
                 if config.run_process_managers {
                     // Composite delivery gateway (#60): the saga offers a job on a strategy-resolved
                     // CHANNEL, so the single Avelo-vs-Noop choice becomes a registry of channel →
@@ -549,9 +626,18 @@ pub fn router() -> Router {
                     .expect("payment service binding (services.yaml)");
                     let runner = ProcessManagerRunner::new(pool.clone())
                         .with_partner(partner)
-                        .with_payments(saga_payments);
+                        .with_payments(saga_payments)
+                        // Runtime D1 (#272): with PM mailboxes on, the Stripe-fact triggers are
+                        // chained to the PM lanes by the mailbox — this runner must not race them.
+                        .with_pm_mailboxes(config.pm_mailbox_delivery);
                     saga_status = Some(runner.status());
-                    tokio::spawn(runner.run_loop());
+                    // The backfill runs INSIDE the runner's task, before its first tick — the
+                    // ordering the re-verification demanded (see the pm_backfill comment above).
+                    let backfill = pm_backfill.take().expect("pm_backfill consumed once");
+                    tokio::spawn(async move {
+                        backfill.await;
+                        runner.run_loop().await;
+                    });
                     tracing::info!(worker = "saga_runner", running = true, toggle = "RUN_PROCESS_MANAGERS", "worker running in-process");
 
                     // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next
@@ -571,6 +657,11 @@ pub fn router() -> Router {
                     }
                 } else {
                     tracing::warn!(worker = "saga_runner", running = false, toggle = "RUN_PROCESS_MANAGERS", "worker NOT started -- no cross-aggregate reaction fires");
+                    // No runner to race: the backfill still runs (facts past frozen checkpoints
+                    // must reach the PM lanes), just unsequenced.
+                    if let Some(backfill) = pm_backfill.take() {
+                        tokio::spawn(backfill);
+                    }
                 }
 
                 // SIRENE sync worker (ADR-0045): drains the `external_sirene_restaurants` staging
@@ -617,7 +708,28 @@ pub fn router() -> Router {
                         .expect("identity service binding (services.yaml)"),
                         customers: Arc::new(PgCustomerRepository::new(pool.clone())),
                         sessions: auth_sessions.clone(),
-                        payments: Arc::new(FailClosedPaymentGateway),
+                        // The SAME conditional Stripe binding the resolver side and the saga runner
+                        // use (#272 Runtime D1): the mailbox workers will execute the payment-
+                        // dependent PM legs once the PlaceOrderProcess/RefundProcess mailboxes land,
+                        // and a hard-wired fail-closed stand-in here would silently decline every
+                        // checkout the moment the generated addressing flips them.
+                        payments: infrastructure::generated::service_bindings::payment_service(|| {
+                            match std::env::var("STRIPE_SECRET_KEY") {
+                                Ok(key) if !key.is_empty() => {
+                                    Arc::new(stripe_adapter::StripePaymentGateway::new(key))
+                                }
+                                _ => {
+                                    tracing::warn!(
+                                        binding = "payments",
+                                        site = "mailbox_workers",
+                                        impl_ = "FailClosedPaymentGateway",
+                                        "STRIPE_SECRET_KEY unset -- payment-dependent deliveries will decline"
+                                    );
+                                    Arc::new(FailClosedPaymentGateway)
+                                }
+                            }
+                        })
+                        .expect("payment service binding (services.yaml)"),
                         pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(
                             pool.clone(),
                         )),
@@ -625,10 +737,65 @@ pub fn router() -> Router {
                             pool.clone(),
                         )),
                     };
-                    let handler = Arc::new(
-                        infrastructure::mailbox::MailboxCommandHandler::new(deps)
-                            .with_event_bus(event_bus.clone()),
-                    );
+                    // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
+                    // held-state cache, its per-actor policy from the GENERATED table, and a
+                    // sweep timer so idle actors leave memory on schedule (not only when
+                    // touched). OFF, `activations` is None and every delivery folds from the
+                    // log exactly as before.
+                    let activations = if config.actor_activations {
+                        let cache = Arc::new(infrastructure::mailbox::StreamActivations::new(
+                            (config.actor_activation_max_memory_mb.max(1) as usize) * 1024 * 1024,
+                        ));
+                        let per_actor: std::collections::HashMap<&'static str, (bool, Option<std::time::Duration>)> =
+                            infrastructure::generated::command_router::ACTOR_ACTIVATIONS
+                                .iter()
+                                .map(|(actor, enabled, idle)| {
+                                    (*actor, (*enabled, idle.map(|s| std::time::Duration::from_secs(s.max(1) as u64))))
+                                })
+                                .collect();
+                        let settings = Arc::new(infrastructure::mailbox::ActivationSettings {
+                            cache: cache.clone(),
+                            idle_default: std::time::Duration::from_secs(
+                                config.actor_activation_idle_seconds.max(1) as u64,
+                            ),
+                            per_actor,
+                        });
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                                let swept = cache.sweep();
+                                if swept > 0 {
+                                    tracing::debug!(swept, "activations: idle passivation sweep");
+                                }
+                            }
+                        });
+                        tracing::info!(
+                            max_memory_mb = config.actor_activation_max_memory_mb,
+                            idle_seconds = config.actor_activation_idle_seconds,
+                            "activations: held-state cache ON (ACTOR_ACTIVATIONS)"
+                        );
+                        Some(settings)
+                    } else {
+                        None
+                    };
+                    activation_cache = activations.as_ref().map(|s| s.cache.clone());
+                    let handler = Arc::new({
+                        let mut h = infrastructure::mailbox::MailboxCommandHandler::new(deps)
+                            .with_event_bus(event_bus.clone())
+                            // The declared reminder windows (actors.yaml `after:` →
+                            // configuration.yaml), so `schedules:` deliveries start their
+                            // clocks from configuration, never a constant (ADR-20260731-214500).
+                            .with_reminder_windows(config.reminder_windows())
+                            // Runtime D1 (#272, B2): a recorded Stripe fact chains its
+                            // PM-addressed copy in the SAME completion transaction, and the PM
+                            // lane's worker is nudged post-commit.
+                            .with_pm_fact_chaining(config.pm_mailbox_delivery)
+                            .with_nudges(mailbox_nudges.clone());
+                        if let Some(settings) = &activations {
+                            h = h.with_activations(settings.clone());
+                        }
+                        h
+                    });
                     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(
                         operation_status_bus.clone(),
                     ));
@@ -683,6 +850,15 @@ pub fn router() -> Router {
                                 if let Some(nudge) = mailbox_nudges.get(actor_type) {
                                     w = w.with_nudge(nudge);
                                 }
+                                // A lane this worker stops owning drops its held activations —
+                                // the new owner may write those actors (§3.5 eviction rules).
+                                if let Some(settings) = &activations {
+                                    w = w.with_lane_events(Arc::new(
+                                        infrastructure::mailbox::ActivationLaneEvents(
+                                            settings.cache.clone(),
+                                        ),
+                                    ));
+                                }
                                 w
                             },
                         );
@@ -723,6 +899,9 @@ pub fn router() -> Router {
                         workers = infrastructure::generated::command_router::ACTOR_MAILBOXES.len(),
                         "mailbox: per-actor-type workers running in-process"
                     );
+
+                    // (The flip-time backfill runs INLINE before the saga runner spawns — see
+                    // the PM_MAILBOX_DELIVERY block above the RUN_PROCESS_MANAGERS gate.)
                 }
 
                 // Stripe webhook ingestor (ADR-20260731-122500 — the mailbox is the only door):
@@ -809,6 +988,33 @@ pub fn router() -> Router {
                     tracing::warn!(worker = "retention_sweep", running = false, toggle = "RUN_RETENTION_SWEEP", "worker NOT started -- nothing expires and storage grows without bound");
                 }
 
+                // The generic deletion engine (ADR-20260731-214500 §4): gated DEFAULT-OFF until
+                // smoked (gate-then-stabilize — this worker DELETES event streams). An engine
+                // that cannot serve a DECLARED deletion policy refuses to construct; with the
+                // gate ON that is a boot-stopping wiring bug (fail-fast, ADR-20260729-010500).
+                if config.run_deletion_engine {
+                    let mut engine = infrastructure::DeletionEngine::new(pool.clone())
+                        .unwrap_or_else(|reason| {
+                            panic!("RUN_DELETION_ENGINE is on but the engine refused to start: {reason}")
+                        });
+                    // Erased streams must leave the activation cache with the deletion (GDPR:
+                    // no held fold of deleted events, no gapped resurrection from a held version).
+                    if let Some(cache) = &activation_cache {
+                        engine = engine.with_activations(cache.clone());
+                    }
+                    deletion_status = Some(engine.status());
+                    // Restart-safe at every journey boundary (two-tx design), so it needs no
+                    // graceful drain: hold a never-firing shutdown sender and let the loop pace
+                    // on its heartbeat.
+                    let (engine_shutdown_tx, engine_shutdown_rx) =
+                        tokio::sync::watch::channel(false);
+                    std::mem::forget(engine_shutdown_tx);
+                    tokio::spawn(engine.run_loop(engine_shutdown_rx));
+                    tracing::info!(worker = "deletion_engine", running = true, toggle = "RUN_DELETION_ENGINE", "worker running in-process");
+                } else {
+                    tracing::info!(worker = "deletion_engine", running = false, toggle = "RUN_DELETION_ENGINE", "worker NOT started (gated default) -- recorded expiry facts accumulate; no stream is erased");
+                }
+
                 let worker = Arc::new(SireneSyncWorker::new(pool.clone()));
                 // Taken unconditionally, BEFORE the gate below: the worker exists either way (the ping
                 // endpoint drives it), so `/sirene` can report `running: false` for a paused loop
@@ -845,8 +1051,9 @@ pub fn router() -> Router {
         .route("/health", get(health))
         .route("/projector", get(projector))
         .route("/saga", get(saga))
+        .route("/deletion", get(deletion))
         .route("/sirene", get(sirene))
-        .with_state(AppState { snap, projector_status, saga_status, sirene_status });
+        .with_state(AppState { snap, projector_status, saga_status, deletion_status, sirene_status });
 
     // Built once, shared twice: the HTTP GraphQL routes AND the SSR page renderer (#92 — the
     // in-process transport executes screens' data_requirements against this same schema).
@@ -987,6 +1194,25 @@ async fn saga(State(app): State<AppState>) -> impl IntoResponse {
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "running": false, "reason": "saga_runner_not_started" })),
+        ),
+    }
+}
+
+/// Deletion-engine readiness (ADR-20260728-224500; worker ADR-20260731-214500 §4). `200` when the
+/// engine loop is running, `503` otherwise — and a `503` with `"reason": "deletion_engine_not_started"`
+/// is the GATED-OFF default (`RUN_DELETION_ENGINE=false`), not a fault: recorded expiry facts
+/// accumulate until the gate flips; no data is lost.
+async fn deletion(State(app): State<AppState>) -> impl IntoResponse {
+    match &app.deletion_status {
+        Some(handle) => {
+            let status = handle.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+            let code = if status.running { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+            let body = serde_json::to_value(&status).unwrap_or_else(|_| json!({ "running": false }));
+            (code, Json(body))
+        }
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "running": false, "reason": "deletion_engine_not_started" })),
         ),
     }
 }

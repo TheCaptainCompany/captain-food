@@ -55,10 +55,19 @@ description: >
 # `requires.acting` compares `actor.id` against (type-checked end to end). Roles without a domain
 # identity (PUBLIC, ADMIN, EXTERNAL) are deliberately absent: they can never satisfy an `acting`
 # entry except the explicit keyword `any`.
-# Each aggregate declares `identity` (the payload property that IS the instance id — the mailbox's
-# actor_id and the stream id) and `mailbox.partitions` (the FIXED keyspace width; worker scaling
-# leases ranges of it and never changes it). Validated by pr-*/id-*/mb-* (id-not-in-payload warns
-# while birth-command id minting is unresolved — #242 slice 3).
+# Each aggregate declares `identity` as a TYPED same-actor state-field $ref
+# (`identity: { $ref: '#/<Actor>/state/<field>' }`, ADR-20260731-214500 consequences): the field
+# names the payload property that IS the instance id — the mailbox's actor_id and the stream id.
+# The identity field is the STREAM KEY, implicitly declared by this ref (it exists before any fold),
+# so it needs no explicit `state:` entry. `mailbox.partitions` is the FIXED keyspace width; worker
+# scaling leases ranges of it and never changes it. An optional `mailbox.activations` block
+# (`false`, or `{ enabled, idle_seconds }`) tunes the ACTOR_ACTIVATIONS-gated held-state cache
+# per actor (#272 D3). Validated by pr-*/identity-*/id-*/mb-*. Id-minting is RESOLVED at both
+# enqueue doors (#272 D3: a declared identity property that fails to parse errors at the door);
+# the surviving identity-property-not-on-command / id-not-in-payload WARNS name the known
+# non-payload identities — Payment's surrogate `Payment-<intentId>` lanes (facts keyed by the
+# gateway's intent id, lane id = UUIDv5 surrogate) and Customer's RequestPhoneVerification
+# (a side-effect command with no instance yet: any lane serializes it).
 
 principals:
   CUSTOMER:           { id: { $ref: 'scalars.yaml#/CustomerId' } }
@@ -70,7 +79,7 @@ principals:
 
 RestaurantAccount:
   type: aggregate
-  identity: restaurantAccountId
+  identity: { $ref: '#/RestaurantAccount/state/restaurantAccountId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A restaurant account (HubRise: restaurant) that owns one or more Restaurant locations."
@@ -92,7 +101,7 @@ RestaurantAccount:
 
 Restaurant:
   type: aggregate
-  identity: restaurantId
+  identity: { $ref: '#/Restaurant/state/restaurantId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -216,7 +225,7 @@ Restaurant:
 
 Prospect:
   type: aggregate
-  identity: restaurantId     # a prospect row IS the restaurant listing (stream Prospect-{restaurantId})
+  identity: { $ref: '#/Prospect/state/restaurantId' }   # a prospect row IS the restaurant listing (stream Prospect-{restaurantId})
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -241,7 +250,7 @@ Prospect:
 
 DeliveryPartnerRegistration:
   type: aggregate
-  identity: registrationId
+  identity: { $ref: '#/DeliveryPartnerRegistration/state/registrationId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -267,7 +276,7 @@ DeliveryPartnerRegistration:
 
 Catalog:
   type: aggregate
-  identity: catalogId
+  identity: { $ref: '#/Catalog/state/catalogId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A restaurant catalog: catalog, category tree, products, offers (SKUs), option lists and per-offer stock."
@@ -343,7 +352,7 @@ Catalog:
 
 Customer:
   type: aggregate
-  identity: customerId
+  identity: { $ref: '#/Customer/state/customerId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A customer identity, keyed by phone number and linked to the auth provider user (authRef)."
@@ -418,7 +427,7 @@ Customer:
 
 Cart:
   type: aggregate
-  identity: cartId
+  identity: { $ref: '#/Cart/state/cartId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A visitor's in-progress selection for one restaurant, built (possibly as a guest) before checkout. Validated incrementally; converted to an Order by PlaceOrderProcess."
@@ -471,7 +480,7 @@ Cart:
 
 Order:
   type: aggregate
-  identity: orderId
+  identity: { $ref: '#/Order/state/orderId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A single order through its lifecycle. Born from OrderPlaced (delivered by PlaceOrderProcess and recorded here), then driven to a terminal state."
@@ -492,6 +501,25 @@ Order:
       - { from: [PLACED], event: { $ref: 'events.yaml#/OrderCancelledByCustomer' }, to: CANCELLED_BY_CUSTOMER }
       - { from: [ACCEPTED, PREPARING, READY], event: { $ref: 'events.yaml#/OrderCancelledByRestaurant' }, to: CANCELLED_BY_RESTAURANT }
     terminal: [DELIVERED, REJECTED, CANCELLED_BY_CUSTOMER, CANCELLED_BY_RESTAURANT]
+  # GDPR retention pilot (ADR-20260731-153000/-160000/-214500, #272): every terminal receive
+  # `schedules:` the OrderExpired reminder (reschedule in place — the LAST terminal fact wins the
+  # clock); the promotion pass delivers it when due and the delivery RECORDS the fact (record
+  # semantics — never Rejected). The `deletion:` block then reacts to the RECORDED OrderExpired:
+  # the window lives on the REMINDER (not the trigger) because the expiry must be a recorded
+  # business fact projections can fold to tombstone (ADR-20260731-160000 §2) — an engine-internal
+  # timer would erase read models without a foldable cause in the log.
+  reminders:
+    OrderExpired:
+      payload: { $ref: 'events.yaml#/OrderExpired' }
+      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
+      reschedule: in-place        # ADR-20260731-150500: re-declaring postpones the SAME row
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/OrderExpired' }]
+        match:
+          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }
+          state: { $ref: '#/Order/state/orderId' }
+    receipt: { $ref: 'events.yaml#/OrderDeleted' }
   receives:
     - message: { $ref: 'events.yaml#/OrderPlaced' }
       emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
@@ -525,21 +553,29 @@ Order:
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
     - message: { $ref: 'commands.yaml#/RejectOrder' }
       emits: [{ $ref: 'events.yaml#/OrderRejectedByRestaurant' }]
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
     - message: { $ref: 'commands.yaml#/CancelOrderByCustomer' }
       emits: [{ $ref: 'events.yaml#/OrderCancelledByCustomer' }]
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
     - message: { $ref: 'commands.yaml#/CancelOrderByRestaurant' }
       emits: [{ $ref: 'events.yaml#/OrderCancelledByRestaurant' }]
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+      schedules:
+        - { $ref: '#/Order/reminders/OrderExpired' }
     - message: { $ref: 'commands.yaml#/RateOrder' }
       emits: [{ $ref: 'events.yaml#/OrderRated' }]
       throws:
@@ -569,10 +605,17 @@ Order:
       throws:
         - { $ref: 'errors.yaml#/OrderNotFound' }
         - { $ref: 'errors.yaml#/InvalidOrderStatus' }
+    - message: { $ref: '#/Order/reminders/OrderExpired' }
+      emits: [{ $ref: 'events.yaml#/OrderExpired' }]
+      effect: >
+        The promotion pass delivered the retention reminder: record the expiry with record
+        semantics — Recorded, or Ignored (stream already gone) / Duplicate (already expired) —
+        NEVER Rejected (ADR-20260731-153000 §1a: the deadline's passage cannot be refused). The
+        erasure ACTION on this recording is the deletion engine's journey (deletion: block above).
 
 Payment:
   type: aggregate
-  identity: paymentIntentId  # the stream is Payment-{paymentIntentId} (crates/domain/src/payment.rs)
+  identity: { $ref: '#/Payment/state/paymentIntentId' }   # the stream is Payment-{paymentIntentId} (crates/domain/src/payment.rs)
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state."
@@ -612,7 +655,7 @@ Payment:
 
 DeliveryJob:
   type: aggregate
-  identity: deliveryJobId
+  identity: { $ref: '#/DeliveryJob/state/deliveryJobId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -741,7 +784,7 @@ DeliveryJob:
     
 Rider:
   type: aggregate
-  identity: riderId
+  identity: { $ref: '#/Rider/state/riderId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A rider identity, linked to the auth provider user (authRef)."
@@ -780,7 +823,7 @@ Rider:
 
 Conversation:
   type: aggregate
-  identity: orderId          # a conversation's identity IS its order (ADR-20260725-015921)
+  identity: { $ref: '#/Conversation/state/orderId' }   # a conversation's identity IS its order (ADR-20260725-015921)
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   # PILOT of the declared-state DSL (PROP-20260728-135632 §2.1, Approved — validation-only in
@@ -839,8 +882,8 @@ Conversation:
       # added) when slice 2 generates the precondition. RIDER deliberately absent = denied.
       requires:
         acting:
-          CUSTOMER:   state.customerId
-          RESTAURANT: state.restaurantId
+          CUSTOMER:   { $ref: '#/Conversation/state/customerId' }
+          RESTAURANT: { $ref: '#/Conversation/state/restaurantId' }
           ADMIN:      any
         claims:
           authorRole: actor.role
@@ -874,7 +917,7 @@ Conversation:
 
 Reclamation:
   type: aggregate
-  identity: reclamationId
+  identity: { $ref: '#/Reclamation/state/reclamationId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -934,7 +977,7 @@ Reclamation:
 
 CustomerCredit:
   type: aggregate
-  identity: customerId       # one credit ledger per customer (stream CustomerCredit-{customerId})
+  identity: { $ref: '#/CustomerCredit/state/customerId' }   # one credit ledger per customer (stream CustomerCredit-{customerId})
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
@@ -952,3 +995,70 @@ CustomerCredit:
       emits: [{ $ref: 'events.yaml#/CustomerCreditConsumed' }]
       throws:
         - { $ref: 'errors.yaml#/InsufficientCustomerCredit' }
+# --- Process managers (sagas) — #272 Runtime D1 (PM mailboxes, ADR-20260801-023000) ---
+#
+# These entries land STRICTLY WITH the D-A wiring (the prepare-phase delivery + the gated
+# resolvers): the generated addressing flips the three mutations the moment they exist, and the
+# flip ships GATED behind PM_MAILBOX_DELIVERY (gate-then-stabilize — the default flip is its own
+# one-line ADR after the gated form is smoked).
+
+PlaceOrderProcess:
+  type: process-manager
+  identity: { $ref: '#/PlaceOrderProcess/state/orderId' }
+  mailbox:
+    partitions: 100          # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
+  description: >
+    The checkout saga (ADR-0004, acceptance-first ADR-20260720-015500): PlaceOrder validates the
+    cart against the live catalog, prices server-side, creates the Stripe PaymentIntent and
+    freezes the checkout as PaymentIntentCreated -- the ORDER IS NOT PLACED YET. The order
+    materializes only when Stripe reports the capture: the PaymentCaptured reaction
+    re-materializes the frozen checkout from PaymentIntentCreated's log (no external store) and
+    emits OrderPlaced idempotently. A PaymentFailed reaction records the outcome on the process
+    state; the customer retries by resubmitting checkout.
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      emits:
+        - { $ref: 'events.yaml#/PaymentIntentCreated' }
+      throws:
+        - { $ref: 'errors.yaml#/CartNotFound' }
+        - { $ref: 'errors.yaml#/CartNotOpen' }
+        - { $ref: 'errors.yaml#/CartEmpty' }
+        - { $ref: 'errors.yaml#/RestaurantNotFound' }
+        - { $ref: 'errors.yaml#/RestaurantPaused' }
+        - { $ref: 'errors.yaml#/CannotOrderTestRestaurant' }
+        - { $ref: 'errors.yaml#/DeliveryAddressRequired' }
+        - { $ref: 'errors.yaml#/OutsideDeliveryArea' }
+        - { $ref: 'errors.yaml#/PriceMismatch' }
+        - { $ref: 'errors.yaml#/PriceUnresolvable' }
+        - { $ref: 'errors.yaml#/PaymentDeclined' }
+    - message: { $ref: 'events.yaml#/PaymentCaptured' }
+      emits:
+        - { $ref: 'events.yaml#/OrderPlaced' }
+      effect: "Inbound Stripe fact: re-materialize the frozen checkout and place the order, idempotently (a redelivered capture is a no-op)."
+    - message: { $ref: 'events.yaml#/PaymentFailed' }
+      emits: []
+      effect: "Inbound Stripe fact: the failure lands on the process state; the customer's resubmit is the retry."
+
+RefundProcess:
+  type: process-manager
+  identity: { $ref: '#/RefundProcess/state/orderId' }
+  mailbox:
+    partitions: 100          # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
+  description: >
+    The refund saga: records the staff decision on an OPEN refund (RefundOpened is emitted by the
+    order-lifecycle commands -- RejectOrder, CancelOrder -- not by this saga's receives), drives
+    the Stripe refund on approval, and closes idempotently when Stripe reports the PaymentRefunded
+    fact. Approval and denial are restaurant/admin decisions on a pending refund; anything else is
+    RefundNotPending.
+  receives:
+    - message: { $ref: 'commands.yaml#/ApproveRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundApproved' }]
+      throws:
+        - { $ref: 'errors.yaml#/RefundNotPending' }
+    - message: { $ref: 'commands.yaml#/DenyRefund' }
+      emits: [{ $ref: 'events.yaml#/RefundDenied' }]
+      throws:
+        - { $ref: 'errors.yaml#/RefundNotPending' }
+    - message: { $ref: 'events.yaml#/PaymentRefunded' }
+      emits: []
+      effect: "Inbound Stripe fact: close the refund saga idempotently."

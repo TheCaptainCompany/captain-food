@@ -36,9 +36,12 @@ carries all of it.
 - **UC2 — Refund decision**: restaurant/admin approves or denies a pending refund; approval
   drives the Stripe refund; the `PaymentRefunded` fact closes the saga idempotently.
 - **UC3 — GDPR order deletion (the deletion pilot)**: an Order reaching a terminal state starts
-  its retention clock; when due, the deletion journey runs (projections tombstone → technical
-  stream deletion → `OrderDeleted` receipt). Recording is a STUB until the erasure action of
-  [#194 "GDPR erasure"](https://github.com/TheCaptainCompany/captain-food/issues/194) lands.
+  its retention clock; when due, the recorded `OrderExpired` fact drives the generic engine's
+  journey (checkpoint-verified → tombstone → stream deletion → `OrderDeleted` receipt on the
+  ledger). The engine ships GATED (`RUN_DELETION_ENGINE` default false); what remains for
+  [#194 "GDPR erasure"](https://github.com/TheCaptainCompany/captain-food/issues/194): the
+  per-projection tombstone folds of `OrderExpired` (parked under `nonProjectedEvents` until
+  then) and the gate's default flip (its own one-line ADR after staging smoke).
 - **UC4 — The leaving restaurant (second pilot, rides when prioritized)**: the owner requests
   deletion (refusable command), gets a cooling window with an undo, and the restaurant's
   dependent aggregates die through the propagation tree.
@@ -93,13 +96,31 @@ Catalog:
           state: { $ref: '#/Catalog/state/restaurantId' }
     receipt: { $ref: 'events.yaml#/CatalogDeleted' }
 
-Order:
+Order:                       # the IMPLEMENTED pilot (#272 D2, ADR-20260801-010134): the window
+  reminders:                 # rides the REMINDER because the elapsed retention must be a
+    OrderExpired:            # RECORDED, foldable business fact (ADR-20260731-160000 §2) — the
+      payload: { $ref: 'events.yaml#/OrderExpired' }        # deletion trigger reacts to the fact
+      after: { $ref: 'configuration.yaml#/keys/ORDER_RETENTION_WINDOW_DAYS' }
+      reschedule: in-place
+  receives:
+    # the four terminal receives each declare, alongside emits/throws:
+    #   schedules: [{ $ref: '#/Order/reminders/OrderExpired' }]
+    - message: { $ref: '#/Order/reminders/OrderExpired' }
+      emits: [{ $ref: 'events.yaml#/OrderExpired' }]        # record semantics — never Rejected
   deletion:
     triggers:
-      - on: [{ $ref: 'events.yaml#/OrderDelivered' }, { $ref: 'events.yaml#/OrderCancelled' }]
-        after: { $ref: 'configuration.yaml#/ORDER_RETENTION_WINDOW' }
+      - on: [{ $ref: 'events.yaml#/OrderExpired' }]
+        match:               # typed self-match — the identity field, implicitly declared
+          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }
+          state: { $ref: '#/Order/state/orderId' }
     receipt: { $ref: 'events.yaml#/OrderDeleted' }
 ```
+
+The two trigger kinds split by whether an intermediate business fact exists
+(ADR-20260801-010134): `after:` ON A DELETION TRIGGER is for pure-delay journeys whose cause is
+already recorded (the Restaurant cooling window above); when the elapsed window must itself
+become a foldable fact (Order's expiry — projections tombstone by folding it), the window rides
+a declared REMINDER and the deletion trigger consumes the recorded fact.
 
 **One generic deletion engine** (infrastructure, written once, parameterized by the generated
 `DELETION_POLICIES` table) runs the decided journey for every declaring actor: verify projection
@@ -108,7 +129,73 @@ technical worker deletes the stream from `domain_events` + `domain_stream` → r
 No per-aggregate erasure PMs; a bespoke PM stays the escape hatch for aggregates needing custom
 steps (e.g. a bookkeeping export before stream deletion).
 
-## Decision D-A — where the Stripe call lives in a mailbox delivery (DECIDED: A2)
+## Decision D-A — where the Stripe call lives in a mailbox delivery (DECIDED: A2, realized as R2 prepare-outside-tx — ADR-20260801-023000)
+
+The STRATEGY: no HTTP inside any transaction, retry-safety via the Stripe idempotency key
+(= `orderId`), every step supervisable. The REALIZATION (product-owner, 2026-08-01,
+[ADR-20260801-023000](../adr/ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md)):
+**R2 — ONE delivery with a PREPARE phase**: validate/price and call Stripe BEFORE the fenced
+transaction opens, then commit `PaymentIntentCreated` + PM row + verdict atomically. A sync
+decline commits as the same `REJECTED PaymentDeclined` operation rejection as today — the client
+contract stays byte-identical. R1 (literal two deliveries) was rejected because the decline could
+then only surface on `paymentStatus`, a contract change.
+
+### The two realizations, as sequences
+
+**R1 — literal A2 (two deliveries) — REJECTED** (the decline can no longer reject the operation):
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant G as GraphQL BFF
+    participant M as Mailbox
+    participant W as Worker (PM lane)
+    participant S as Stripe
+    C->>G: placeOrder
+    G->>M: enqueue PlaceOrder (row 1)
+    G-->>C: PENDING
+    W->>M: deliver row 1
+    Note over W: fenced tx 1 - validate cart, price,<br/>freeze checkout - COMMIT fast<br/>row 1 = SUCCEEDED (already terminal)
+    W->>S: AFTER commit (spawned leg): create PaymentIntent<br/>idempotency key = orderId
+    alt intent created
+        S-->>W: intent id
+        W->>M: enqueue outcome fact (row 2, same lane)
+        W->>M: deliver row 2
+        Note over W: fenced tx 2 - record PaymentIntentCreated,<br/>open PM row - COMMIT
+    else DECLINED synchronously
+        S-->>W: decline
+        Note over W,C: row 1 already SUCCEEDED - operationStatus can<br/>never say REJECTED; the decline surfaces only on<br/>paymentStatus = CONTRACT CHANGE vs today
+    end
+```
+
+**R2 — prepare-outside-tx, single delivery — CHOSEN ✓** (contract byte-identical):
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant G as GraphQL BFF
+    participant M as Mailbox
+    participant W as Worker (PM lane)
+    participant S as Stripe
+    C->>G: placeOrder
+    G->>M: enqueue PlaceOrder (one row)
+    G-->>C: PENDING
+    W->>M: deliver
+    Note over W: PREPARE phase - NO transaction open:<br/>validate cart + price via pool reads
+    alt invalid (CartEmpty, PriceMismatch, ...)
+        Note over W: fenced tx: row = REJECTED error<br/>operationStatus rejection (contract unchanged)
+    else valid
+        W->>S: create PaymentIntent (still NO tx open)<br/>idempotency key = orderId
+        alt created
+            S-->>W: intent id
+            Note over W: fenced tx (ONE commit): record<br/>PaymentIntentCreated + PM row + SUCCEEDED
+        else declined
+            S-->>W: decline
+            Note over W,C: fenced tx: row = REJECTED PaymentDeclined<br/>operationStatus, byte-identical to today
+        end
+        Note over W,S: crash between Stripe call and commit:<br/>row stays RECEIVED - redelivery re-runs prepare -<br/>the idempotency key returns the SAME intent, no duplicate
+    end
+```
 
 | | Option | Pros | Cons |
 |---|---|---|---|
@@ -116,13 +203,25 @@ steps (e.g. a bookkeeping export before stream deletion).
 | **A2 ✓** | **Two-phase delivery**: delivery 1 validates/prices and commits the frozen checkout fast; a post-commit step calls Stripe (idempotency key = `orderId`) and enqueues the outcome as a fact on the same lane; delivery 2 records `PaymentIntentCreated` | No HTTP inside any tx (peak-safe); retry-safe by construction (idempotency key + mailbox pk dedupe); every step a supervisable mailbox row; matches the webhook ACL pattern | One extra mailbox hop per checkout; the frozen checkout lives in the PM state store between deliveries |
 | A3 | Keep the spawned task for the gateway leg | Smallest diff | A non-mailbox execution leg survives (against ADR-20260731-122500); unfenced, invisible to supervision — the #270 review's orphaned-work class returns |
 
-## Decision D-B — who receives the Stripe facts (DECIDED: B2)
+## Decision D-B — who receives the Stripe facts (DECIDED: B2, realized in-tx — ADR-20260801-053000)
 
 | | Option | Pros | Cons |
 |---|---|---|---|
 | B1 | Keep as-is (Payment lane records; saga runner reacts off the log) | Zero routing change | The PM reaction stays unfenced and invisible; two delivery mechanisms forever |
-| **B2 ✓** | **Chain**: Payment lane records (unchanged); the delivery's post-commit hook enqueues a PM-addressed copy on the order's lane (`UUIDv5(orderId, factType)`, cause-chained); the saga runner retires | Both consumers durable, fenced, ordered per order; stream ownership untouched; causality visible | One extra row per payment fact; a (nudged, ~immediate) chain hop before order materialization |
+| **B2 ✓** | **Chain**: Payment lane records (unchanged); a PM-addressed copy is enqueued on the order's lane, cause-chained; the saga runner's Stripe-fact triggers retire | Both consumers durable, fenced, ordered per order; stream ownership untouched; causality visible | One extra row per payment fact; a (nudged, ~immediate) chain hop before order materialization |
 | B3 | Facts go only to the PM lane; the PM writes the Payment stream | One row | Moves Payment record semantics into the PM; cross-stream appends re-create the foreign-writer conflicts the #270 review closed |
+
+**Realization** ([ADR-20260801-053000](../adr/ADR-20260801-053000-b2-chain-rides-the-completion-transaction.md),
+two refinements over the sketch): the chain hop rides the **recording transaction itself**, not a
+post-commit hook — a post-commit enqueue leaves a crash window in which the payment fact is
+durable but its saga hop is lost (the recorded-payment-nobody-acts-on failure); only the wake-up
+nudge stays post-commit. And the chain identity is
+`UUIDv5(orderId, "{factType}:{causing mailbox row id}")` — stable under webhook redelivery (the
+causing row's id is itself deterministic), while two DISTINCT same-type facts on one order (a
+second attempt's `PaymentFailed`, a second partial refund's settlement) each keep their own hop,
+where the sketched `UUIDv5(orderId, factType)` would silently swallow the second. The runner's
+retirement is scoped to D-B: PlaceOrderProcess leaves it whole; RefundProcess keeps its
+refund-OPENING order-fact legs until their own runtime item; full retirement at the default flip.
 
 ## Sequence — UC1 under A2 + B2
 
@@ -160,11 +259,11 @@ sequenceDiagram
     participant E as Generic deletion engine
     participant L as domain_events
 
-    O->>M: deletion trigger schedules the reminder — UUIDv5(orderId,"erase"),<br/>scheduled_at = now + ORDER_RETENTION_WINDOW (re-declare = reschedule in place)
+    O->>M: the terminal receive's `schedules:` declares OrderExpired IN the completion tx —<br/>UUIDv5(orderId,"OrderExpired"), scheduled_at = now + ORDER_RETENTION_WINDOW_DAYS<br/>(re-declare = reschedule in place)
     Note over M: status SCHEDULED, no position yet
     P->>M: due? promote: stamp position, SCHEDULED → RECEIVED
     W->>M: deliver (head-of-line on the order's lane)
-    W->>L: record the deletion fact — Recorded | Ignored | Duplicate (never Rejected)
+    W->>L: record OrderExpired — Recorded | Ignored | Duplicate (never Rejected)
     E->>L: checkpoints verified → technical tombstone event
     E->>L: technical worker deletes the streams (domain_events + domain_stream)
     E->>L: OrderDeleted receipt on the deletion ledger
@@ -193,7 +292,148 @@ drill-down is declared as a `gaps` entry until its query exists.
   erasure needs (bookkeeping export) must consciously opt out via a hand-written PM.
 - The DSL grows three sections and seven validator rules — spec surface the team must learn.
 
+## Realization state (D3 — landed on PR #273; the D-slice work orders are complete)
+
+The #270 review's deferred runtime findings and PROP-20260728-152752 §3.5's activations are on
+the branch, each gate-then-stabilize:
+
+- **Fair-share lane rebalancing** (was: `steal_lane` test-only — a first instance claimed every
+  lane and renewed forever, a second idled). When a worker's pass claims nothing, it takes a
+  live-ownership census and, while below `floor(total/instances)` with a live peer above it,
+  steals ONE lane from the largest owner — fresh census per steal, bounded per pass. Stop-at-
+  the-floor makes the loop converge to a ±1 spread without ping-pong; the victim's stale belief
+  fences exactly like an expiry takeover. Proven by the cluster fixture
+  (`crates/actor_runtime/tests/rebalance.rs` — ADR-20260730-234918 ports 1–3: convergence while
+  the victim is ALIVE, then a hard-crash expiry takeover, with exactly-once + per-actor order +
+  per-identity completeness accounting throughout, and the port-5 probe self-test).
+- **Activations, gated `ACTOR_ACTIVATIONS` default false** (§3.5): deliveries fold the
+  delivered actor's own stream (`{actor_type}-{actor_id}`) through a shared held-state cache —
+  fill on load, promotion strictly POST-COMMIT (apply-after-commit), invalidation on a lost
+  `UNIQUE(stream_name, version)` race (the never-wrong signal), lane loss drops the partition's
+  holdings (the worker's `LaneEvents` seam), idle expiry + LRU byte bound from configuration
+  (`ACTOR_ACTIVATION_IDLE_SECONDS` / `ACTOR_ACTIVATION_MAX_MEMORY_MB`), per-actor
+  `mailbox.activations` overrides in actors.yaml (validated, emitted as `ACTOR_ACTIVATIONS`).
+  Cross-lane writers (a PM leg appending `OrderPlaced`) invalidate held copies on commit.
+  Surrogate-keyed lanes (`Payment-<intentId>`) never match the scoped name and stay uncached.
+  Correctness never depends on the cache; OFF is byte-identical to pre-D3. The micro-mailbox and
+  batched turns stay deferred per §3.5's own sequencing (the partition lane is single-threaded —
+  they become load-bearing only with intra-partition concurrency, a later throughput knob).
+- **Standalone adapter workers, gated `RUN_MAILBOX_WORKERS` default false** (was: adapters ACK
+  200 while facts pile up RECEIVED with the monolith down). Each adapter binary can run the
+  monolith-identical fleet for exactly the lanes its ingestor feeds (stripe: Payment + the two
+  PM lanes its B2-chained copies land on; delivery partners: DeliveryJob; hubrise:
+  RestaurantAccount/Restaurant/Catalog). OFF by default because the status/event buses are
+  in-process — a fact delivered by the adapter process never reaches the monolith's push
+  subscribers (polls unaffected); cross-process fan-out (Postgres LISTEN/NOTIFY) is the recorded
+  follow-up that would dissolve the trade-off.
+- **Birth id-minting unified at the doors**: a DECLARED identity property that is missing or
+  unparsable now fails the GraphQL mutation at the door (the worker-channel enqueue helper's
+  existing rule) instead of silently minting a random lane id that breaks per-aggregate
+  serialization; only actors declaring NO identity property mint an addressing-only lane id.
+
+**Independent multi-lens review round 2 (full branch: runtime/concurrency + money-path +
+spec/codegen lenses, 2026-08-01)** — 1 critical + 4 major (and a set of minors), all FIXED:
+
+- **CRITICAL — the activation invariant only covered appends.** A delivery terminating WITHOUT
+  an append (a deterministic rejection, an Ignored/Duplicate record verdict) had no
+  `UNIQUE(stream_name, version)` race to lose, so a stale held fold (out-of-band writers: the
+  saga runner's pool-side legs, a peer process's fleet, the deletion engine) could commit a
+  durably WRONG verdict — a paid order nobody can accept — and each retry's cache touch kept the
+  stale entry alive. Fixed with the FRESHNESS GUARD: every cache-served delivery re-asserts the
+  scoped stream's `MAX(version)` inside the fenced transaction (matching `load`'s semantics,
+  `$`-rows included); mismatch → invalidate + abort, the redelivery refolds. E2E
+  `stale_hold_cannot_commit_a_wrong_rejection`.
+- **MAJOR — fill/invalidate TOCTOU**: a fill racing a cross-lane invalidation could re-install a
+  pre-invalidation snapshot. Fixed with an invalidation-epoch fence on the cache
+  (`put_at_epoch`): fills capture the epoch before the pool read and are refused if any
+  invalidation landed since.
+- **MAJOR — the deletion engine erased streams under held activations** (GDPR events surviving
+  in memory; an append from a held version could recreate a gapped stream with no UNIQUE
+  conflict left to catch it). Fixed: the engine evicts the erased stream from the cache at tx2
+  commit (same-process fast path), and the freshness guard is the cross-process backstop.
+- **MAJOR — `PM_MAILBOX_DELIVERY` split-brain across lease-competing fleets**: an adapter fleet
+  whose gate was merely UNSET (implicit false) against a monolith running true would record
+  captures without chaining their saga hop. Fixed: the standalone fleet REFUSES the money lanes
+  (Payment/PlaceOrderProcess/RefundProcess) unless the gate is set EXPLICITLY, runs the startup
+  backfill itself when ON (parity with the monolith), and the gate prose records the invariant;
+  a DB-persisted posture is the recorded follow-up that removes the residual explicit-mismatch
+  operator error.
+- **MAJOR — Stripe HTTP 409 `idempotency_error` was classified terminal**, yet rebalancing
+  manufactures it routinely (a steal redelivers while the victim's prepare is in flight, same
+  idempotency key). Fixed: 409 (same key in flight) → retry-in-place; only the 400
+  params-mismatch form stays terminal.
+- **MAJOR — the frozen `pm:*` checkpoints made every restart re-scan the whole post-flip
+  history** (O(history) idempotent dead hops enqueued ahead of live reactions at a peak deploy).
+  Fixed: a clean backfill pass advances the checkpoints to what it saw (rollback-safe: the
+  runner re-absorbs any replay via the run rows' expects).
+- Minors fixed: `mb-activations-shape` gained its negative-test suite; adapter binaries gained
+  graceful HTTP shutdown (the fleet's signal handler had replaced the default SIGTERM
+  disposition, leaving axum serving until SIGKILL); standalone fleets derive missing reminder
+  windows from the generated spec defaults (a missing window would head-of-line-wedge a lane,
+  not retry); the SIRENE staged-verdict SQL enumerates success instead of inferring it from
+  "not FAILED" (REJECTED/CANCELLED would have silently SYNCED and dropped the evidence
+  payload); the stale actors.yaml id-minting warn calibration now names the surviving warns'
+  real justification; `RUN_MAILBOX_WORKERS` moved out of the server Config via `consumer:`.
+
+Accepted-and-recorded (not fixed here): the per-lane drain loop is unbounded per pass
+(pre-Runtime-C shape — a peak-load tuning item, not a D3 regression); a worker re-claiming its
+own expired lane over-evicts its activations (refold cost only); cross-process push-subscriber
+degradation under `RUN_MAILBOX_WORKERS` (LISTEN/NOTIFY is the follow-up).
+
+## Realization state (D1 — landed on PR #273, GATED)
+
+The flip is IMPLEMENTED behind **`PM_MAILBOX_DELIVERY`** (configuration.yaml, default false —
+gate-then-stabilize; the default flip is its own one-line ADR after staging smoke). One gate
+controls all three moving parts so the two worlds never interleave:
+
+- **Resolvers**: the generated PM resolvers (placeOrder/approveRefund/denyRefund) carry BOTH
+  arms and pick per request — mailbox delivery through the PREPARE phase
+  (ADR-20260801-023000: the UNCHANGED application handler runs against staging stores with no
+  transaction open, Stripe idempotency keys `intent:{orderId}` / `refund:{intent}:{amount}`;
+  ONE fenced commit flushes events + PM row + verdict), or the legacy journal+spawn.
+- **Chaining**: the Payment lane chains the Stripe facts to the PM lanes in the recording
+  transaction (Decision D-B realization above).
+- **Runner**: the saga runner drops exactly the Stripe-fact triggers.
+
+`command_journal` retirement is sequenced reads-first as planned: `operationStatus` has read
+mailbox-then-journal since Runtime C, the gated-off legacy arm still writes the journal, and the
+DROP (with the journal sweep's retirement) rides the default-flip deploy.
+`command_completion_ms` is emitted on BOTH arms (the mailbox delivery's post-commit observer —
+which also lit it back up for every Runtime-C-flipped command).
+
+Three hardening points from the independent multi-lens review of the branch (payments lens):
+
+- **Deterministic gateway refusals are terminal.** The Stripe adapter classifies
+  `invalid_request_error`/`idempotency_error` 4xx as a terminal FAILED on both arms (a
+  `Repository`-classed outcome would retry a mailbox head row forever — one bogus
+  `paymentMethodId` per partition could wedge every checkout lane). Transient classes (5xx,
+  rate-limit, transport) stay retry-in-place on the mailbox arm.
+- **The flip cannot lose in-flight saga hops.** At every startup with the gate ON, a backfill
+  pass enqueues PM-addressed copies of all Stripe facts past the saga runner's group checkpoints
+  (deterministic ids `UUIDv5(lane, "{factType}:{event id}")`, idempotent under restart and under
+  record-time double-coverage — the legs absorb duplicates). A `PaymentCaptured` the runner
+  accepted but never reacted to is therefore delivered after the flip, and gate ROLLBACK stays
+  sound for the mirror reason.
+- **Cross-arm duplicate identity.** Each gated resolver arm consults the OTHER acceptance store
+  by `messageId` first and replays its terminal status as `duplicate: true` (payload-hash
+  mismatch = the same synchronous Conflict as same-store dedupe) — a client retry across a gate
+  transition can never re-execute a committed command in either direction.
+
+The backfill is SEQUENCED before the saga runner's first tick (inside the runner's own task) —
+that tick could otherwise advance `pm:RefundProcess` past an un-reacted `PaymentRefunded` before
+the backfill read the checkpoint (re-verification residual). Two accepted noise items ride until
+the DEFAULT-FLIP deploy and belong in its one-line ADR's checklist: the backfill's id namespace
+(`{factType}:{event id}`) differs from record-time chaining's (`{factType}:{recording row id}`),
+so post-flip facts still past the frozen checkpoints get one extra idempotent hop per restart
+(absorbed IGNORED, same lane, ordering holds); and the frozen `pm:PlaceOrderProcess` checkpoint
+makes the startup scan grow with post-flip history — the default-flip deploy retires the runner
+groups and advances/drops those checkpoints, ending both.
+
 ## Unresolved questions
+
+- ~~A2's realization shape~~ — RESOLVED 2026-08-01 as R2
+  ([ADR-20260801-023000](../adr/ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md),
+  see Decision D-A) and IMPLEMENTED (see Realization state).
 
 - Retention windows per data category (legal/product input; configuration layer) — including
   whether the financial skeleton is exported before phase 2 or survives via a longer window.
@@ -203,10 +443,11 @@ drill-down is declared as a `gaps` entry until its query exists.
   scope; the mechanism here may generalize, not assumed.
 - The `UnsettledInvoices` rejection awaits the invoicing concept (noted, no development).
 
-## Appendix — the validated `PlaceOrderProcess` / `RefundProcess` entries
+## Appendix — the `PlaceOrderProcess` / `RefundProcess` entries (LANDED in actors.yaml, PR #273)
 
-Gate-green against `main` (0 validator errors). Lands in actors.yaml only WITH the D-A wiring
-(the generated addressing flips the three mutations the moment these exist).
+Landed together with the D-A wiring and the gated resolvers, as required (the generated
+addressing flips the three mutations the moment these exist — the gate makes that flip a
+request-time choice instead of an outright cutover).
 
 ```yaml
 PlaceOrderProcess:

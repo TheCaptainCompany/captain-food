@@ -33,6 +33,7 @@ impl MessageHandler for ProbeHandler {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
+        _prepared: actor_runtime::Prepared,
     ) -> Result<Delivery, sqlx::Error> {
         sqlx::query("INSERT INTO delivered_probe (message_id, position) VALUES ($1, $2)")
             .bind(message.message_id)
@@ -86,6 +87,28 @@ async fn enqueue(pool: &PgPool, partition: i16, n: u128) -> (uuid::Uuid, i64) {
     .await
     .expect("enqueue");
     (id, row.get::<i64, _>("position"))
+}
+
+/// Schedule one MESSAGE row (a reminder) on `partition`: status SCHEDULED, `position` explicitly
+/// NULL — the column default must NOT fire (positions are stamped at promotion, §3.4).
+async fn schedule(pool: &PgPool, partition: i16, n: u128, due: chrono::DateTime<chrono::Utc>) -> uuid::Uuid {
+    let id = uuid::Uuid::from_u128(n);
+    sqlx::query(
+        "INSERT INTO inbound_messages \
+           (message_id, position, kind, actor_type, actor_id, partition, message_type, payload, \
+            payload_hash, channel, user_type, correlation_id, scheduled_at, status) \
+         VALUES ($1, NULL, 'MESSAGE', 'Conversation', $2, $3, 'OrderExpired', '{}', $4, 'WORKER', \
+                 'EXTERNAL', $1, $5, 'SCHEDULED')",
+    )
+    .bind(id)
+    .bind(uuid::Uuid::from_u128(0xAC70))
+    .bind(partition)
+    .bind(format!("h{n}"))
+    .bind(due)
+    .execute(pool)
+    .await
+    .expect("schedule");
+    id
 }
 
 async fn probe_rows(pool: &PgPool) -> Vec<(uuid::Uuid, i64)> {
@@ -472,6 +495,60 @@ async fn nudge_wakes_the_worker_before_the_heartbeat() {
     run.await.expect("join").expect("clean shutdown");
 }
 
+/// Reminders (ADR-20260731-150500, PROP-20260728-152752 §3.4): a SCHEDULED row is invisible to
+/// claim/drain until [`actor_runtime::promote_due`] stamps it RECEIVED with a FRESH position —
+/// after which it is an ordinary mailbox row and a worker pass delivers it (kind MESSAGE included:
+/// the ProbeHandler accepts anything; the host's MESSAGE route lands with the spec deltas).
+#[tokio::test]
+async fn scheduled_row_is_invisible_until_promoted_then_delivered() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    let handler = Arc::new(ProbeHandler);
+    let w = MailboxWorker::new(
+        pool.clone(),
+        "w-A",
+        "Conversation",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        handler,
+    );
+    w.seed(4).await.expect("seed");
+    let due = schedule(&pool, 1, 0x51, chrono::Utc::now() - chrono::Duration::seconds(1)).await;
+    let future = schedule(&pool, 1, 0x52, chrono::Utc::now() + chrono::Duration::hours(1)).await;
+
+    // Before promotion: a full claim + drain pass delivers NOTHING — SCHEDULED is not RECEIVED.
+    w.claim().await.expect("claim");
+    assert_eq!(w.drain().await.expect("pre-promotion drain"), 0);
+    assert!(probe_rows(&pool).await.is_empty());
+
+    // Promotion stamps exactly the due row: RECEIVED + a fresh position; the future row keeps
+    // status SCHEDULED and position NULL.
+    assert_eq!(w.promote().await.expect("promote"), 1);
+    let rows: Vec<(uuid::Uuid, String, Option<i64>)> =
+        sqlx::query("SELECT message_id, status, position FROM inbound_messages ORDER BY message_id")
+            .fetch_all(&pool)
+            .await
+            .expect("rows")
+            .iter()
+            .map(|r| (r.get("message_id"), r.get("status"), r.get("position")))
+            .collect();
+    assert_eq!(rows[0].0, due);
+    assert_eq!(rows[0].1, "RECEIVED");
+    assert!(rows[0].2.is_some(), "promotion stamps a position");
+    assert_eq!(rows[1], (future, "SCHEDULED".into(), None), "the undue row is untouched");
+
+    // Idempotent: nothing left to promote.
+    assert_eq!(w.promote().await.expect("re-promote"), 0);
+
+    // An ordinary drain pass now delivers the promoted row — and only it.
+    assert_eq!(w.drain().await.expect("post-promotion drain"), 1);
+    let delivered = probe_rows(&pool).await;
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(delivered[0].0, due);
+}
+
 /// Test-local decode of a full mailbox row (the crate's own decode is private).
 fn decode_for_test(row: &sqlx::postgres::PgRow) -> InboundMessage {
     InboundMessage {
@@ -492,4 +569,132 @@ fn decode_for_test(row: &sqlx::postgres::PgRow) -> InboundMessage {
         session_id: row.get("session_id"),
         received_at: row.get("received_at"),
     }
+}
+
+// ================================================================================================
+// PREPARE phase (ADR-20260801-023000): host work with NO transaction open, before the fenced
+// commit — the R2 "prepare-outside-tx single delivery" primitive.
+// ================================================================================================
+
+/// A handler whose prepare produces a value; handle records it through the transaction — proving
+/// the prepared value crosses the phase boundary and commits atomically with the delivery.
+struct PreparingHandler;
+
+#[async_trait::async_trait]
+impl MessageHandler for PreparingHandler {
+    async fn prepare(
+        &self,
+        message: &InboundMessage,
+    ) -> Result<actor_runtime::Prepared, sqlx::Error> {
+        // Stand-in for the host's no-tx-open work (pool reads, an external gateway call).
+        Ok(Some(Box::new(format!("prepared:{}", message.message_id))))
+    }
+
+    async fn handle(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        message: &InboundMessage,
+        prepared: actor_runtime::Prepared,
+    ) -> Result<Delivery, sqlx::Error> {
+        let value = prepared
+            .and_then(|p| p.downcast::<String>().ok())
+            .map(|s| *s)
+            .unwrap_or_else(|| "MISSING".into());
+        assert_eq!(value, format!("prepared:{}", message.message_id), "prepared value must reach handle");
+        sqlx::query("INSERT INTO delivered_probe (message_id, position) VALUES ($1, $2)")
+            .bind(message.message_id)
+            .bind(message.position)
+            .execute(&mut **tx)
+            .await?;
+        Ok(Delivery::of(HandlerVerdict::Succeeded))
+    }
+}
+
+/// A handler whose prepare fails (the gateway is down): the delivery must abort with the row
+/// still RECEIVED — redelivery is the retry — and handle must never run.
+struct FailingPrepareHandler;
+
+#[async_trait::async_trait]
+impl MessageHandler for FailingPrepareHandler {
+    async fn prepare(
+        &self,
+        _message: &InboundMessage,
+    ) -> Result<actor_runtime::Prepared, sqlx::Error> {
+        Err(sqlx::Error::Protocol("gateway unreachable during prepare".into()))
+    }
+
+    async fn handle(
+        &self,
+        _tx: &mut Transaction<'_, Postgres>,
+        _message: &InboundMessage,
+        _prepared: actor_runtime::Prepared,
+    ) -> Result<Delivery, sqlx::Error> {
+        panic!("handle must not run when prepare failed");
+    }
+}
+
+#[tokio::test]
+async fn prepared_value_reaches_handle_and_commits() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    actor_runtime::seed_partitions(&pool, "Conversation", 4).await.expect("seed");
+    let (mid, pos) = enqueue(&pool, 1, 71).await;
+    let lanes = claim_due_lanes(&pool, "Conversation", "w-P", 300, 100).await.expect("claim");
+    let lane = lanes.iter().find(|l| l.partition == 1).expect("lane 1").clone();
+
+    let row = sqlx::query(
+        "SELECT message_id, position, kind, actor_type, actor_id, partition, message_type, \
+                payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
+                session_id, received_at \
+         FROM inbound_messages WHERE message_id = $1",
+    )
+    .bind(mid)
+    .fetch_one(&pool)
+    .await
+    .expect("row");
+    let msg = decode_for_test(&row);
+
+    let verdict =
+        complete_fenced(&pool, &lane, "w-P", &msg, &PreparingHandler).await.expect("commit");
+    assert_eq!(verdict, HandlerVerdict::Succeeded);
+    assert_eq!(probe_rows(&pool).await, vec![(mid, pos)]);
+}
+
+#[tokio::test]
+async fn failed_prepare_aborts_delivery_and_row_stays_received() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    actor_runtime::seed_partitions(&pool, "Conversation", 4).await.expect("seed");
+    let (mid, _pos) = enqueue(&pool, 1, 72).await;
+    let lanes = claim_due_lanes(&pool, "Conversation", "w-F", 300, 100).await.expect("claim");
+    let lane = lanes.iter().find(|l| l.partition == 1).expect("lane 1").clone();
+
+    let row = sqlx::query(
+        "SELECT message_id, position, kind, actor_type, actor_id, partition, message_type, \
+                payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
+                session_id, received_at \
+         FROM inbound_messages WHERE message_id = $1",
+    )
+    .bind(mid)
+    .fetch_one(&pool)
+    .await
+    .expect("row");
+    let msg = decode_for_test(&row);
+
+    let out = complete_fenced(&pool, &lane, "w-F", &msg, &FailingPrepareHandler).await;
+    assert!(matches!(out, Err(CompletionError::Db(_))), "prepare error aborts the delivery: {out:?}");
+    assert!(probe_rows(&pool).await.is_empty(), "nothing committed");
+    let status: String = sqlx::query("SELECT status FROM inbound_messages WHERE message_id = $1")
+        .bind(mid)
+        .fetch_one(&pool)
+        .await
+        .expect("row")
+        .get("status");
+    assert_eq!(status, "RECEIVED", "the row awaits redelivery — retry is the recovery");
 }

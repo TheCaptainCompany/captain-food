@@ -20,82 +20,143 @@ use crate::generated::command_router::{dispatch_command, CommandDeps};
 use crate::persistence::event_bus::{AppendedEvent, EventBus};
 use crate::persistence::status_bus::{OperationStatusBus, OperationUpdate};
 
-use super::flush_staged_in_tx;
+use super::activation::{ActivationSettings, DeliveryActivation};
+use super::{flush_staged_in_tx, pm_delivery};
 
-/// The COMMAND-kind delivery glue. EVENT/MESSAGE kinds are later C/D slices (the adapter inbox
-/// flip and the reminders promotion) — until then they complete FAILED with a routing error so a
-/// misrouted row is loud, never silently swallowed.
+/// The delivery glue for all three kinds: COMMAND (generated router), EVENT (adapted inbound
+/// facts) and MESSAGE (promoted reminders, ADR-20260731-153000 — record semantics, like EVENT).
+/// An unroutable kind or type completes FAILED with a routing error so a misrouted row is loud,
+/// never silently swallowed.
 pub struct MailboxCommandHandler {
     deps: CommandDeps,
     /// When present, each committed delivery publishes its appended events on the in-process bus
     /// (the GraphQL domain-fact subscriptions) — POST-COMMIT, via the runtime's Delivery hook,
     /// exactly where the pool-backed PgEventStore publishes.
     event_bus: Option<EventBus>,
+    /// Reminder window keys → DAYS (`Config::reminder_windows()`): what `apply_schedules_in_tx`
+    /// resolves a `schedules:` declaration's `after` against. Empty = no windows wired; a
+    /// delivery that then needs one aborts for retry (wiring bug, never a terminal verdict).
+    reminder_windows: std::collections::HashMap<&'static str, i64>,
+    /// The Runtime D1 gate (`PM_MAILBOX_DELIVERY`): when on, a recorded Payment fact chains its
+    /// PM-addressed copy in the SAME completion transaction (B2) — the saga runner's Stripe-fact
+    /// triggers retire behind the same gate at the composition root.
+    pm_fact_chaining: bool,
+    /// Enqueue-side wake signals: a committed chain hop nudges the PM lane's worker post-commit,
+    /// cutting the saga hop from the heartbeat poll to ~immediate (B2's "nudged" property).
+    nudges: Option<std::sync::Arc<crate::persistence::mailbox_store::MailboxNudges>>,
+    /// ACTIVATIONS (#272 D3, PROP-20260728-152752 §3.5, gated `ACTOR_ACTIVATIONS`): when wired,
+    /// each delivery folds its own stream through the held-state cache (fill on miss, promote
+    /// post-commit, invalidate on a lost version race) — fold-on-first-message instead of every
+    /// message. `None` = the gate is off; every delivery folds from the log, exactly as before.
+    activations: Option<Arc<ActivationSettings>>,
 }
 
 impl MailboxCommandHandler {
     pub fn new(deps: CommandDeps) -> Self {
-        Self { deps, event_bus: None }
+        Self {
+            deps,
+            event_bus: None,
+            reminder_windows: Default::default(),
+            pm_fact_chaining: false,
+            nudges: None,
+            activations: None,
+        }
+    }
+
+    /// Wire the activation cache (the `ACTOR_ACTIVATIONS` gate resolved at the composition root).
+    pub fn with_activations(mut self, settings: Arc<ActivationSettings>) -> Self {
+        self.activations = Some(settings);
+        self
     }
 
     pub fn with_event_bus(mut self, bus: EventBus) -> Self {
         self.event_bus = Some(bus);
         self
     }
+
+    /// Wire the configured reminder windows (composition root: `Config::reminder_windows()`).
+    pub fn with_reminder_windows(
+        mut self,
+        windows: std::collections::HashMap<&'static str, i64>,
+    ) -> Self {
+        self.reminder_windows = windows;
+        self
+    }
+
+    /// Turn on B2 chaining (the `PM_MAILBOX_DELIVERY` gate).
+    pub fn with_pm_fact_chaining(mut self, on: bool) -> Self {
+        self.pm_fact_chaining = on;
+        self
+    }
+
+    /// Wire the per-actor-type wake signals so chained hops deliver ~immediately.
+    pub fn with_nudges(
+        mut self,
+        nudges: std::sync::Arc<crate::persistence::mailbox_store::MailboxNudges>,
+    ) -> Self {
+        self.nudges = Some(nudges);
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl MessageHandler for MailboxCommandHandler {
+    /// The PREPARE phase (ADR-20260801-023000): the three PM commands run their WHOLE legacy
+    /// handler here — pool reads and the Stripe call, no transaction open — capturing every
+    /// effect for the fenced commit. Every other message has no prepare work.
+    async fn prepare(
+        &self,
+        message: &InboundMessage,
+    ) -> Result<actor_runtime::Prepared, sqlx::Error> {
+        if message.kind == "COMMAND" && pm_delivery::is_pm_command(&message.message_type) {
+            let actor = self.resolve_actor(message).await?;
+            let prepared = pm_delivery::prepare(&self.deps, message, &actor).await?;
+            return Ok(Some(Box::new(prepared)));
+        }
+        Ok(None)
+    }
+
     async fn handle(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
+        prepared: actor_runtime::Prepared,
     ) -> Result<Delivery, sqlx::Error> {
-        if message.kind == "EVENT" {
-            return self.handle_inbound_event(tx, message).await;
+        if message.kind == "COMMAND" && pm_delivery::is_pm_command(&message.message_type) {
+            // A PM command's effects were computed in prepare; this phase only commits them.
+            let prepared = prepared
+                .and_then(|p| p.downcast::<pm_delivery::PreparedPmCommand>().ok())
+                .ok_or_else(|| {
+                    sqlx::Error::Protocol(
+                        "PM command delivered without its prepared phase (wiring bug)".into(),
+                    )
+                })?;
+            return self.commit_prepared_pm(tx, message, *prepared).await;
+        }
+        if message.kind == "EVENT" || message.kind == "MESSAGE" {
+            // Both kinds RECORD facts: EVENT carries an adapted inbound business fact, MESSAGE a
+            // promoted reminder's payload fact (ADR-20260731-153000 §1a) — same record semantics,
+            // same route.
+            return self.handle_recorded_fact(tx, message).await;
         }
         if message.kind != "COMMAND" {
             return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                 "code": "Internal",
-                "context": { "detail": format!("kind {} not routed yet (#242 later slices)", message.kind) }
+                "context": { "detail": format!("unroutable mailbox kind '{}'", message.kind) }
             }))));
         }
 
-        // The acting principal, envelope → Actor (ADR-0041) with the #235 domain-identity bridge:
-        // a CUSTOMER's auth subject resolves to its CustomerId — the value `requires.acting`
-        // compares against folded participants. Same logic as the GraphQL edge; other roles stay
-        // None until their bridges land (#144).
-        let domain_id = if message.user_type == "CUSTOMER" {
-            match message.user_id {
-                Some(uid) => match self
-                    .deps
-                    .customers
-                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
-                    .await
-                {
-                    Ok(customer) => customer.map(|c| c.customer_id.0),
-                    // An infrastructure failure resolving the principal must ABORT the delivery
-                    // (row stays RECEIVED, redelivery retries) — swallowing it into `None` would
-                    // durably record a legitimate customer's command as REJECTED NotAParticipant,
-                    // a wrong-class terminal verdict for a transient DB blip.
-                    Err(e) => return Err(sqlx::Error::Protocol(e.to_string())),
-                },
-                None => None,
-            }
-        } else {
-            None
-        };
-        let actor = Actor {
-            user_id: message.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: message.user_type.clone(),
-            domain_id,
-            correlation_id: message.correlation_id,
-            cause_id: Some(message.message_id),
-        };
+        let actor = self.resolve_actor(message).await?;
 
         // Stage-don't-write: the handler runs unchanged over a buffering store; its events only
-        // become true when the runtime commits the fenced transaction this flush joins.
-        let staging = Arc::new(StagingEventStore::new(self.deps.store.clone()));
+        // become true when the runtime commits the fenced transaction this flush joins. With
+        // activations wired, the delivered actor's OWN stream folds through the held-state cache.
+        let activation = DeliveryActivation::for_message(&self.activations, message);
+        let base_store: Arc<dyn EventStore> = match &activation {
+            Some(a) => a.store(self.deps.store.clone()),
+            None => self.deps.store.clone(),
+        };
+        let staging = Arc::new(StagingEventStore::new(base_store));
         let mut deps = self.deps.clone();
         deps.store = staging.clone() as Arc<dyn EventStore>;
 
@@ -115,15 +176,36 @@ impl MessageHandler for MailboxCommandHandler {
             }))),
             Some(Ok(())) => {
                 let staged = staging.take_staged();
+                // Freshness guard BEFORE the flush: after it, MAX(version) would include this
+                // delivery's own appends and a legitimate append would read as stale.
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
                 match flush_staged_in_tx(tx, &staged).await {
-                    Ok(()) => self.fanout_delivery(&staged),
+                    Ok(()) => {
+                        // The handler's third observable effect (ADR-20260731-214500 §2): a
+                        // successful delivery (re)declares its `schedules:` reminders in the
+                        // SAME transaction — commit and clock start together or not at all.
+                        super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
+                            .await?;
+                        let promote = DeliveryActivation::promote_after_commit(
+                            &self.activations,
+                            activation.as_ref(),
+                            &staged,
+                        );
+                        self.fanout_delivery(&staged, None, promote)
+                    }
                     // A version clash at commit time: a concurrent writer (a legacy-path PM leg,
                     // another lane) moved the stream between the handler's load and this flush.
                     // ABORT the delivery — the row stays RECEIVED and the retry re-runs the
                     // handler against the moved stream. Contention is transient by construction
                     // (each retry reloads), so retry-in-place converges; a terminal FAILED here
-                    // would make a peak-time clash cost the client a manual resubmit.
+                    // would make a peak-time clash cost the client a manual resubmit. The held
+                    // state provably lost the race: drop it so the retry refolds.
                     Err(e) if is_version_conflict(&e) => {
+                        if let Some(a) = &activation {
+                            a.invalidate_scoped();
+                        }
                         return Err(sqlx::Error::Protocol(e.to_string()));
                     }
                     Err(DomainError::Repository(detail)) => {
@@ -144,19 +226,110 @@ impl MessageHandler for MailboxCommandHandler {
             Some(Err(DomainError::Repository(detail))) => {
                 return Err(sqlx::Error::Protocol(detail));
             }
-            Some(Err(e)) => Delivery::of(verdict_of_error(e)),
+            Some(Err(e)) => {
+                // A deterministic rejection stages nothing, so no UNIQUE race can catch a stale
+                // fold — the freshness guard is the ONLY fence between a held state and a
+                // durably wrong REJECTED (reviewer CRITICAL, 2026-08-01).
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(verdict_of_error(e))
+            }
         };
         Ok(delivery)
     }
 }
 
 impl MailboxCommandHandler {
-    /// The kind-EVENT delivery route (ADR-20260731-122500): adapted inbound BUSINESS facts, the
-    /// mailbox-era home of the retired InboundEventsDrainWorker's routing. The aggregate's
-    /// fold-based dedupe stays authoritative — its verdict is PERSISTED on the row (a no-change
-    /// decision lands IGNORED, a redelivered fact DUPLICATE, per ADR-20260728-011344 D6), and the
-    /// staged events flush into the SAME fenced transaction as every command delivery.
-    async fn handle_inbound_event(
+    /// The acting principal, envelope → Actor (ADR-0041) with the #235 domain-identity bridge:
+    /// a CUSTOMER's auth subject resolves to its CustomerId — the value `requires.acting`
+    /// compares against folded participants. Same logic as the GraphQL edge; other roles stay
+    /// None until their bridges land (#144). An infrastructure failure resolving the principal
+    /// ABORTS the delivery (row stays RECEIVED, redelivery retries) — swallowing it into `None`
+    /// would durably record a legitimate customer's command as REJECTED NotAParticipant, a
+    /// wrong-class terminal verdict for a transient DB blip.
+    async fn resolve_actor(&self, message: &InboundMessage) -> Result<Actor, sqlx::Error> {
+        let domain_id = if message.user_type == "CUSTOMER" {
+            match message.user_id {
+                Some(uid) => match self
+                    .deps
+                    .customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                {
+                    Ok(customer) => customer.map(|c| c.customer_id.0),
+                    Err(e) => return Err(sqlx::Error::Protocol(e.to_string())),
+                },
+                None => None,
+            }
+        } else {
+            None
+        };
+        Ok(Actor {
+            user_id: message.user_id.unwrap_or_else(uuid::Uuid::nil),
+            user_type: message.user_type.clone(),
+            domain_id,
+            correlation_id: message.correlation_id,
+            cause_id: Some(message.message_id),
+        })
+    }
+
+    /// Commit one prepared PM command (ADR-20260801-023000): flush the staged events + the PM
+    /// run rows into the fenced transaction, or land the captured deterministic rejection as the
+    /// row's verdict — the SAME operation outcome the legacy spawn path produced, byte-identical
+    /// to the client.
+    async fn commit_prepared_pm(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        message: &InboundMessage,
+        prepared: pm_delivery::PreparedPmCommand,
+    ) -> Result<Delivery, sqlx::Error> {
+        match prepared.outcome {
+            // Deterministic rejection captured in prepare (validation, sync Stripe decline):
+            // committed as the terminal verdict; no effect to flush.
+            Err(e) => Ok(Delivery::of(verdict_of_error(e))),
+            Ok(effects) => match flush_staged_in_tx(tx, &effects.staged).await {
+                Ok(()) => {
+                    pm_delivery::flush_pm_rows_in_tx(
+                        tx,
+                        &effects.payment_rows,
+                        &effects.refund_rows,
+                    )
+                    .await
+                    .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+                    super::apply_schedules_in_tx(tx, message, &self.reminder_windows).await?;
+                    // No scoped activation on a PM lane (its prepare folds through pool
+                    // stores), but the committed appends touch AGGREGATE streams other lanes
+                    // may hold — the promotion closure invalidates them.
+                    let promote = DeliveryActivation::promote_after_commit(
+                        &self.activations,
+                        None,
+                        &effects.staged,
+                    );
+                    Ok(self.fanout_delivery(&effects.staged, None, promote))
+                }
+                // A version clash at flush: a concurrent writer moved a stream between prepare's
+                // load and this commit. ABORT for retry — redelivery re-runs prepare against the
+                // moved stream, and the Stripe idempotency key returns the SAME intent/refund,
+                // so the retry can never double-charge (the ADR's crash-window argument).
+                Err(e) if is_version_conflict(&e) => Err(sqlx::Error::Protocol(e.to_string())),
+                Err(DomainError::Repository(detail)) => Err(sqlx::Error::Protocol(detail)),
+                Err(e) => Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                    "code": "Internal",
+                    "context": { "detail": e.to_string() }
+                })))),
+            },
+        }
+    }
+
+    /// The kind-EVENT / kind-MESSAGE delivery route (ADR-20260731-122500): adapted inbound
+    /// BUSINESS facts (the mailbox-era home of the retired InboundEventsDrainWorker's routing)
+    /// and promoted reminder facts (ADR-20260731-153000 §1a — record semantics, never Rejected).
+    /// The aggregate's fold-based dedupe stays authoritative — its verdict is PERSISTED on the
+    /// row (a no-change decision lands IGNORED, a redelivered fact DUPLICATE, per
+    /// ADR-20260728-011344 D6), and the staged events flush into the SAME fenced transaction as
+    /// every command delivery.
+    async fn handle_recorded_fact(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
@@ -171,6 +344,11 @@ impl MailboxCommandHandler {
                     }))))
                 }
             };
+        // A chained PM-addressed copy (B2): the lane IS the saga — run its event leg, not the
+        // record route (the fact is already on the Payment stream; this hop reacts to it).
+        if message.actor_type == "PlaceOrderProcess" || message.actor_type == "RefundProcess" {
+            return self.handle_pm_fact(tx, message, event).await;
+        }
         let actor = Actor {
             // The external system principal (deterministic per source — mirrors the enqueue side).
             user_id: message.user_id.unwrap_or_else(uuid::Uuid::nil),
@@ -180,45 +358,83 @@ impl MailboxCommandHandler {
             // The causality link: the appended fact's cause is the mailbox row that carried it.
             cause_id: Some(message.message_id),
         };
-        let staging = Arc::new(StagingEventStore::new(self.deps.store.clone()));
+        let activation = DeliveryActivation::for_message(&self.activations, message);
+        let base_store: Arc<dyn EventStore> = match &activation {
+            Some(a) => a.store(self.deps.store.clone()),
+            None => self.deps.store.clone(),
+        };
+        let staging = Arc::new(StagingEventStore::new(base_store));
         let store: Arc<dyn EventStore> = staging.clone();
 
         use domain::generated::events::DomainEvent as E;
         let outcome = match &event {
             E::PaymentCaptured(_) | E::PaymentFailed(_) | E::PaymentRefunded(_) => {
-                application::payments::record_inbound_payment_event(store.as_ref(), event, &actor)
-                    .await
+                application::payments::record_inbound_payment_event(
+                    store.as_ref(),
+                    event.clone(),
+                    &actor,
+                )
+                .await
             }
             E::DeliveryAcceptedByPartner(_)
             | E::DeliveryRejectedByPartner(_)
             | E::DeliveryStatusUpdated(_) => {
-                application::deliveries::record_inbound_delivery_event(store.as_ref(), event, &actor)
+                application::deliveries::record_inbound_delivery_event(store.as_ref(), event.clone(), &actor)
                     .await
             }
             E::RestaurantRegistered(_) => {
                 application::commands::record_inbound_restaurant_registration(
                     store.as_ref(),
-                    event,
+                    event.clone(),
                     &actor,
                 )
                 .await
             }
+            // The reminders pilot (ADR-20260731-153000): the promoted OrderExpired MESSAGE
+            // records the expiry on its order's stream — Recorded / AlreadyRecorded / NoChange,
+            // never a rejection (a retention deadline's passage cannot be refused).
+            E::OrderExpired(_) => {
+                application::commands::record_inbound_order_event(store.as_ref(), event.clone(), &actor)
+                    .await
+            }
             _ => {
                 return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                     "code": "Internal",
-                    "context": { "detail": format!("no delivery route for inbound event type '{}'", message.message_type) }
+                    "context": { "detail": format!("no delivery route for inbound fact type '{}'", message.message_type) }
                 }))))
             }
         };
         let delivery = match outcome {
             Ok(RecordOutcome::Recorded) | Ok(RecordOutcome::Updated) => {
                 let staged = staging.take_staged();
+                // Same pre-flush freshness guard as the COMMAND route.
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
                 match flush_staged_in_tx(tx, &staged).await {
                     // Same post-commit subscription fan-out as the COMMAND route: an inbound
                     // PaymentCaptured must reach `paymentStatusChanged` exactly like a
                     // command-emitted fact — the retired drain published through
                     // PgEventStore::with_bus, and the checkout screen's push depends on it.
-                    Ok(()) => self.fanout_delivery(&staged),
+                    Ok(()) => {
+                        // Recorded facts may declare `schedules:` too (same third-effect rule).
+                        super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
+                            .await?;
+                        // B2 (gated): the recorded Stripe fact's PM-addressed copy rides THIS
+                        // transaction — atomic with the record, nudged post-commit.
+                        let chained = if self.pm_fact_chaining {
+                            pm_delivery::chain_pm_copy_in_tx(&self.deps, tx, message, &event)
+                                .await?
+                        } else {
+                            None
+                        };
+                        let promote = DeliveryActivation::promote_after_commit(
+                            &self.activations,
+                            activation.as_ref(),
+                            &staged,
+                        );
+                        self.fanout_delivery(&staged, chained, promote)
+                    }
                     // Version clash at flush: someone appended between load and commit. That
                     // someone is NOT necessarily a redelivery of this fact — the legacy-path PM
                     // legs write the same Payment streams until Runtime D — so a terminal
@@ -226,6 +442,9 @@ impl MailboxCommandHandler {
                     // retry: the redelivery re-runs the fold-based dedupe against the moved
                     // stream and lands Duplicate only if the fact is genuinely in it.
                     Err(e) if is_version_conflict(&e) => {
+                        if let Some(a) = &activation {
+                            a.invalidate_scoped();
+                        }
                         return Err(sqlx::Error::Protocol(e.to_string()));
                     }
                     Err(DomainError::Repository(detail)) => {
@@ -236,11 +455,27 @@ impl MailboxCommandHandler {
                     )),
                 }
             }
-            Ok(RecordOutcome::NoChange) => Delivery::of(HandlerVerdict::Ignored),
-            Ok(RecordOutcome::AlreadyRecorded) => Delivery::of(HandlerVerdict::Duplicate),
+            // The no-append verdicts are exactly where a stale hold has no UNIQUE race to lose:
+            // an Ignored/Duplicate decided from a held fold must re-assert freshness or a fact
+            // could be durably absorbed against state that no longer exists.
+            Ok(RecordOutcome::NoChange) => {
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Ignored)
+            }
+            Ok(RecordOutcome::AlreadyRecorded) => {
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Duplicate)
+            }
             // A conflict surfaced by the recorder itself: the stream moved under it — retry, same
             // reasoning as the flush-time clash above.
             Err(e) if is_version_conflict(&e) => {
+                if let Some(a) = &activation {
+                    a.invalidate_scoped();
+                }
                 return Err(sqlx::Error::Protocol(e.to_string()));
             }
             // Transient infrastructure failure while loading/folding the stream: ABORT for retry.
@@ -249,41 +484,168 @@ impl MailboxCommandHandler {
             Err(DomainError::Repository(detail)) => {
                 return Err(sqlx::Error::Protocol(detail));
             }
-            Err(e) => Delivery::of(HandlerVerdict::Failed(
-                serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
-            )),
+            Err(e) => {
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Failed(
+                    serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
+                ))
+            }
         };
         Ok(delivery)
     }
 
     /// The committed-success Delivery: verdict + the post-commit event-bus fan-out of everything
     /// the flush just made durable (both delivery routes share this — subscriptions must hear
-    /// mailbox-written facts exactly as they heard PgEventStore-written ones).
-    fn fanout_delivery(&self, staged: &[application::staging::StagedAppend]) -> Delivery {
-        match &self.event_bus {
-            Some(bus) => {
-                let bus = bus.clone();
-                let envelopes: Vec<AppendedEvent> = staged
-                    .iter()
-                    .flat_map(|a| {
-                        a.events.iter().enumerate().filter_map(|(i, e)| {
-                            let tagged = serde_json::to_value(e).ok()?;
-                            Some(AppendedEvent {
-                                stream_name: a.stream_name.clone(),
-                                event_type: tagged.get("eventType")?.as_str()?.to_owned(),
-                                correlation_id: a.actor.correlation_id,
-                                position: a.expected_version + i as i64 + 1,
-                            })
+    /// mailbox-written facts exactly as they heard PgEventStore-written ones). `chained` names
+    /// the PM lane a B2 hop was enqueued on — its worker is nudged post-commit, never before.
+    /// `promote` is the activation promotion/invalidation closure (apply-after-commit) — it runs
+    /// FIRST, so a subscription-triggered read-through can never observe a pre-commit held state.
+    fn fanout_delivery(
+        &self,
+        staged: &[application::staging::StagedAppend],
+        chained: Option<&'static str>,
+        promote: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Delivery {
+        let envelopes: Vec<AppendedEvent> = match &self.event_bus {
+            Some(_) => staged
+                .iter()
+                .flat_map(|a| {
+                    a.events.iter().enumerate().filter_map(|(i, e)| {
+                        let tagged = serde_json::to_value(e).ok()?;
+                        Some(AppendedEvent {
+                            stream_name: a.stream_name.clone(),
+                            event_type: tagged.get("eventType")?.as_str()?.to_owned(),
+                            correlation_id: a.actor.correlation_id,
+                            position: a.expected_version + i as i64 + 1,
                         })
                     })
-                    .collect();
-                Delivery::then(HandlerVerdict::Succeeded, move || {
-                    for envelope in envelopes {
-                        bus.publish(envelope);
-                    }
                 })
+                .collect(),
+            None => Vec::new(),
+        };
+        let bus = self.event_bus.clone();
+        let nudges = self.nudges.clone();
+        if bus.is_none() && (chained.is_none() || nudges.is_none()) && promote.is_none() {
+            return Delivery::of(HandlerVerdict::Succeeded);
+        }
+        Delivery::then(HandlerVerdict::Succeeded, move || {
+            if let Some(promote) = promote {
+                promote();
             }
-            None => Delivery::of(HandlerVerdict::Succeeded),
+            if let Some(bus) = bus {
+                for envelope in envelopes {
+                    bus.publish(envelope);
+                }
+            }
+            if let (Some(nudges), Some(actor_type)) = (nudges, chained) {
+                nudges.nudge(actor_type);
+            }
+        })
+    }
+
+    /// One chained PM hop's delivery (B2): dispatch the saga's EVENT leg against staging stores,
+    /// then flush events + run rows into the fenced transaction — the mailbox-era home of the
+    /// saga runner's PlaceOrderProcess/RefundProcess Stripe-fact dispatch, now durable, fenced
+    /// and ordered per order. A typed leg anomaly (`PaymentEventOrphaned`) lands REJECTED on the
+    /// row — supervisable, never silently skipped; a benign skip (redelivered outcome, resolved
+    /// run) lands IGNORED.
+    async fn handle_pm_fact(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        message: &InboundMessage,
+        event: domain::generated::events::DomainEvent,
+    ) -> Result<Delivery, sqlx::Error> {
+        use application::process_managers::{place_order, refund, Outcome, TriggerEnvelope};
+        use domain::generated::events::DomainEvent as E;
+
+        let staging = Arc::new(StagingEventStore::new(self.deps.store.clone()));
+        let payment_staging =
+            application::staging::StagingPaymentProcessState::new(self.deps.pm_state.clone());
+        let refund_staging =
+            application::staging::StagingRefundProcessState::new(self.deps.refund_state.clone());
+        // The trigger envelope: the chained row IS the trigger (its deterministic id doubles as
+        // the dedup key the run row records).
+        let env = TriggerEnvelope {
+            event_id: message.message_id,
+            correlation_id: message.correlation_id,
+            occurred_at: message.received_at,
+        };
+        let outcome = match (message.actor_type.as_str(), &event) {
+            ("PlaceOrderProcess", E::PaymentCaptured(e)) => {
+                place_order::on_payment_captured(
+                    staging.as_ref() as &dyn EventStore,
+                    &payment_staging,
+                    e,
+                    &env,
+                )
+                .await
+            }
+            ("PlaceOrderProcess", E::PaymentFailed(e)) => {
+                place_order::on_payment_failed(&payment_staging, e, &env).await
+            }
+            ("RefundProcess", E::PaymentRefunded(e)) => {
+                refund::on_payment_refunded(&refund_staging, e).await
+            }
+            (actor, _) => {
+                return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                    "code": "Internal",
+                    "context": { "detail": format!(
+                        "no PM event leg for '{}' on the {actor} lane", message.message_type
+                    ) }
+                }))))
+            }
+        };
+        match outcome {
+            Ok(Outcome::Completed) => {
+                let staged = staging.take_staged();
+                match flush_staged_in_tx(tx, &staged).await {
+                    Ok(()) => {
+                        pm_delivery::flush_pm_rows_in_tx(
+                            tx,
+                            &payment_staging.take_staged(),
+                            &refund_staging.take_staged(),
+                        )
+                        .await
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+                        super::apply_schedules_in_tx(tx, message, &self.reminder_windows).await?;
+                        // Same cross-writer rule as the prepared PM commit: the saga leg's
+                        // appends (OrderPlaced on the Order stream) stale-out held copies.
+                        let promote = DeliveryActivation::promote_after_commit(
+                            &self.activations,
+                            None,
+                            &staged,
+                        );
+                        Ok(self.fanout_delivery(&staged, None, promote))
+                    }
+                    // Lost optimistic-concurrency race: retry the WHOLE leg (the run row's
+                    // expect and the aggregates' record-idempotency absorb the replay) — the
+                    // runner's exact semantics, now per-lane instead of per-tick.
+                    Err(e) if is_version_conflict(&e) => Err(sqlx::Error::Protocol(e.to_string())),
+                    Err(DomainError::Repository(detail)) => Err(sqlx::Error::Protocol(detail)),
+                    Err(e) => Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                        "code": "Internal",
+                        "context": { "detail": e.to_string() }
+                    })))),
+                }
+            }
+            // Benign expected alternative (idempotent re-delivery, failed state.expect): the
+            // runner LOGGED and advanced; the mailbox records it as the row's IGNORED verdict.
+            Ok(Outcome::Skipped(reason)) => {
+                tracing::warn!(
+                    actor_type = %message.actor_type,
+                    message_type = %message.message_type,
+                    %reason,
+                    "pm fact delivery skipped"
+                );
+                Ok(Delivery::of(HandlerVerdict::Ignored))
+            }
+            Err(e) if is_version_conflict(&e) => Err(sqlx::Error::Protocol(e.to_string())),
+            Err(DomainError::Repository(detail)) => Err(sqlx::Error::Protocol(detail)),
+            // A typed leg anomaly (PaymentEventOrphaned): REJECTED on the row — the runner
+            // surfaced it on /saga and advanced; the mailbox keeps it queryable per message.
+            Err(e) => Ok(Delivery::of(verdict_of_error(e))),
         }
     }
 }
@@ -330,6 +692,22 @@ impl DeliveryObserver for StatusBusObserver {
         if message.kind != "COMMAND" {
             return;
         }
+        // `command_completion_ms{status}` — acceptance insert → committed terminal status, the
+        // mailbox-era emission of the command-acceptance contract's histogram (#272 D1: the
+        // metric must not go dark when a command leaves the journal+spawn path; this also lights
+        // it back up for every Runtime-C-flipped command). Measured from the row's `received_at`
+        // — the durable acceptance instant, same contract meaning as the journal insert.
+        let status_label = match verdict {
+            HandlerVerdict::Succeeded | HandlerVerdict::Ignored | HandlerVerdict::Duplicate => {
+                "SUCCEEDED"
+            }
+            HandlerVerdict::Rejected(_) => "REJECTED",
+            HandlerVerdict::Failed(_) => "FAILED",
+        };
+        let elapsed_ms = (chrono::Utc::now() - message.received_at)
+            .num_milliseconds()
+            .max(0) as f64;
+        telemetry::meters::acceptance::completed(status_label, elapsed_ms);
         use domain::generated::scalars::CommandJournalStatus as J;
         let status = match verdict {
             HandlerVerdict::Succeeded | HandlerVerdict::Ignored | HandlerVerdict::Duplicate => {

@@ -44,6 +44,13 @@ not compiled dependencies. `find target/debug/deps -maxdepth 1 -type f -size +50
 costs a full recompile of ~200 crates. Two ENOSPC build failures in one session were both cured by
 this plus dropping `incremental/`.
 
+**Don't flip `CARGO_INCREMENTAL` mid-session (2026-08-01):** toggling it changes the crate
+metadata hashes, so the next build writes a SECOND full set of workspace artifacts next to the
+old one — flipping to `0` right after deleting `incremental/` re-exhausted the allowance during
+the very build meant to save space. Pick one mode for the whole session; if you must switch,
+delete the workspace-crate artifacts (`lib{server,web,application,infrastructure,domain,…}-*`
+and the test binaries in `deps/`) in the same breath.
+
 Never tell the user the container is unrecoverable — clean up first; a fresh session is the fallback,
 not the first move.
 
@@ -144,9 +151,13 @@ under a dedicated user (`pguser`) inside the scratchpad dies mid-session with "P
 on the data directory, and every DB-gated suite then fails with PoolTimedOut/Connection refused
 (cost: a full server-suite failure mis-read as a code regression, 2026-07-31). Recovery recipe:
 re-`chmod o+x` every path component from `/tmp/claude-0` down to the scratchpad, `rm -f
-<pgdata>/postmaster.pid`, then `su pguser -c "pg_ctl -D <pgdata> -o '-k /tmp -p 5433 -c
-listen_addresses=127.0.0.1 -c fsync=off' start"`. Diagnose "tests suddenly failing" with
-`pg_isready`/`psql` FIRST, before reading a single line of code.
+<pgdata>/postmaster.pid`, then `su pguser -c "/usr/lib/postgresql/16/bin/pg_ctl -D <pgdata> -o
+'-k /tmp -p 5433 -c listen_addresses=127.0.0.1 -c fsync=off' start"` — the FULL binary path:
+`pg_ctl` is not on `pguser`'s PATH even though `psql` is on root's (cost: one dead recovery
+attempt, 2026-08-01). A cross-session note: the pgdata lives in the PREVIOUS session's
+scratchpad directory (session-specific paths), so a resumed branch reuses it by absolute path —
+don't initdb a fresh cluster when yesterday's is one `pg_ctl start` away. Diagnose "tests
+suddenly failing" with `pg_isready`/`psql` FIRST, before reading a single line of code.
 
 **While a background agent owns the branch checkout, edit `main` through a git WORKTREE**
 (`git worktree add <scratchpad>/main-wt origin/main -b <tmp>` → edit → push `<tmp>:main` →
@@ -154,6 +165,25 @@ listen_addresses=127.0.0.1 -c fsync=off' start"`. Diagnose "tests suddenly faili
 stop-hook flags the agent's uncommitted WIP, leave it — the agent commits gated work itself;
 committing under it snapshots untested state. (`git worktree remove` leaves the shell's cwd
 dangling — `cd` out first or ignore the getcwd error.)
+
+**Run `make rust` only on a COMMITTED tree, and never judge it through a pipe.** `check-drift`
+regenerates and then diffs the WHOLE tree — uncommitted source edits read as "drift" and fail the
+gate by design (its own comment says so). And `make rust ... | tail` reports the PIPE's exit (tail's
+0), so a background run can notify "exit 0" over a red gate (cost: one commit pushed on a
+believed-green gate before the output was re-read, 2026-08-01). Redirect to a file and echo `$?`
+separately, then read both.
+
+**`ld terminated with signal 7 [Bus error]` at link time is the DISK ALLOWANCE, not a toolchain
+fault.** The linker mmaps its output; at 98% used it dies with a bus error that looks like
+corruption. `target/debug/incremental` alone held 9.2G — deleting just it recovers the build
+without the full `target/debug` rebuild cost (cost: one mysterious "could not compile server"
+mid-suite, 2026-08-01).
+
+**Pass multi-line commit messages through `git commit -F -` with a quoted heredoc**, never `-m`
+with a body containing backticks: bash command-substitutes `` ` `` inside double quotes, so a
+`` `type: process-manager` `` in the message executed `type:` as a command and pushed a commit
+with the phrase silently deleted (cost: one garbled money-path commit message, an amend and a
+force-push, 2026-08-01). `git commit -F - << 'MSG' … MSG` (quoted delimiter) is immune.
 
 **The remote git proxy cannot DELETE branches.** `git push origin --delete <branch>` (and the
 `:refs/heads/<branch>` form) dies with "the remote end hung up unexpectedly" — the per-session git

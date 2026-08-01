@@ -50,9 +50,15 @@ impl From<sqlx::Error> for CompletionError {
     }
 }
 
-/// Deliver ONE message under the lane's authority: run the handler inside a fresh transaction,
-/// then commit its effects + the row flip + the checkpoint advance atomically. Returns the
-/// committed verdict.
+/// Deliver ONE message under the lane's authority: run the handler's PREPARE phase with NO
+/// transaction open (ADR-20260801-023000 — pool reads and external calls must never ride a
+/// Postgres connection's transaction), then run the handler inside a fresh transaction and
+/// commit its effects + the row flip + the checkpoint advance atomically. Returns the committed
+/// verdict.
+///
+/// A prepare error aborts the delivery exactly like a handler error: nothing was written, the
+/// row stays RECEIVED, redelivery re-runs prepare (its external effects must be idempotent —
+/// the handler contract).
 pub async fn complete_fenced(
     pool: &PgPool,
     lane: &Lane,
@@ -60,9 +66,11 @@ pub async fn complete_fenced(
     message: &InboundMessage,
     handler: &dyn MessageHandler,
 ) -> Result<HandlerVerdict, CompletionError> {
+    let prepared = handler.prepare(message).await?;
+
     let mut tx: Transaction<'_, Postgres> = pool.begin().await?;
 
-    let delivery = handler.handle(&mut tx, message).await?;
+    let delivery = handler.handle(&mut tx, message, prepared).await?;
     let verdict = delivery.verdict;
 
     // Terminal flip — only if still RECEIVED (guard 1).

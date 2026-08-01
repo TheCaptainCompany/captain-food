@@ -10,6 +10,17 @@ use chrono::{DateTime, Utc};
 use sirene_ingest::{upsert_staging_batch, upsert_staging_row, Etablissement, SireneRecord};
 use sqlx::PgPool;
 
+/// Every test here DROP+CREATEs the SAME staging table and works the SAME SIRET, and the test
+/// harness runs a file's tests on concurrent threads — unserialized, each test yanks the table
+/// out from under its siblings and the suite passes or fails on interleaving luck (observed:
+/// 3 vs 4 nondeterministic failures per run, 2026-08-01). One suite-wide lock, held for each
+/// test's whole body, restores determinism; a poisoned lock (a failed sibling) is fine to reuse.
+static SUITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn serialize_suite() -> std::sync::MutexGuard<'static, ()> {
+    SUITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Fresh copy of the staging table (mirrors migrations/20260718100000_external_sirene_restaurants.sql).
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
@@ -99,6 +110,7 @@ fn record_with_siret(siret: &str) -> SireneRecord {
 
 #[tokio::test]
 async fn staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at() {
+    let _suite = serialize_suite();
     let Ok(url) = std::env::var("DATABASE_URL") else {
         assert!(
             std::env::var("DB_TESTS_REQUIRED").is_err(),
@@ -181,6 +193,7 @@ async fn staging_upsert_is_idempotent_per_siret_and_bumps_last_seen_at() {
 
 #[tokio::test]
 async fn staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent() {
+    let _suite = serialize_suite();
     let Ok(url) = std::env::var("DATABASE_URL") else {
         assert!(
             std::env::var("DB_TESTS_REQUIRED").is_err(),
@@ -266,6 +279,7 @@ async fn staging_batch_upsert_matches_row_by_row_semantics_and_is_idempotent() {
 
 #[tokio::test]
 async fn staging_batch_upsert_falls_back_to_row_by_row_on_batch_error() {
+    let _suite = serialize_suite();
     let Ok(url) = std::env::var("DATABASE_URL") else {
         assert!(
             std::env::var("DB_TESTS_REQUIRED").is_err(),
@@ -302,6 +316,7 @@ async fn staging_batch_upsert_falls_back_to_row_by_row_on_batch_error() {
 /// failure mode worth a test rather than a comment.
 #[tokio::test]
 async fn an_unchanged_processed_row_does_not_get_its_payload_written_back() {
+    let _suite = serialize_suite();
     let Ok(url) = std::env::var("DATABASE_URL") else {
         assert!(
             std::env::var("DB_TESTS_REQUIRED").is_err(),
@@ -347,6 +362,7 @@ async fn an_unchanged_processed_row_does_not_get_its_payload_written_back() {
 /// a row with nothing to translate.
 #[tokio::test]
 async fn a_changed_record_gets_its_payload_written_again() {
+    let _suite = serialize_suite();
     let Ok(url) = std::env::var("DATABASE_URL") else {
         assert!(
             std::env::var("DB_TESTS_REQUIRED").is_err(),
@@ -390,6 +406,7 @@ async fn a_changed_record_gets_its_payload_written_again() {
 /// `status` follows exactly the same predicate as `payload` and `processed_at`.
 #[tokio::test]
 async fn a_changed_record_releases_a_poisoned_row() {
+    let _suite = serialize_suite();
     let Ok(url) = std::env::var("DATABASE_URL") else {
         assert!(
             std::env::var("DB_TESTS_REQUIRED").is_err(),

@@ -421,6 +421,49 @@ keys:
       authority never — the ownership_version fence is commit-time). Keep at roughly a third of
       MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
 
+  RUN_MAILBOX_WORKERS:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    # `consumer` keeps this key OUT of the server Config: only the adapter binaries read it
+    # (their own env parse in infrastructure::mailbox::standalone), and a resolved-but-ignored
+    # monolith field would imply an authority the monolith does not have.
+    consumer: adapters
+    gates: >
+      Standalone adapter workers (#272 D3, deferred from the PR #270 review): ON in a webhook
+      adapter's own deployment, the binary runs MailboxWorkers for exactly the lanes its
+      ingestor feeds — so facts keep being DELIVERED (not just accepted) while the monolith is
+      down. OFF (the default), the adapter only mirrors + enqueues and the monolith's fleet
+      delivers. The trade-off the flip accepts: the status/event buses are in-process, so a
+      fact delivered by the adapter process never reaches the monolith's push subscribers
+      (polls unaffected) — which is why this is a deployment posture, not a default. The MONEY
+      lanes (Payment / PlaceOrderProcess / RefundProcess) additionally demand an EXPLICIT
+      PM_MAILBOX_DELIVERY in the adapter's environment, matching the monolith's — an implicit
+      false against a monolith running true records captures without chaining their saga hop
+      (a paid order nobody reacts to until a restart); unset = those lanes are refused at
+      spawn. Read by the adapter binaries only; the monolith ignores it (its composition root
+      always runs the full fleet).
+
+  ACTOR_ACTIVATIONS:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      ACTIVATIONS (#272 D3, PROP-20260728-152752 §3.5): ON, each mailbox delivery folds the
+      delivered actor's own stream through a shared held-state cache — filled on first load,
+      extended with the committed appends strictly AFTER the fenced transaction commits
+      (apply-after-commit), dropped on a lost version race, on lane loss, on idle expiry and
+      under the memory bound. OFF (the default — gate-then-stabilize; the flip is its own
+      one-line ADR after staging smoke), every delivery folds from the log, byte-identically
+      to the pre-D3 runtime. Correctness never depends on the cache, on BOTH verdict shapes:
+      an APPEND from a stale hold loses the UNIQUE(stream_name, version) race, and a NON-APPEND
+      terminal verdict (a deterministic rejection, an Ignored/Duplicate record) from a
+      cache-served fold re-asserts the stream version inside the fenced transaction — either
+      way the delivery aborts, invalidates and refolds, out-of-band writers (saga-runner legs,
+      peer-process fleets, the deletion engine) included.
+
   ACTOR_ACTIVATION_IDLE_SECONDS:
     type: int
     default: 300
@@ -429,7 +472,30 @@ keys:
       unsolicited for this long is dropped, its next message paying one rehydration fold.
       Per-actor overrides live in actors.yaml (mailbox.activations.idle_seconds). Zero would
       disable the cache; too high and idle aggregates hold memory the LRU bound must then evict.
-      Reader lands with the #242 slice-4 activations.
+      Read by the ACTOR_ACTIVATIONS-gated cache (#272 D3).
+
+  ACTOR_ACTIVATION_MAX_MEMORY_MB:
+    type: int
+    default: 64
+    gates: >
+      The activation cache's byte bound (PROP-20260728-152752 §3.5 "hot cache pressure evicts by
+      size"): crossing it evicts least-recently-used held states, sized by their serialized event
+      payloads. Idle actors expire by the clock (ACTOR_ACTIVATION_IDLE_SECONDS); this bound is
+      the backstop for a hot Friday-peak set larger than memory should carry.
+
+  ORDER_RETENTION_WINDOW_DAYS:
+    type: int
+    default: 3650
+    gates: >
+      The Order deletion pilot's retention window (ADR-20260731-153000/-160000, #272): a terminal
+      order schedules its OrderExpired reminder this many days out; recording the delivered fact
+      starts the deletion journey (tombstone -> stream deletion -> OrderDeleted receipt). ONE
+      window for now, set to the conservative accounting horizon (~10 years) because the
+      per-data-category split (personal vs financial retention, a legal/product input) is still
+      open — shortening it below the accounting horizon before that split lands would delete
+      financial facts French commercial law retains. Rescheduling is safe: changing this value
+      re-declares each order's reminder IN PLACE at the next terminal fact, and the deletion
+      engine re-reads it at delivery.
 
   PROJECTION_BATCH_SIZE:
     type: int
@@ -485,6 +551,38 @@ keys:
     deploy:
       production: "true"
       staging: "true"
+
+  RUN_DELETION_ENGINE:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      The generic deletion engine (ADR-20260731-214500 §4): runs the declared deletion journeys
+      (tombstone -> stream deletion -> ledger receipt) for every actors.yaml `deletion:` block.
+      OFF, recorded expiry facts accumulate and no stream is ever erased — GDPR deletion pauses,
+      data is never lost. DEFAULT OFF (gate-then-stabilize): this worker DELETES event streams;
+      the default flips by its own one-line ADR after the gated form is smoked in staging.
+      Readiness at GET /deletion.
+
+  PM_MAILBOX_DELIVERY:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      The Runtime D1 flip (#272, ADR-20260801-023000): ON, the three process-manager mutations
+      (placeOrder / approveRefund / denyRefund) deliver through the PM mailboxes via the PREPARE
+      phase (Stripe call with no transaction open, one fenced commit), the Payment lane chains
+      the inbound Stripe facts to the PM lanes in the recording transaction (B2), and the saga
+      runner's Stripe-fact triggers retire. OFF, the legacy journal+spawn path and the runner
+      handle everything exactly as before -- the client contract is byte-identical on both arms
+      (each arm replays the OTHER acceptance store's messageIds as duplicates, so a retry never
+      re-executes across a flip), and every startup with the gate ON backfills un-reacted Stripe
+      facts past the runner checkpoints onto the PM lanes (idempotent), so flipping in EITHER
+      direction loses no saga hop. DEFAULT OFF (gate-then-stabilize): this flips the MONEY PATH;
+      the default flips by its own one-line ADR after the gated form is smoked in staging, and
+      command_journal DROPs only at that deploy.
 
   RUN_RETENTION_SWEEP:
     type: bool

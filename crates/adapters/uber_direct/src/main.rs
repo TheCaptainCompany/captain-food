@@ -24,10 +24,26 @@ async fn main() {
         .acquire_timeout(Duration::from_secs(10))
         .connect_lazy(&url)
         .unwrap_or_else(|e| panic!("DATABASE_URL pool init failed: {e}"));
-    // Standalone deployment (ADR-20260731-122500): mirror + ENQUEUE on the shared mailbox;
-    // the monolith's per-actor-type MailboxWorkers deliver (same database, lease-competed).
-    let mailbox = Arc::new(PgMailbox::new(pool.clone()));
-    let ingestor = Arc::new(UberDirectWebhookIngestor::new(Arc::new(PgRawUberDirectEvents::new(pool)), mailbox));
+    // Standalone deployment (ADR-20260731-122500): mirror + ENQUEUE on the shared mailbox; by
+    // default the monolith's MailboxWorkers deliver (same database, lease-competed). With
+    // RUN_MAILBOX_WORKERS on (#272 D3), THIS process also runs the DeliveryJob lane so delivery
+    // facts keep flowing while the monolith is down.
+    let nudges = Arc::new(infrastructure::persistence::mailbox_store::MailboxNudges::default());
+    let mailbox = Arc::new(PgMailbox::new(pool.clone()).with_nudges(nudges.clone()));
+    let ingestor = Arc::new(UberDirectWebhookIngestor::new(
+        Arc::new(PgRawUberDirectEvents::new(pool.clone())),
+        mailbox,
+    ));
+    if infrastructure::mailbox::standalone_workers_enabled() {
+        infrastructure::mailbox::spawn_standalone_workers(
+            pool,
+            "uber_direct",
+            &["DeliveryJob"],
+            Arc::new(infrastructure::FailClosedPaymentGateway),
+            nudges,
+            Default::default(),
+        );
+    }
     let state = UberDirectWebhookState {
         ingestor: Some(ingestor),
         webhook_secret: config.map(|c| Arc::new(c.webhook_secret)),
@@ -38,5 +54,8 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
     tracing::info!(adapter = "uber_direct", %addr, "webhook adapter listening");
-    axum::serve(listener, routes(state)).await.expect("server error");
+    axum::serve(listener, routes(state))
+        .with_graceful_shutdown(infrastructure::mailbox::shutdown_signal())
+        .await
+        .expect("server error");
 }

@@ -20,14 +20,53 @@ async fn main() {
         .connect_lazy(&url)
         .unwrap_or_else(|e| panic!("DATABASE_URL pool init failed: {e}"));
     // Standalone deployment (ADR-20260731-122500): mirror + ENQUEUE on the shared mailbox;
-    // the monolith's per-actor-type MailboxWorkers deliver (same database, lease-competed).
-    let mailbox = Arc::new(PgMailbox::new(pool.clone()));
-    let ingestor = Arc::new(StripeWebhookIngestor::new(Arc::new(PgRawStripeEvents::new(pool)), mailbox));
+    // by default the monolith's per-actor-type MailboxWorkers deliver (same database,
+    // lease-competed). With RUN_MAILBOX_WORKERS on (#272 D3), THIS process also runs workers
+    // for the lanes its ingestor feeds, so delivery survives monolith downtime.
+    let nudges = Arc::new(infrastructure::persistence::mailbox_store::MailboxNudges::default());
+    let mailbox = Arc::new(PgMailbox::new(pool.clone()).with_nudges(nudges.clone()));
+    let ingestor =
+        Arc::new(StripeWebhookIngestor::new(Arc::new(PgRawStripeEvents::new(pool.clone())), mailbox));
+    if infrastructure::mailbox::standalone_workers_enabled() {
+        // Payment (the ingested Stripe facts) always; the two PM lanes their B2-chained copies
+        // land on — a capture chained here must also be REACTED to here when the monolith is
+        // down — ONLY with a real gateway. Running them fail-closed would not be inert: this
+        // fleet lease-competes with the monolith's, and a PlaceOrder landing on an
+        // adapter-owned lane would be terminally DECLINED instead of delivered by the peer
+        // that has credentials. (The PM EVENT legs never call Stripe, but their lanes also
+        // carry the PM COMMANDS.)
+        let (lanes, payments): (
+            &'static [&'static str],
+            Arc<dyn application::generated::services::PaymentService>,
+        ) = match std::env::var("STRIPE_SECRET_KEY") {
+            Ok(key) if !key.is_empty() => (
+                &["Payment", "PlaceOrderProcess", "RefundProcess"],
+                Arc::new(stripe_adapter::StripePaymentGateway::new(key)),
+            ),
+            _ => {
+                tracing::warn!(
+                    "STRIPE_SECRET_KEY unset -- running the Payment lane only (PM lanes need the gateway)"
+                );
+                (&["Payment"], Arc::new(infrastructure::FailClosedPaymentGateway))
+            }
+        };
+        infrastructure::mailbox::spawn_standalone_workers(
+            pool,
+            "stripe",
+            lanes,
+            payments,
+            nudges,
+            Default::default(),
+        );
+    }
 
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
     tracing::info!(adapter = "stripe", %addr, "webhook adapter listening");
-    axum::serve(listener, routes(Some(ingestor))).await.expect("server error");
+    axum::serve(listener, routes(Some(ingestor)))
+        .with_graceful_shutdown(infrastructure::mailbox::shutdown_signal())
+        .await
+        .expect("server error");
 }
