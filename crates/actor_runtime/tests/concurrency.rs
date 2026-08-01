@@ -39,6 +39,7 @@ impl MessageHandler for ProbeHandler {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
+        _prepared: actor_runtime::Prepared,
     ) -> Result<Delivery, sqlx::Error> {
         sqlx::query(
             "INSERT INTO delivered_probe (worker, message_id, actor_id, position) VALUES ($1, $2, $3, $4)",

@@ -64,6 +64,7 @@ impl MessageHandler for MailboxCommandHandler {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
+        _prepared: actor_runtime::Prepared,
     ) -> Result<Delivery, sqlx::Error> {
         if message.kind == "EVENT" || message.kind == "MESSAGE" {
             // Both kinds RECORD facts: EVENT carries an adapted inbound business fact, MESSAGE a

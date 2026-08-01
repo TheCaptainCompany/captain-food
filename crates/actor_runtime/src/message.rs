@@ -52,6 +52,12 @@ impl InboundMessage {
     }
 }
 
+/// Output of the PREPARE phase, opaque to the runtime (ADR-20260801-023000): whatever the host
+/// computed with NO transaction open — validation outcomes, priced totals, an external gateway's
+/// response — handed to [`MessageHandler::handle`] to commit. `None` = the handler declared no
+/// prepare work for this message (the default).
+pub type Prepared = Option<Box<dyn std::any::Any + Send>>;
+
 /// The handler's verdict on one delivery — the RECEIVED row's terminal transition
 /// (`SCHEDULED -> (CANCELLED | RECEIVED); RECEIVED -> SUCCEEDED | REJECTED | FAILED | IGNORED |
 /// DUPLICATE`). `Rejected`/`Failed` carry the `{ code, context }` error surfaced to the status
@@ -117,10 +123,29 @@ impl Delivery {
 
 #[async_trait::async_trait]
 pub trait MessageHandler: Send + Sync {
+    /// The PREPARE phase (ADR-20260801-023000): runs BEFORE the fenced completion transaction
+    /// opens — the one place a delivery may do slow or external work (pool reads, an outbound
+    /// HTTP call) without holding a transaction across it. Whatever it returns is handed to
+    /// [`Self::handle`] verbatim.
+    ///
+    /// Retry contract: an `Err` aborts the delivery — the row stays RECEIVED and redelivery
+    /// re-runs prepare from scratch, so any external call made here MUST be idempotent under
+    /// re-execution (e.g. a deterministic gateway idempotency key). A crash between prepare and
+    /// the commit has exactly the same shape: nothing was written, redelivery re-prepares.
+    /// Deterministic business rejections belong in the PREPARED VALUE (committed as a REJECTED
+    /// verdict by `handle`), never in `Err` — `Err` means "retry", and a rejection retried
+    /// forever is a stuck lane.
+    ///
+    /// Default: no prepare work (`Ok(None)`) — existing handlers run unchanged.
+    async fn prepare(&self, _message: &InboundMessage) -> Result<Prepared, sqlx::Error> {
+        Ok(None)
+    }
+
     async fn handle(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
+        prepared: Prepared,
     ) -> Result<Delivery, sqlx::Error>;
 }
 
