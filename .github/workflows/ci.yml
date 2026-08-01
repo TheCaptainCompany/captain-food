@@ -120,13 +120,16 @@ jobs:
       # --test-threads=1 because the suites share one database and reset the same tables; the per-file
       # db_lock() does not cover cross-file runs. DB_TESTS_REQUIRED makes a skip LOUD: if this step
       # ever loses its DATABASE_URL, the gated tests panic instead of silently reporting ok (#230).
+      # actor_runtime carries the Proto.Actor port suites (ADR-20260730-234918: fencing, ordering,
+      # rebalance, discipline) — it was missing here until #275, so those suites only ever ran on
+      # developer machines.
       - name: DB integration tests (previously these always skipped — no Postgres in CI)
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
           DB_TESTS_REQUIRED: '1'
         run: >-
           cargo test -p infrastructure -p sirene_ingest -p server -p hubrise-adapter
-          --tests --verbose -- --test-threads=1
+          -p actor_runtime --tests --verbose -- --test-threads=1
 
       - name: Validate the specs (full validator §1–§11 — the blocking gate)
         run: cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --check --specs specs
