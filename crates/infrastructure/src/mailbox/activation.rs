@@ -68,6 +68,10 @@ pub(super) struct DeliveryActivation {
     actor_type: String,
     partition: i16,
     idle: Duration,
+    /// The held version SERVED to this delivery's fold, when the scoped load was a cache HIT.
+    /// `None` = the fold read the log directly (miss, or never loaded) — the pre-activation
+    /// freshness window applies and no extra guard is owed.
+    served: Arc<std::sync::Mutex<Option<i64>>>,
 }
 
 impl DeliveryActivation {
@@ -84,6 +88,7 @@ impl DeliveryActivation {
             actor_type: message.actor_type.clone(),
             partition: message.partition,
             idle,
+            served: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -96,6 +101,7 @@ impl DeliveryActivation {
             actor_type: self.actor_type.clone(),
             partition: self.partition,
             idle: self.idle,
+            served: self.served.clone(),
         })
     }
 
@@ -103,6 +109,42 @@ impl DeliveryActivation {
     /// refolds from the log.
     pub(super) fn invalidate_scoped(&self) {
         self.settings.cache.invalidate(&self.scoped);
+    }
+
+    /// THE FRESHNESS GUARD (reviewer CRITICAL, 2026-08-01): when this delivery's fold was served
+    /// from the cache, re-assert the scoped stream's live version INSIDE the fenced completion
+    /// transaction. Without it, a delivery that terminates WITHOUT appending to its own stream
+    /// (a deterministic rejection, an Ignored/Duplicate record verdict) has no
+    /// `UNIQUE(stream_name, version)` race to lose — a stale hold (an out-of-band writer: the
+    /// saga runner's pool-side legs, a legacy-arm PM spawn, a peer process's fleet, the deletion
+    /// engine erasing the stream) would commit a durably WRONG verdict, and each retry's cache
+    /// touch would keep the stale entry alive. A mismatch invalidates and aborts — the row stays
+    /// RECEIVED and the redelivery refolds from the log. Appends to the scoped stream are also
+    /// covered on the deleted-stream edge (erased rows mean no UNIQUE conflict would fire), so
+    /// the guard runs for EVERY cache-served delivery, append or not. The comparison matches
+    /// `PgEventStore::load`'s version semantics exactly: `MAX(version)` over ALL rows,
+    /// `$`-prefixed technical rows included.
+    pub(super) async fn guard_freshness_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), sqlx::Error> {
+        let served = *self.served.lock().expect("served poisoned");
+        let Some(served) = served else { return Ok(()) };
+        let live: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(version)::bigint FROM domain_events WHERE stream_name = $1",
+        )
+        .bind(&self.scoped)
+        .fetch_one(&mut **tx)
+        .await?;
+        let live = live.unwrap_or(0);
+        if live != served {
+            self.invalidate_scoped();
+            return Err(sqlx::Error::Protocol(format!(
+                "activation: held fold of '{}' is stale (held v{served}, live v{live}) -- delivery aborted for refold",
+                self.scoped
+            )));
+        }
+        Ok(())
     }
 
     /// The POST-COMMIT promotion closure (apply-after-commit): extend the held state with the
@@ -172,6 +214,9 @@ struct ActivationEventStore {
     actor_type: String,
     partition: i16,
     idle: Duration,
+    /// Records the held version served on a scoped cache HIT — what
+    /// [`DeliveryActivation::guard_freshness_in_tx`] re-asserts at commit time.
+    served: Arc<std::sync::Mutex<Option<i64>>>,
 }
 
 #[async_trait]
@@ -194,17 +239,23 @@ impl EventStore for ActivationEventStore {
             return self.inner.load(stream_name).await;
         }
         if let Some(held) = self.settings.cache.get(stream_name) {
+            *self.served.lock().expect("served poisoned") = Some(held.version);
             return Ok((held.events.clone(), held.version));
         }
+        // TOCTOU fence: capture the invalidation epoch BEFORE the pool read — an invalidation
+        // racing this fill (a cross-lane writer's post-commit signal) means the snapshot below
+        // may predate it, and installing it would resurrect exactly the announced staleness.
+        let epoch = self.settings.cache.epoch();
         let (events, version) = self.inner.load(stream_name).await?;
         let bytes = estimate_bytes(&events);
-        self.settings.cache.put(
+        self.settings.cache.put_at_epoch(
             stream_name,
             &self.actor_type,
             self.partition,
             self.idle,
             bytes,
             Arc::new(CachedStream { events: events.clone(), version }),
+            epoch,
         );
         Ok((events, version))
     }

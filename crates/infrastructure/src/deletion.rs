@@ -76,6 +76,12 @@ pub struct DeletionEngine {
     status: Arc<Mutex<DeletionEngineStatus>>,
     /// event_type → the armed trigger it fires (built once from [`DELETION_POLICIES`]).
     routes: std::collections::HashMap<&'static str, ArmedTrigger>,
+    /// The ACTIVATION cache to evict erased streams from (`ACTOR_ACTIVATIONS` on): a held fold
+    /// of a stream tx2 just deleted would keep GDPR-erased events in memory for its idle window
+    /// AND let an append from the held version recreate a gapped stream (the erased rows mean no
+    /// `UNIQUE(stream_name, version)` conflict fires) — reviewer MAJOR, 2026-08-01. `None` when
+    /// the activation gate is off.
+    activations: Option<Arc<crate::mailbox::StreamActivations>>,
 }
 
 impl DeletionEngine {
@@ -132,7 +138,14 @@ impl DeletionEngine {
                 }
             }
         }
-        Ok(Self { pool, status: Arc::default(), routes })
+        Ok(Self { pool, status: Arc::default(), routes, activations: None })
+    }
+
+    /// Wire the activation cache (composition root, `ACTOR_ACTIVATIONS` on) so an erased stream's
+    /// held fold is evicted the moment the deletion commits.
+    pub fn with_activations(mut self, cache: Arc<crate::mailbox::StreamActivations>) -> Self {
+        self.activations = Some(cache);
+        self
     }
 
     /// Shared status handle — the server reads this for its `/deletion` endpoint.
@@ -421,6 +434,13 @@ impl DeletionEngine {
         .await
         .map_err(db_err)?;
         tx.commit().await.map_err(db_err)?;
+        // Evict the erased stream's held activation the moment the deletion is durable — erased
+        // events must not survive in memory, and a held version over deleted rows could append a
+        // gapped resurrection (no UNIQUE conflict left to catch it). The in-tx freshness guard
+        // is the backstop for a peer process's cache; this is the same-process fast path.
+        if let Some(cache) = &self.activations {
+            cache.invalidate(&stream);
+        }
         tracing::info!(
             actor_type = armed.policy.actor_type,
             stream = %stream,

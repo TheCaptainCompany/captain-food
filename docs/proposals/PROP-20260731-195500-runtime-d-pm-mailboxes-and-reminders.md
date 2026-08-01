@@ -331,6 +331,55 @@ the branch, each gate-then-stabilize:
   existing rule) instead of silently minting a random lane id that breaks per-aggregate
   serialization; only actors declaring NO identity property mint an addressing-only lane id.
 
+**Independent multi-lens review round 2 (full branch: runtime/concurrency + money-path +
+spec/codegen lenses, 2026-08-01)** — 1 critical + 4 major (and a set of minors), all FIXED:
+
+- **CRITICAL — the activation invariant only covered appends.** A delivery terminating WITHOUT
+  an append (a deterministic rejection, an Ignored/Duplicate record verdict) had no
+  `UNIQUE(stream_name, version)` race to lose, so a stale held fold (out-of-band writers: the
+  saga runner's pool-side legs, a peer process's fleet, the deletion engine) could commit a
+  durably WRONG verdict — a paid order nobody can accept — and each retry's cache touch kept the
+  stale entry alive. Fixed with the FRESHNESS GUARD: every cache-served delivery re-asserts the
+  scoped stream's `MAX(version)` inside the fenced transaction (matching `load`'s semantics,
+  `$`-rows included); mismatch → invalidate + abort, the redelivery refolds. E2E
+  `stale_hold_cannot_commit_a_wrong_rejection`.
+- **MAJOR — fill/invalidate TOCTOU**: a fill racing a cross-lane invalidation could re-install a
+  pre-invalidation snapshot. Fixed with an invalidation-epoch fence on the cache
+  (`put_at_epoch`): fills capture the epoch before the pool read and are refused if any
+  invalidation landed since.
+- **MAJOR — the deletion engine erased streams under held activations** (GDPR events surviving
+  in memory; an append from a held version could recreate a gapped stream with no UNIQUE
+  conflict left to catch it). Fixed: the engine evicts the erased stream from the cache at tx2
+  commit (same-process fast path), and the freshness guard is the cross-process backstop.
+- **MAJOR — `PM_MAILBOX_DELIVERY` split-brain across lease-competing fleets**: an adapter fleet
+  whose gate was merely UNSET (implicit false) against a monolith running true would record
+  captures without chaining their saga hop. Fixed: the standalone fleet REFUSES the money lanes
+  (Payment/PlaceOrderProcess/RefundProcess) unless the gate is set EXPLICITLY, runs the startup
+  backfill itself when ON (parity with the monolith), and the gate prose records the invariant;
+  a DB-persisted posture is the recorded follow-up that removes the residual explicit-mismatch
+  operator error.
+- **MAJOR — Stripe HTTP 409 `idempotency_error` was classified terminal**, yet rebalancing
+  manufactures it routinely (a steal redelivers while the victim's prepare is in flight, same
+  idempotency key). Fixed: 409 (same key in flight) → retry-in-place; only the 400
+  params-mismatch form stays terminal.
+- **MAJOR — the frozen `pm:*` checkpoints made every restart re-scan the whole post-flip
+  history** (O(history) idempotent dead hops enqueued ahead of live reactions at a peak deploy).
+  Fixed: a clean backfill pass advances the checkpoints to what it saw (rollback-safe: the
+  runner re-absorbs any replay via the run rows' expects).
+- Minors fixed: `mb-activations-shape` gained its negative-test suite; adapter binaries gained
+  graceful HTTP shutdown (the fleet's signal handler had replaced the default SIGTERM
+  disposition, leaving axum serving until SIGKILL); standalone fleets derive missing reminder
+  windows from the generated spec defaults (a missing window would head-of-line-wedge a lane,
+  not retry); the SIRENE staged-verdict SQL enumerates success instead of inferring it from
+  "not FAILED" (REJECTED/CANCELLED would have silently SYNCED and dropped the evidence
+  payload); the stale actors.yaml id-minting warn calibration now names the surviving warns'
+  real justification; `RUN_MAILBOX_WORKERS` moved out of the server Config via `consumer:`.
+
+Accepted-and-recorded (not fixed here): the per-lane drain loop is unbounded per pass
+(pre-Runtime-C shape — a peak-load tuning item, not a D3 regression); a worker re-claiming its
+own expired lane over-evicts its activations (refold cost only); cross-process push-subscriber
+degradation under `RUN_MAILBOX_WORKERS` (LISTEN/NOTIFY is the follow-up).
+
 ## Realization state (D1 — landed on PR #273, GATED)
 
 The flip is IMPLEMENTED behind **`PM_MAILBOX_DELIVERY`** (configuration.yaml, default false —

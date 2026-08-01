@@ -636,18 +636,28 @@ impl SireneSyncWorker {
     ///
     /// All three are SUCCESSFUL terminal outcomes: the record reached the domain and the domain is now
     /// correct about it. "Nothing changed" is a real answer, not a failure — conflating it with one is
-    /// what made a sweep unable to distinguish 200,000 registrations from 200,000 no-ops. FAILED is
-    /// surfaced as FAILED. RECEIVED is still in flight and left alone.
+    /// what made a sweep unable to distinguish 200,000 registrations from 200,000 no-ops. ANY other
+    /// terminal verdict (FAILED today; REJECTED/CANCELLED should a recorded fact ever produce them)
+    /// surfaces as FAILED and keeps the payload — success is enumerated, never inferred from
+    /// "not FAILED". RECEIVED/SCHEDULED are still in flight and left alone.
     async fn reconcile_staged(&self, summary: &mut SireneSyncSummary) -> Result<(), DomainError> {
         let resolved = sqlx::query(
             // The payload is dropped HERE, in the same statement that records the verdict — never
             // before it. A FAILED verdict keeps the payload: that is the row that may need
             // re-translating, and it is the only original we hold.
+            // DEFENSIVE verdict mapping: only the three SUCCESS verdicts resolve SYNCED and drop
+            // the payload; anything else terminal (FAILED today; REJECTED/CANCELLED should they
+            // ever reach a recorded fact) lands FAILED and KEEPS the payload — the only original
+            // we hold, and the row that may need re-translating. An enumerated "not FAILED means
+            // success" would silently assert a sync that never happened the day a new terminal
+            // verdict appears (#272 review, 2026-08-01).
             "UPDATE external_sirene_restaurants s \
-                SET status = CASE WHEN i.status = 'FAILED' THEN 'FAILED' ELSE 'SYNCED' END, \
-                    synced_at = CASE WHEN i.status = 'FAILED' THEN s.synced_at \
-                                     ELSE COALESCE(i.completed_at, now()) END, \
-                    payload = CASE WHEN i.status = 'FAILED' THEN s.payload ELSE NULL END \
+                SET status = CASE WHEN i.status IN ('SUCCEEDED', 'IGNORED', 'DUPLICATE') \
+                                  THEN 'SYNCED' ELSE 'FAILED' END, \
+                    synced_at = CASE WHEN i.status IN ('SUCCEEDED', 'IGNORED', 'DUPLICATE') \
+                                     THEN COALESCE(i.completed_at, now()) ELSE s.synced_at END, \
+                    payload = CASE WHEN i.status IN ('SUCCEEDED', 'IGNORED', 'DUPLICATE') \
+                                   THEN NULL ELSE s.payload END \
                FROM inbound_messages i \
               WHERE s.status = 'STAGED' \
                 AND i.source = $1 \

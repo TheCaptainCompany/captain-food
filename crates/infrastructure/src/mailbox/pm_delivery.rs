@@ -297,7 +297,7 @@ pub async fn backfill_stripe_facts_to_pm_lanes(
     let cp_refund = checkpoint("pm:RefundProcess").await?;
 
     let rows = sqlx::query(
-        "SELECT id, event_type, payload, correlation_id, user_id, user_type FROM domain_events \
+        "SELECT id, position, event_type, payload, correlation_id, user_id, user_type FROM domain_events \
          WHERE (event_type IN ('PaymentCaptured', 'PaymentFailed') AND position > $1) \
             OR (event_type = 'PaymentRefunded' AND position > $2) \
          ORDER BY position",
@@ -309,10 +309,28 @@ pub async fn backfill_stripe_facts_to_pm_lanes(
     .map_err(|e| DomainError::Repository(e.to_string()))?;
 
     let mut enqueued = 0u64;
+    // The highest position this pass SAW per group — advanced onto the frozen `pm:*` checkpoints
+    // after a clean pass (#272 review MAJOR: the runner no longer moves them behind the gate, so
+    // without this every restart re-scans the whole post-flip history and enqueues O(history)
+    // idempotent-but-position-fresh dead hops ahead of live reactions on the money lanes).
+    // Rollback-safe: everything at or below the advanced value was either runner-processed
+    // pre-flip or enqueued onto the PM lanes by this pass (and the lanes deliver regardless of
+    // the gate); facts recorded after it while the gate is ON are chained at record time, and a
+    // duplicate replay after a rollback is absorbed by the run rows' expects (IGNORED).
+    let mut seen_place: i64 = 0;
+    let mut seen_refund: i64 = 0;
     for row in rows {
         use sqlx::Row as _;
         let event_id: uuid::Uuid = row.try_get("id").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let position: i64 = row.try_get("position").map_err(|e| DomainError::Repository(e.to_string()))?;
         let event_type: String = row.try_get("event_type").map_err(|e| DomainError::Repository(e.to_string()))?;
+        // Every deterministically-handled row advances its group's watermark (skips mirror the
+        // runner's own advance-past-poison/orphan semantics); a transient error below returns
+        // Err before any advance is written.
+        match event_type.as_str() {
+            "PaymentRefunded" => seen_refund = seen_refund.max(position),
+            _ => seen_place = seen_place.max(position),
+        }
         let payload: serde_json::Value = row.try_get("payload").map_err(|e| DomainError::Repository(e.to_string()))?;
         let tagged = serde_json::json!({ "eventType": event_type, "payload": payload });
         let event: domain::generated::events::DomainEvent = match serde_json::from_value(tagged.clone()) {
@@ -369,6 +387,24 @@ pub async fn backfill_stripe_facts_to_pm_lanes(
         .map_err(|e| DomainError::Repository(e.to_string()))?
         .rows_affected();
         enqueued += inserted;
+    }
+    // A CLEAN pass advances the frozen checkpoints to what it saw, ending the O(history)
+    // restart re-scan. `GREATEST` keeps a concurrent peer's larger advance.
+    for (projector, seen) in
+        [("pm:PlaceOrderProcess", seen_place), ("pm:RefundProcess", seen_refund)]
+    {
+        if seen > 0 {
+            sqlx::query(
+                "INSERT INTO projection_checkpoint (projector, position, updated_at) VALUES ($1, $2, now()) \
+                 ON CONFLICT (projector) DO UPDATE \
+                 SET position = GREATEST(projection_checkpoint.position, EXCLUDED.position), updated_at = now()",
+            )
+            .bind(projector)
+            .bind(seen)
+            .execute(pool)
+            .await
+            .map_err(|e| DomainError::Repository(e.to_string()))?;
+        }
     }
     Ok(enqueued)
 }

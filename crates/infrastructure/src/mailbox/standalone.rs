@@ -26,6 +26,31 @@ use crate::generated::command_router::{CommandDeps, ACTOR_MAILBOXES};
 use crate::persistence::mailbox_store::MailboxNudges;
 use crate::persistence::status_bus::OperationStatusBus;
 
+/// Resolves on SIGTERM/ctrl-c — the adapter mains hand this to axum's `with_graceful_shutdown`.
+/// Installing the fleet's own signal task REPLACES the default SIGTERM disposition for the whole
+/// process, so without this the HTTP server would keep serving after the workers drained and
+/// every deploy would eat the full kill grace period (#272 review, 2026-08-01).
+pub async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(_) => std::future::pending().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+}
+
 /// The `RUN_MAILBOX_WORKERS` gate, read the same way the generated config reads its booleans.
 pub fn standalone_workers_enabled() -> bool {
     std::env::var("RUN_MAILBOX_WORKERS")
@@ -33,13 +58,22 @@ pub fn standalone_workers_enabled() -> bool {
         .unwrap_or(false)
 }
 
-/// The `PM_MAILBOX_DELIVERY` gate (Runtime D1) — the standalone fleet must chain PM copies of
-/// recorded Stripe facts exactly like the monolith's, or a flip would behave differently
-/// depending on WHICH process won the Payment lane's lease.
-fn pm_mailbox_delivery() -> bool {
+/// The `PM_MAILBOX_DELIVERY` posture (Runtime D1), EXPLICIT presence and all: the standalone
+/// fleet must chain PM copies of recorded Stripe facts exactly like the monolith's, or a flip
+/// behaves differently depending on WHICH process won the Payment lane's lease — a capture the
+/// adapter records without chaining is a saga hop nobody reacts to until a monolith restart
+/// (#272 review MAJOR, 2026-08-01). `None` = the key is UNSET in this environment, which for a
+/// money lane is an unprovable posture, not a default.
+fn pm_gate_posture() -> Option<bool> {
     std::env::var("PM_MAILBOX_DELIVERY")
+        .ok()
         .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
-        .unwrap_or(false)
+}
+
+/// The lanes whose behavior depends on the PM gate posture — recording Stripe facts (chaining)
+/// and reacting to them (the PM event legs).
+fn is_money_lane(actor_type: &str) -> bool {
+    matches!(actor_type, "Payment" | "PlaceOrderProcess" | "RefundProcess")
 }
 
 /// Fully Pg-backed [`CommandDeps`] for a standalone adapter process. External services the
@@ -78,13 +112,72 @@ pub fn spawn_standalone_workers(
     actor_types: &'static [&'static str],
     payments: Arc<dyn PaymentService>,
     nudges: Arc<MailboxNudges>,
-    reminder_windows: std::collections::HashMap<&'static str, i64>,
+    mut reminder_windows: std::collections::HashMap<&'static str, i64>,
 ) {
+    // MONEY-LANE POSTURE CHECK: a fleet whose PM_MAILBOX_DELIVERY is merely UNSET must not
+    // lease-compete on the Payment/PM lanes — an implicit `false` against a monolith running
+    // `true` records captures without chaining, and the hop is lost until a monolith restart.
+    // The operator states the posture explicitly (matching the monolith's) or those lanes stay
+    // with the monolith. An explicitly WRONG value is still an operator error — recorded in the
+    // RUN_MAILBOX_WORKERS gate prose; a DB-persisted posture is the follow-up that removes it.
+    let posture = pm_gate_posture();
+    let actor_types: Vec<&'static str> = actor_types
+        .iter()
+        .copied()
+        .filter(|a| {
+            if is_money_lane(a) && posture.is_none() {
+                tracing::error!(
+                    adapter,
+                    actor_type = a,
+                    "standalone mailbox: PM_MAILBOX_DELIVERY is UNSET -- refusing this money lane (set it explicitly, matching the monolith)"
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    // Any lane with declared `schedules:` needs its window; fall back to the SPEC DEFAULT when
+    // the caller wired none (the monolith reads Config; an adapter fleet has no Config reader) —
+    // a missing window would otherwise abort every delivery on that lane while its heartbeat
+    // keeps the lease: a permanent head-of-line wedge, not a retry.
+    for schedule in application::generated::reminders::REMINDER_SCHEDULES {
+        if actor_types.contains(&schedule.actor_type) {
+            reminder_windows.entry(schedule.after_days_key).or_insert_with(|| {
+                tracing::info!(
+                    adapter,
+                    key = schedule.after_days_key,
+                    days = schedule.after_default_days,
+                    "standalone mailbox: reminder window from spec default"
+                );
+                schedule.after_default_days
+            });
+        }
+    }
     let deps = standalone_deps(&pool, payments);
+    // Gate-ON parity with the monolith (#272 review MAJOR): a fleet that runs the PM lanes must
+    // also run the startup backfill, or a fact the retired saga runner accepted but never
+    // reacted to stays unreacted when THIS process is the one delivering.
+    if posture == Some(true) && actor_types.iter().any(|a| is_money_lane(a)) {
+        let backfill_pool = pool.clone();
+        let pm_state = deps.pm_state.clone();
+        tokio::spawn(async move {
+            match super::backfill_stripe_facts_to_pm_lanes(&backfill_pool, pm_state.as_ref()).await
+            {
+                Ok(n) if n > 0 => {
+                    tracing::info!(enqueued = n, "standalone mailbox: PM backfill enqueued un-reacted Stripe facts");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!(error = %e, "standalone mailbox: PM backfill failed -- un-reacted facts wait for the next restart");
+                }
+            }
+        });
+    }
     let handler = Arc::new(
         super::MailboxCommandHandler::new(deps)
             .with_reminder_windows(reminder_windows)
-            .with_pm_fact_chaining(pm_mailbox_delivery())
+            .with_pm_fact_chaining(posture.unwrap_or(false))
             .with_nudges(nudges.clone()),
     );
     // A local bus with no subscribers: publishes vanish, but the observer's
@@ -124,8 +217,9 @@ pub fn spawn_standalone_workers(
         std::future::pending::<()>().await;
     });
 
+    let worker_count = actor_types.len();
     for actor_type in actor_types {
-        let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| a == actor_type) else {
+        let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == actor_type) else {
             tracing::error!(adapter, actor_type, "standalone mailbox: not a mailbox actor -- worker not started");
             continue;
         };
@@ -133,7 +227,7 @@ pub fn spawn_standalone_workers(
             let mut w = actor_runtime::MailboxWorker::new(
                 pool.clone(),
                 worker_id.clone(),
-                *actor_type,
+                actor_type,
                 actor_runtime::WorkerConfig::default(),
                 handler.clone(),
             )
@@ -174,7 +268,7 @@ pub fn spawn_standalone_workers(
     }
     tracing::info!(
         adapter,
-        workers = actor_types.len(),
+        workers = worker_count,
         "standalone mailbox: adapter-owned workers running (RUN_MAILBOX_WORKERS)"
     );
 }

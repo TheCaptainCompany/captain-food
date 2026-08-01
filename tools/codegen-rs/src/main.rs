@@ -18680,6 +18680,49 @@ Catalog:
         issues
     }
 
+    /// `mailbox.activations` shape rules (#272 D3): a knob that parses to nothing would silently
+    /// run the global defaults — every malformed form must be a hard error, and the two legal
+    /// forms must be clean.
+    #[test]
+    fn mailbox_activations_shapes_are_validated() {
+        let base = |act: &str| {
+            format!(
+                "Order:\n  type: aggregate\n  identity: {{ $ref: '#/Order/state/orderId' }}\n  mailbox:\n    partitions: 100\n    activations: {act}\n  receives: []\n",
+            )
+        };
+        for (bad, why) in [
+            ("300", "a bare scalar is neither bool nor mapping"),
+            ("{ enabled: \"yes\" }", "enabled must be a real bool"),
+            ("{ idle_seconds: \"300\" }", "idle_seconds must be an integer"),
+            ("{ idle_seconds: 0 }", "zero would disable rather than tune -- use `activations: false`"),
+            ("{ idle_secs: 300 }", "an unknown key must not fall through to defaults"),
+        ] {
+            let issues = mb_issues(&base(bad));
+            assert_eq!(
+                rules_of(&issues),
+                vec!["mb-activations-shape"],
+                "{why}: {:?}",
+                issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+            );
+        }
+        for ok_form in ["false", "true", "{ enabled: false }", "{ idle_seconds: 60 }", "{ enabled: true, idle_seconds: 60 }"] {
+            let issues = mb_issues(&base(ok_form));
+            assert!(
+                issues.iter().all(|i| i.rule != "mb-activations-shape"),
+                "legal form '{ok_form}' flagged: {:?}",
+                issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+            );
+        }
+        // The block is legal on a PROCESS MANAGER too (any mailbox actor) — and still validated.
+        let pm = "RefundProcess:\n  type: process-manager\n  mailbox:\n    partitions: 100\n    activations: { idle_secs: 1 }\n  receives: []\n";
+        let issues = mb_issues(pm);
+        assert!(
+            issues.iter().any(|i| i.rule == "mb-activations-shape"),
+            "PM activations must be validated: {:?}",
+            issues.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn actor_identity_bare_string_is_a_hard_error() {
         let issues = mb_issues(

@@ -99,9 +99,11 @@ external_sirene_restaurants:
     On each drain the worker reads `inbound_messages.status` for its STAGED rows and writes the verdict
     back: SUCCEEDED / IGNORED / DUPLICATE all mean the record reached the domain and the domain is now
     correct about it (a no-change verdict is a real answer, not a failure -- conflating the two is what
-    once made a sweep unable to tell 200,000 registrations from 200,000 no-ops), so all three resolve
-    to SYNCED; FAILED surfaces as FAILED; RECEIVED means still in flight and is left alone. This
-    necessarily LAGS by at least one drain, because the verdict does not exist at hand-over time.
+    once made a sweep unable to tell 200,000 registrations from 200,000 no-ops), so exactly those three
+    resolve to SYNCED; ANY other terminal verdict surfaces as FAILED and keeps the payload (success is
+    enumerated, never inferred from "not FAILED"); RECEIVED/SCHEDULED mean still in flight and are left
+    alone. This necessarily LAGS by at least one drain, because the verdict does not exist at hand-over
+    time.
 
     `synced_at` is the third of that trio and answers WHEN, in wall-clock terms, this row last became a
     domain fact. It is NOT derivable from `processed_at`, and the difference is easy to miss: the worker

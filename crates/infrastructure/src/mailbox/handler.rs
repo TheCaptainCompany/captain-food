@@ -176,6 +176,11 @@ impl MessageHandler for MailboxCommandHandler {
             }))),
             Some(Ok(())) => {
                 let staged = staging.take_staged();
+                // Freshness guard BEFORE the flush: after it, MAX(version) would include this
+                // delivery's own appends and a legitimate append would read as stale.
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
                 match flush_staged_in_tx(tx, &staged).await {
                     Ok(()) => {
                         // The handler's third observable effect (ADR-20260731-214500 §2): a
@@ -221,7 +226,15 @@ impl MessageHandler for MailboxCommandHandler {
             Some(Err(DomainError::Repository(detail))) => {
                 return Err(sqlx::Error::Protocol(detail));
             }
-            Some(Err(e)) => Delivery::of(verdict_of_error(e)),
+            Some(Err(e)) => {
+                // A deterministic rejection stages nothing, so no UNIQUE race can catch a stale
+                // fold — the freshness guard is the ONLY fence between a held state and a
+                // durably wrong REJECTED (reviewer CRITICAL, 2026-08-01).
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(verdict_of_error(e))
+            }
         };
         Ok(delivery)
     }
@@ -394,6 +407,10 @@ impl MailboxCommandHandler {
         let delivery = match outcome {
             Ok(RecordOutcome::Recorded) | Ok(RecordOutcome::Updated) => {
                 let staged = staging.take_staged();
+                // Same pre-flush freshness guard as the COMMAND route.
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
                 match flush_staged_in_tx(tx, &staged).await {
                     // Same post-commit subscription fan-out as the COMMAND route: an inbound
                     // PaymentCaptured must reach `paymentStatusChanged` exactly like a
@@ -438,8 +455,21 @@ impl MailboxCommandHandler {
                     )),
                 }
             }
-            Ok(RecordOutcome::NoChange) => Delivery::of(HandlerVerdict::Ignored),
-            Ok(RecordOutcome::AlreadyRecorded) => Delivery::of(HandlerVerdict::Duplicate),
+            // The no-append verdicts are exactly where a stale hold has no UNIQUE race to lose:
+            // an Ignored/Duplicate decided from a held fold must re-assert freshness or a fact
+            // could be durably absorbed against state that no longer exists.
+            Ok(RecordOutcome::NoChange) => {
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Ignored)
+            }
+            Ok(RecordOutcome::AlreadyRecorded) => {
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Duplicate)
+            }
             // A conflict surfaced by the recorder itself: the stream moved under it — retry, same
             // reasoning as the flush-time clash above.
             Err(e) if is_version_conflict(&e) => {
@@ -454,9 +484,14 @@ impl MailboxCommandHandler {
             Err(DomainError::Repository(detail)) => {
                 return Err(sqlx::Error::Protocol(detail));
             }
-            Err(e) => Delivery::of(HandlerVerdict::Failed(
-                serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
-            )),
+            Err(e) => {
+                if let Some(a) = &activation {
+                    a.guard_freshness_in_tx(tx).await?;
+                }
+                Delivery::of(HandlerVerdict::Failed(
+                    serde_json::json!({ "code": "Internal", "context": { "detail": e.to_string() } }),
+                ))
+            }
         };
         Ok(delivery)
     }

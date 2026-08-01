@@ -84,5 +84,8 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
     tracing::info!(adapter = "hubrise", %addr, "webhook adapter listening");
-    axum::serve(listener, routes(state)).await.expect("server error");
+    axum::serve(listener, routes(state))
+        .with_graceful_shutdown(infrastructure::mailbox::shutdown_signal())
+        .await
+        .expect("server error");
 }

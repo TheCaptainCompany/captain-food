@@ -306,6 +306,9 @@ pub fn router() -> Router {
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
     let mut deletion_status: Option<Arc<Mutex<infrastructure::DeletionEngineStatus>>> = None;
+    // The activation cache handle (ACTOR_ACTIVATIONS on), hoisted out of the worker block so the
+    // deletion engine can evict erased streams from it.
+    let mut activation_cache: Option<Arc<infrastructure::mailbox::StreamActivations>> = None;
     let mut sirene_status: Option<Arc<Mutex<infrastructure::SireneSyncStatus>>> = None;
     let mut sirene_worker: Option<Arc<SireneSyncWorker>> = None;
     let mut stripe_ingestor: Option<Arc<StripeWebhookIngestor>> = None;
@@ -775,6 +778,7 @@ pub fn router() -> Router {
                     } else {
                         None
                     };
+                    activation_cache = activations.as_ref().map(|s| s.cache.clone());
                     let handler = Arc::new({
                         let mut h = infrastructure::mailbox::MailboxCommandHandler::new(deps)
                             .with_event_bus(event_bus.clone())
@@ -989,10 +993,15 @@ pub fn router() -> Router {
                 // that cannot serve a DECLARED deletion policy refuses to construct; with the
                 // gate ON that is a boot-stopping wiring bug (fail-fast, ADR-20260729-010500).
                 if config.run_deletion_engine {
-                    let engine = infrastructure::DeletionEngine::new(pool.clone())
+                    let mut engine = infrastructure::DeletionEngine::new(pool.clone())
                         .unwrap_or_else(|reason| {
                             panic!("RUN_DELETION_ENGINE is on but the engine refused to start: {reason}")
                         });
+                    // Erased streams must leave the activation cache with the deletion (GDPR:
+                    // no held fold of deleted events, no gapped resurrection from a held version).
+                    if let Some(cache) = &activation_cache {
+                        engine = engine.with_activations(cache.clone());
+                    }
                     deletion_status = Some(engine.status());
                     // Restart-safe at every journey boundary (two-tx design), so it needs no
                     // graceful drain: hold a never-firing shutdown sender and let the loop pace

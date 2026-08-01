@@ -65,5 +65,8 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
     tracing::info!(adapter = "stripe", %addr, "webhook adapter listening");
-    axum::serve(listener, routes(Some(ingestor))).await.expect("server error");
+    axum::serve(listener, routes(Some(ingestor)))
+        .with_graceful_shutdown(infrastructure::mailbox::shutdown_signal())
+        .await
+        .expect("server error");
 }

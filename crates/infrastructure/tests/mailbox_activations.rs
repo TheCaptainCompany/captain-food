@@ -338,6 +338,108 @@ async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writ
     assert_eq!(settings.cache.len(), 0, "a lost lane drops every held state under it");
 }
 
+/// THE FRESHNESS GUARD (#272 review CRITICAL): a delivery that terminates WITHOUT appending (a
+/// deterministic rejection) has no `UNIQUE(stream_name, version)` race to lose — a stale held
+/// fold would commit a durably WRONG verdict, and each retry's cache touch would keep the entry
+/// alive. The guard re-asserts the stream version inside the fenced transaction: mismatch →
+/// abort + invalidate, and the redelivery refolds and decides correctly.
+#[tokio::test]
+async fn stale_hold_cannot_commit_a_wrong_rejection() {
+    let Some(url) = gated() else { return };
+    let _suite = serialize_suite();
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    let order = uuid::Uuid::from_u128(0xAC73);
+    let restaurant = uuid::Uuid::from_u128(0x0E59);
+    let stream = format!("Conversation-{order}");
+    let partition = actor_runtime::stable_partition(&order, 100);
+
+    let counting = Arc::new(CountingStore::new(Arc::new(PgEventStore::new(pool.clone()))));
+    let settings = settings(true);
+    let handler = MailboxCommandHandler::new(deps_over(
+        counting.clone() as Arc<dyn EventStore>,
+        &pool,
+    ))
+    .with_activations(settings.clone());
+    let worker = MailboxWorker::new(
+        pool.clone(),
+        "w-A",
+        "Conversation",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        Arc::new(handler),
+    );
+    worker.seed(100).await.expect("seed");
+    worker.claim().await.expect("claim");
+
+    // 1. A PostMessage against the not-yet-existing conversation: correctly REJECTED
+    //    (ConversationNotFound) — and the EMPTY stream is now the held activation.
+    enqueue(&pool, partition, 0x11, order, "PostMessage", post_payload(order, 0x3001, "early")).await;
+    assert_eq!(worker.drain().await.expect("drain"), 1);
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM inbound_messages WHERE message_id = $1")
+            .bind(uuid::Uuid::from_u128(0x11))
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+    assert_eq!(status, "REJECTED", "the genuinely-absent conversation rejects");
+
+    // 2. An OUT-OF-BAND writer (the saga runner's shape: pool-side, no cache signal) opens the
+    //    conversation under the warm empty hold.
+    let foreign = PgEventStore::new(pool.clone());
+    let actor = Actor {
+        user_id: uuid::Uuid::nil(),
+        user_type: "ADMIN".into(),
+        domain_id: None,
+        correlation_id: uuid::Uuid::from_u128(0xF1),
+        cause_id: None,
+    };
+    foreign
+        .append(
+            &stream,
+            0,
+            &[DomainEvent::ConversationOpened(domain::generated::events::ConversationOpened {
+                order_id: domain::generated::scalars::OrderId(order),
+                restaurant_id: domain::generated::scalars::RestaurantId(restaurant),
+                customer_id: None,
+                customer_chat_enabled: true,
+            })],
+            &actor,
+        )
+        .await
+        .expect("foreign open");
+
+    // 3. The next PostMessage folds the STALE empty hold and would terminally reject a
+    //    conversation that EXISTS — the guard must abort instead (row stays RECEIVED).
+    enqueue(&pool, partition, 0x22, order, "PostMessage", post_payload(order, 0x3002, "after")).await;
+    assert_eq!(worker.drain().await.expect("drain"), 0, "the stale-fold rejection must not commit");
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM inbound_messages WHERE message_id = $1")
+            .bind(uuid::Uuid::from_u128(0x22))
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+    assert_eq!(status, "RECEIVED", "aborted delivery leaves the row undelivered");
+
+    // 4. The redelivery refolds from the log and SUCCEEDS — the customer's message posts.
+    assert_eq!(worker.drain().await.expect("retry drain"), 1);
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM inbound_messages WHERE message_id = $1")
+            .bind(uuid::Uuid::from_u128(0x22))
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+    assert_eq!(status, "SUCCEEDED", "the refolded delivery sees the opened conversation");
+    let types: Vec<String> = sqlx::query_scalar(
+        "SELECT event_type FROM domain_events WHERE stream_name = $1 ORDER BY version",
+    )
+    .bind(&stream)
+    .fetch_all(&pool)
+    .await
+    .expect("events");
+    assert_eq!(types, vec!["ConversationOpened", "MessagePosted"]);
+}
+
 #[tokio::test]
 async fn per_actor_opt_out_caches_nothing() {
     let Some(url) = gated() else { return };

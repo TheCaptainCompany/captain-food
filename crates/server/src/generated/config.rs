@@ -217,9 +217,7 @@ pub struct Config {
     pub mailbox_lease_seconds: i64,
     /// Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
     pub mailbox_heartbeat_seconds: i64,
-    /// Standalone adapter workers (#272 D3, deferred from the PR #270 review): ON in a webhook adapter's own deployment, the binary runs MailboxWorkers for exactly the lanes its ingestor feeds — so facts keep being DELIVERED (not just accepted) while the monolith is down. OFF (the default), the adapter only mirrors + enqueues and the monolith's fleet delivers. The trade-off the flip accepts: the status/event buses are in-process, so a fact delivered by the adapter process never reaches the monolith's push subscribers (polls unaffected) — which is why this is a deployment posture, not a default. Read by the adapter binaries only; the monolith ignores it (its composition root always runs the full fleet).
-    pub run_mailbox_workers: bool,
-    /// ACTIVATIONS (#272 D3, PROP-20260728-152752 §3.5): ON, each mailbox delivery folds the delivered actor's own stream through a shared held-state cache — filled on first load, extended with the committed appends strictly AFTER the fenced transaction commits (apply-after-commit), dropped on a lost version race, on lane loss, on idle expiry and under the memory bound. OFF (the default — gate-then-stabilize; the flip is its own one-line ADR after staging smoke), every delivery folds from the log, byte-identically to the pre-D3 runtime. Correctness never depends on the cache: a stale hold loses the UNIQUE(stream_name, version) race, aborts, invalidates and refolds.
+    /// ACTIVATIONS (#272 D3, PROP-20260728-152752 §3.5): ON, each mailbox delivery folds the delivered actor's own stream through a shared held-state cache — filled on first load, extended with the committed appends strictly AFTER the fenced transaction commits (apply-after-commit), dropped on a lost version race, on lane loss, on idle expiry and under the memory bound. OFF (the default — gate-then-stabilize; the flip is its own one-line ADR after staging smoke), every delivery folds from the log, byte-identically to the pre-D3 runtime. Correctness never depends on the cache, on BOTH verdict shapes: an APPEND from a stale hold loses the UNIQUE(stream_name, version) race, and a NON-APPEND terminal verdict (a deterministic rejection, an Ignored/Duplicate record) from a cache-served fold re-asserts the stream version inside the fenced transaction — either way the delivery aborts, invalidates and refolds, out-of-band writers (saga-runner legs, peer-process fleets, the deletion engine) included.
     pub actor_activations: bool,
     /// Global default for activation passivation (PROP-20260728-152752 §3.5): an in-memory actor unsolicited for this long is dropped, its next message paying one rehydration fold. Per-actor overrides live in actors.yaml (mailbox.activations.idle_seconds). Zero would disable the cache; too high and idle aggregates hold memory the LRU bound must then evict. Read by the ACTOR_ACTIVATIONS-gated cache (#272 D3).
     pub actor_activation_idle_seconds: i64,
@@ -387,10 +385,6 @@ impl Config {
         let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
-        let run_mailbox_workers = raw("RUN_MAILBOX_WORKERS")
-            .or_else(|| baked("RUN_MAILBOX_WORKERS", profile).map(str::to_string))
-            .map(|v| parse_bool("RUN_MAILBOX_WORKERS", &v, false))
-            .unwrap_or(false);
         let actor_activations = raw("ACTOR_ACTIVATIONS")
             .or_else(|| baked("ACTOR_ACTIVATIONS", profile).map(str::to_string))
             .map(|v| parse_bool("ACTOR_ACTIVATIONS", &v, false))
@@ -551,7 +545,6 @@ impl Config {
                 delivery_offer_max_ttl_seconds,
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
-                run_mailbox_workers,
                 actor_activations,
                 actor_activation_idle_seconds,
                 actor_activation_max_memory_mb,
@@ -630,7 +623,6 @@ impl Config {
         out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds));
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
-        out.push_str(&format!("  RUN_MAILBOX_WORKERS        = {}\n", self.run_mailbox_workers));
         out.push_str(&format!("  ACTOR_ACTIVATIONS          = {}\n", self.actor_activations));
         out.push_str(&format!("  ACTOR_ACTIVATION_IDLE_SECONDS = {}\n", self.actor_activation_idle_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATION_MAX_MEMORY_MB = {}\n", self.actor_activation_max_memory_mb));
@@ -673,7 +665,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 58;
+pub const KEY_COUNT: usize = 57;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -698,7 +690,6 @@ pub const DECLARED_KEYS: &[&str] = &[
     "DELIVERY_OFFER_MAX_TTL_SECONDS",
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
-    "RUN_MAILBOX_WORKERS",
     "ACTOR_ACTIVATIONS",
     "ACTOR_ACTIVATION_IDLE_SECONDS",
     "ACTOR_ACTIVATION_MAX_MEMORY_MB",

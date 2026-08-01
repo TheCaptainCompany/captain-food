@@ -60,9 +60,14 @@ description: >
 # names the payload property that IS the instance id — the mailbox's actor_id and the stream id.
 # The identity field is the STREAM KEY, implicitly declared by this ref (it exists before any fold),
 # so it needs no explicit `state:` entry. `mailbox.partitions` is the FIXED keyspace width; worker
-# scaling leases ranges of it and never changes it. Validated by pr-*/identity-*/id-*/mb-*
-# (identity-property-not-on-command / id-not-in-payload warn while birth-command id minting is
-# unresolved — #242 slice 3).
+# scaling leases ranges of it and never changes it. An optional `mailbox.activations` block
+# (`false`, or `{ enabled, idle_seconds }`) tunes the ACTOR_ACTIVATIONS-gated held-state cache
+# per actor (#272 D3). Validated by pr-*/identity-*/id-*/mb-*. Id-minting is RESOLVED at both
+# enqueue doors (#272 D3: a declared identity property that fails to parse errors at the door);
+# the surviving identity-property-not-on-command / id-not-in-payload WARNS name the known
+# non-payload identities — Payment's surrogate `Payment-<intentId>` lanes (facts keyed by the
+# gateway's intent id, lane id = UUIDv5 surrogate) and Customer's RequestPhoneVerification
+# (a side-effect command with no instance yet: any lane serializes it).
 
 principals:
   CUSTOMER:           { id: { $ref: 'scalars.yaml#/CustomerId' } }

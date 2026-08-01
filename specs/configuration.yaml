@@ -426,6 +426,10 @@ keys:
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
     default: false
+    # `consumer` keeps this key OUT of the server Config: only the adapter binaries read it
+    # (their own env parse in infrastructure::mailbox::standalone), and a resolved-but-ignored
+    # monolith field would imply an authority the monolith does not have.
+    consumer: adapters
     gates: >
       Standalone adapter workers (#272 D3, deferred from the PR #270 review): ON in a webhook
       adapter's own deployment, the binary runs MailboxWorkers for exactly the lanes its
@@ -433,9 +437,13 @@ keys:
       down. OFF (the default), the adapter only mirrors + enqueues and the monolith's fleet
       delivers. The trade-off the flip accepts: the status/event buses are in-process, so a
       fact delivered by the adapter process never reaches the monolith's push subscribers
-      (polls unaffected) — which is why this is a deployment posture, not a default. Read by
-      the adapter binaries only; the monolith ignores it (its composition root always runs the
-      full fleet).
+      (polls unaffected) — which is why this is a deployment posture, not a default. The MONEY
+      lanes (Payment / PlaceOrderProcess / RefundProcess) additionally demand an EXPLICIT
+      PM_MAILBOX_DELIVERY in the adapter's environment, matching the monolith's — an implicit
+      false against a monolith running true records captures without chaining their saga hop
+      (a paid order nobody reacts to until a restart); unset = those lanes are refused at
+      spawn. Read by the adapter binaries only; the monolith ignores it (its composition root
+      always runs the full fleet).
 
   ACTOR_ACTIVATIONS:
     type: bool
@@ -449,8 +457,12 @@ keys:
       (apply-after-commit), dropped on a lost version race, on lane loss, on idle expiry and
       under the memory bound. OFF (the default — gate-then-stabilize; the flip is its own
       one-line ADR after staging smoke), every delivery folds from the log, byte-identically
-      to the pre-D3 runtime. Correctness never depends on the cache: a stale hold loses the
-      UNIQUE(stream_name, version) race, aborts, invalidates and refolds.
+      to the pre-D3 runtime. Correctness never depends on the cache, on BOTH verdict shapes:
+      an APPEND from a stale hold loses the UNIQUE(stream_name, version) race, and a NON-APPEND
+      terminal verdict (a deterministic rejection, an Ignored/Duplicate record) from a
+      cache-served fold re-asserts the stream version inside the fenced transaction — either
+      way the delivery aborts, invalidates and refolds, out-of-band writers (saga-runner legs,
+      peer-process fleets, the deletion engine) included.
 
   ACTOR_ACTIVATION_IDLE_SECONDS:
     type: int

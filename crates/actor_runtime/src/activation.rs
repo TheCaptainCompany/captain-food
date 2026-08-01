@@ -44,6 +44,11 @@ struct Inner<V> {
     entries: HashMap<String, Entry<V>>,
     total_bytes: usize,
     tick: u64,
+    /// Bumped on every INVALIDATION signal (`invalidate`, `drop_partition`) — the fence for
+    /// fill-vs-invalidate races: a fill that started before an invalidation must not install
+    /// its (possibly pre-invalidation) snapshot after it. Idle/LRU evictions do NOT bump it —
+    /// they signal memory pressure, not staleness.
+    epoch: u64,
 }
 
 /// The activation dictionary. One instance is shared by every worker of a process (entries are
@@ -58,9 +63,16 @@ impl<V> ActivationCache<V> {
     /// least-recently-used entries until back under.
     pub fn new(max_bytes: usize) -> Self {
         Self {
-            inner: Mutex::new(Inner { entries: HashMap::new(), total_bytes: 0, tick: 0 }),
+            inner: Mutex::new(Inner { entries: HashMap::new(), total_bytes: 0, tick: 0, epoch: 0 }),
             max_bytes,
         }
+    }
+
+    /// The current invalidation epoch — capture BEFORE reading the backing store, hand back to
+    /// [`Self::put_at_epoch`] so a fill cannot re-install a snapshot past an invalidation that
+    /// raced it (the TOCTOU fence).
+    pub fn epoch(&self) -> u64 {
+        self.inner.lock().unwrap().epoch
     }
 
     /// Look up a held state. An expired entry is passivated on the spot (miss); a live one is
@@ -87,6 +99,28 @@ impl<V> ActivationCache<V> {
         None
     }
 
+    /// [`Self::put`] fenced against invalidations: installs only if no `invalidate`/
+    /// `drop_partition` happened since `at_epoch` was captured (see [`Self::epoch`]). Returns
+    /// whether the value was installed. Fills MUST use this — a plain `put` of data read before
+    /// a racing invalidation would resurrect exactly the staleness the invalidation announced.
+    pub fn put_at_epoch(
+        &self,
+        key: &str,
+        actor_type: &str,
+        partition: i16,
+        idle: Duration,
+        bytes: usize,
+        value: Arc<V>,
+        at_epoch: u64,
+    ) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.epoch != at_epoch {
+            return false;
+        }
+        Self::put_locked(&mut inner, self.max_bytes, key, actor_type, partition, idle, bytes, value);
+        true
+    }
+
     /// Insert or replace a held state (the host calls this on fill AND on apply-after-commit
     /// promotion — promotion is a replace). Evicts LRU entries if the byte bound is crossed;
     /// a single value larger than the whole bound is inserted and immediately evicted, i.e.
@@ -101,6 +135,20 @@ impl<V> ActivationCache<V> {
         value: Arc<V>,
     ) {
         let mut inner = self.inner.lock().unwrap();
+        Self::put_locked(&mut inner, self.max_bytes, key, actor_type, partition, idle, bytes, value);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn put_locked(
+        inner: &mut Inner<V>,
+        max_bytes: usize,
+        key: &str,
+        actor_type: &str,
+        partition: i16,
+        idle: Duration,
+        bytes: usize,
+        value: Arc<V>,
+    ) {
         inner.tick += 1;
         let tick = inner.tick;
         if let Some(old) = inner.entries.remove(key) {
@@ -119,7 +167,7 @@ impl<V> ActivationCache<V> {
                 last_used: tick,
             },
         );
-        while inner.total_bytes > self.max_bytes && !inner.entries.is_empty() {
+        while inner.total_bytes > max_bytes && !inner.entries.is_empty() {
             let lru_key = inner
                 .entries
                 .iter()
@@ -137,6 +185,7 @@ impl<V> ActivationCache<V> {
     /// appends to a stream some OTHER lane may be holding).
     pub fn invalidate(&self, key: &str) {
         let mut inner = self.inner.lock().unwrap();
+        inner.epoch += 1;
         if let Some(e) = inner.entries.remove(key) {
             inner.total_bytes -= e.bytes;
         }
@@ -147,6 +196,7 @@ impl<V> ActivationCache<V> {
     /// trusted to stay equal to the committed fold.
     pub fn drop_partition(&self, actor_type: &str, partition: i16) {
         let mut inner = self.inner.lock().unwrap();
+        inner.epoch += 1;
         let doomed: Vec<String> = inner
             .entries
             .iter()
@@ -245,6 +295,24 @@ mod tests {
         std::thread::sleep(Duration::from_millis(5));
         assert_eq!(c.sweep(), 1, "sweep passivates without an access");
         assert!(c.get("b").is_some(), "live entry untouched");
+    }
+
+    /// The TOCTOU fence: a fill whose read started before a racing invalidation must not
+    /// install its snapshot after it (the invalidation announced staleness the fill's data may
+    /// predate). Idle/LRU evictions are memory pressure, not staleness — they don't fence.
+    #[test]
+    fn a_fill_never_lands_past_a_racing_invalidation() {
+        let c = cache(1024);
+        let before = c.epoch();
+        c.invalidate("Order-1"); // the racing invalidation (entry absent — still a signal)
+        assert!(
+            !c.put_at_epoch("Order-1", "Order", 3, IDLE, 10, Arc::new(1), before),
+            "a pre-invalidation snapshot must be refused"
+        );
+        assert!(c.get("Order-1").is_none());
+        let now = c.epoch();
+        assert!(c.put_at_epoch("Order-1", "Order", 3, IDLE, 10, Arc::new(2), now));
+        assert_eq!(c.get("Order-1").as_deref(), Some(&2));
     }
 
     #[test]

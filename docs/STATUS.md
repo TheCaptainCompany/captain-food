@@ -93,6 +93,18 @@
 > to parse errors at the GraphQL door like the worker door — never a silent random lane).
 > Stale `inbound_events` narratives in integration_staging.yaml + the SIRENE worker rewritten
 > to `inbound_messages`.
+> ✅ **D3 review round 2 (2026-08-01, full-branch, three lenses): 1 critical + 4 major, all
+> FIXED** — the activation FRESHNESS GUARD (a cache-served delivery re-asserts the stream
+> version in the fenced tx: non-append verdicts had no UNIQUE race to lose, so a stale hold
+> could durably commit a wrong REJECTED — E2E `stale_hold_cannot_commit_a_wrong_rejection`);
+> fill-epoch TOCTOU fence; deletion engine evicts erased streams from the cache; standalone
+> money lanes REFUSE an unset PM_MAILBOX_DELIVERY (+ adapter-side backfill parity); Stripe 409
+> in-flight idempotency conflicts retry instead of terminally failing a stolen-lane checkout;
+> the backfill advances the frozen pm:* checkpoints (no more O(history) restart re-scans).
+> Minors: mb-activations-shape negative tests, adapter graceful HTTP shutdown, spec-default
+> reminder windows in standalone fleets, SIRENE success-is-enumerated verdict SQL,
+> RUN_MAILBOX_WORKERS out of the server Config (`consumer`). Details in the proposal's review
+> round 2 section.
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).

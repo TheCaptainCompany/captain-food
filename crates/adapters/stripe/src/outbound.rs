@@ -225,6 +225,19 @@ fn map_error(context: &str, status: u16, body: &str) -> DomainError {
                 let code_suffix = if code.is_empty() { String::new() } else { format!(" ({code})") };
                 return DomainError::Invariant(format!("PaymentDeclined: {message}{code_suffix}"));
             }
+            // `idempotency_error` is two DIFFERENT conditions: HTTP 400 = the same key was
+            // reused with different parameters (deterministic — a keying bug, terminal), but
+            // HTTP 409 = a request with the SAME key is concurrently in flight — transient by
+            // definition, and one the runtime now MANUFACTURES routinely: a rebalance steal
+            // redelivers a head row whose victim's prepare is still executing, so thief and
+            // victim run the same `intent:{orderId}` key at once. Terminal here would fail a
+            // checkout the winning arm was completing (#272 review MAJOR, 2026-08-01) — retry
+            // in place instead; the settled gateway object answers the retry.
+            if kind == "idempotency_error" && status == 409 {
+                return DomainError::Repository(format!(
+                    "stripe: {context} idempotency key in flight (HTTP 409): {message}"
+                ));
+            }
             if kind == "invalid_request_error" || kind == "idempotency_error" {
                 return DomainError::Invariant(format!(
                     "PaymentGatewayRefused: stripe {context} refused deterministically (HTTP {status}, code '{code}'): {message}"
@@ -401,6 +414,19 @@ mod tests {
         match decode_create_intent_response(429, body) {
             Err(DomainError::Repository(msg)) => assert!(msg.contains("HTTP 429"), "{msg}"),
             other => panic!("expected Repository error, got {other:?}"),
+        }
+    }
+
+    /// #272 D3 review MAJOR: HTTP 409 `idempotency_error` = the SAME key concurrently in flight
+    /// (a rebalance steal redelivering while the victim's prepare still runs) — transient, must
+    /// retry in place, never a terminal refusal that fails a checkout the winning arm was
+    /// completing. Only the 400 params-mismatch form stays terminal (asserted above).
+    #[test]
+    fn in_flight_idempotency_conflict_409_is_retryable() {
+        let body = r#"{"error":{"type":"idempotency_error","code":"","message":"There is currently another in-progress request using this Idempotency Key."}}"#;
+        match decode_create_intent_response(409, body) {
+            Err(DomainError::Repository(msg)) => assert!(msg.contains("in flight"), "{msg}"),
+            other => panic!("expected retryable Repository error, got {other:?}"),
         }
     }
 
