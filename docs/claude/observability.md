@@ -56,3 +56,29 @@ acceptance path only; async completion is watched via `command_completion_ms`.
 ## Rule
 
 If an observability contract test fails, fix instrumentation/middleware — **not the domain model**.
+
+## Reading production telemetry — Honeycomb MCP (moved from CLAUDE.md, 2026-08-01)
+
+Traces/metrics go to **Honeycomb EU (`eu1`)** — a GDPR constraint, not a default
+(ADR-20260729-183000: spans carry `customerId`/`orderId`; ADR-0042 pinned data to Frankfurt).
+The MCP server is declared in `.mcp.json`, pinned to `https://mcp.eu1.honeycomb.io/mcp`.
+
+**The region is the trap**: the `honeycomb` plugin ships the US default (`mcp.honeycomb.io`),
+and US/EU are separate tenancies — authorizing the US host SUCCEEDS and then returns an empty
+environment list, which reads as a broken integration rather than a wrong region. The
+project-scoped `.mcp.json` overrides that for everyone; do not "fix" it back.
+
+Auth is per-user OAuth on first use (no secret in the repo); it needs an INTERACTIVE session and
+**Honeycomb Intelligence** on the team (an empty tool list after clean auth is usually that
+add-on). Headless alternative: a **Management** API key (`<Key ID>:<Secret Key>`, scopes
+`Model Context Protocol` + `Environments` read) — the ingest key the app uses to SEND telemetry
+cannot read it back.
+
+Query discipline: `get_workspace_context` FIRST; discover fields with `find_columns` /
+`get_dataset_columns`; human-readable time ranges ("last 2 hours"), never epoch; name the
+environment and dataset in every query; prefer percentiles and `HEATMAP` over `AVG` (an average
+hides the Friday/Saturday 19:00-21:30 tail — a P99 checkout regression is invisible in a flat
+mean); correlate by `correlation_id`/`trace_id` — the write path is acceptance-first
+(ADR-20260720-015500), so a command's interesting half runs AFTER the mutation answered PENDING;
+filtering to the GraphQL span alone shows the accept, not the outcome.
+

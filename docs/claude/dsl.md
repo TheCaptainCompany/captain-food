@@ -46,3 +46,73 @@ changing anything (see `CLAUDE.md` for the index).
   otherwise (`test-uncovered-*`, `rule-uncovered`, `test-no-rule`, `op-uncovered-by-story`). Extend the
   specs — never weaken the gate.
 - After any DSL change: `make validate` must be green before `make generate`.
+
+## The specs index — full detail (moved from CLAUDE.md, 2026-08-01)
+
+CLAUDE.md keeps the one-line index; the load-bearing detail lives here:
+
+- **specs/database/** (ADR-0037/0039/0040) — the store schema as DSL: `tables/*.yaml` are the real
+  tables, globbed. `tables/eventstore.yaml` = `domain_events` + `domain_stream`;
+  `tables/referential.yaml` = seed/config tables (repo seed script, not projected);
+  `tables/projection_tables.yaml` = MATERIALIZED read-model tables, each `projector: app` (a Rust
+  projector over `domain_events`); `tables/integration_staging.yaml` = ADAPTER-OWNED raw staging
+  (`staging: true` — SIRENE mirror + the verbatim `external_stripe_events` /
+  `external_hubrise_callbacks` webhook mirrors, ADR-0045 / ADR-20260720-015400);
+  `tables/journals.yaml` = the WRITE-PATH JOURNALS (ADR-20260720-015300/-015400): the
+  `inbound_messages` mailbox (+ `mailbox_partitions`) and the residual `command_journal` —
+  journals never write `domain_events` and never replay as state. No SQL triggers (ADR-0040).
+  `projection_views.yaml` = the event-fed `View_*` read models — SQL VIEWS **generated** as a
+  per-column state-fold over `domain_events` from each column's `from` lineage (ADR-0039).
+  **Naming: `View_*` = a SQL VIEW; an unprefixed name = a TABLE.** `functions/*.sql` = event-store
+  functions. Generated to `specs/generated/schema.generated.sql` + `views.generated.sql`; enum
+  columns store the scalars.yaml TEXT value verbatim (ADR-20260728-170000 — no `ref_<enum>`
+  lookups). `specs/database.md` is the narrative rationale; the query→read-model mapping is the
+  `@reads` binding in `specs/api.yaml`.
+- **specs/screens/** (ADR-0033/0037, taxonomy ADR-20260722-091500) — Spec-Driven SDUI apps, one
+  file per audience (folder conveys the `_screens` suffix). Customer-facing front offices split
+  by host (ADR-20260722-160000): `captain_frontoffice.yaml` = the marketplace at
+  `live.captain.food`; `restaurant_frontoffice.yaml` = a single restaurant's storefront at
+  `{slug}.captain.food` (roles PUBLIC+CUSTOMER; also the source of the shared SDUI component
+  registry for `crates/web` `registry.rs`). Then `restaurant_backoffice.yaml`, `rider.yaml`,
+  `system.yaml`. Each file: screens + a `resolvers` allowlist (reads → api.yaml queries by $ref)
+  + an `actions` allowlist (writes → api.yaml mutations by $ref); screens declare `roles`
+  (⊆ UserType) and files declare `app_types`. The validator proves the API answers the UI; UI
+  needs the API lacks are explicit `gaps`; `sdui: false` marks non-SDUI screens.
+- **specs/translations.yaml** (ADR-0033; sidecars ADR-20260722-101500) — SHARED UI i18n catalog,
+  errors.yaml-style (dotted keys + typed `params` + `messages.en`/`fr`) for cross-surface
+  strings (`common.*`) + future backend text; surface-specific strings live in co-located
+  sidecars `specs/screens/<surface>.translations.yaml` (keys globally unique across files); the
+  codegen merges everything into one `translations.generated.json`.
+- **specs/api.yaml** — the GraphQL surface (output-type registry, queries, mutations, ACL
+  `roles` → `@auth`/`@public`); SDL GENERATED to `specs/generated/schema.generated.graphql`.
+  **Role = path**: one master schema served per-role under `/{role}/graphql` (PUBLIC, CUSTOMER,
+  RESTAURANT_ACCOUNT, RESTAURANT, RIDER, ADMIN, EXTERNAL).
+- **specs/stories.yaml** — the executable story map (personas → activities → steps, each step a
+  $ref into api.yaml); the validator enforces completeness BOTH ways (steps resolve + persona
+  authorized, and every mutation/query reached by ≥1 step, `op-uncovered-by-story`).
+- **specs/rules.yaml** (ADR-0032) — business rules/invariants; every behaviour test links ≥1
+  rule and every rule is asserted by ≥1 test (bidirectional, validator-enforced). Rules = WHAT,
+  `specs/tests.yaml` = HOW (Given/When/Then).
+- **specs/actors.yaml** — the actor-model catalog (codegen source): aggregates & process
+  managers, each with typed `identity`, optional `mailbox`, `reminders:`/`deletion:`
+  (ADR-20260731-214500), and an inbox of `{ message → emits, throws, schedules }` where every
+  ref is kind-checked.
+
+## CQRS methodology — commands vs inbound events (moved from CLAUDE.md, 2026-08-01)
+
+Commands are **derived from use cases** (ADR-0004), never mechanically one-per-event: a command
+may emit several events (`PlaceOrder` → frozen checkout + payment intent) and not all commands
+have a 1:1 counterpart.
+
+**Not every event originates from a command.** A command is a request the system can REJECT; an
+external system sometimes just INFORMS us of a fact that already happened — nothing to validate,
+nothing to refuse. Those are **inbound (integration) events**, recorded directly through the
+Anti-Corruption Layer (idempotently keyed), without a command. Rule of thumb: originator can be
+told "no" → command; stating an already-occurred fact → inbound event. Captain.Food inbound
+events: Stripe `PaymentCaptured`/`PaymentFailed`/`PaymentRefunded`; HubRise inventory sync +
+externally-channeled order updates; delivery partners' `DeliveryStatusUpdated`/
+`DeliveryAcceptedByPartner`. Note the request/report split: a refund is REQUESTED by a command
+(`RejectOrder`, `CancelOrder*`) but the `PaymentRefunded` FACT is REPORTED by Stripe. Contrast
+`ImportCatalog`: stays a command even though the data comes from HubRise — we orchestrate it and
+can reject it. In the story map, inbound events are marked 📥.
+

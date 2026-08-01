@@ -36,7 +36,10 @@ The [specs/](specs/) folder is the **source of truth** for the domain and archit
 Read the relevant file before implementing or changing anything:
 
 - [specs/PRODUCT_SPEC_WEB_CLIENT.md](specs/PRODUCT_SPEC_WEB_CLIENT.md) — web client product spec (user flows, checkout, Stripe payment, order tracking, NFRs, tech constraints).
-- [specs/database/](specs/database/) — the store schema as DSL (ADR-0037/0039/0040): `tables/*.yaml` (real tables, globbed — `tables/eventstore.yaml` = `domain_events` + `domain_stream`; `tables/referential.yaml` = seed/config tables configured once by a repo seed script, not projected; `tables/projection_tables.yaml` = MATERIALIZED read-model tables whose columns are computed, each `projector: app` — an application-layer (Rust) projector over `domain_events` (deferred until `crates/`); `tables/integration_staging.yaml` = ADAPTER-OWNED raw staging (`staging: true` — SIRENE mirror + the verbatim `external_stripe_events`/`external_hubrise_callbacks` webhook mirrors, ADR-0045/ADR-20260720-015400); `tables/journals.yaml` = the WRITE-PATH JOURNALS (ADR-20260720-015300/-015400): `command_journal` (one row per command submission, persisted BEFORE handling — idempotency + operationStatus source, records rejections) and `inbound_events` (adapted inbound BUSINESS events drained through the normal write path) — journals never write `domain_events` and never replay as state; no SQL triggers, so projection/business logic stays out of the DB (ADR-0040)), `projection_views.yaml` (the event-fed `View_*` read models — SQL VIEWS **generated** as a per-column state-fold over `domain_events` from each column's `from` lineage, ADR-0039). **Naming: `View_*` = a SQL VIEW; an unprefixed name = a TABLE.** `functions/*.sql` (event-store functions). Generated to `specs/generated/schema.generated.sql` (tables) + `views.generated.sql` (fold views); enum columns store the scalars.yaml TEXT value verbatim (ADR-20260728-170000 — no `ref_<enum>` lookup tables). [specs/database.md](specs/database.md) is the narrative rationale; query→read-model mapping is the `@reads` binding in [specs/api.yaml](specs/api.yaml).
+- [specs/database/](specs/database/) — the store schema as DSL: real tables, generated `View_*`
+  fold views, event-store functions, journals (the `inbound_messages` mailbox). `View_*` = a SQL
+  VIEW; unprefixed = a TABLE. Full taxonomy + generation detail: [docs/claude/dsl.md](docs/claude/dsl.md);
+  narrative: [specs/database.md](specs/database.md).
 - [specs/scalars.yaml](specs/scalars.yaml) — domain scalar types (IDs, names, money, enums: `OrderStatus`, `RestaurantStatus`, `ServiceType`, `StockStatus`, etc.).
 - [specs/entities.yaml](specs/entities.yaml) — value objects and aggregates. HubRise-aligned catalog: `Restaurant`, `Catalog`, `CatalogCategory` (tree), `Product` → `Offer[]` (SKUs), `OptionList`/`Option`, `Cart`/`CartLineItem`, `Order`, `OrderLineItem`. Value objects `Money`, `Stock`, `TaxRate`, `Address`.
 - [specs/events.yaml](specs/events.yaml) — **business event** payloads (RestaurantRegistered, ProductAdded, CatalogImported, OrderPlaced...). `*Updated` events carry the full entity (replace semantics).
@@ -45,9 +48,14 @@ Read the relevant file before implementing or changing anything:
 - [specs/actors.yaml](specs/actors.yaml) — **actor-model catalog** (codegen source): aggregates & process managers, each with its inbox of `{ message → emits, throws }`, where every message/event/error is a `$ref` into commands.yaml/events.yaml/errors.yaml (checkable; the ref path encodes kind). Personas/authz live elsewhere (GraphQL `@auth`, story map).
 - [specs/stories.yaml](specs/stories.yaml) — the **executable story map** (codegen source): personas → activities → steps, each step a `$ref` into an api.yaml query/mutation. The validator enforces completeness BOTH ways: steps resolve + persona role authorized, AND every mutation/query is reached by ≥1 step (`op-uncovered-by-story`).
 - [specs/rules.yaml](specs/rules.yaml) — **business rules / invariants** (ADR-0032): each a readable guarantee. Every behaviour test links to ≥1 rule and every rule is asserted by ≥1 test (bidirectional, validator-enforced). Rules say WHAT we guarantee; [specs/tests.yaml](specs/tests.yaml) says HOW (Given/When/Then). A rule may span several tests.
-- [specs/screens/](specs/screens/) — **Spec-Driven SDUI** apps (ADR-0033/0037, taxonomy refined by ADR-20260722-091500), **one file per audience, named without a `_screens` suffix** (the folder conveys it). Two are customer-facing **front offices** split by host: `captain_frontoffice.yaml` = the **marketplace** (cross-restaurant discovery: `home`/`search` + partner marketing) at `live.captain.food` → bare `captain.food` later; `restaurant_frontoffice.yaml` = a **single restaurant's storefront** (catalog → cart → checkout → tracking, plus the customer account/order screens) at `{slug}.captain.food` (renamed from `customer_screens.yaml`; roles PUBLIC+CUSTOMER). The marketplace was split out of the storefront by ADR-20260722-160000 (#75). Then `restaurant_backoffice.yaml` (staff), `rider.yaml`, `system.yaml` to follow. Each: screens + a **`resolvers`** allowlist (reads → `api.yaml` queries by `$ref`) + an **`actions`** allowlist (writes → `api.yaml` mutations by `$ref`); the SDUI **component registry** is a renderer-level shared allowlist declared once (in `restaurant_frontoffice.yaml`, the source for `crates/web` `registry.rs`). Each screen declares `roles` (⊆ UserType — so PUBLIC+CUSTOMER share the front office) and the file declares `app_types` (web/ios/android/windows); a `system`/admin screen set may follow (refining ADR-0037's impersonation-only stance). The validator (generic over `screens/*.yaml`) proves the **API answers the UI**; UI needs the API lacks are explicit `gaps`; `sdui: false` marks non-SDUI screens. Runtime (renderer/registry/Supabase) is a deferred contract.
-- [specs/translations.yaml](specs/translations.yaml) — **SHARED UI i18n catalog** (ADR-0033; sidecars per ADR-20260722-101500), errors.yaml-style: dotted keys + typed `params` + `messages.en`/`fr`. Holds strings shared across surfaces (`common.*`) + future backend/server-rendered text; **surface-specific** strings live in co-located sidecars `specs/screens/<surface>.translations.yaml` (e.g. `restaurant_frontoffice.translations.yaml`). Screens `$ref` the file holding the key (keys globally unique across files). The codegen **merges** `translations.yaml` + every `screens/*.translations.yaml` into one `translations.generated.json`.
-- [specs/api.yaml](specs/api.yaml) — the **GraphQL API surface** (source of truth): output-type registry, queries, mutations, and the ACL (`roles` → `@auth`/`@public`). The SDL is GENERATED from it to `specs/generated/schema.generated.graphql` (the hand-written `schema.graphql` has been removed). **Role = path**: one master schema served per-role under `/{role}/graphql`, filtered by the `@auth`/`@public` ACL (roles: PUBLIC, CUSTOMER, RESTAURANT_ACCOUNT, RESTAURANT, RIDER, ADMIN, EXTERNAL).
+- [specs/screens/](specs/screens/) — Spec-Driven SDUI apps, one file per audience
+  (marketplace / storefront front offices split by host, backoffice, rider, system); each file =
+  screens + `resolvers`/`actions` allowlists into api.yaml, validator-proved, gaps explicit.
+  Detail: [docs/claude/dsl.md](docs/claude/dsl.md).
+- [specs/translations.yaml](specs/translations.yaml) — shared UI i18n catalog + per-surface
+  sidecars, merged into one generated JSON. Detail: [docs/claude/dsl.md](docs/claude/dsl.md).
+- [specs/api.yaml](specs/api.yaml) — the GraphQL surface (types, queries, mutations, ACL); SDL
+  generated. **Role = path**: one master schema served per-role under `/{role}/graphql`.
 - [specs/integrations/hubrise.md](specs/integrations/hubrise.md) — HubRise integration: exposed data, mapping → domain, ACL, gaps, import path.
 
 For a single **navigable, fully detailed view of the whole product** (stories → api → actors → views →
@@ -55,45 +63,27 @@ commands → events → entities → scalars → errors, each with its descripti
 generator and read [specs/generated/documentation.generated.md](specs/generated/documentation.generated.md)
 — it is GENERATED from the specs above (do not hand-edit), so it never drifts from the source of truth.
 
-## CQRS methodology — commands
+## CQRS methodology — commands vs inbound events
 
-Commands are **derived from use cases** (business intentions from the story map), **not** from events.
-Do NOT mechanically generate one command per event: a command may emit **several events**
-(e.g. `PlaceOrder` → `OrderPlaced` + payment), and not all commands have a 1:1 counterpart.
-See [ADR-0004](docs/adr/0004-commands-derived-from-use-cases.md) and [specs/stories.yaml](specs/stories.yaml) for the use case → command derivation.
-
-### Commands vs inbound (integration) events
-
-**Not every event originates from a command.** A **command** is a *request* to change state that the
-system can **reject** — it validates invariants first. But an external system or actor sometimes just
-**informs** us that something already happened on their side: there is nothing to validate and nothing
-to reject. These are **inbound (integration) events** — recorded as facts directly (through the
-Anti-Corruption Layer, idempotently keyed where possible), **without a command**.
-
-Rule of thumb: if the originator can be told *"no"* → **command**. If they are stating a fact that has
-**already occurred** → **inbound event** (no command).
-
-Captain.Food inbound events:
-- **Stripe** webhooks: `PaymentCaptured`, `PaymentFailed`, `PaymentRefunded` — Stripe reports the outcome; we record it.
-- **HubRise**: inventory sync (`OfferStockUpdated`) and externally-channeled order updates.
-- **Delivery partner** (e.g. Avelo37): `DeliveryStatusUpdated`, `DeliveryAcceptedByPartner` (post-V0).
-
-Note the request/report split: a refund is **requested** by a command (`RejectOrder`, `CancelOrder*`),
-but the `PaymentRefunded` **fact** is **reported** by Stripe (inbound). Contrast `ImportCatalog`, which
-stays a **command** even though the data comes from HubRise — we orchestrate it and can reject it via ACL
-validation. In the story map, inbound events are marked 📥.
+Commands are **derived from use cases** (ADR-0004), never one-per-event. A command is a request
+the system can REJECT; an external fact that already happened is an **inbound (integration)
+event**, recorded through the ACL without a command (Stripe payment facts, HubRise sync,
+delivery-partner reports — marked 📥 in the story map). Full doctrine + examples:
+[docs/claude/dsl.md](docs/claude/dsl.md).
 
 ## Architecture (summary)
 
-- **Full-stack Rust** (ADR-0034 — supersedes the earlier Next.js/Node stack). **Cargo workspace** in Clean-Architecture layers (ADR-0035): `crates/domain` (pure DDD — aggregates/commands/events/policies/value-objects + the `Aggregate` trait (event-sourced-actor identity + `fold`); may derive `serde` on events/VOs but no serialization *logic*), `crates/application` (use cases — `ports/` traits, command/query handlers, `process_managers/` sagas, and a write-side `Repository` over the event-store journal so handlers/runner never touch the raw `EventStore` — ADR-20260719-031136), `crates/infrastructure` (adapters — event store, read-model repos over `View_*`, `integrations/` ACL for HubRise/Stripe/delivery), `crates/server` (Axum BFF — GraphQL, SDUI, `middleware/tenant`), `crates/shared_types` (serde + UniFFI), `crates/core` (Crux app-shell over `domain`), `crates/web` (Leptos → WASM SDUI renderer), `crates/desktop` (Tauri 2.0). Mobile = thin SwiftUI/Compose shells over the core via UniFFI. Dependency rule: outer→inner only; `domain` imports nothing else.
-- **Frontend**: **Leptos** (Rust→WASM), SSR+hydration; the SDUI screens (ADR-0033) render via a generated Leptos component registry. All backend calls go through **GraphQL**.
-- **Backend**: **Rust** — Axum + Tokio + SQLx (compile-time-checked) + async-graphql, **CQRS-light + event log**.
-  - Mutations (commands) validate invariants then write events into the append-only `domain_events` table.
-  - Queries read the dedicated **`View_*` read models** — **never** raw `domain_events`. In **V0** these are Postgres **SQL views defined over `domain_events`** (projection-on-read, ADR-0035); a hot view can later become a materialized table fed by a projector with no query-API change (refines ADR-0005).
-  - No full event sourcing (no snapshots/replay) in V0.
-- **Database**: managed PostgreSQL (e.g. Supabase).
-- **Multi-tenant**: restaurant resolution via the `Host` header; pattern `{restaurantSlug}.captain.food` (wildcard `*.captain.food`).
-- **Integrations**: Stripe (payments, later Stripe Connect), HubRise (existing restaurant systems), delivery partner (e.g. Avelo37), Supabase Auth (passwordless phone-OTP + email magic-link identity — **wrapped** behind our GraphQL, see [specs/integrations/supabase.md](specs/integrations/supabase.md) / ADR-0015).
+**Full-stack Rust** (ADR-0034/0035), Cargo workspace in Clean-Architecture layers — `domain`
+(pure DDD, no outward imports) · `application` (ports, handlers, PMs, write-side Repository) ·
+`infrastructure` (event store, `View_*` repos, integration ACLs, the mailbox) · `server` (Axum
+BFF: GraphQL, SDUI, tenant middleware) · `actor_runtime` (generic mailbox: leases, fencing,
+head-of-line) · `shared_types`/`core`/`web`/`desktop` (UniFFI/Crux/Leptos/Tauri). Frontend =
+Leptos→WASM SDUI over GraphQL. Backend = CQRS-light + event log: mutations enqueue on the actor
+mailbox (acceptance-first, PENDING) and workers append to `domain_events`; queries read `View_*`
+read models, never the raw log. Managed Postgres; multi-tenant by `Host`
+(`{slug}.captain.food`); integrations: Stripe, HubRise, delivery partners, Supabase Auth
+(wrapped, identity-only — ADR-20260731-061609 moved hosting to OVH). Dependency rule:
+outer→inner only. Current runtime state: [docs/STATUS.md](docs/STATUS.md).
 
 ## Important conventions
 
@@ -120,34 +110,10 @@ validation. In the story map, inbound events are marked 📥.
 
 ## Reading production telemetry (Honeycomb MCP)
 
-Traces and metrics go to **Honeycomb EU (`eu1`)** — a GDPR constraint, not a default
-(ADR-20260729-183000: spans carry `customerId`/`orderId`, and ADR-0042 pinned data to Frankfurt).
-The MCP server used to read them back is declared in [`.mcp.json`](.mcp.json), pinned to the **EU**
-host `https://mcp.eu1.honeycomb.io/mcp`.
-
-**The region is the trap.** The `honeycomb` plugin ships the **US** default (`mcp.honeycomb.io`), and
-US/EU are separate tenancies — authorizing the US host *succeeds* and then returns an empty environment
-list, which reads as a broken integration rather than a wrong region. The project-scoped `.mcp.json`
-exists to override that default for everyone, so do not "fix" it back to the documented default.
-
-Auth is per-user OAuth on first use, so **no secret lives in the repo**. It needs an **interactive**
-session (the browser flow cannot complete in a remote/non-interactive one) and **Honeycomb Intelligence**
-enabled on the team — an empty tool list after a clean auth is usually that add-on, not the config. The
-headless alternative is a **Management** API key (`<Key ID>:<Secret Key>`; scopes `Model Context Protocol`
-+ `Environments`, read). Note the two key kinds are not interchangeable: the **ingest** key the app uses
-to *send* telemetry cannot read it back.
-
-When querying:
-
-- Call `get_workspace_context` **first** — it establishes which environments and datasets exist.
-- Discover fields with `find_columns` / `get_dataset_columns` before querying them.
-- Use human-readable time ranges (`"last 2 hours"`, `"24h"`), not epoch timestamps.
-- Name the environment and dataset explicitly in every query.
-- Prefer percentiles and `HEATMAP` over `AVG`. An average hides exactly the tail that matters at peak
-  (Friday/Saturday 19:00-21:30) — a P99 checkout regression is invisible in a flat mean.
-- Correlate by `correlation_id` / `trace_id`: the write path is acceptance-first
-  (ADR-20260720-015500), so a command's interesting half runs on a spawned task **after** the mutation
-  has already answered `PENDING`. Filtering to the GraphQL span alone shows the accept, not the outcome.
+Honeycomb **EU (`eu1`)** — a GDPR constraint; `.mcp.json` pins the EU host ON PURPOSE (the
+plugin's US default "succeeds" and then shows an empty environment list — do not "fix" it back).
+Auth, key kinds, and query discipline (percentiles over averages, correlate by
+`correlation_id`): [docs/claude/observability.md](docs/claude/observability.md).
 
 ## Operating model (read [docs/PLAYBOOK.md](docs/PLAYBOOK.md))
 
@@ -272,16 +238,8 @@ mutation/query is reached by a story step, and every test↔rule link holds both
 
 ## Project status
 
-The repo currently contains the **specs** ([specs/](specs/)), the **codegen** generator/validator
-([tools/codegen/](tools/codegen/)), and the **operating-model scaffold** ([docs/](docs/),
-`.claude/agents`, `.claude/hooks`, `Makefile`). The Rust workspace (`crates/`) does **not** exist yet
-(ADR-0034), so the runtime layers of the playbook — the Crux core, Leptos/Axum apps, OpenTelemetry
-emission, Kubernetes probes, BAM projections, GraphQL operation observability — are specified as
-**contracts + ADRs** and deferred until then. The codegen is a **Rust** tool
-([tools/codegen-rs/](tools/codegen-rs/), bin `generate`, ADR-0034): it runs the full validator (§1–§11)
-and every emitter (translations, views SQL + the `database.md` §2 injection, C4 Structurizr/Mermaid,
-GraphQL SDL, and the Markdown + HTML docs). It began as a TypeScript tool (`tools/codegen`), was ported
-to Rust at parity (all 8 artifacts byte-identical + the same validation issue set), and the TypeScript
-codegen was then **retired**. Run it with `make validate` / `make generate` (needs a local Rust
-toolchain; `make rust` = build + test + validate + generate). CI's single `codegen` gate does the same and
-fails on any spec↔generation drift.
+The live state (what exists, what is gated, what is next) is
+[docs/STATUS.md](docs/STATUS.md) — kept current with every substantive change, and deliberately
+NOT duplicated here. Toolchain: the Rust codegen `tools/codegen-rs` (bin `generate`) runs the
+whole validator + every emitter; `make validate` / `make generate` / `make rust`; CI's `codegen`
+gate fails on any spec↔generation drift.

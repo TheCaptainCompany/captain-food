@@ -146,6 +146,16 @@ operating model itself — **proposals, ADRs, `DECISIONS.md` and `STATUS.md` are
 session.** When a session has produced decisions, write them down and let the next session start
 small; do not carry a 30-turn context forward for its own sake.
 
+**Context discipline — the rules that keep a session under ~80k** (2026-08-01, after a week at
+87% of requests >150k context): (1) `specs/generated/**` and `crates/**/generated/**` are
+GREP-ONLY — never `Read` a generated artifact wholesale (`documentation.generated.md` alone can
+eat a third of a session); (2) GitHub MCP calls use `minimal_output: true` and small `perPage`
+unless the full payload is the point — a bare PR `get_diff` on a large PR returns megabytes
+(fetch the branch and use local `git diff` instead); (3) fan-out exploration goes to SUBAGENTS
+(Explore/reviewer/generator), never inline — their transcripts stay out of the main context;
+(4) ONE SESSION PER WORK CHUNK (CLAUDE.md rigor rules) — the repo carries the state, so ending a
+session is free and long context measurably raises the staleness error rate.
+
 **The scratchpad's parent-directory permissions RESET between wakeups** — a local Postgres run
 under a dedicated user (`pguser`) inside the scratchpad dies mid-session with "Permission denied"
 on the data directory, and every DB-gated suite then fails with PoolTimedOut/Connection refused
