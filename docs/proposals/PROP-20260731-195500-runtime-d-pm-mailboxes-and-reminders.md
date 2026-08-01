@@ -292,6 +292,45 @@ drill-down is declared as a `gaps` entry until its query exists.
   erasure needs (bookkeeping export) must consciously opt out via a hand-written PM.
 - The DSL grows three sections and seven validator rules — spec surface the team must learn.
 
+## Realization state (D3 — landed on PR #273; the D-slice work orders are complete)
+
+The #270 review's deferred runtime findings and PROP-20260728-152752 §3.5's activations are on
+the branch, each gate-then-stabilize:
+
+- **Fair-share lane rebalancing** (was: `steal_lane` test-only — a first instance claimed every
+  lane and renewed forever, a second idled). When a worker's pass claims nothing, it takes a
+  live-ownership census and, while below `floor(total/instances)` with a live peer above it,
+  steals ONE lane from the largest owner — fresh census per steal, bounded per pass. Stop-at-
+  the-floor makes the loop converge to a ±1 spread without ping-pong; the victim's stale belief
+  fences exactly like an expiry takeover. Proven by the cluster fixture
+  (`crates/actor_runtime/tests/rebalance.rs` — ADR-20260730-234918 ports 1–3: convergence while
+  the victim is ALIVE, then a hard-crash expiry takeover, with exactly-once + per-actor order +
+  per-identity completeness accounting throughout, and the port-5 probe self-test).
+- **Activations, gated `ACTOR_ACTIVATIONS` default false** (§3.5): deliveries fold the
+  delivered actor's own stream (`{actor_type}-{actor_id}`) through a shared held-state cache —
+  fill on load, promotion strictly POST-COMMIT (apply-after-commit), invalidation on a lost
+  `UNIQUE(stream_name, version)` race (the never-wrong signal), lane loss drops the partition's
+  holdings (the worker's `LaneEvents` seam), idle expiry + LRU byte bound from configuration
+  (`ACTOR_ACTIVATION_IDLE_SECONDS` / `ACTOR_ACTIVATION_MAX_MEMORY_MB`), per-actor
+  `mailbox.activations` overrides in actors.yaml (validated, emitted as `ACTOR_ACTIVATIONS`).
+  Cross-lane writers (a PM leg appending `OrderPlaced`) invalidate held copies on commit.
+  Surrogate-keyed lanes (`Payment-<intentId>`) never match the scoped name and stay uncached.
+  Correctness never depends on the cache; OFF is byte-identical to pre-D3. The micro-mailbox and
+  batched turns stay deferred per §3.5's own sequencing (the partition lane is single-threaded —
+  they become load-bearing only with intra-partition concurrency, a later throughput knob).
+- **Standalone adapter workers, gated `RUN_MAILBOX_WORKERS` default false** (was: adapters ACK
+  200 while facts pile up RECEIVED with the monolith down). Each adapter binary can run the
+  monolith-identical fleet for exactly the lanes its ingestor feeds (stripe: Payment + the two
+  PM lanes its B2-chained copies land on; delivery partners: DeliveryJob; hubrise:
+  RestaurantAccount/Restaurant/Catalog). OFF by default because the status/event buses are
+  in-process — a fact delivered by the adapter process never reaches the monolith's push
+  subscribers (polls unaffected); cross-process fan-out (Postgres LISTEN/NOTIFY) is the recorded
+  follow-up that would dissolve the trade-off.
+- **Birth id-minting unified at the doors**: a DECLARED identity property that is missing or
+  unparsable now fails the GraphQL mutation at the door (the worker-channel enqueue helper's
+  existing rule) instead of silently minting a random lane id that breaks per-aggregate
+  serialization; only actors declaring NO identity property mint an addressing-only lane id.
+
 ## Realization state (D1 — landed on PR #273, GATED)
 
 The flip is IMPLEMENTED behind **`PM_MAILBOX_DELIVERY`** (configuration.yaml, default false —

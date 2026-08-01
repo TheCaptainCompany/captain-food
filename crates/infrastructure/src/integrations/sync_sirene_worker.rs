@@ -100,7 +100,7 @@ const EXTERNAL_USER_TYPE: &str = "EXTERNAL";
 /// small enough that a genuinely broken one stops costing anything within a sweep or two.
 const MAX_SYNC_ATTEMPTS: i32 = 10;
 
-/// The `inbound_events.source` this adapter owns. `(source, external_id)` is the delivery-level dedupe,
+/// The `inbound_messages.source` this adapter owns. `(source, external_id)` is the delivery-level dedupe,
 /// and unlike `command_journal`'s `last_seen_at`-seeded message_id it is STABLE across sweeps
 /// (ADR-20260728-011344).
 const SIRENE_SOURCE: &str = "sirene";
@@ -159,7 +159,7 @@ pub struct SireneSyncSummary {
     /// Inbound registry facts STAGED for the drain (ADR-20260728-011344). No longer "commands issued",
     /// and no longer conflating new prospects with replays: what each staged fact turned out to MEAN
     /// (created / updated / no-change) is the drain's verdict, readable as
-    /// `SELECT status, count(*) FROM inbound_events WHERE source = 'sirene'`. This counter only says how
+    /// `SELECT status, count(*) FROM inbound_messages WHERE source = 'sirene'`. This counter only says how
     /// many rows we handed over.
     pub registered: u64,
     /// `MarkRestaurantClosed` issued (NON_PARTNER prospects only).
@@ -189,8 +189,8 @@ pub struct SireneSyncSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowOutcome {
     /// HANDED OVER to the inbox, verdict not yet known. The ACL translated the record and staged an
-    /// inbound fact; the aggregate has not decided anything yet — `InboundEventsDrainWorker` delivers it
-    /// and writes the verdict onto `inbound_events.status`. Calling this SYNCED would claim more than
+    /// inbound fact; the aggregate has not decided anything yet — the Restaurant lane's MailboxWorker
+    /// delivers it and the verdict lands on `inbound_messages.status`. Calling this SYNCED would claim more than
     /// this worker knows: a later delivery failure or rejection would leave the mirror asserting a
     /// success that never happened. `reconcile_staged` resolves it on a later pass.
     ///
@@ -625,12 +625,12 @@ impl SireneSyncWorker {
     /// delivers it and the AGGREGATE decides. Without this step the mirror would permanently claim a
     /// success it never observed.
     ///
-    /// The join key is the one the ACL already writes: `inbound_events.external_id = '{siret}:{hash}'`,
+    /// The join key is the one the ACL already writes: `inbound_messages.external_id = '{siret}:{hash}'`,
     /// which is exactly `siret || ':' || payload_hash` on the staging row. One statement, no per-row
     /// round-trip.
     ///
-    /// Verdict mapping (`InboundEventStatus`, stored as TEXT):
-    /// - DELIVERED — the aggregate decided a fact and it was appended;
+    /// Verdict mapping (`InboundMessageStatus`, stored as TEXT):
+    /// - SUCCEEDED — the aggregate decided a fact and it was appended;
     /// - IGNORED — the aggregate decided nothing had changed;
     /// - DUPLICATE — this delivery had already been consumed.
     ///

@@ -74,6 +74,25 @@
 > authority-precheck rate burn; the pre-existing same-cart check-then-act window (durable fix =
 > partial unique index on payment_process_manager). Remaining D: D3 (activations, rebalancing,
 > test ports).
+> ✅ **D3 LANDED on the #272 branch (2026-08-01)** — the #270 review's deferred runtime findings
+> plus PROP-20260728-152752 §3.5's activations, each gate-then-stabilize: **fair-share lane
+> rebalancing** (census + steal-one-from-the-largest with fresh counts per steal, stop at
+> `floor(total/instances)` — converges ±1 without thrash; cluster fixture `rebalance.rs` proves
+> convergence while the victim is ALIVE, then a hard-crash expiry takeover, exactly-once +
+> per-actor order + per-identity completeness throughout = ADR-20260730-234918 ports 1–3 + the
+> port-5 probe self-test); **ACTIVATIONS gated `ACTOR_ACTIVATIONS` default false** (held-state
+> cache scoped to the delivered actor's own stream: fill on load, promote strictly POST-COMMIT,
+> invalidate on a lost version race / lane loss / idle expiry / LRU byte bound; per-actor
+> `mailbox.activations` DSL + generated policy table; E2E `mailbox_activations`: 1 rehydration
+> load across 3 deliveries, a foreign writer under a warm activation aborts→invalidates→the
+> retry refolds with no hole and no duplicate); **standalone adapter workers gated
+> `RUN_MAILBOX_WORKERS` default false** (each adapter binary can run the monolith-identical
+> fleet for its own lanes; OFF because the in-process status/event buses mean adapter-delivered
+> facts never reach monolith push subscribers — LISTEN/NOTIFY is the recorded follow-up; E2E
+> `standalone_workers`); **birth id-minting unified** (a declared identity property that fails
+> to parse errors at the GraphQL door like the worker door — never a silent random lane).
+> Stale `inbound_events` narratives in integration_staging.yaml + the SIRENE worker rewritten
+> to `inbound_messages`.
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).

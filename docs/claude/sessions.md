@@ -166,6 +166,19 @@ stop-hook flags the agent's uncommitted WIP, leave it — the agent commits gate
 committing under it snapshots untested state. (`git worktree remove` leaves the shell's cwd
 dangling — `cd` out first or ignore the getcwd error.)
 
+**Run `make rust` only on a COMMITTED tree, and never judge it through a pipe.** `check-drift`
+regenerates and then diffs the WHOLE tree — uncommitted source edits read as "drift" and fail the
+gate by design (its own comment says so). And `make rust ... | tail` reports the PIPE's exit (tail's
+0), so a background run can notify "exit 0" over a red gate (cost: one commit pushed on a
+believed-green gate before the output was re-read, 2026-08-01). Redirect to a file and echo `$?`
+separately, then read both.
+
+**`ld terminated with signal 7 [Bus error]` at link time is the DISK ALLOWANCE, not a toolchain
+fault.** The linker mmaps its output; at 98% used it dies with a bus error that looks like
+corruption. `target/debug/incremental` alone held 9.2G — deleting just it recovers the build
+without the full `target/debug` rebuild cost (cost: one mysterious "could not compile server"
+mid-suite, 2026-08-01).
+
 **Pass multi-line commit messages through `git commit -F -` with a quoted heredoc**, never `-m`
 with a body containing backticks: bash command-substitutes `` ` `` inside double quotes, so a
 `` `type: process-manager` `` in the message executed `type:` as a command and pushed a commit
