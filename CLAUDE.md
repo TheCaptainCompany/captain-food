@@ -219,6 +219,15 @@ mutation/query is reached by a story step, and every test↔rule link holds both
 - Review and validation gates are executable and **blocking**; never hand-edit generated output
   (`specs/generated/**`, the `database.md` GENERATED region) — change the spec/emitter and regenerate.
 - Every recurring agent/loop failure becomes a new rule, test, or ADR.
+- **Independent review before ready-for-review** (product-owner directive, 2026-08-01): a PR is
+  marked ready only after a reviewer-agent pass over the FULL branch diff by eyes that did not
+  write it (high-stakes changes — payments, migrations, erasure — get the multi-lens fan-out;
+  the #270 five-lens review found six criticals in fully-gated work and is the model). After any
+  decision that renames or reshapes something, grep the OLD term across specs/**, docs/** and
+  open issue/PR bodies before the turn ends — staleness the compiler cannot catch is caught by
+  the sweep, not by the product owner. Prefer ONE SESSION PER WORK CHUNK: the repo carries the
+  state (proposals, ADRs, checklists), so fresh context is cheap and long-context error rates
+  are real.
 - **Every session records what it learned** (ADR-20260730-034635, product-owner directive), in the
   **same change** as the work — not just failures, and not only on the second occurrence. Operational
   findings (environment limits, tool behaviour, gate costs, workflow traps) go to
