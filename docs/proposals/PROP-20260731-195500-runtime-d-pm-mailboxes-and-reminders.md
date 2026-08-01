@@ -45,12 +45,16 @@ carries all of it.
 
 ## The DSL (decided shape — ADR-20260731-214500)
 
-Three per-actor sections; all references are typed `$ref`s (bare string paths are barred; the
-two legacy string dialects — `requires.acting` state paths, `identity:` property names — migrate
-to `$ref`s in this PR's scope):
+Three per-actor sections; all references are typed `$ref`s — bare string paths are barred and
+MIGRATED (branch `f25b964`): actor `identity` is `{ $ref: '#/<Actor>/state/<field>' }` (the ref
+implicitly declares the stream key, so no explicit `state:` entry is needed for it, and the
+validator proves every received command's payload carries the field), `requires.acting` values
+are the same state-field `$ref`s (`any` stays a keyword), and a declared reminder identity is a
+validator error (derived):
 
-- **`reminders:`** — typed self-messages: `payload` (a `$ref` into events.yaml — FACT vocabulary),
-  deterministic identity (`UUIDv5(actorId, purpose)`, one pending occurrence), reschedule
+- **`reminders:`** — typed self-messages: `payload` (a `$ref` into events.yaml — FACT vocabulary);
+  the identity is DERIVED, never declared (`UUIDv5(actorId, reminderName)`, one pending
+  occurrence — declaring it is a validator error, `reminder-identity-declared`); reschedule
   in-place (re-declaring postpones the SAME row; `SCHEDULED → CANCELLED` stays the explicit
   withdrawal).
 - **`schedules:`** on a `receives` entry — the declaration that handling this message schedules a
@@ -207,7 +211,7 @@ Gate-green against `main` (0 validator errors). Lands in actors.yaml only WITH t
 ```yaml
 PlaceOrderProcess:
   type: process-manager
-  identity: orderId
+  identity: { $ref: '#/PlaceOrderProcess/state/orderId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
   description: >
@@ -244,7 +248,7 @@ PlaceOrderProcess:
 
 RefundProcess:
   type: process-manager
-  identity: orderId
+  identity: { $ref: '#/RefundProcess/state/orderId' }
   mailbox:
     partitions: 100          # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
   description: >
