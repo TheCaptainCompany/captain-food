@@ -139,6 +139,63 @@ onto `paymentStatus` — a client-contract change — while a prepare-outside-tx
 realization keeps the contract byte-identical with the same peak/retry safety. **D1 is blocked on
 this product-owner call** — full analysis under "A2's realization shape" in Unresolved questions.
 
+### The two realizations, as sequences
+
+**R1 — literal A2 (two deliveries)** — the decline can no longer reject the operation:
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant G as GraphQL BFF
+    participant M as Mailbox
+    participant W as Worker (PM lane)
+    participant S as Stripe
+    C->>G: placeOrder
+    G->>M: enqueue PlaceOrder (row 1)
+    G-->>C: PENDING
+    W->>M: deliver row 1
+    Note over W: fenced tx 1 - validate cart, price,<br/>freeze checkout - COMMIT fast<br/>row 1 = SUCCEEDED (already terminal)
+    W->>S: AFTER commit (spawned leg): create PaymentIntent<br/>idempotency key = orderId
+    alt intent created
+        S-->>W: intent id
+        W->>M: enqueue outcome fact (row 2, same lane)
+        W->>M: deliver row 2
+        Note over W: fenced tx 2 - record PaymentIntentCreated,<br/>open PM row - COMMIT
+    else DECLINED synchronously
+        S-->>W: decline
+        Note over W,C: row 1 already SUCCEEDED - operationStatus can<br/>never say REJECTED; the decline surfaces only on<br/>paymentStatus = CONTRACT CHANGE vs today
+    end
+```
+
+**R2 — prepare-outside-tx, single delivery** — contract byte-identical:
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant G as GraphQL BFF
+    participant M as Mailbox
+    participant W as Worker (PM lane)
+    participant S as Stripe
+    C->>G: placeOrder
+    G->>M: enqueue PlaceOrder (one row)
+    G-->>C: PENDING
+    W->>M: deliver
+    Note over W: PREPARE phase - NO transaction open:<br/>validate cart + price via pool reads
+    alt invalid (CartEmpty, PriceMismatch, ...)
+        Note over W: fenced tx: row = REJECTED error<br/>operationStatus rejection (contract unchanged)
+    else valid
+        W->>S: create PaymentIntent (still NO tx open)<br/>idempotency key = orderId
+        alt created
+            S-->>W: intent id
+            Note over W: fenced tx (ONE commit): record<br/>PaymentIntentCreated + PM row + SUCCEEDED
+        else declined
+            S-->>W: decline
+            Note over W,C: fenced tx: row = REJECTED PaymentDeclined<br/>operationStatus, byte-identical to today
+        end
+        Note over W,S: crash between Stripe call and commit:<br/>row stays RECEIVED - redelivery re-runs prepare -<br/>the idempotency key returns the SAME intent, no duplicate
+    end
+```
+
 | | Option | Pros | Cons |
 |---|---|---|---|
 | A1 | Call Stripe inside the fenced transaction | Simplest; one atomic outcome | External HTTP inside a Postgres tx: connection held for Stripe's latency exactly at peak; a timeout aborts the delivery and the retry re-calls Stripe; pool exhaustion amplifies under load |
