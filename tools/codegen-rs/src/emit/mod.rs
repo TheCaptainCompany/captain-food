@@ -3,3 +3,5 @@
 pub(crate) mod web;
 
 pub(crate) use web::*;
+pub(crate) mod behaviour_tests;
+pub(crate) use behaviour_tests::*;
