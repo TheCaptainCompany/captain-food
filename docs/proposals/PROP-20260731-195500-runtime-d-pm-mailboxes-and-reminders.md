@@ -216,6 +216,28 @@ drill-down is declared as a `gaps` entry until its query exists.
 
 ## Unresolved questions
 
+- **A2's realization shape against the actual runtime primitive** (found starting D1,
+  2026-08-01). The mailbox runtime's `complete_fenced` runs the handler INSIDE the completion
+  transaction and its `post_commit` hook is a synchronous closure — so A2's "post-commit step
+  calls Stripe" must spawn an async gateway leg (a small unfenced window), and its "delivery 2"
+  needs somewhere for a SYNC DECLINE to land: the PlaceOrder row is already terminal-SUCCEEDED
+  after delivery 1, `PaymentFailed` requires a `paymentIntentId` a declined request may not
+  have, and the PM row cannot open without an intent id (NOT NULL) — so under literal A2 the
+  decline surfaces only via `paymentStatus`, a CONTRACT change from the legacy synchronous
+  `PaymentDeclined` rejection (which the appendix's `throws` deliberately keeps). An
+  alternative realization keeps the contract byte-identical: ONE delivery whose runtime
+  PREPARES OUTSIDE the transaction (validate/price via pool reads → Stripe call, idempotency
+  key = orderId) and only then opens the fenced commit (record `PaymentIntentCreated` + PM row
+  + verdict — a crash between call and commit redelivers into the idempotency key). Same
+  peak-safety (no HTTP in any tx), same retry-safety, one less hop, no PM-state hand-off — but
+  it is a new runtime primitive (`prepare` phase) rather than A2's two rows. Needs a
+  product-owner call before D1 lands; the [PR #273](https://github.com/TheCaptainCompany/captain-food/pull/273)
+  checklist item stays open on it. (Also noted for D1: the worker router already routes the
+  three PM commands — to the FULL legacy handlers, HTTP-in-tx — so the actors.yaml appendix
+  entries must land strictly WITH the D-A wiring, never alone; and `command_journal`'s DROP
+  cannot ride while the gated-off legacy arm still writes it — retirement sequences as reads
+  first, DROP at the default-flip deploy.)
+
 - Retention windows per data category (legal/product input; configuration layer) — including
   whether the financial skeleton is exported before phase 2 or survives via a longer window.
 - Occurrence-scoped reminder identity for REPEATING reminders (ADR-20260731-150500 §2 leaves it

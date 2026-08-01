@@ -46,7 +46,14 @@
 > `RUN_DELETION_ENGINE` default **false** (gate-then-stabilize — the default flip is its own
 > one-line ADR after staging smoke); readiness at `GET /deletion`. E2E `deletion_engine` green.
 > Next: D1 (A2 two-phase placeOrder + B2 chained facts + journal retirement + observability
-> rewrite).
+> rewrite). ⚠️ D1 is BLOCKED on a product-owner call first: A2's literal two-row shape moves
+> the sync PaymentDeclined off operationStatus (a contract change), while a prepare-outside-tx
+> single-delivery realization keeps the contract intact with the same peak/retry safety — see
+> the new "A2's realization shape" entry under PROP-20260731-195500 §Unresolved questions.
+> Findings already banked there: the worker router ALREADY routes the three PM commands to the
+> full legacy handlers (HTTP-in-tx if flipped naively — the appendix entries must land WITH the
+> D-A wiring only), the real payment gateway is already in the worker's CommandDeps (059b423),
+> and the journal DROP must sequence AFTER the default flip (the gated-off arm still writes it).
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).
