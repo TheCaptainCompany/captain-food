@@ -70,6 +70,10 @@ pub struct MailboxStatusRow {
     pub status: InboundMessageStatus,
     /// `{ code, context }` on REJECTED / FAILED.
     pub error: Option<serde_json::Value>,
+    /// The accepted payload's hash — the cross-arm duplicate check compares against it
+    /// (#272 review MAJOR-3: a legacy-arm retry of a mailbox-accepted messageId must replay,
+    /// and a DIFFERENT payload under the same id must Conflict, exactly like same-store dedupe).
+    pub payload_hash: String,
     pub user_id: Option<uuid::Uuid>,
     pub session_id: Option<uuid::Uuid>,
     pub received_at: chrono::DateTime<chrono::Utc>,
@@ -193,6 +197,7 @@ pub mod mem {
                 correlation_id: r.entry.correlation_id,
                 status: r.status,
                 error: r.error.clone(),
+                payload_hash: r.entry.payload_hash.clone(),
                 user_id: r.entry.user_id,
                 session_id: r.entry.session_id,
                 received_at: chrono::Utc::now(),

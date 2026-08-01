@@ -167,14 +167,14 @@ pub(super) async fn flush_pm_rows_in_tx(
 /// back to a deterministic surrogate lane so the PM leg still runs — and flags
 /// `PaymentEventOrphaned` on the chained row, supervisable, never silently dropped.
 pub(super) async fn chain_target_of(
-    deps: &CommandDeps,
+    pm_state: &dyn PaymentProcessStateStore,
     event: &domain::generated::events::DomainEvent,
 ) -> Result<Option<(&'static str, uuid::Uuid)>, sqlx::Error> {
     use domain::generated::events::DomainEvent as E;
     let by_intent = |intent: &domain::generated::scalars::PaymentIntentId| {
         let intent = intent.clone();
         async move {
-            deps.pm_state
+            pm_state
                 .by_payment_intent(&intent)
                 .await
                 // A transient lookup failure aborts the delivery (retry) — guessing a lane would
@@ -219,7 +219,8 @@ pub(super) async fn chain_pm_copy_in_tx(
     message: &InboundMessage,
     event: &domain::generated::events::DomainEvent,
 ) -> Result<Option<&'static str>, sqlx::Error> {
-    let Some((actor_type, actor_id)) = chain_target_of(deps, event).await? else {
+    let Some((actor_type, actor_id)) = chain_target_of(deps.pm_state.as_ref(), event).await?
+    else {
         return Ok(None);
     };
     // The lane keyspace WIDTH is the actor's seeded registry row count — the same source the
@@ -260,4 +261,114 @@ pub(super) async fn chain_pm_copy_in_tx(
     .execute(&mut **tx)
     .await?;
     Ok(Some(actor_type))
+}
+
+// ================================================================================================
+// The FLIP-TIME BACKFILL (#272 review MAJOR-2): B2 chaining only happens at RECORD time, so a
+// Stripe fact recorded before the gate flipped ON — one the saga runner had accepted but not yet
+// reacted to — would have NO deliverer after the flip: a PaymentCaptured with no OrderPlaced is
+// a paid order nobody is told about, the product's worst failure mode. At every startup with the
+// gate ON, this pass enqueues a PM-addressed copy of every Stripe fact past the runner's group
+// checkpoints. Idempotent end to end: the chain identity is UUIDv5(lane, "{factType}:{event id}")
+// (deterministic per fact — a restart re-scan collides on the pk), and the saga legs absorb a
+// hop that record-time chaining already delivered (run-row expect → IGNORED). Gate ROLLBACK
+// stays sound for the same reason: the runner re-processing a mailbox-delivered fact skips on
+// the same idempotency.
+// ================================================================================================
+
+/// Enqueue PM-addressed copies of the un-reacted Stripe facts (called at startup, gate ON, after
+/// idempotently seeding the PM lanes). Returns how many copies were enqueued (dedup collisions
+/// excluded).
+pub async fn backfill_stripe_facts_to_pm_lanes(
+    pool: &sqlx::PgPool,
+    pm_state: &dyn PaymentProcessStateStore,
+) -> Result<u64, DomainError> {
+    let checkpoint = |projector: &'static str| async move {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT position FROM projection_checkpoint WHERE projector = $1",
+        )
+        .bind(projector)
+        .fetch_optional(pool)
+        .await
+        .map(|c| c.unwrap_or(0))
+        .map_err(|e| DomainError::Repository(e.to_string()))
+    };
+    let cp_place = checkpoint("pm:PlaceOrderProcess").await?;
+    let cp_refund = checkpoint("pm:RefundProcess").await?;
+
+    let rows = sqlx::query(
+        "SELECT id, event_type, payload, correlation_id, user_id, user_type FROM domain_events \
+         WHERE (event_type IN ('PaymentCaptured', 'PaymentFailed') AND position > $1) \
+            OR (event_type = 'PaymentRefunded' AND position > $2) \
+         ORDER BY position",
+    )
+    .bind(cp_place)
+    .bind(cp_refund)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DomainError::Repository(e.to_string()))?;
+
+    let mut enqueued = 0u64;
+    for row in rows {
+        use sqlx::Row as _;
+        let event_id: uuid::Uuid = row.try_get("id").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let event_type: String = row.try_get("event_type").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let payload: serde_json::Value = row.try_get("payload").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let tagged = serde_json::json!({ "eventType": event_type, "payload": payload });
+        let event: domain::generated::events::DomainEvent = match serde_json::from_value(tagged.clone()) {
+            Ok(e) => e,
+            Err(e) => {
+                // A log row this build cannot parse (legacy payload shape): loud, never wedging —
+                // the runner would have surfaced the same poison on /saga and advanced.
+                tracing::error!(%event_id, %event_type, error = %e, "pm backfill: unparsable fact skipped");
+                continue;
+            }
+        };
+        let Some((actor_type, actor_id)) =
+            chain_target_of(pm_state, &event).await.map_err(|e| DomainError::Repository(e.to_string()))?
+        else {
+            continue;
+        };
+        let width: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM mailbox_partitions WHERE actor_type = $1")
+                .bind(actor_type)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| DomainError::Repository(e.to_string()))?;
+        if width == 0 {
+            return Err(DomainError::Repository(format!(
+                "pm backfill: '{actor_type}' has no seeded lanes — seed before backfilling"
+            )));
+        }
+        let chained_id =
+            uuid::Uuid::new_v5(&actor_id, format!("{event_type}:{event_id}").as_bytes());
+        let correlation_id: uuid::Uuid = row.try_get("correlation_id").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let user_id: uuid::Uuid = row.try_get("user_id").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let user_type: String = row.try_get("user_type").map_err(|e| DomainError::Repository(e.to_string()))?;
+        let inserted = sqlx::query(
+            "INSERT INTO inbound_messages \
+               (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
+                payload_hash, channel, user_id, user_type, correlation_id, cause_id) \
+             VALUES ($1, 'EVENT', $2, $3, $4, $5, $6, $7, 'WORKER', $8, $9, $10, $11) \
+             ON CONFLICT (message_id) DO NOTHING",
+        )
+        .bind(chained_id)
+        .bind(actor_type)
+        .bind(actor_id)
+        .bind(actor_runtime::stable_partition(&actor_id, width as u16))
+        .bind(&event_type)
+        .bind(&tagged)
+        .bind(application::journal::payload_hash(&tagged))
+        .bind(user_id)
+        .bind(&user_type)
+        .bind(correlation_id)
+        // The causality link: the backfilled hop's cause is the recorded fact itself.
+        .bind(event_id)
+        .execute(pool)
+        .await
+        .map_err(|e| DomainError::Repository(e.to_string()))?
+        .rows_affected();
+        enqueued += inserted;
+    }
+    Ok(enqueued)
 }

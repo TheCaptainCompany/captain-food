@@ -763,6 +763,50 @@ pub fn router() -> Router {
                         workers = infrastructure::generated::command_router::ACTOR_MAILBOXES.len(),
                         "mailbox: per-actor-type workers running in-process"
                     );
+
+                    // THE FLIP-TIME BACKFILL (#272 review MAJOR-2): with the gate ON, any Stripe
+                    // fact the saga runner accepted but had not reacted to before the flip has no
+                    // deliverer — a PaymentCaptured with no OrderPlaced is a paid order nobody is
+                    // told about. Enqueue PM-addressed copies of everything past the runner's
+                    // group checkpoints, idempotently (deterministic ids; the legs absorb
+                    // already-delivered hops). Seeds the PM lanes first so the width lookup can
+                    // never race the workers' own seeding.
+                    if config.pm_mailbox_delivery {
+                        let pool = pool.clone();
+                        let nudges = mailbox_nudges.clone();
+                        tokio::spawn(async move {
+                            for (actor_type, width) in
+                                infrastructure::generated::command_router::ACTOR_MAILBOXES
+                            {
+                                if matches!(*actor_type, "PlaceOrderProcess" | "RefundProcess") {
+                                    if let Err(e) = actor_runtime::seed_partitions(
+                                        &pool, actor_type, *width as i16,
+                                    )
+                                    .await
+                                    {
+                                        tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill aborted; restart to retry");
+                                        return;
+                                    }
+                                }
+                            }
+                            let pm_state = infrastructure::persistence::PgPaymentProcessState::new(
+                                pool.clone(),
+                            );
+                            match infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(
+                                &pool, &pm_state,
+                            )
+                            .await
+                            {
+                                Ok(0) => tracing::info!(worker = "pm_backfill", enqueued = 0, "no un-reacted Stripe facts to backfill"),
+                                Ok(n) => {
+                                    tracing::warn!(worker = "pm_backfill", enqueued = n, "backfilled un-reacted Stripe facts onto the PM lanes");
+                                    nudges.nudge("PlaceOrderProcess");
+                                    nudges.nudge("RefundProcess");
+                                }
+                                Err(e) => tracing::error!(worker = "pm_backfill", error = %e, "backfill failed -- restart to retry (facts stay in the log; nothing lost)"),
+                            }
+                        });
+                    }
                 }
 
                 // Stripe webhook ingestor (ADR-20260731-122500 — the mailbox is the only door):

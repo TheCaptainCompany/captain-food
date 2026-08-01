@@ -209,8 +209,8 @@ impl Mailbox for PgMailbox {
         message_id: uuid::Uuid,
     ) -> Result<Option<MailboxStatusRow>, DomainError> {
         let row = sqlx::query(
-            "SELECT message_id, correlation_id, status, error, user_id, session_id, received_at, \
-                    completed_at \
+            "SELECT message_id, correlation_id, status, error, payload_hash, user_id, session_id, \
+                    received_at, completed_at \
              FROM inbound_messages WHERE message_id = $1",
         )
         .bind(message_id)
@@ -223,6 +223,7 @@ impl Mailbox for PgMailbox {
                 correlation_id: r.try_get("correlation_id").map_err(db_err)?,
                 status: EnumText::from_text(&r.try_get::<String, _>("status").map_err(db_err)?)?,
                 error: r.try_get("error").map_err(db_err)?,
+                payload_hash: r.try_get("payload_hash").map_err(db_err)?,
                 user_id: r.try_get("user_id").map_err(db_err)?,
                 session_id: r.try_get("session_id").map_err(db_err)?,
                 received_at: r.try_get("received_at").map_err(db_err)?,

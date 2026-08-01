@@ -313,6 +313,24 @@ DROP (with the journal sweep's retirement) rides the default-flip deploy.
 `command_completion_ms` is emitted on BOTH arms (the mailbox delivery's post-commit observer —
 which also lit it back up for every Runtime-C-flipped command).
 
+Three hardening points from the independent multi-lens review of the branch (payments lens):
+
+- **Deterministic gateway refusals are terminal.** The Stripe adapter classifies
+  `invalid_request_error`/`idempotency_error` 4xx as a terminal FAILED on both arms (a
+  `Repository`-classed outcome would retry a mailbox head row forever — one bogus
+  `paymentMethodId` per partition could wedge every checkout lane). Transient classes (5xx,
+  rate-limit, transport) stay retry-in-place on the mailbox arm.
+- **The flip cannot lose in-flight saga hops.** At every startup with the gate ON, a backfill
+  pass enqueues PM-addressed copies of all Stripe facts past the saga runner's group checkpoints
+  (deterministic ids `UUIDv5(lane, "{factType}:{event id}")`, idempotent under restart and under
+  record-time double-coverage — the legs absorb duplicates). A `PaymentCaptured` the runner
+  accepted but never reacted to is therefore delivered after the flip, and gate ROLLBACK stays
+  sound for the mirror reason.
+- **Cross-arm duplicate identity.** Each gated resolver arm consults the OTHER acceptance store
+  by `messageId` first and replays its terminal status as `duplicate: true` (payload-hash
+  mismatch = the same synchronous Conflict as same-store dedupe) — a client retry across a gate
+  transition can never re-execute a committed command in either direction.
+
 ## Unresolved questions
 
 - ~~A2's realization shape~~ — RESOLVED 2026-08-01 as R2

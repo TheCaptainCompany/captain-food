@@ -157,6 +157,11 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: infrastructure::OperationStatusBus)
 /// The composition-root wiring, materialized for the test (what `server::router()` builds from
 /// `DATABASE_URL`): read repos + write ports (incl. the command journal + status bus) over the pool.
 fn schema_over(pool: &PgPool, status_bus: infrastructure::OperationStatusBus) -> server::graphql_schema::CaptainSchema {
+    schema_over_with_gate(pool, status_bus, false)
+}
+
+/// Same wiring with the Runtime D1 gate chosen by the test (#272 review MAJOR-3).
+fn schema_over_with_gate(pool: &PgPool, status_bus: infrastructure::OperationStatusBus, pm_mailbox_delivery: bool) -> server::graphql_schema::CaptainSchema {
     let restaurants: Arc<dyn RestaurantReadRepository> =
         Arc::new(PgRestaurantRepository::new(pool.clone()));
     let prospection: Arc<dyn ProspectionReadRepository> =
@@ -236,9 +241,10 @@ fn schema_over(pool: &PgPool, status_bus: infrastructure::OperationStatusBus) ->
             // double is enough (see `AlwaysFreeSlugs` — deliberately NOT reused in production, where
             // the arbiter is a real UNIQUE constraint).
             slug_reservations: std::sync::Arc::new(AlwaysFreeSlugs),
-            // Runtime D1 (#272): the write-path test exercises the LEGACY arm (gate off) — the
-            // mailbox arm is covered end-to-end by infrastructure/tests/pm_prepare_delivery.rs.
-            pm_mailbox_delivery: false,
+            // Runtime D1 (#272): the flag under test — the legacy arm by default; the cross-arm
+            // duplicate test flips it (mailbox delivery itself is covered end-to-end by
+            // infrastructure/tests/pm_prepare_delivery.rs).
+            pm_mailbox_delivery,
         }),
         // No event bus: this test exercises the POST write path, not the domain-fact subscriptions.
         None,
@@ -295,6 +301,9 @@ async fn poll_operation(
     panic!("operation {message_id} did not reach a terminal status in time");
 }
 
+/// Serialize the suite: every test resets the same tables.
+static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
@@ -305,6 +314,7 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
         eprintln!("SKIP acceptance_first_write_path: DATABASE_URL not set");
         return;
     };
+    let _guard = DB_LOCK.lock().await;
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
     // One shared status bus: the workers publish terminal transitions on it, the schema's
@@ -491,4 +501,144 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
         admin.data.into_json().expect("json")["operationStatus"].is_object(),
         "ADMIN sees every operation"
     );
+}
+
+/// #272 review MAJOR-3 — cross-arm duplicate identity: a messageId accepted on ONE arm must
+/// replay as `duplicate: true` on the OTHER arm (and Conflict on a different payload), never
+/// re-execute. Both directions: journal-accepted → mailbox arm (gate ON), mailbox-accepted →
+/// legacy arm (gate OFF).
+#[tokio::test]
+async fn pm_gate_cross_arm_duplicate_replays_instead_of_reexecuting() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("DB_TESTS_REQUIRED").is_err(),
+            "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
+        );
+        eprintln!("SKIP pm_gate_cross_arm_duplicate: DATABASE_URL not set");
+        return;
+    };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    let status_bus = infrastructure::OperationStatusBus::default();
+
+    // --- Direction 1: accepted on the LEGACY arm (command_journal), retried on the MAILBOX arm.
+    use application::journal::CommandJournal as _;
+    let journal = PgCommandJournal::new(pool.clone());
+    let order_id = uuid::Uuid::new_v4();
+    let message_id = uuid::Uuid::new_v4();
+    let payload = serde_json::json!({ "orderId": order_id, "reason": "wrong order" });
+    journal
+        .insert(&application::journal::CommandJournalEntry {
+            message_id,
+            correlation_id: message_id,
+            cause_id: None,
+            session_id: None,
+            trace_id: None,
+            user_id: None,
+            user_type: "ADMIN".into(),
+            channel: domain::generated::scalars::CommandChannel::GRAPHQL,
+            command_type: "DenyRefund".into(),
+            payload_hash: application::journal::payload_hash(&payload),
+            payload: payload.clone(),
+        })
+        .await
+        .expect("seed pre-flip journal acceptance");
+    journal
+        .complete(message_id, domain::generated::scalars::CommandJournalStatus::SUCCEEDED, None)
+        .await
+        .expect("terminal");
+
+    let gated = schema_over_with_gate(&pool, status_bus.clone(), true);
+    let replay = format!(
+        r#"mutation {{
+            denyRefund(input: {{ orderId: "{order_id}", reason: "wrong order" }},
+                       metadata: {{ messageId: "{message_id}" }})
+            {{ messageId operationStatus duplicate }}
+        }}"#
+    );
+    let resp = gated
+        .execute(async_graphql::Request::new(replay).data(RequestRole::Admin))
+        .await;
+    assert!(resp.errors.is_empty(), "cross-arm replay errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["denyRefund"]["duplicate"], true, "{data:?}");
+    assert_eq!(data["denyRefund"]["operationStatus"], "SUCCEEDED");
+    let mailbox_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inbound_messages")
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(mailbox_rows, 0, "the replay never re-enqueued (no re-execution)");
+
+    // Same id, DIFFERENT payload across arms: the synchronous Conflict, exactly like same-store.
+    let conflicting = format!(
+        r#"mutation {{
+            denyRefund(input: {{ orderId: "{order_id}", reason: "changed my mind" }},
+                       metadata: {{ messageId: "{message_id}" }})
+            {{ messageId }}
+        }}"#
+    );
+    let resp = gated
+        .execute(async_graphql::Request::new(conflicting).data(RequestRole::Admin))
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected Conflict: {:?}", resp.errors);
+    let ext = resp.errors[0].extensions.as_ref().expect("extensions");
+    assert_eq!(ext.get("code"), Some(&async_graphql::Value::from("Conflict")));
+
+    // --- Direction 2: accepted on the MAILBOX arm, retried on the LEGACY arm (gate rolled back).
+    let mailbox = infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone());
+    use application::mailbox::Mailbox as _;
+    let order2 = uuid::Uuid::new_v4();
+    let message2 = uuid::Uuid::new_v4();
+    let payload2 = serde_json::json!({ "orderId": order2, "reason": "cold food" });
+    mailbox
+        .insert(&application::mailbox::MailboxEntry {
+            message_id: message2,
+            kind: "COMMAND".into(),
+            actor_type: "RefundProcess".into(),
+            actor_id: order2,
+            partition: 0,
+            message_type: "DenyRefund".into(),
+            payload: payload2.clone(),
+            payload_hash: application::journal::payload_hash(&payload2),
+            channel: "GRAPHQL".into(),
+            user_id: None,
+            user_type: "ADMIN".into(),
+            correlation_id: message2,
+            cause_id: None,
+            session_id: None,
+            trace_id: None,
+            source: None,
+            external_id: None,
+        })
+        .await
+        .expect("seed mailbox acceptance");
+    sqlx::query("UPDATE inbound_messages SET status = 'REJECTED', error = '{\"code\":\"RefundNotPending\"}', completed_at = now() WHERE message_id = $1")
+        .bind(message2)
+        .execute(&pool)
+        .await
+        .expect("terminal");
+
+    let legacy = schema_over_with_gate(&pool, status_bus, false);
+    let replay2 = format!(
+        r#"mutation {{
+            denyRefund(input: {{ orderId: "{order2}", reason: "cold food" }},
+                       metadata: {{ messageId: "{message2}" }})
+            {{ messageId operationStatus duplicate }}
+        }}"#
+    );
+    let resp = legacy
+        .execute(async_graphql::Request::new(replay2).data(RequestRole::Admin))
+        .await;
+    assert!(resp.errors.is_empty(), "reverse replay errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["denyRefund"]["duplicate"], true, "{data:?}");
+    assert_eq!(data["denyRefund"]["operationStatus"], "REJECTED");
+    let journal_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM command_journal WHERE message_id = $1")
+            .bind(message2)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(journal_rows, 0, "the reverse replay never re-journaled (no re-execution)");
 }

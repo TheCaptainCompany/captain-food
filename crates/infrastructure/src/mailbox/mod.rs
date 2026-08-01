@@ -13,6 +13,7 @@ pub use enqueue::{
     surrogate_actor_id, EnqueueOutcome, InboundFact, ScheduleOutcome,
 };
 pub use handler::{MailboxCommandHandler, StatusBusObserver};
+pub use pm_delivery::backfill_stripe_facts_to_pm_lanes;
 
 use application::ports::{version_conflict, Actor};
 use application::staging::StagedAppend;

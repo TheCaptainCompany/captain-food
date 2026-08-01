@@ -524,10 +524,13 @@ keys:
       phase (Stripe call with no transaction open, one fenced commit), the Payment lane chains
       the inbound Stripe facts to the PM lanes in the recording transaction (B2), and the saga
       runner's Stripe-fact triggers retire. OFF, the legacy journal+spawn path and the runner
-      handle everything exactly as before -- the client contract is byte-identical on both arms.
-      DEFAULT OFF (gate-then-stabilize): this flips the MONEY PATH; the default flips by its own
-      one-line ADR after the gated form is smoked in staging, and command_journal DROPs only at
-      that deploy.
+      handle everything exactly as before -- the client contract is byte-identical on both arms
+      (each arm replays the OTHER acceptance store's messageIds as duplicates, so a retry never
+      re-executes across a flip), and every startup with the gate ON backfills un-reacted Stripe
+      facts past the runner checkpoints onto the PM lanes (idempotent), so flipping in EITHER
+      direction loses no saga hop. DEFAULT OFF (gate-then-stabilize): this flips the MONEY PATH;
+      the default flips by its own one-line ADR after the gated form is smoked in staging, and
+      command_journal DROPs only at that deploy.
 
   RUN_RETENTION_SWEEP:
     type: bool

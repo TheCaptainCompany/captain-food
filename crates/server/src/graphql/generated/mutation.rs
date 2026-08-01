@@ -3829,6 +3829,19 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        // Cross-arm duplicate identity (#272 review MAJOR-3): a messageId accepted on the
+        // LEGACY arm (command_journal) must replay as a duplicate here, never re-execute --
+        // the mailbox pk dedupe cannot see the journal, and the journal lives until the
+        // default-flip deploy.
+        let __journal_port = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        if let Some(prior) = __journal_port.by_message(env.message_id).await.map_err(domain_error)? {
+            if prior.entry.payload_hash != application::journal::payload_hash(&payload_json) {
+                telemetry::meters::acceptance::sync_conflict("PlaceOrder");
+                return Err(conflict_error(env.message_id));
+            }
+            telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+            return Ok(acceptance(&env, journal_status_api(prior.status), true));
+        }
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
@@ -3895,6 +3908,18 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        // Cross-arm duplicate identity (#272 review MAJOR-3, mirror direction): a messageId
+        // accepted on the MAILBOX arm must replay as a duplicate here, never re-execute --
+        // a gate rolled back mid-retry must not re-run a committed command.
+        let __mailbox_port = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
+        if let Some(prior) = __mailbox_port.by_message(env.message_id).await.map_err(domain_error)? {
+            if prior.payload_hash != application::journal::payload_hash(&payload_json) {
+                telemetry::meters::acceptance::sync_conflict("PlaceOrder");
+                return Err(conflict_error(env.message_id));
+            }
+            telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+            return Ok(acceptance(&env, mailbox_status_api(prior.status), true));
+        }
         let entry = application::journal::CommandJournalEntry {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -4851,6 +4876,19 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        // Cross-arm duplicate identity (#272 review MAJOR-3): a messageId accepted on the
+        // LEGACY arm (command_journal) must replay as a duplicate here, never re-execute --
+        // the mailbox pk dedupe cannot see the journal, and the journal lives until the
+        // default-flip deploy.
+        let __journal_port = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        if let Some(prior) = __journal_port.by_message(env.message_id).await.map_err(domain_error)? {
+            if prior.entry.payload_hash != application::journal::payload_hash(&payload_json) {
+                telemetry::meters::acceptance::sync_conflict("ApproveRefund");
+                return Err(conflict_error(env.message_id));
+            }
+            telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+            return Ok(acceptance(&env, journal_status_api(prior.status), true));
+        }
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
@@ -4916,6 +4954,18 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        // Cross-arm duplicate identity (#272 review MAJOR-3, mirror direction): a messageId
+        // accepted on the MAILBOX arm must replay as a duplicate here, never re-execute --
+        // a gate rolled back mid-retry must not re-run a committed command.
+        let __mailbox_port = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
+        if let Some(prior) = __mailbox_port.by_message(env.message_id).await.map_err(domain_error)? {
+            if prior.payload_hash != application::journal::payload_hash(&payload_json) {
+                telemetry::meters::acceptance::sync_conflict("ApproveRefund");
+                return Err(conflict_error(env.message_id));
+            }
+            telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+            return Ok(acceptance(&env, mailbox_status_api(prior.status), true));
+        }
         let entry = application::journal::CommandJournalEntry {
             message_id: env.message_id,
             correlation_id: env.correlation_id,
@@ -5021,6 +5071,19 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        // Cross-arm duplicate identity (#272 review MAJOR-3): a messageId accepted on the
+        // LEGACY arm (command_journal) must replay as a duplicate here, never re-execute --
+        // the mailbox pk dedupe cannot see the journal, and the journal lives until the
+        // default-flip deploy.
+        let __journal_port = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
+        if let Some(prior) = __journal_port.by_message(env.message_id).await.map_err(domain_error)? {
+            if prior.entry.payload_hash != application::journal::payload_hash(&payload_json) {
+                telemetry::meters::acceptance::sync_conflict("DenyRefund");
+                return Err(conflict_error(env.message_id));
+            }
+            telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+            return Ok(acceptance(&env, journal_status_api(prior.status), true));
+        }
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).unwrap_or_else(uuid::Uuid::now_v7);
         let entry = application::mailbox::MailboxEntry {
             message_id: env.message_id,
@@ -5085,6 +5148,18 @@ impl MutationRoot {
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        // Cross-arm duplicate identity (#272 review MAJOR-3, mirror direction): a messageId
+        // accepted on the MAILBOX arm must replay as a duplicate here, never re-execute --
+        // a gate rolled back mid-retry must not re-run a committed command.
+        let __mailbox_port = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
+        if let Some(prior) = __mailbox_port.by_message(env.message_id).await.map_err(domain_error)? {
+            if prior.payload_hash != application::journal::payload_hash(&payload_json) {
+                telemetry::meters::acceptance::sync_conflict("DenyRefund");
+                return Err(conflict_error(env.message_id));
+            }
+            telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+            return Ok(acceptance(&env, mailbox_status_api(prior.status), true));
+        }
         let entry = application::journal::CommandJournalEntry {
             message_id: env.message_id,
             correlation_id: env.correlation_id,

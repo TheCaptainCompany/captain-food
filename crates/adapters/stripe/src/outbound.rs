@@ -196,15 +196,27 @@ struct StripeErrorBody {
     message: Option<String>,
 }
 
-/// Map a non-2xx Stripe response: card-type declines (`card_error`, or any 4xx carrying a
-/// `*declined*`/`card_*` code) → the canonical `PaymentDeclined` rejection; everything else
-/// (5xx, unparseable bodies, other API errors) → `DomainError::Repository`.
+/// Map a non-2xx Stripe response onto the THREE outcome classes the delivery paths distinguish
+/// (#272 D1 review CRITICAL-1 — the classes drive retry-vs-terminal, so a wrong class either
+/// loses a payment or wedges a mailbox lane forever):
+///
+/// - card-type declines (`card_error`, or any 4xx carrying a `*declined*`/`card_*` code) → the
+///   canonical `PaymentDeclined` rejection (`Invariant` with the catalogued prefix — REJECTED);
+/// - DETERMINISTIC request refusals (`invalid_request_error`, `idempotency_error`) → `Invariant`
+///   with a non-catalogued prefix: a terminal FAILED on BOTH dispatch arms. Retrying these can
+///   never succeed (a bogus payment method, a reused idempotency key with different params), and
+///   on the mailbox arm a `Repository` here would retry the head row FOREVER — one crafted
+///   `paymentMethodId` per partition could wedge every checkout lane;
+/// - everything plausibly transient (5xx, `rate_limit_error`, `api_error`, auth/config errors,
+///   transport failures, unparseable bodies) → `DomainError::Repository`: the legacy arm lands
+///   FAILED, the mailbox arm retries in place — the class where retry can actually help.
 fn map_error(context: &str, status: u16, body: &str) -> DomainError {
     if status < 500 {
         if let Ok(envelope) = serde_json::from_str::<StripeErrorEnvelope>(body) {
             let err = envelope.error;
             let code = err.code.as_deref().unwrap_or("");
-            let is_decline = err.kind.as_deref() == Some("card_error")
+            let kind = err.kind.as_deref().unwrap_or("");
+            let is_decline = kind == "card_error"
                 || code.contains("declined")
                 || code.starts_with("card_")
                 || code.starts_with("insufficient_");
@@ -212,6 +224,11 @@ fn map_error(context: &str, status: u16, body: &str) -> DomainError {
             if is_decline {
                 let code_suffix = if code.is_empty() { String::new() } else { format!(" ({code})") };
                 return DomainError::Invariant(format!("PaymentDeclined: {message}{code_suffix}"));
+            }
+            if kind == "invalid_request_error" || kind == "idempotency_error" {
+                return DomainError::Invariant(format!(
+                    "PaymentGatewayRefused: stripe {context} refused deterministically (HTTP {status}, code '{code}'): {message}"
+                ));
             }
             return DomainError::Repository(format!(
                 "stripe: {context} rejected (HTTP {status}, code '{code}'): {message}"
@@ -358,14 +375,31 @@ mod tests {
         }
     }
 
+    /// #272 D1 review CRITICAL-1: a deterministic request refusal must be TERMINAL (Invariant,
+    /// non-catalogued prefix → FAILED on both arms), never Repository — on the mailbox arm a
+    /// Repository outcome retries the head row forever and wedges the partition.
     #[test]
-    fn non_card_api_error_maps_to_repository_error() {
-        let body = r#"{"error":{"type":"invalid_request_error","code":"parameter_missing","message":"Missing required param: amount."}}"#;
-        match decode_create_intent_response(400, body) {
-            Err(DomainError::Repository(msg)) => {
-                assert!(msg.contains("parameter_missing"), "{msg}");
-                assert!(msg.contains("Missing required param"), "{msg}");
+    fn deterministic_request_refusals_are_terminal_never_retried() {
+        for body in [
+            r#"{"error":{"type":"invalid_request_error","code":"parameter_missing","message":"Missing required param: amount."}}"#,
+            r#"{"error":{"type":"idempotency_error","code":"","message":"Keys for idempotent requests can only be used with the same parameters."}}"#,
+        ] {
+            match decode_create_intent_response(400, body) {
+                Err(DomainError::Invariant(msg)) => {
+                    assert!(msg.starts_with("PaymentGatewayRefused: "), "{msg}");
+                }
+                other => panic!("expected terminal PaymentGatewayRefused, got {other:?}"),
             }
+        }
+    }
+
+    /// The transient classes STAY retryable: rate limiting and unrecognized 4xx kinds map to
+    /// Repository (mailbox retry-in-place; legacy FAILED).
+    #[test]
+    fn transient_gateway_errors_stay_repository() {
+        let body = r#"{"error":{"type":"rate_limit_error","message":"Too many requests."}}"#;
+        match decode_create_intent_response(429, body) {
+            Err(DomainError::Repository(msg)) => assert!(msg.contains("HTTP 429"), "{msg}"),
             other => panic!("expected Repository error, got {other:?}"),
         }
     }
@@ -380,14 +414,17 @@ mod tests {
     }
 
     #[test]
-    fn refund_ok_is_accepted_and_decline_maps_like_create_intent() {
+    fn refund_ok_is_accepted_and_deterministic_refusal_is_terminal() {
         assert!(decode_refund_response(200, r#"{"id":"re_1","object":"refund"}"#).is_ok());
+        // charge_already_refunded is deterministic — retrying an ApproveRefund delivery on it
+        // forever would wedge the RefundProcess lane (review CRITICAL-1).
         let body = r#"{"error":{"type":"invalid_request_error","code":"charge_already_refunded","message":"Charge ch_1 has already been refunded."}}"#;
         match decode_refund_response(400, body) {
-            Err(DomainError::Repository(msg)) => {
+            Err(DomainError::Invariant(msg)) => {
+                assert!(msg.starts_with("PaymentGatewayRefused: "), "{msg}");
                 assert!(msg.contains("charge_already_refunded"), "{msg}")
             }
-            other => panic!("expected Repository error, got {other:?}"),
+            other => panic!("expected terminal PaymentGatewayRefused, got {other:?}"),
         }
     }
 

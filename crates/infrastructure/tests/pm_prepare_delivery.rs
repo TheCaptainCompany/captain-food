@@ -742,3 +742,136 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
             .get("status");
     assert_eq!(redelivered, "IGNORED", "a re-delivered capture is a benign skip");
 }
+
+/// Review CRITICAL-1: a DETERMINISTIC gateway refusal (Stripe 4xx invalid_request /
+/// idempotency_error — mapped to a non-catalogued Invariant by the adapter) must land a TERMINAL
+/// verdict, never abort-for-retry: a Repository-classed outcome would retry the head row forever
+/// and wedge the whole PlaceOrderProcess partition behind one bogus paymentMethodId.
+struct RefusingGateway;
+
+#[async_trait]
+impl PaymentService for RefusingGateway {
+    async fn request(
+        &self,
+        _input: PaymentRequestInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<PaymentRequestOutput, DomainError> {
+        Err(DomainError::Invariant(
+            "PaymentGatewayRefused: stripe create_payment_intent refused deterministically (HTTP 400, code 'parameter_missing'): No such payment_method".into(),
+        ))
+    }
+
+    async fn refund(
+        &self,
+        _input: PaymentRefundInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        unreachable!("not exercised")
+    }
+}
+
+#[tokio::test]
+async fn deterministic_gateway_refusal_is_terminal_never_a_wedged_lane() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+    seed_checkout_world(&pool, true).await;
+
+    let deps = deps_over(&pool, Arc::new(RefusingGateway));
+    let mid = enqueue_pm(
+        &pool,
+        "PlaceOrderProcess",
+        uid(ORDER),
+        0x95,
+        "PlaceOrder",
+        place_order_payload(None),
+    )
+    .await;
+
+    let worker = worker_over(&pool, "PlaceOrderProcess", deps).await;
+    assert_eq!(drain_all(&worker).await, 1, "the delivery COMPLETES — terminal, not retried");
+
+    let (status, error) = verdict_of(&pool, mid).await;
+    assert_eq!(status, "FAILED", "deterministic refusal = terminal FAILED, lane free: {error:?}");
+    let events: i64 =
+        sqlx::query("SELECT count(*) AS n FROM domain_events WHERE stream_name LIKE 'Payment-%'")
+            .fetch_one(&pool)
+            .await
+            .expect("count")
+            .get("n");
+    assert_eq!(events, 0);
+}
+
+/// Review MAJOR-2: the flip-time backfill enqueues PM-addressed copies of Stripe facts the saga
+/// runner never reacted to (recorded pre-flip), idempotently — so no paid order is ever left
+/// with nobody told about it across the gate flip.
+#[tokio::test]
+async fn flip_backfill_enqueues_unreacted_stripe_facts_idempotently() {
+    let Some(url) = gated() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+    seed_checkout_world(&pool, true).await;
+
+    // The pre-flip world: a checkout ran (intent + PM row), Stripe reported the capture, and the
+    // fact was RECORDED on the Payment stream — but the runner died before reacting.
+    let gateway = Arc::new(StubGateway::default());
+    enqueue_pm(&pool, "PlaceOrderProcess", uid(ORDER), 0xB1, "PlaceOrder", place_order_payload(None))
+        .await;
+    let pm_worker = worker_over(&pool, "PlaceOrderProcess", deps_over(&pool, gateway.clone())).await;
+    assert_eq!(drain_all(&pm_worker).await, 1);
+    let store = PgEventStore::new(pool.clone());
+    let actor = Actor {
+        user_id: uid(0xE0),
+        user_type: "EXTERNAL".into(),
+        domain_id: None,
+        correlation_id: uid(0xC1),
+        cause_id: None,
+    };
+    store
+        .append(
+            "Payment-pi_prepare_test",
+            1,
+            &[DomainEvent::PaymentCaptured(domain::generated::events::PaymentCaptured {
+                payment_intent_id: PaymentIntentId("pi_prepare_test".into()),
+                order_id: Some(OrderId(uid(ORDER))),
+                restaurant_id: RestaurantId(uid(RESTAURANT)),
+                amount: eur(1960),
+            })],
+            &actor,
+        )
+        .await
+        .expect("record the capture pre-flip");
+    // The runner's checkpoint table exists in the full schema; create the minimal one here.
+    sqlx::raw_sql(
+        "CREATE TABLE IF NOT EXISTS projection_checkpoint (\n\
+           projector TEXT PRIMARY KEY, position BIGINT NOT NULL, updated_at TIMESTAMPTZ NOT NULL)",
+    )
+    .execute(&pool)
+    .await
+    .expect("checkpoint table");
+
+    // The flip: backfill (lanes already seeded by worker_over).
+    let pm_state = infrastructure::persistence::PgPaymentProcessState::new(pool.clone());
+    let enqueued =
+        infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(&pool, &pm_state)
+            .await
+            .expect("backfill");
+    assert_eq!(enqueued, 1, "exactly the un-reacted capture");
+    // Idempotent: a restart re-scan collides on the deterministic pk.
+    let again = infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(&pool, &pm_state)
+        .await
+        .expect("re-backfill");
+    assert_eq!(again, 0, "re-scan enqueues nothing");
+
+    // And the backfilled hop DELIVERS: the order materializes.
+    pm_worker.claim().await.expect("claim");
+    assert_eq!(drain_all(&pm_worker).await, 1);
+    let placed: i64 = sqlx::query("SELECT count(*) AS n FROM domain_events WHERE event_type = 'OrderPlaced'")
+        .fetch_one(&pool)
+        .await
+        .expect("count")
+        .get("n");
+    assert_eq!(placed, 1, "the paid order got told about");
+}
