@@ -166,6 +166,12 @@ stop-hook flags the agent's uncommitted WIP, leave it — the agent commits gate
 committing under it snapshots untested state. (`git worktree remove` leaves the shell's cwd
 dangling — `cd` out first or ignore the getcwd error.)
 
+**Pass multi-line commit messages through `git commit -F -` with a quoted heredoc**, never `-m`
+with a body containing backticks: bash command-substitutes `` ` `` inside double quotes, so a
+`` `type: process-manager` `` in the message executed `type:` as a command and pushed a commit
+with the phrase silently deleted (cost: one garbled money-path commit message, an amend and a
+force-push, 2026-08-01). `git commit -F - << 'MSG' … MSG` (quoted delimiter) is immune.
+
 **The remote git proxy cannot DELETE branches.** `git push origin --delete <branch>` (and the
 `:refs/heads/<branch>` form) dies with "the remote end hung up unexpectedly" — the per-session git
 proxy only supports fetch/push of refs, not deletions — and the GitHub MCP toolset has no
