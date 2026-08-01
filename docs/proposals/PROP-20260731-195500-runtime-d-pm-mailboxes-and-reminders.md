@@ -129,19 +129,20 @@ technical worker deletes the stream from `domain_events` + `domain_stream` → r
 No per-aggregate erasure PMs; a bespoke PM stays the escape hatch for aggregates needing custom
 steps (e.g. a bookkeeping export before stream deletion).
 
-## Decision D-A — where the Stripe call lives in a mailbox delivery (DECIDED: A2 — strategy; realization shape OPEN)
+## Decision D-A — where the Stripe call lives in a mailbox delivery (DECIDED: A2, realized as R2 prepare-outside-tx — ADR-20260801-023000)
 
-The STRATEGY is decided: no HTTP inside any transaction, retry-safety via the Stripe idempotency
-key (= `orderId`), every step supervisable. Its REALIZATION reopened when D1 met the actual
-runtime primitive (`complete_fenced` runs the handler inside the transaction; `post_commit` is a
-sync closure): literal two-row A2 moves the synchronous `PaymentDeclined` off `operationStatus`
-onto `paymentStatus` — a client-contract change — while a prepare-outside-tx SINGLE-delivery
-realization keeps the contract byte-identical with the same peak/retry safety. **D1 is blocked on
-this product-owner call** — full analysis under "A2's realization shape" in Unresolved questions.
+The STRATEGY: no HTTP inside any transaction, retry-safety via the Stripe idempotency key
+(= `orderId`), every step supervisable. The REALIZATION (product-owner, 2026-08-01,
+[ADR-20260801-023000](../adr/ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md)):
+**R2 — ONE delivery with a PREPARE phase**: validate/price and call Stripe BEFORE the fenced
+transaction opens, then commit `PaymentIntentCreated` + PM row + verdict atomically. A sync
+decline commits as the same `REJECTED PaymentDeclined` operation rejection as today — the client
+contract stays byte-identical. R1 (literal two deliveries) was rejected because the decline could
+then only surface on `paymentStatus`, a contract change.
 
 ### The two realizations, as sequences
 
-**R1 — literal A2 (two deliveries)** — the decline can no longer reject the operation:
+**R1 — literal A2 (two deliveries) — REJECTED** (the decline can no longer reject the operation):
 
 ```mermaid
 sequenceDiagram
@@ -167,7 +168,7 @@ sequenceDiagram
     end
 ```
 
-**R2 — prepare-outside-tx, single delivery** — contract byte-identical:
+**R2 — prepare-outside-tx, single delivery — CHOSEN ✓** (contract byte-identical):
 
 ```mermaid
 sequenceDiagram
@@ -281,27 +282,12 @@ drill-down is declared as a `gaps` entry until its query exists.
 
 ## Unresolved questions
 
-- **A2's realization shape against the actual runtime primitive** (found starting D1,
-  2026-08-01). The mailbox runtime's `complete_fenced` runs the handler INSIDE the completion
-  transaction and its `post_commit` hook is a synchronous closure — so A2's "post-commit step
-  calls Stripe" must spawn an async gateway leg (a small unfenced window), and its "delivery 2"
-  needs somewhere for a SYNC DECLINE to land: the PlaceOrder row is already terminal-SUCCEEDED
-  after delivery 1, `PaymentFailed` requires a `paymentIntentId` a declined request may not
-  have, and the PM row cannot open without an intent id (NOT NULL) — so under literal A2 the
-  decline surfaces only via `paymentStatus`, a CONTRACT change from the legacy synchronous
-  `PaymentDeclined` rejection (which the appendix's `throws` deliberately keeps). An
-  alternative realization keeps the contract byte-identical: ONE delivery whose runtime
-  PREPARES OUTSIDE the transaction (validate/price via pool reads → Stripe call, idempotency
-  key = orderId) and only then opens the fenced commit (record `PaymentIntentCreated` + PM row
-  + verdict — a crash between call and commit redelivers into the idempotency key). Same
-  peak-safety (no HTTP in any tx), same retry-safety, one less hop, no PM-state hand-off — but
-  it is a new runtime primitive (`prepare` phase) rather than A2's two rows. Needs a
-  product-owner call before D1 lands; the [PR #273](https://github.com/TheCaptainCompany/captain-food/pull/273)
-  checklist item stays open on it. (Also noted for D1: the worker router already routes the
-  three PM commands — to the FULL legacy handlers, HTTP-in-tx — so the actors.yaml appendix
-  entries must land strictly WITH the D-A wiring, never alone; and `command_journal`'s DROP
-  cannot ride while the gated-off legacy arm still writes it — retirement sequences as reads
-  first, DROP at the default-flip deploy.)
+- ~~A2's realization shape~~ — RESOLVED 2026-08-01 as R2
+  ([ADR-20260801-023000](../adr/ADR-20260801-023000-a2-realizes-as-prepare-phase-single-delivery.md),
+  see Decision D-A). D1 sequencing findings that stand: the appendix actors.yaml entries land
+  strictly WITH the D-A wiring, never alone (the router would otherwise route the PM commands to
+  the full legacy handlers — HTTP-in-tx); `command_journal` retirement sequences as reads-first,
+  DROP at the default-flip deploy (the gated-off legacy arm still writes it).
 
 - Retention windows per data category (legal/product input; configuration layer) — including
   whether the financial skeleton is exported before phase 2 or survives via a longer window.
