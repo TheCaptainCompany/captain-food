@@ -64,7 +64,15 @@
 > from the mailbox delivery's post-commit observer (was dark for every Runtime-C-flipped
 > command); observability contracts rewritten in the same change. `operationStatus` reads were
 > already mailbox-first; journal DROP rides the default-flip deploy. E2E `pm_prepare_delivery`
-> (5 tests incl. the full capture chain) green. Remaining D: D3 (activations, rebalancing,
+> (7 tests incl. the full capture chain) green. The independent multi-lens review (payments
+> lens) found 1 critical + 2 major, all FIXED (`32b8605`): deterministic Stripe 4xx now terminal
+> on both arms (a Repository class retried a mailbox head row FOREVER — one bogus
+> paymentMethodId per partition could wedge every checkout lane); a startup backfill (gate ON)
+> enqueues un-reacted Stripe facts past the runner checkpoints so no flip direction loses a saga
+> hop; cross-arm duplicate identity (each gated arm replays the OTHER acceptance store's
+> messageIds — a retry never re-executes across a flip). Deferred minors: prepare-before-
+> authority-precheck rate burn; the pre-existing same-cart check-then-act window (durable fix =
+> partial unique index on payment_process_manager). Remaining D: D3 (activations, rebalancing,
 > test ports).
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
