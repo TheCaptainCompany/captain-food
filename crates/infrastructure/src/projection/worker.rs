@@ -484,6 +484,14 @@ impl ProjectionWorker {
         let payload: serde_json::Value = record.try_get("payload").map_err(db_err)?;
         let occurred_at: chrono::DateTime<Utc> = record.try_get("occurred_at").map_err(db_err)?;
 
+        // `$`-prefixed rows are TECHNICAL, envelope-level events (the deletion engine's
+        // `$StreamTombstoned`, ADR-20260731-160000 §5) — not events.yaml vocabulary, nothing to
+        // fold. Skipping them here keeps them from masquerading as poison records (the
+        // log-and-skip path below is an ERROR, and a tombstone is not one).
+        if event_type.starts_with('$') {
+            return Ok(());
+        }
+
         // Rebuild the typed event from the (event_type, payload) columns via the adjacent tag.
         let event: DomainEvent = serde_json::from_value(serde_json::json!({
             "eventType": event_type,

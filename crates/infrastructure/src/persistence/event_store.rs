@@ -158,6 +158,15 @@ impl PgEventStore {
             let payload: serde_json::Value = row.try_get("payload").map_err(db_err)?;
             let row_version: i32 = row.try_get("version").map_err(db_err)?;
             version = version.max(i64::from(row_version));
+            // `$`-prefixed rows are TECHNICAL, envelope-level events (EventStore convention —
+            // today only the deletion engine's `$StreamTombstoned` instruction,
+            // ADR-20260731-160000 §5): not events.yaml vocabulary, so they cannot deserialize
+            // into DomainEvent and no fold may see them. They still occupy a version (counted
+            // above) so optimistic concurrency stays correct in the brief window before the
+            // technical deletion removes the stream.
+            if event_type.starts_with('$') {
+                continue;
+            }
             // Rebuild the typed event from the (event_type, payload) columns via the adjacent tag —
             // the same envelope-join the projection worker uses.
             let event: DomainEvent = serde_json::from_value(serde_json::json!({

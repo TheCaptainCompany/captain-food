@@ -24,6 +24,10 @@ pub struct DeletionTrigger {
 /// One actor's declared deletion policy.
 pub struct DeletionPolicy {
     pub actor_type: &'static str,
+    /// The actor's identity property (its typed `identity` ref) — the stream key: a trigger whose
+    /// `match_state_field` equals it identifies the doomed instance DIRECTLY by the event property
+    /// (self-trigger / direct key); anything else needs child-projection enumeration.
+    pub identity: &'static str,
     pub triggers: &'static [DeletionTrigger],
     /// The business fact recorded on the deletion ledger when the journey completes
     /// (pseudonymous references, never erased payloads — ADR-20260731-160000 §6).
@@ -33,6 +37,7 @@ pub struct DeletionPolicy {
 pub const DELETION_POLICIES: &[DeletionPolicy] = &[
     DeletionPolicy {
         actor_type: "Order",
+        identity: "orderId",
         triggers: &[
             DeletionTrigger { on: &["OrderExpired"], after_config_key: None, cancelled_on: &[], match_event_property: Some("orderId"), match_state_field: Some("orderId") },
         ],

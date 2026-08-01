@@ -8,6 +8,7 @@
 //! SIRENE prospect sync; later HubRise/Stripe/delivery, incl. recording inbound facts). Depends on
 //! `application` + `domain`; referencing both proves the infrastructure → application, domain edges.
 
+pub mod deletion;
 pub mod generated;
 pub mod integrations;
 pub mod mailbox;
@@ -36,5 +37,6 @@ pub use persistence::{
     PgRestaurantRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,
     PgUberSplitPolicyRepository,
 };
+pub use deletion::{DeletionEngine, DeletionEngineStatus};
 pub use process_manager::{ProcessManagerRunner, ProcessManagerStatus};
 pub use projection::{ProjectionStatus, ProjectionWorker};

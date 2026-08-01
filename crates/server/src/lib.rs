@@ -236,6 +236,9 @@ pub struct AppState {
     /// Live saga-runner (process managers, actors.yaml) status when it runs in-process; `None` when
     /// not started.
     saga_status: Option<Arc<Mutex<ProcessManagerStatus>>>,
+    /// Live deletion-engine status (`RUN_DELETION_ENGINE`, ADR-20260731-214500 §4); `None` when the
+    /// gate is off.
+    deletion_status: Option<Arc<Mutex<infrastructure::DeletionEngineStatus>>>,
     /// Live SIRENE sync-worker status. Unlike the two above this is `Some` whenever a DATABASE_URL
     /// pool exists — the worker is always constructed (the ping endpoint needs it), so the snapshot
     /// can distinguish "loop not started" (`running: false`) from "no database" (`None`). That
@@ -302,6 +305,7 @@ pub fn router() -> Router {
     let mut write_deps: Option<WriteDeps> = None;
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
+    let mut deletion_status: Option<Arc<Mutex<infrastructure::DeletionEngineStatus>>> = None;
     let mut sirene_status: Option<Arc<Mutex<infrastructure::SireneSyncStatus>>> = None;
     let mut sirene_worker: Option<Arc<SireneSyncWorker>> = None;
     let mut stripe_ingestor: Option<Arc<StripeWebhookIngestor>> = None;
@@ -834,6 +838,28 @@ pub fn router() -> Router {
                     tracing::warn!(worker = "retention_sweep", running = false, toggle = "RUN_RETENTION_SWEEP", "worker NOT started -- nothing expires and storage grows without bound");
                 }
 
+                // The generic deletion engine (ADR-20260731-214500 §4): gated DEFAULT-OFF until
+                // smoked (gate-then-stabilize — this worker DELETES event streams). An engine
+                // that cannot serve a DECLARED deletion policy refuses to construct; with the
+                // gate ON that is a boot-stopping wiring bug (fail-fast, ADR-20260729-010500).
+                if config.run_deletion_engine {
+                    let engine = infrastructure::DeletionEngine::new(pool.clone())
+                        .unwrap_or_else(|reason| {
+                            panic!("RUN_DELETION_ENGINE is on but the engine refused to start: {reason}")
+                        });
+                    deletion_status = Some(engine.status());
+                    // Restart-safe at every journey boundary (two-tx design), so it needs no
+                    // graceful drain: hold a never-firing shutdown sender and let the loop pace
+                    // on its heartbeat.
+                    let (engine_shutdown_tx, engine_shutdown_rx) =
+                        tokio::sync::watch::channel(false);
+                    std::mem::forget(engine_shutdown_tx);
+                    tokio::spawn(engine.run_loop(engine_shutdown_rx));
+                    tracing::info!(worker = "deletion_engine", running = true, toggle = "RUN_DELETION_ENGINE", "worker running in-process");
+                } else {
+                    tracing::info!(worker = "deletion_engine", running = false, toggle = "RUN_DELETION_ENGINE", "worker NOT started (gated default) -- recorded expiry facts accumulate; no stream is erased");
+                }
+
                 let worker = Arc::new(SireneSyncWorker::new(pool.clone()));
                 // Taken unconditionally, BEFORE the gate below: the worker exists either way (the ping
                 // endpoint drives it), so `/sirene` can report `running: false` for a paused loop
@@ -870,8 +896,9 @@ pub fn router() -> Router {
         .route("/health", get(health))
         .route("/projector", get(projector))
         .route("/saga", get(saga))
+        .route("/deletion", get(deletion))
         .route("/sirene", get(sirene))
-        .with_state(AppState { snap, projector_status, saga_status, sirene_status });
+        .with_state(AppState { snap, projector_status, saga_status, deletion_status, sirene_status });
 
     // Built once, shared twice: the HTTP GraphQL routes AND the SSR page renderer (#92 — the
     // in-process transport executes screens' data_requirements against this same schema).
@@ -1009,6 +1036,25 @@ async fn saga(State(app): State<AppState>) -> impl IntoResponse {
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "running": false, "reason": "saga_runner_not_started" })),
+        ),
+    }
+}
+
+/// Deletion-engine readiness (ADR-20260728-224500; worker ADR-20260731-214500 §4). `200` when the
+/// engine loop is running, `503` otherwise — and a `503` with `"reason": "deletion_engine_not_started"`
+/// is the GATED-OFF default (`RUN_DELETION_ENGINE=false`), not a fault: recorded expiry facts
+/// accumulate until the gate flips; no data is lost.
+async fn deletion(State(app): State<AppState>) -> impl IntoResponse {
+    match &app.deletion_status {
+        Some(handle) => {
+            let status = handle.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+            let code = if status.running { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+            let body = serde_json::to_value(&status).unwrap_or_else(|_| json!({ "running": false }));
+            (code, Json(body))
+        }
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "running": false, "reason": "deletion_engine_not_started" })),
         ),
     }
 }

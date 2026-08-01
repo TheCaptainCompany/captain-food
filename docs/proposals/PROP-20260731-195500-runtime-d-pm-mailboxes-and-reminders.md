@@ -36,9 +36,12 @@ carries all of it.
 - **UC2 — Refund decision**: restaurant/admin approves or denies a pending refund; approval
   drives the Stripe refund; the `PaymentRefunded` fact closes the saga idempotently.
 - **UC3 — GDPR order deletion (the deletion pilot)**: an Order reaching a terminal state starts
-  its retention clock; when due, the deletion journey runs (projections tombstone → technical
-  stream deletion → `OrderDeleted` receipt). Recording is a STUB until the erasure action of
-  [#194 "GDPR erasure"](https://github.com/TheCaptainCompany/captain-food/issues/194) lands.
+  its retention clock; when due, the recorded `OrderExpired` fact drives the generic engine's
+  journey (checkpoint-verified → tombstone → stream deletion → `OrderDeleted` receipt on the
+  ledger). The engine ships GATED (`RUN_DELETION_ENGINE` default false); what remains for
+  [#194 "GDPR erasure"](https://github.com/TheCaptainCompany/captain-food/issues/194): the
+  per-projection tombstone folds of `OrderExpired` (parked under `nonProjectedEvents` until
+  then) and the gate's default flip (its own one-line ADR after staging smoke).
 - **UC4 — The leaving restaurant (second pilot, rides when prioritized)**: the owner requests
   deletion (refusable command), gets a cooling window with an undo, and the restaurant's
   dependent aggregates die through the propagation tree.

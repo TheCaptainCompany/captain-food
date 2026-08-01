@@ -36,7 +36,17 @@
 > the clock INSIDE the completion transaction; the kind-MESSAGE delivery route records the
 > promoted fact (Recorded/Duplicate/Ignored — never Rejected); behaviour tests assert schedule +
 > reschedule-in-place per terminal receive; E2E `mailbox_retention` proves the loop on PG.
-> Next: the generic deletion engine over `DELETION_POLICIES`, then D1 (A2/B2 flip).
+> ✅ **The GENERIC deletion engine is on the branch too (2026-08-01)**: a log-consumer worker
+> over the generated `DELETION_POLICIES` (own `projection_checkpoint` row `DeletionEngine`, scan
+> BOUNDED by the slowest projection checkpoint = phase-1 fold verification), two restart-safe
+> transactions per journey (`$StreamTombstoned` instruction → delete `domain_events` +
+> `domain_stream` + `OrderDeleted` receipt on `DeletionLedger-Order` + cursor, atomically);
+> `$`-prefixed technical rows are skipped by `PgEventStore::load` and the projector; unsupported
+> policy shapes (windowed engine delays, undo, child enumeration) REFUSE construction. GATED
+> `RUN_DELETION_ENGINE` default **false** (gate-then-stabilize — the default flip is its own
+> one-line ADR after staging smoke); readiness at `GET /deletion`. E2E `deletion_engine` green.
+> Next: D1 (A2 two-phase placeOrder + B2 chained facts + journal retirement + observability
+> rewrite).
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).

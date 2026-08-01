@@ -500,6 +500,19 @@ keys:
       production: "true"
       staging: "true"
 
+  RUN_DELETION_ENGINE:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      The generic deletion engine (ADR-20260731-214500 §4): runs the declared deletion journeys
+      (tombstone -> stream deletion -> ledger receipt) for every actors.yaml `deletion:` block.
+      OFF, recorded expiry facts accumulate and no stream is ever erased — GDPR deletion pauses,
+      data is never lost. DEFAULT OFF (gate-then-stabilize): this worker DELETES event streams;
+      the default flips by its own one-line ADR after the gated form is smoked in staging.
+      Readiness at GET /deletion.
+
   RUN_RETENTION_SWEEP:
     type: bool
     scalar:
