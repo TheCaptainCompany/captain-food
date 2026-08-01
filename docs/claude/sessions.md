@@ -185,6 +185,15 @@ with a body containing backticks: bash command-substitutes `` ` `` inside double
 with the phrase silently deleted (cost: one garbled money-path commit message, an amend and a
 force-push, 2026-08-01). `git commit -F - << 'MSG' … MSG` (quoted delimiter) is immune.
 
+**After a product-owner merge, diff CONTENT before declaring a remainder.** A squash merge takes
+the WHOLE branch at its head — "the PO merged early, only slice N is in" is a belief about the
+commit graph, not the content. Verify with `git diff main <branch-tip>` (and read the merged PR
+body's checklist — its state at merge time is the record): if `main` is ahead and nothing is
+missing, the work IS merged, whatever the in-flight session believed. Cost: issue #275 and a
+proposal `Realized by` header both written as "only D2 merged" minutes after a squash that
+contained D1+D2+D3 complete; the next session spent its opening verifying instead of building
+(2026-08-01).
+
 **The remote git proxy cannot DELETE branches.** `git push origin --delete <branch>` (and the
 `:refs/heads/<branch>` form) dies with "the remote end hung up unexpectedly" — the per-session git
 proxy only supports fetch/push of refs, not deletions — and the GitHub MCP toolset has no

@@ -116,6 +116,14 @@
 > reminder windows in standalone fleets, SIRENE success-is-enumerated verdict SQL,
 > RUN_MAILBOX_WORKERS out of the server Config (`consumer`). Details in the proposal's review
 > round 2 section.
+> ✅ **#273 MERGED to `main` (2026-08-01, squash `735adbf`, CI green incl. the DB suites) with
+> D1 + D2 + D3 ALL COMPLETE** — the three "LANDED on the #272 branch" entries above are on
+> `main`. [#275](https://github.com/TheCaptainCompany/captain-food/issues/275) was opened on the
+> mistaken premise that only D2 merged (corrected at claim time — a post-merge content diff
+> shows `main` strictly ahead of the branch); its real remainder is ADR-20260730-234918 **test
+> port 4** (mailbox discipline suite) on `275-runtime-d1-r2-payment-flip`. The
+> `PM_MAILBOX_DELIVERY` default flip (+ `command_journal` DROP + runner-group retirement riding
+> that deploy) stays gated pending staging smoke — its own one-line ADR.
 > 🚧 Remainder (slices 2+3+4 + supervision API/page) CONSOLIDATED on `242-actor-mailbox-runtime`
 > (product-owner directive, 2026-07-31: one branch, tests throughout; migrations ride the branch —
 > they only APPLY at the manual deploy, ADR-20260730-051500).

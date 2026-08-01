@@ -6,9 +6,12 @@
 - **Date**: 2026-07-31 (living document — this is the CURRENT state of the design; prior states
   are in this file's git history, per ADR-20260801-020000)
 - **Tracking issue**: [#272 "Runtime D: PM mailboxes (placeOrder/refund flip), reminders machinery, activations — continuation of #242"](https://github.com/TheCaptainCompany/captain-food/issues/272)
-- **Realized by**: D2 merged via [PR #273](https://github.com/TheCaptainCompany/captain-food/pull/273)
-  (2026-08-01); the D1/D3 remainder continues under
-  [#275 "Runtime D remainder: D1 — the R2 payment flip (prepare-phase delivery), then D3"](https://github.com/TheCaptainCompany/captain-food/issues/275)
+- **Realized by**: [PR #273 "Runtime D — PM mailboxes (two-phase payment delivery), typed reminders, activations"](https://github.com/TheCaptainCompany/captain-food/pull/273),
+  squash-merged 2026-08-01 with **D1, D2 and D3 all complete** (the realization-state sections
+  below; a post-merge content diff confirmed nothing was left on the branch). The sole remainder —
+  ADR-20260730-234918 test port 4 (mailbox discipline) — plus the record correction ride
+  [#275 "Runtime D remainder: D1 — the R2 payment flip (prepare-phase delivery), then D3"](https://github.com/TheCaptainCompany/captain-food/issues/275);
+  the `PM_MAILBOX_DELIVERY` default flip stays its own one-line ADR after staging smoke
 
 **Context**: [PROP-20260728-152752](PROP-20260728-152752-actor-mailbox-write-path.md) §3.4 ·
 [ADR-20260731-120825](../adr/ADR-20260731-120825-actor-messages-typed-inside-the-actor.md) ·
