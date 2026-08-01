@@ -20,14 +20,18 @@
 #   STRIPE_SECRET_KEY   sk_test_... (refused otherwise — this script must never move live money).
 #                       CI supplies it from the repo secret STRIPE_SECRET_KEY_TEST; the unsuffixed
 #                       repo secret was retired 2026-07-29 because its mode was not visible in its name.
-#   RENDER_API_KEY      used to read the deployed Supabase URL/secret so role JWTs can be minted
-#                       through the deployment's own auth provider (Supabase admin API).
-#                       Alternatively set SUPABASE_URL + SUPABASE_SECRET_KEY directly and
-#                       RENDER_API_KEY becomes optional.
+#   RENDER_API_KEY      used to read the deployed Supabase SECRET key (SUPABASE_SECRET_KEY, which stays
+#                       dashboard-managed on the Render service) so role JWTs can be minted through the
+#                       deployment's own auth provider (Supabase admin API). The Supabase URL is NOT read
+#                       from Render: it is a non-secret that RIDES THE ARTIFACT (baked per-profile,
+#                       ADR-20260729-020000) and was deliberately removed from the Render env, so it is
+#                       read from the baked source of truth specs/configuration.yaml. Set SUPABASE_URL +
+#                       SUPABASE_SECRET_KEY directly to override both (RENDER_API_KEY then optional).
 # Optional env:
 #   SMOKE_BASE_DOMAIN     default captain.food
 #   SMOKE_TENANT_SLUG     default smoke-test
 #   RENDER_SERVICE_NAME   default captain-food
+#   SMOKE_APP_PROFILE     which baked config profile the deployment runs (default production)
 #   SMOKE_ORDER_TIMEOUT   seconds to wait for the captured order (default 90)
 set -euo pipefail
 
@@ -35,7 +39,10 @@ set -euo pipefail
 SMOKE_BASE_DOMAIN="${SMOKE_BASE_DOMAIN:-captain.food}"
 SMOKE_TENANT_SLUG="${SMOKE_TENANT_SLUG:-smoke-test}"
 RENDER_SERVICE_NAME="${RENDER_SERVICE_NAME:-captain-food}"
+SMOKE_APP_PROFILE="${SMOKE_APP_PROFILE:-production}"
 SMOKE_ORDER_TIMEOUT="${SMOKE_ORDER_TIMEOUT:-90}"
+# Repo root, so we can read baked (non-secret) config from specs/configuration.yaml (ADR-20260729-020000).
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 API_BASE="https://api.${SMOKE_BASE_DOMAIN}"
 TENANT_BASE="https://${SMOKE_TENANT_SLUG}.${SMOKE_BASE_DOMAIN}"
 STRIPE_API="https://api.stripe.com"
@@ -101,27 +108,54 @@ gql_ok() {
 }
 
 # --- Supabase role-token minting (the deployment's own auth provider) -----------------------------
+# The two values have DIFFERENT homes since ADR-20260729-020000 ("non-secret config rides the artifact"):
+#   * SUPABASE_URL        — NON-secret, baked per-profile into the image by the codegen and DELIBERATELY
+#                           REMOVED from the Render env (env > baked precedence means a leftover dashboard
+#                           value would silently win over the digest). Read it from the baked source of
+#                           truth specs/configuration.yaml, NOT from the Render service. Before this fix
+#                           the script still read it from Render and failed L3 once the key was removed.
+#   * SUPABASE_SECRET_KEY — a real secret; stays on the Render service, read via RENDER_API_KEY.
+# An explicit SUPABASE_URL / SUPABASE_SECRET_KEY env still overrides either lookup.
 SB_URL="${SUPABASE_URL:-}"
 SB_KEY="${SUPABASE_SECRET_KEY:-}"
+
+# Read a baked per-profile config value straight from the DSL source of truth, coreutils only: the CI
+# runner ships mikefarah yq while dev boxes often carry python-yq, and their query syntaxes differ, so a
+# yq invocation is not portable here. Blocks are 2-space-indented keys; `deploy:` holds per-profile values.
+baked_config() {
+  local key="$1" prof="$2" cfg="${REPO_ROOT}/specs/configuration.yaml"
+  [ -f "$cfg" ] || return 0
+  awk -v key="$key" -v prof="$prof" '
+    $0 ~ "^  " key ":" {inkey=1; next}
+    inkey && /^  [A-Za-z_]/ {inkey=0}
+    inkey && $1=="deploy:" {indeploy=1; next}
+    indeploy && $1==prof":" {gsub(/^[^:]*:[[:space:]]*/,""); gsub(/^"|"$/,""); print; exit}
+  ' "$cfg"
+}
+
 load_supabase_creds() {
   [ -n "$SB_URL" ] && [ -n "$SB_KEY" ] && return 0
-  [ -n "${RENDER_API_KEY:-}" ] || fail "L3: need RENDER_API_KEY (or SUPABASE_URL+SUPABASE_SECRET_KEY) to mint role tokens"
-  local sid ev
-  sid=$(curl -sS -m 20 "https://api.render.com/v1/services?name=${RENDER_SERVICE_NAME}&limit=1" \
-    -H "Authorization: Bearer $RENDER_API_KEY" | jq -r '.[0].service.id // empty')
-  [ -n "$sid" ] || fail "L3: Render service '${RENDER_SERVICE_NAME}' not found"
-  ev=$(curl -sS -m 20 "https://api.render.com/v1/services/${sid}/env-vars?limit=100" \
-    -H "Authorization: Bearer $RENDER_API_KEY")
-  # SHAPE-AGNOSTIC (2026-07-29): this used `.[].envVar | select(...)`, which assumes Render returns an
-  # array of {envVar:{key,value}}. It also returns an object wrapper over the same records, and the docs
-  # publish neither shape — the assumption died with `Cannot index string with string "envVar"` the first
-  # time render-config-sync.yml ran against production. Pull any object carrying key+value, wherever it
-  # sits, so either shape works.
-  local vars
-  vars=$(printf '%s' "$ev" | jq -c '[.. | objects | select(has("key") and has("value"))]')
-  SB_URL=$(printf '%s' "$vars" | jq -r 'map(select(.key=="SUPABASE_URL")) | .[0].value // empty')
-  SB_KEY=$(printf '%s' "$vars" | jq -r 'map(select(.key=="SUPABASE_SECRET_KEY")) | .[0].value // empty')
-  [ -n "$SB_URL" ] && [ -n "$SB_KEY" ] || fail "L3: SUPABASE_URL/SUPABASE_SECRET_KEY not configured on the Render service"
+  if [ -z "$SB_URL" ]; then
+    SB_URL=$(baked_config SUPABASE_URL "$SMOKE_APP_PROFILE")
+    [ -n "$SB_URL" ] || fail "L3: SUPABASE_URL not set and no baked default for profile '${SMOKE_APP_PROFILE}' in specs/configuration.yaml (ADR-20260729-020000); set SUPABASE_URL to override"
+  fi
+  if [ -z "$SB_KEY" ]; then
+    [ -n "${RENDER_API_KEY:-}" ] || fail "L3: need RENDER_API_KEY (or SUPABASE_SECRET_KEY) to read the Supabase service key for role-token minting"
+    local sid ev vars
+    sid=$(curl -sS -m 20 "https://api.render.com/v1/services?name=${RENDER_SERVICE_NAME}&limit=1" \
+      -H "Authorization: Bearer $RENDER_API_KEY" | jq -r '.[0].service.id // empty')
+    [ -n "$sid" ] || fail "L3: Render service '${RENDER_SERVICE_NAME}' not found"
+    ev=$(curl -sS -m 20 "https://api.render.com/v1/services/${sid}/env-vars?limit=100" \
+      -H "Authorization: Bearer $RENDER_API_KEY")
+    # SHAPE-AGNOSTIC (2026-07-29): this used `.[].envVar | select(...)`, which assumes Render returns an
+    # array of {envVar:{key,value}}. It also returns an object wrapper over the same records, and the docs
+    # publish neither shape — the assumption died with `Cannot index string with string "envVar"` the first
+    # time render-config-sync.yml ran against production. Pull any object carrying key+value, wherever it
+    # sits, so either shape works.
+    vars=$(printf '%s' "$ev" | jq -c '[.. | objects | select(has("key") and has("value"))]')
+    SB_KEY=$(printf '%s' "$vars" | jq -r 'map(select(.key=="SUPABASE_SECRET_KEY")) | .[0].value // empty')
+    [ -n "$SB_KEY" ] || fail "L3: SUPABASE_SECRET_KEY not configured on the Render service"
+  fi
 }
 
 # mint_token <email> <captain_role> — ensure the smoke user exists with the role, then magic-link

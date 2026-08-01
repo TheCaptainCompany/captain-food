@@ -23,20 +23,25 @@ observed state.
 ## Auth
 
 Non-public GraphQL paths require a Supabase JWT whose `app_metadata.captain_role` matches the path
-(ADR-0047). The script mints role tokens through the deployment's **own** auth provider: it reads
-`SUPABASE_URL`/`SUPABASE_SECRET_KEY` from the Render service env (via `RENDER_API_KEY`), ensures the
-dedicated smoke users (`smoke-admin@…` ADMIN, `smoke-customer@…` CUSTOMER) exist, and signs them in
-via an admin-generated magic link (nothing is emailed). No secret is ever printed or persisted.
+(ADR-0047). The script mints role tokens through the deployment's **own** auth provider. The two Supabase
+values have different homes since ADR-20260729-020000 ("non-secret config rides the artifact"):
+`SUPABASE_URL` is a non-secret baked per-profile into the image and **removed from the Render env**, so the
+script reads it from the baked source of truth `specs/configuration.yaml` (profile `SMOKE_APP_PROFILE`,
+default `production`); `SUPABASE_SECRET_KEY` is a real secret and is read from the Render service env (via
+`RENDER_API_KEY`). It then ensures the dedicated smoke users (`smoke-admin@…` ADMIN, `smoke-customer@…`
+CUSTOMER) exist and signs them in via an admin-generated magic link (nothing is emailed). No secret is
+ever printed or persisted. Set `SUPABASE_URL`/`SUPABASE_SECRET_KEY` directly to override either lookup.
 
 ## Environment
 
 | Var | Required | Meaning |
 |-----|----------|---------|
 | `STRIPE_SECRET_KEY` | yes (L4) | must be `sk_test_…` — the script refuses to confirm payments otherwise |
-| `RENDER_API_KEY` | yes (L3/L4) | to read the deployed Supabase creds; or set `SUPABASE_URL` + `SUPABASE_SECRET_KEY` directly |
+| `RENDER_API_KEY` | yes (L3/L4) | to read the deployed `SUPABASE_SECRET_KEY`; or set `SUPABASE_URL` + `SUPABASE_SECRET_KEY` directly |
 | `SMOKE_BASE_DOMAIN` | no | default `captain.food` |
 | `SMOKE_TENANT_SLUG` | no | default `smoke-test` |
 | `RENDER_SERVICE_NAME` | no | default `captain-food` |
+| `SMOKE_APP_PROFILE` | no | baked config profile the deployment runs (default `production`) |
 | `SMOKE_ORDER_TIMEOUT` | no | seconds to wait for the captured order (default 90) |
 
 ## Stripe webhook prerequisite
