@@ -28,24 +28,32 @@ async fn main() {
     let ingestor =
         Arc::new(StripeWebhookIngestor::new(Arc::new(PgRawStripeEvents::new(pool.clone())), mailbox));
     if infrastructure::mailbox::standalone_workers_enabled() {
-        // Payment (the ingested Stripe facts) + the two PM lanes their B2-chained copies land
-        // on — a capture chained here must also be REACTED to here when the monolith is down.
-        let payments: Arc<dyn application::generated::services::PaymentService> =
-            match std::env::var("STRIPE_SECRET_KEY") {
-                Ok(key) if !key.is_empty() => {
-                    Arc::new(stripe_adapter::StripePaymentGateway::new(key))
-                }
-                _ => {
-                    tracing::warn!(
-                        "STRIPE_SECRET_KEY unset -- payment-dependent deliveries will decline"
-                    );
-                    Arc::new(infrastructure::FailClosedPaymentGateway)
-                }
-            };
+        // Payment (the ingested Stripe facts) always; the two PM lanes their B2-chained copies
+        // land on — a capture chained here must also be REACTED to here when the monolith is
+        // down — ONLY with a real gateway. Running them fail-closed would not be inert: this
+        // fleet lease-competes with the monolith's, and a PlaceOrder landing on an
+        // adapter-owned lane would be terminally DECLINED instead of delivered by the peer
+        // that has credentials. (The PM EVENT legs never call Stripe, but their lanes also
+        // carry the PM COMMANDS.)
+        let (lanes, payments): (
+            &'static [&'static str],
+            Arc<dyn application::generated::services::PaymentService>,
+        ) = match std::env::var("STRIPE_SECRET_KEY") {
+            Ok(key) if !key.is_empty() => (
+                &["Payment", "PlaceOrderProcess", "RefundProcess"],
+                Arc::new(stripe_adapter::StripePaymentGateway::new(key)),
+            ),
+            _ => {
+                tracing::warn!(
+                    "STRIPE_SECRET_KEY unset -- running the Payment lane only (PM lanes need the gateway)"
+                );
+                (&["Payment"], Arc::new(infrastructure::FailClosedPaymentGateway))
+            }
+        };
         infrastructure::mailbox::spawn_standalone_workers(
             pool,
             "stripe",
-            &["Payment", "PlaceOrderProcess", "RefundProcess"],
+            lanes,
             payments,
             nudges,
             Default::default(),
