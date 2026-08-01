@@ -71,35 +71,41 @@ impl PaymentProcessStateStore for PgPaymentProcessState {
     }
 
     async fn upsert(&self, row: &PaymentProcessRow) -> Result<(), DomainError> {
-        let sql = format!(
-            "INSERT INTO payment_process_manager ({PAYMENT_PROCESS_COLUMNS}) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) \
-             ON CONFLICT (cart_id) DO UPDATE SET \
-             order_id = EXCLUDED.order_id, \
-             payment_intent_id = EXCLUDED.payment_intent_id, \
-             process_status = EXCLUDED.process_status, \
-             payment_status = EXCLUDED.payment_status, \
-             customer_id = EXCLUDED.customer_id, \
-             session_id = EXCLUDED.session_id, \
-             client_secret = EXCLUDED.client_secret, \
-             last_processed_stripe_event_id = EXCLUDED.last_processed_stripe_event_id, \
-             last_update_utc = now()"
-        );
-        sqlx::query(&sql)
-            .bind(row.cart_id.0)
-            .bind(row.order_id.0)
-            .bind(row.payment_intent_id.0.clone())
-            .bind(row.process_status.to_text())
-            .bind(row.payment_status.to_text())
-            .bind(row.customer_id.as_ref().map(|v| v.0))
-            .bind(row.session_id.as_ref().map(|v| v.0))
-            .bind(row.client_secret.clone())
-            .bind(row.last_processed_stripe_event_id.as_ref().map(|v| v.0.clone()))
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
-        Ok(())
+        upsert_payment_process_with(&self.pool, row).await
     }
+}
+
+/// Upsert one `payment_process_manager` row through ANY PgExecutor — the pool (the trait impl delegates here)
+/// or the fenced completion transaction (#272 Runtime D1, ADR-20260801-023000).
+pub async fn upsert_payment_process_with<'e, E: sqlx::PgExecutor<'e>>(executor: E, row: &PaymentProcessRow) -> Result<(), DomainError> {
+    let sql = format!(
+        "INSERT INTO payment_process_manager ({PAYMENT_PROCESS_COLUMNS}) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) \
+         ON CONFLICT (cart_id) DO UPDATE SET \
+         order_id = EXCLUDED.order_id, \
+         payment_intent_id = EXCLUDED.payment_intent_id, \
+         process_status = EXCLUDED.process_status, \
+         payment_status = EXCLUDED.payment_status, \
+         customer_id = EXCLUDED.customer_id, \
+         session_id = EXCLUDED.session_id, \
+         client_secret = EXCLUDED.client_secret, \
+         last_processed_stripe_event_id = EXCLUDED.last_processed_stripe_event_id, \
+         last_update_utc = now()"
+    );
+    sqlx::query(&sql)
+        .bind(row.cart_id.0)
+        .bind(row.order_id.0)
+        .bind(row.payment_intent_id.0.clone())
+        .bind(row.process_status.to_text())
+        .bind(row.payment_status.to_text())
+        .bind(row.customer_id.as_ref().map(|v| v.0))
+        .bind(row.session_id.as_ref().map(|v| v.0))
+        .bind(row.client_secret.clone())
+        .bind(row.last_processed_stripe_event_id.as_ref().map(|v| v.0.clone()))
+        .execute(executor)
+        .await
+        .map_err(db_err)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -141,29 +147,35 @@ impl RefundProcessStateStore for PgRefundProcessState {
     }
 
     async fn upsert(&self, row: &RefundProcessRow) -> Result<(), DomainError> {
-        let sql = format!(
-            "INSERT INTO refund_process_manager ({REFUND_PROCESS_COLUMNS}) \
-             VALUES ($1,$2,$3,$4,$5,$6,now()) \
-             ON CONFLICT (order_id) DO UPDATE SET \
-             payment_intent_id = EXCLUDED.payment_intent_id, \
-             refund_id = EXCLUDED.refund_id, \
-             process_status = EXCLUDED.process_status, \
-             approved_amount_cents = EXCLUDED.approved_amount_cents, \
-             reason = EXCLUDED.reason, \
-             last_update_utc = now()"
-        );
-        sqlx::query(&sql)
-            .bind(row.order_id.0)
-            .bind(row.payment_intent_id.as_ref().map(|v| v.0.clone()))
-            .bind(row.refund_id.as_ref().map(|v| v.0.clone()))
-            .bind(row.process_status.to_text())
-            .bind(row.approved_amount_cents.map(|v| v.0))
-            .bind(row.reason.clone())
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
-        Ok(())
+        upsert_refund_process_with(&self.pool, row).await
     }
+}
+
+/// Upsert one `refund_process_manager` row through ANY PgExecutor — the pool (the trait impl delegates here)
+/// or the fenced completion transaction (#272 Runtime D1, ADR-20260801-023000).
+pub async fn upsert_refund_process_with<'e, E: sqlx::PgExecutor<'e>>(executor: E, row: &RefundProcessRow) -> Result<(), DomainError> {
+    let sql = format!(
+        "INSERT INTO refund_process_manager ({REFUND_PROCESS_COLUMNS}) \
+         VALUES ($1,$2,$3,$4,$5,$6,now()) \
+         ON CONFLICT (order_id) DO UPDATE SET \
+         payment_intent_id = EXCLUDED.payment_intent_id, \
+         refund_id = EXCLUDED.refund_id, \
+         process_status = EXCLUDED.process_status, \
+         approved_amount_cents = EXCLUDED.approved_amount_cents, \
+         reason = EXCLUDED.reason, \
+         last_update_utc = now()"
+    );
+    sqlx::query(&sql)
+        .bind(row.order_id.0)
+        .bind(row.payment_intent_id.as_ref().map(|v| v.0.clone()))
+        .bind(row.refund_id.as_ref().map(|v| v.0.clone()))
+        .bind(row.process_status.to_text())
+        .bind(row.approved_amount_cents.map(|v| v.0))
+        .bind(row.reason.clone())
+        .execute(executor)
+        .await
+        .map_err(db_err)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -201,21 +213,27 @@ impl CartBindingStateStore for PgCartBindingState {
     }
 
     async fn upsert(&self, row: &CartBindingRow) -> Result<(), DomainError> {
-        let sql = format!(
-            "INSERT INTO cart_binding_process_manager ({CART_BINDING_COLUMNS}) \
-             VALUES ($1,$2,now()) \
-             ON CONFLICT (session_id) DO UPDATE SET \
-             customer_id = EXCLUDED.customer_id, \
-             last_update_utc = now()"
-        );
-        sqlx::query(&sql)
-            .bind(row.session_id.0)
-            .bind(row.customer_id.0)
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
-        Ok(())
+        upsert_cart_binding_with(&self.pool, row).await
     }
+}
+
+/// Upsert one `cart_binding_process_manager` row through ANY PgExecutor — the pool (the trait impl delegates here)
+/// or the fenced completion transaction (#272 Runtime D1, ADR-20260801-023000).
+pub async fn upsert_cart_binding_with<'e, E: sqlx::PgExecutor<'e>>(executor: E, row: &CartBindingRow) -> Result<(), DomainError> {
+    let sql = format!(
+        "INSERT INTO cart_binding_process_manager ({CART_BINDING_COLUMNS}) \
+         VALUES ($1,$2,now()) \
+         ON CONFLICT (session_id) DO UPDATE SET \
+         customer_id = EXCLUDED.customer_id, \
+         last_update_utc = now()"
+    );
+    sqlx::query(&sql)
+        .bind(row.session_id.0)
+        .bind(row.customer_id.0)
+        .execute(executor)
+        .await
+        .map_err(db_err)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -264,29 +282,35 @@ impl DeliveryDispatchStateStore for PgDeliveryDispatchState {
     }
 
     async fn upsert(&self, row: &DeliveryDispatchRow) -> Result<(), DomainError> {
-        let sql = format!(
-            "INSERT INTO delivery_dispatch_process_manager ({DELIVERY_DISPATCH_COLUMNS}) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,now()) \
-             ON CONFLICT (order_id) DO UPDATE SET \
-             restaurant_id = EXCLUDED.restaurant_id, \
-             delivery_job_id = EXCLUDED.delivery_job_id, \
-             process_status = EXCLUDED.process_status, \
-             offer_attempts = EXCLUDED.offer_attempts, \
-             current_rank = EXCLUDED.current_rank, \
-             current_channel = EXCLUDED.current_channel, \
-             last_update_utc = now()"
-        );
-        sqlx::query(&sql)
-            .bind(row.order_id.0)
-            .bind(row.restaurant_id.0)
-            .bind(row.delivery_job_id.0)
-            .bind(row.process_status.to_text())
-            .bind(row.offer_attempts)
-            .bind(row.current_rank)
-            .bind(row.current_channel.as_ref().map(|v| v.0.clone()))
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
-        Ok(())
+        upsert_delivery_dispatch_with(&self.pool, row).await
     }
+}
+
+/// Upsert one `delivery_dispatch_process_manager` row through ANY PgExecutor — the pool (the trait impl delegates here)
+/// or the fenced completion transaction (#272 Runtime D1, ADR-20260801-023000).
+pub async fn upsert_delivery_dispatch_with<'e, E: sqlx::PgExecutor<'e>>(executor: E, row: &DeliveryDispatchRow) -> Result<(), DomainError> {
+    let sql = format!(
+        "INSERT INTO delivery_dispatch_process_manager ({DELIVERY_DISPATCH_COLUMNS}) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,now()) \
+         ON CONFLICT (order_id) DO UPDATE SET \
+         restaurant_id = EXCLUDED.restaurant_id, \
+         delivery_job_id = EXCLUDED.delivery_job_id, \
+         process_status = EXCLUDED.process_status, \
+         offer_attempts = EXCLUDED.offer_attempts, \
+         current_rank = EXCLUDED.current_rank, \
+         current_channel = EXCLUDED.current_channel, \
+         last_update_utc = now()"
+    );
+    sqlx::query(&sql)
+        .bind(row.order_id.0)
+        .bind(row.restaurant_id.0)
+        .bind(row.delivery_job_id.0)
+        .bind(row.process_status.to_text())
+        .bind(row.offer_attempts)
+        .bind(row.current_rank)
+        .bind(row.current_channel.as_ref().map(|v| v.0.clone()))
+        .execute(executor)
+        .await
+        .map_err(db_err)?;
+    Ok(())
 }

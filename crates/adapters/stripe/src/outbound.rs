@@ -53,12 +53,20 @@ impl StripePaymentGateway {
         &self,
         path: &str,
         form: &[(String, String)],
+        idempotency_key: Option<&str>,
     ) -> Result<(u16, String), DomainError> {
-        let response = self
+        let mut request = self
             .http
             .post(format!("{}{}", self.base_url, path))
             .bearer_auth(&self.secret_key)
-            .form(form)
+            .form(form);
+        // Stripe's native retry-safety seam (ADR-20260801-023000): the SAME key re-submitted
+        // returns the SAME object, so a mailbox redelivery that re-runs the prepare phase can
+        // never create a second intent (or a second refund) for the same business identity.
+        if let Some(key) = idempotency_key {
+            request = request.header("Idempotency-Key", key);
+        }
+        let response = request
             .send()
             .await
             .map_err(|e| DomainError::Repository(format!("stripe: transport error on {path}: {e}")))?;
@@ -90,7 +98,12 @@ impl PaymentService for StripePaymentGateway {
         let span = telemetry::spans::payment_intent_create();
         let result = async {
             let form = encode_create_intent_form(&input, meta);
-            let (status, body) = self.post_form("/v1/payment_intents", &form).await?;
+            // Idempotency key = the orderId ref (ADR-20260801-023000): the checkout call site
+            // always sets it, so a re-run of the prepare phase (crash between the Stripe call
+            // and the fenced commit, then redelivery) receives the SAME intent, no duplicate.
+            let key = intent_idempotency_key(meta);
+            let (status, body) =
+                self.post_form("/v1/payment_intents", &form, key.as_deref()).await?;
             decode_create_intent_response(status, &body)
         }
         .instrument(span.clone())
@@ -112,9 +125,23 @@ impl PaymentService for StripePaymentGateway {
 
     async fn refund(&self, input: PaymentRefundInput, _meta: &ServiceCallMeta) -> Result<(), DomainError> {
         let form = encode_refund_form(&input);
-        let (status, body) = self.post_form("/v1/refunds", &form).await?;
+        // Deterministic per (intent, amount): a redelivered ApproveRefund re-runs the call and
+        // Stripe returns the SAME refund instead of moving the money twice.
+        let key = refund_idempotency_key(&input);
+        let (status, body) = self.post_form("/v1/refunds", &form, Some(&key)).await?;
         decode_refund_response(status, &body)
     }
+}
+
+/// The create-intent idempotency key: the `orderId` business ref when the call site set it
+/// (the checkout always does), else none — a keyless call keeps Stripe's default behavior.
+pub fn intent_idempotency_key(meta: &ServiceCallMeta) -> Option<String> {
+    meta.refs.get("orderId").map(|order_id| format!("intent:{order_id}"))
+}
+
+/// The refund idempotency key: deterministic over the refunded intent and amount.
+pub fn refund_idempotency_key(input: &PaymentRefundInput) -> String {
+    format!("refund:{}:{}", input.payment_intent_id.0, input.amount.amount_cents.0)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -268,6 +295,22 @@ mod tests {
                 ("confirm".to_string(), "false".to_string()),
             ]
         );
+    }
+
+    /// ADR-20260801-023000: intent idempotency key = the orderId ref; refund key deterministic
+    /// over (intent, amount) — a prepare-phase re-run must land on the SAME Stripe object.
+    #[test]
+    fn idempotency_keys_are_deterministic_over_business_identity() {
+        assert_eq!(
+            intent_idempotency_key(&meta()).as_deref(),
+            Some("intent:11111111-1111-4111-8111-111111111111")
+        );
+        assert_eq!(intent_idempotency_key(&ServiceCallMeta::new(uuid::Uuid::nil())), None);
+        let key = refund_idempotency_key(&PaymentRefundInput {
+            payment_intent_id: PaymentIntentId("pi_123".into()),
+            amount: Money { amount_cents: MoneyCents(500), currency: CurrencyCode("EUR".into()) },
+        });
+        assert_eq!(key, "refund:pi_123:500");
     }
 
     #[test]

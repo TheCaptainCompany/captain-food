@@ -9397,18 +9397,28 @@ fn emit_pm_state_infrastructure(model: &Model) -> String {
             })
             .collect();
         out.push_str(&format!(
-            "    async fn upsert(&self, row: &{}Row) -> Result<(), DomainError> {{\n        let sql = format!(\n            \"INSERT INTO {} ({{{}_COLUMNS}}) \\\n             VALUES ({}) \\\n             ON CONFLICT ({}) DO UPDATE SET \\\n             {}\"\n        );\n        sqlx::query(&sql)\n",
+            "    async fn upsert(&self, row: &{}Row) -> Result<(), DomainError> {{\n        upsert_{}_with(&self.pool, row).await\n    }}\n}}\n",
+            t.base, snake
+        ));
+        // Executor-generic upsert: ONE SQL body serving both the pool-backed trait impl above and
+        // the fenced completion transaction (#272 Runtime D1, ADR-20260801-023000 — a PM row must
+        // commit atomically with the staged events and the mailbox verdict, and a hand-mirrored
+        // copy of this statement would drift silently).
+        out.push_str(&format!(
+            "\n/// Upsert one `{}` row through ANY PgExecutor — the pool (the trait impl delegates here)\n/// or the fenced completion transaction (#272 Runtime D1, ADR-20260801-023000).\npub async fn upsert_{}_with<'e, E: sqlx::PgExecutor<'e>>(executor: E, row: &{}Row) -> Result<(), DomainError> {{\n    let sql = format!(\n        \"INSERT INTO {} ({{{}_COLUMNS}}) \\\n         VALUES ({}) \\\n         ON CONFLICT ({}) DO UPDATE SET \\\n         {}\"\n    );\n    sqlx::query(&sql)\n",
+            t.table,
+            snake,
             t.base,
             t.table,
             upper,
             placeholders.join(","),
             t.pk,
-            updates.join(", \\\n             ")
+            updates.join(", \\\n         ")
         ));
         for b in &binds {
-            out.push_str(&format!("            .bind({})\n", b));
+            out.push_str(&format!("        .bind({})\n", b));
         }
-        out.push_str("            .execute(&self.pool)\n            .await\n            .map_err(db_err)?;\n        Ok(())\n    }\n}\n");
+        out.push_str("        .execute(executor)\n        .await\n        .map_err(db_err)?;\n    Ok(())\n}\n");
     }
     out
 }

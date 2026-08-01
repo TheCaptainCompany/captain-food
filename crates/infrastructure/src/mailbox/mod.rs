@@ -5,6 +5,7 @@
 
 mod enqueue;
 mod handler;
+mod pm_delivery;
 
 pub use enqueue::{
     cancel_reminder, enqueue_inbound_fact, enqueue_worker_command, inbound_fact_for,

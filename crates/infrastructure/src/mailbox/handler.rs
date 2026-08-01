@@ -20,7 +20,7 @@ use crate::generated::command_router::{dispatch_command, CommandDeps};
 use crate::persistence::event_bus::{AppendedEvent, EventBus};
 use crate::persistence::status_bus::{OperationStatusBus, OperationUpdate};
 
-use super::flush_staged_in_tx;
+use super::{flush_staged_in_tx, pm_delivery};
 
 /// The delivery glue for all three kinds: COMMAND (generated router), EVENT (adapted inbound
 /// facts) and MESSAGE (promoted reminders, ADR-20260731-153000 — record semantics, like EVENT).
@@ -60,12 +60,38 @@ impl MailboxCommandHandler {
 
 #[async_trait::async_trait]
 impl MessageHandler for MailboxCommandHandler {
+    /// The PREPARE phase (ADR-20260801-023000): the three PM commands run their WHOLE legacy
+    /// handler here — pool reads and the Stripe call, no transaction open — capturing every
+    /// effect for the fenced commit. Every other message has no prepare work.
+    async fn prepare(
+        &self,
+        message: &InboundMessage,
+    ) -> Result<actor_runtime::Prepared, sqlx::Error> {
+        if message.kind == "COMMAND" && pm_delivery::is_pm_command(&message.message_type) {
+            let actor = self.resolve_actor(message).await?;
+            let prepared = pm_delivery::prepare(&self.deps, message, &actor).await?;
+            return Ok(Some(Box::new(prepared)));
+        }
+        Ok(None)
+    }
+
     async fn handle(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
-        _prepared: actor_runtime::Prepared,
+        prepared: actor_runtime::Prepared,
     ) -> Result<Delivery, sqlx::Error> {
+        if message.kind == "COMMAND" && pm_delivery::is_pm_command(&message.message_type) {
+            // A PM command's effects were computed in prepare; this phase only commits them.
+            let prepared = prepared
+                .and_then(|p| p.downcast::<pm_delivery::PreparedPmCommand>().ok())
+                .ok_or_else(|| {
+                    sqlx::Error::Protocol(
+                        "PM command delivered without its prepared phase (wiring bug)".into(),
+                    )
+                })?;
+            return self.commit_prepared_pm(tx, message, *prepared).await;
+        }
         if message.kind == "EVENT" || message.kind == "MESSAGE" {
             // Both kinds RECORD facts: EVENT carries an adapted inbound business fact, MESSAGE a
             // promoted reminder's payload fact (ADR-20260731-153000 §1a) — same record semantics,
@@ -79,37 +105,7 @@ impl MessageHandler for MailboxCommandHandler {
             }))));
         }
 
-        // The acting principal, envelope → Actor (ADR-0041) with the #235 domain-identity bridge:
-        // a CUSTOMER's auth subject resolves to its CustomerId — the value `requires.acting`
-        // compares against folded participants. Same logic as the GraphQL edge; other roles stay
-        // None until their bridges land (#144).
-        let domain_id = if message.user_type == "CUSTOMER" {
-            match message.user_id {
-                Some(uid) => match self
-                    .deps
-                    .customers
-                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
-                    .await
-                {
-                    Ok(customer) => customer.map(|c| c.customer_id.0),
-                    // An infrastructure failure resolving the principal must ABORT the delivery
-                    // (row stays RECEIVED, redelivery retries) — swallowing it into `None` would
-                    // durably record a legitimate customer's command as REJECTED NotAParticipant,
-                    // a wrong-class terminal verdict for a transient DB blip.
-                    Err(e) => return Err(sqlx::Error::Protocol(e.to_string())),
-                },
-                None => None,
-            }
-        } else {
-            None
-        };
-        let actor = Actor {
-            user_id: message.user_id.unwrap_or_else(uuid::Uuid::nil),
-            user_type: message.user_type.clone(),
-            domain_id,
-            correlation_id: message.correlation_id,
-            cause_id: Some(message.message_id),
-        };
+        let actor = self.resolve_actor(message).await?;
 
         // Stage-don't-write: the handler runs unchanged over a buffering store; its events only
         // become true when the runtime commits the fenced transaction this flush joins.
@@ -176,6 +172,79 @@ impl MessageHandler for MailboxCommandHandler {
 }
 
 impl MailboxCommandHandler {
+    /// The acting principal, envelope → Actor (ADR-0041) with the #235 domain-identity bridge:
+    /// a CUSTOMER's auth subject resolves to its CustomerId — the value `requires.acting`
+    /// compares against folded participants. Same logic as the GraphQL edge; other roles stay
+    /// None until their bridges land (#144). An infrastructure failure resolving the principal
+    /// ABORTS the delivery (row stays RECEIVED, redelivery retries) — swallowing it into `None`
+    /// would durably record a legitimate customer's command as REJECTED NotAParticipant, a
+    /// wrong-class terminal verdict for a transient DB blip.
+    async fn resolve_actor(&self, message: &InboundMessage) -> Result<Actor, sqlx::Error> {
+        let domain_id = if message.user_type == "CUSTOMER" {
+            match message.user_id {
+                Some(uid) => match self
+                    .deps
+                    .customers
+                    .by_auth_ref(domain::generated::scalars::ExternalReference(uid.to_string()))
+                    .await
+                {
+                    Ok(customer) => customer.map(|c| c.customer_id.0),
+                    Err(e) => return Err(sqlx::Error::Protocol(e.to_string())),
+                },
+                None => None,
+            }
+        } else {
+            None
+        };
+        Ok(Actor {
+            user_id: message.user_id.unwrap_or_else(uuid::Uuid::nil),
+            user_type: message.user_type.clone(),
+            domain_id,
+            correlation_id: message.correlation_id,
+            cause_id: Some(message.message_id),
+        })
+    }
+
+    /// Commit one prepared PM command (ADR-20260801-023000): flush the staged events + the PM
+    /// run rows into the fenced transaction, or land the captured deterministic rejection as the
+    /// row's verdict — the SAME operation outcome the legacy spawn path produced, byte-identical
+    /// to the client.
+    async fn commit_prepared_pm(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        message: &InboundMessage,
+        prepared: pm_delivery::PreparedPmCommand,
+    ) -> Result<Delivery, sqlx::Error> {
+        match prepared.outcome {
+            // Deterministic rejection captured in prepare (validation, sync Stripe decline):
+            // committed as the terminal verdict; no effect to flush.
+            Err(e) => Ok(Delivery::of(verdict_of_error(e))),
+            Ok(effects) => match flush_staged_in_tx(tx, &effects.staged).await {
+                Ok(()) => {
+                    pm_delivery::flush_pm_rows_in_tx(
+                        tx,
+                        &effects.payment_rows,
+                        &effects.refund_rows,
+                    )
+                    .await
+                    .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+                    super::apply_schedules_in_tx(tx, message, &self.reminder_windows).await?;
+                    Ok(self.fanout_delivery(&effects.staged))
+                }
+                // A version clash at flush: a concurrent writer moved a stream between prepare's
+                // load and this commit. ABORT for retry — redelivery re-runs prepare against the
+                // moved stream, and the Stripe idempotency key returns the SAME intent/refund,
+                // so the retry can never double-charge (the ADR's crash-window argument).
+                Err(e) if is_version_conflict(&e) => Err(sqlx::Error::Protocol(e.to_string())),
+                Err(DomainError::Repository(detail)) => Err(sqlx::Error::Protocol(detail)),
+                Err(e) => Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                    "code": "Internal",
+                    "context": { "detail": e.to_string() }
+                })))),
+            },
+        }
+    }
+
     /// The kind-EVENT / kind-MESSAGE delivery route (ADR-20260731-122500): adapted inbound
     /// BUSINESS facts (the mailbox-era home of the retired InboundEventsDrainWorker's routing)
     /// and promoted reminder facts (ADR-20260731-153000 §1a — record semantics, never Rejected).
