@@ -331,6 +331,16 @@ Three hardening points from the independent multi-lens review of the branch (pay
   mismatch = the same synchronous Conflict as same-store dedupe) — a client retry across a gate
   transition can never re-execute a committed command in either direction.
 
+The backfill is SEQUENCED before the saga runner's first tick (inside the runner's own task) —
+that tick could otherwise advance `pm:RefundProcess` past an un-reacted `PaymentRefunded` before
+the backfill read the checkpoint (re-verification residual). Two accepted noise items ride until
+the DEFAULT-FLIP deploy and belong in its one-line ADR's checklist: the backfill's id namespace
+(`{factType}:{event id}`) differs from record-time chaining's (`{factType}:{recording row id}`),
+so post-flip facts still past the frozen checkpoints get one extra idempotent hop per restart
+(absorbed IGNORED, same lane, ordering holds); and the frozen `pm:PlaceOrderProcess` checkpoint
+makes the startup scan grow with post-flip history — the default-flip deploy retires the runner
+groups and advances/drops those checkpoints, ending both.
+
 ## Unresolved questions
 
 - ~~A2's realization shape~~ — RESOLVED 2026-08-01 as R2

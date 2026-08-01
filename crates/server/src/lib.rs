@@ -502,6 +502,73 @@ pub fn router() -> Router {
                 // logged no-op stand-in (jobs stay open to independent riders; the bounded re-offer
                 // run row still terminates ACCEPTED/FAILED). The partner's answers always arrive
                 // asynchronously through the webhook inbox below, never this outbound call.
+                // THE FLIP-TIME BACKFILL (#272 review MAJOR-2 + re-verify residual): with the
+                // gate ON, any Stripe fact the saga runner accepted but had not reacted to
+                // before the flip has no deliverer — a PaymentCaptured with no OrderPlaced is a
+                // paid order nobody is told about. Runs STRICTLY BEFORE the saga runner's first
+                // tick (sequenced inside the runner's own task below): that first tick can
+                // advance pm:RefundProcess past an un-reacted PaymentRefunded (via the group's
+                // remaining order-fact triggers), and a backfill reading the checkpoint after
+                // that would miss the fact forever. Idempotent (deterministic ids; the legs
+                // absorb already-delivered hops); PM lanes are seeded first so the width lookup
+                // can never race the workers' own seeding.
+                let pm_backfill = {
+                    let gate_on = config.pm_mailbox_delivery;
+                    let pool = pool.clone();
+                    let nudges = mailbox_nudges.clone();
+                    async move {
+                        if !gate_on {
+                            return;
+                        }
+                        for (actor_type, width) in
+                            infrastructure::generated::command_router::ACTOR_MAILBOXES
+                        {
+                            if matches!(*actor_type, "PlaceOrderProcess" | "RefundProcess") {
+                                if let Err(e) =
+                                    actor_runtime::seed_partitions(&pool, actor_type, *width as i16)
+                                        .await
+                                {
+                                    tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill skipped; restart to retry BEFORE relying on the flip");
+                                    return;
+                                }
+                            }
+                        }
+                        let pm_state =
+                            infrastructure::persistence::PgPaymentProcessState::new(pool.clone());
+                        let mut attempt = 0u32;
+                        loop {
+                            attempt += 1;
+                            match infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(
+                                &pool, &pm_state,
+                            )
+                            .await
+                            {
+                                Ok(0) => {
+                                    tracing::info!(worker = "pm_backfill", enqueued = 0, "no un-reacted Stripe facts to backfill");
+                                    return;
+                                }
+                                Ok(n) => {
+                                    tracing::warn!(worker = "pm_backfill", enqueued = n, "backfilled un-reacted Stripe facts onto the PM lanes");
+                                    nudges.nudge("PlaceOrderProcess");
+                                    nudges.nudge("RefundProcess");
+                                    return;
+                                }
+                                Err(e) if attempt < 3 => {
+                                    tracing::warn!(worker = "pm_backfill", error = %e, attempt, "backfill failed -- retrying");
+                                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                                }
+                                Err(e) => {
+                                    // Facts stay in the log — nothing is lost — but the runner
+                                    // may now advance past them: LOUD, and a restart retries.
+                                    tracing::error!(worker = "pm_backfill", error = %e, "backfill failed after retries -- restart to retry BEFORE relying on the flip");
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                };
+                let mut pm_backfill = Some(pm_backfill);
+
                 if config.run_process_managers {
                     // Composite delivery gateway (#60): the saga offers a job on a strategy-resolved
                     // CHANNEL, so the single Avelo-vs-Noop choice becomes a registry of channel →
@@ -561,7 +628,13 @@ pub fn router() -> Router {
                         // chained to the PM lanes by the mailbox — this runner must not race them.
                         .with_pm_mailboxes(config.pm_mailbox_delivery);
                     saga_status = Some(runner.status());
-                    tokio::spawn(runner.run_loop());
+                    // The backfill runs INSIDE the runner's task, before its first tick — the
+                    // ordering the re-verification demanded (see the pm_backfill comment above).
+                    let backfill = pm_backfill.take().expect("pm_backfill consumed once");
+                    tokio::spawn(async move {
+                        backfill.await;
+                        runner.run_loop().await;
+                    });
                     tracing::info!(worker = "saga_runner", running = true, toggle = "RUN_PROCESS_MANAGERS", "worker running in-process");
 
                     // Delivery offer-timeout worker (#60): escalates a stale OFFERED run to the next
@@ -581,6 +654,11 @@ pub fn router() -> Router {
                     }
                 } else {
                     tracing::warn!(worker = "saga_runner", running = false, toggle = "RUN_PROCESS_MANAGERS", "worker NOT started -- no cross-aggregate reaction fires");
+                    // No runner to race: the backfill still runs (facts past frozen checkpoints
+                    // must reach the PM lanes), just unsequenced.
+                    if let Some(backfill) = pm_backfill.take() {
+                        tokio::spawn(backfill);
+                    }
                 }
 
                 // SIRENE sync worker (ADR-0045): drains the `external_sirene_restaurants` staging
@@ -764,49 +842,8 @@ pub fn router() -> Router {
                         "mailbox: per-actor-type workers running in-process"
                     );
 
-                    // THE FLIP-TIME BACKFILL (#272 review MAJOR-2): with the gate ON, any Stripe
-                    // fact the saga runner accepted but had not reacted to before the flip has no
-                    // deliverer — a PaymentCaptured with no OrderPlaced is a paid order nobody is
-                    // told about. Enqueue PM-addressed copies of everything past the runner's
-                    // group checkpoints, idempotently (deterministic ids; the legs absorb
-                    // already-delivered hops). Seeds the PM lanes first so the width lookup can
-                    // never race the workers' own seeding.
-                    if config.pm_mailbox_delivery {
-                        let pool = pool.clone();
-                        let nudges = mailbox_nudges.clone();
-                        tokio::spawn(async move {
-                            for (actor_type, width) in
-                                infrastructure::generated::command_router::ACTOR_MAILBOXES
-                            {
-                                if matches!(*actor_type, "PlaceOrderProcess" | "RefundProcess") {
-                                    if let Err(e) = actor_runtime::seed_partitions(
-                                        &pool, actor_type, *width as i16,
-                                    )
-                                    .await
-                                    {
-                                        tracing::error!(worker = "pm_backfill", error = %e, "seed failed -- backfill aborted; restart to retry");
-                                        return;
-                                    }
-                                }
-                            }
-                            let pm_state = infrastructure::persistence::PgPaymentProcessState::new(
-                                pool.clone(),
-                            );
-                            match infrastructure::mailbox::backfill_stripe_facts_to_pm_lanes(
-                                &pool, &pm_state,
-                            )
-                            .await
-                            {
-                                Ok(0) => tracing::info!(worker = "pm_backfill", enqueued = 0, "no un-reacted Stripe facts to backfill"),
-                                Ok(n) => {
-                                    tracing::warn!(worker = "pm_backfill", enqueued = n, "backfilled un-reacted Stripe facts onto the PM lanes");
-                                    nudges.nudge("PlaceOrderProcess");
-                                    nudges.nudge("RefundProcess");
-                                }
-                                Err(e) => tracing::error!(worker = "pm_backfill", error = %e, "backfill failed -- restart to retry (facts stay in the log; nothing lost)"),
-                            }
-                        });
-                    }
+                    // (The flip-time backfill runs INLINE before the saga runner spawns — see
+                    // the PM_MAILBOX_DELIVERY block above the RUN_PROCESS_MANAGERS gate.)
                 }
 
                 // Stripe webhook ingestor (ADR-20260731-122500 — the mailbox is the only door):
