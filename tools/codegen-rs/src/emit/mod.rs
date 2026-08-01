@@ -17,3 +17,5 @@ pub(crate) mod services;
 pub(crate) use services::*;
 pub(crate) mod rust_domain;
 pub(crate) use rust_domain::*;
+pub(crate) mod docs;
+pub(crate) use docs::*;
