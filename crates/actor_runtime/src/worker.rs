@@ -35,6 +35,15 @@ impl Default for WorkerConfig {
     }
 }
 
+/// Lane-lifecycle notifications — the seam a host hangs its activation cache on
+/// (PROP-20260728-152752 §3.5 eviction rules: "lease lost / `ownership_version` bump observed →
+/// drop ALL activations of that partition"). Called whenever this worker STOPS believing it owns
+/// a lane: heartbeat renewal failed (stolen/re-claimed), a completion fenced out, or a graceful
+/// shutdown release. Must be cheap and non-blocking — it runs on the worker loop.
+pub trait LaneEvents: Send + Sync {
+    fn lane_dropped(&self, lane: &Lane);
+}
+
 /// One worker instance consuming ONE actor type's lanes.
 pub struct MailboxWorker {
     pool: PgPool,
@@ -47,6 +56,7 @@ pub struct MailboxWorker {
     /// Enqueue-side wake signal: a producer's `notify_one` cuts the delivery latency from the
     /// heartbeat poll to ~immediate. Purely an accelerator — the poll is the guarantee.
     nudge: Option<Arc<Notify>>,
+    lane_events: Option<Arc<dyn LaneEvents>>,
     lanes: tokio::sync::Mutex<Vec<Lane>>,
 }
 
@@ -66,8 +76,15 @@ impl MailboxWorker {
             handler,
             observer: None,
             nudge: None,
+            lane_events: None,
             lanes: tokio::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    /// Attach a lane-lifecycle observer (activation-cache eviction).
+    pub fn with_lane_events(mut self, events: Arc<dyn LaneEvents>) -> Self {
+        self.lane_events = Some(events);
+        self
     }
 
     /// Attach a post-commit observer (status bus / subscription fan-out).
@@ -189,6 +206,9 @@ impl MailboxWorker {
                     partition = lane.partition,
                     "mailbox: lane lost (stolen or re-claimed) -- dropping"
                 );
+                if let Some(events) = &self.lane_events {
+                    events.lane_dropped(&lane);
+                }
             }
         }
         *lanes = kept;
@@ -214,6 +234,9 @@ impl MailboxWorker {
                             && l.partition == lane.partition
                             && l.ownership_version == lane.ownership_version)
                     });
+                    if let Some(events) = &self.lane_events {
+                        events.lane_dropped(&lane);
+                    }
                 }
                 Err(CompletionError::Db(e)) => {
                     tracing::warn!(
@@ -371,6 +394,9 @@ impl MailboxWorker {
         for lane in &lanes {
             if let Err(e) = release_lane(&self.pool, lane, &self.worker_id).await {
                 tracing::warn!(worker = %self.worker_id, actor_type = %lane.actor_type, partition = lane.partition, error = %e, "mailbox: lane release failed -- peers take over at lease expiry");
+            }
+            if let Some(events) = &self.lane_events {
+                events.lane_dropped(lane);
             }
         }
         tracing::info!(worker = %self.worker_id, released = lanes.len(), "mailbox: shut down");

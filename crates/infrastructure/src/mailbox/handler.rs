@@ -20,6 +20,7 @@ use crate::generated::command_router::{dispatch_command, CommandDeps};
 use crate::persistence::event_bus::{AppendedEvent, EventBus};
 use crate::persistence::status_bus::{OperationStatusBus, OperationUpdate};
 
+use super::activation::{ActivationSettings, DeliveryActivation};
 use super::{flush_staged_in_tx, pm_delivery};
 
 /// The delivery glue for all three kinds: COMMAND (generated router), EVENT (adapted inbound
@@ -43,6 +44,11 @@ pub struct MailboxCommandHandler {
     /// Enqueue-side wake signals: a committed chain hop nudges the PM lane's worker post-commit,
     /// cutting the saga hop from the heartbeat poll to ~immediate (B2's "nudged" property).
     nudges: Option<std::sync::Arc<crate::persistence::mailbox_store::MailboxNudges>>,
+    /// ACTIVATIONS (#272 D3, PROP-20260728-152752 §3.5, gated `ACTOR_ACTIVATIONS`): when wired,
+    /// each delivery folds its own stream through the held-state cache (fill on miss, promote
+    /// post-commit, invalidate on a lost version race) — fold-on-first-message instead of every
+    /// message. `None` = the gate is off; every delivery folds from the log, exactly as before.
+    activations: Option<Arc<ActivationSettings>>,
 }
 
 impl MailboxCommandHandler {
@@ -53,7 +59,14 @@ impl MailboxCommandHandler {
             reminder_windows: Default::default(),
             pm_fact_chaining: false,
             nudges: None,
+            activations: None,
         }
+    }
+
+    /// Wire the activation cache (the `ACTOR_ACTIVATIONS` gate resolved at the composition root).
+    pub fn with_activations(mut self, settings: Arc<ActivationSettings>) -> Self {
+        self.activations = Some(settings);
+        self
     }
 
     pub fn with_event_bus(mut self, bus: EventBus) -> Self {
@@ -136,8 +149,14 @@ impl MessageHandler for MailboxCommandHandler {
         let actor = self.resolve_actor(message).await?;
 
         // Stage-don't-write: the handler runs unchanged over a buffering store; its events only
-        // become true when the runtime commits the fenced transaction this flush joins.
-        let staging = Arc::new(StagingEventStore::new(self.deps.store.clone()));
+        // become true when the runtime commits the fenced transaction this flush joins. With
+        // activations wired, the delivered actor's OWN stream folds through the held-state cache.
+        let activation = DeliveryActivation::for_message(&self.activations, message);
+        let base_store: Arc<dyn EventStore> = match &activation {
+            Some(a) => a.store(self.deps.store.clone()),
+            None => self.deps.store.clone(),
+        };
+        let staging = Arc::new(StagingEventStore::new(base_store));
         let mut deps = self.deps.clone();
         deps.store = staging.clone() as Arc<dyn EventStore>;
 
@@ -164,15 +183,24 @@ impl MessageHandler for MailboxCommandHandler {
                         // SAME transaction — commit and clock start together or not at all.
                         super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
                             .await?;
-                        self.fanout_delivery(&staged, None)
+                        let promote = DeliveryActivation::promote_after_commit(
+                            &self.activations,
+                            activation.as_ref(),
+                            &staged,
+                        );
+                        self.fanout_delivery(&staged, None, promote)
                     }
                     // A version clash at commit time: a concurrent writer (a legacy-path PM leg,
                     // another lane) moved the stream between the handler's load and this flush.
                     // ABORT the delivery — the row stays RECEIVED and the retry re-runs the
                     // handler against the moved stream. Contention is transient by construction
                     // (each retry reloads), so retry-in-place converges; a terminal FAILED here
-                    // would make a peak-time clash cost the client a manual resubmit.
+                    // would make a peak-time clash cost the client a manual resubmit. The held
+                    // state provably lost the race: drop it so the retry refolds.
                     Err(e) if is_version_conflict(&e) => {
+                        if let Some(a) = &activation {
+                            a.invalidate_scoped();
+                        }
                         return Err(sqlx::Error::Protocol(e.to_string()));
                     }
                     Err(DomainError::Repository(detail)) => {
@@ -257,7 +285,15 @@ impl MailboxCommandHandler {
                     .await
                     .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
                     super::apply_schedules_in_tx(tx, message, &self.reminder_windows).await?;
-                    Ok(self.fanout_delivery(&effects.staged, None))
+                    // No scoped activation on a PM lane (its prepare folds through pool
+                    // stores), but the committed appends touch AGGREGATE streams other lanes
+                    // may hold — the promotion closure invalidates them.
+                    let promote = DeliveryActivation::promote_after_commit(
+                        &self.activations,
+                        None,
+                        &effects.staged,
+                    );
+                    Ok(self.fanout_delivery(&effects.staged, None, promote))
                 }
                 // A version clash at flush: a concurrent writer moved a stream between prepare's
                 // load and this commit. ABORT for retry — redelivery re-runs prepare against the
@@ -309,7 +345,12 @@ impl MailboxCommandHandler {
             // The causality link: the appended fact's cause is the mailbox row that carried it.
             cause_id: Some(message.message_id),
         };
-        let staging = Arc::new(StagingEventStore::new(self.deps.store.clone()));
+        let activation = DeliveryActivation::for_message(&self.activations, message);
+        let base_store: Arc<dyn EventStore> = match &activation {
+            Some(a) => a.store(self.deps.store.clone()),
+            None => self.deps.store.clone(),
+        };
+        let staging = Arc::new(StagingEventStore::new(base_store));
         let store: Arc<dyn EventStore> = staging.clone();
 
         use domain::generated::events::DomainEvent as E;
@@ -370,7 +411,12 @@ impl MailboxCommandHandler {
                         } else {
                             None
                         };
-                        self.fanout_delivery(&staged, chained)
+                        let promote = DeliveryActivation::promote_after_commit(
+                            &self.activations,
+                            activation.as_ref(),
+                            &staged,
+                        );
+                        self.fanout_delivery(&staged, chained, promote)
                     }
                     // Version clash at flush: someone appended between load and commit. That
                     // someone is NOT necessarily a redelivery of this fact — the legacy-path PM
@@ -379,6 +425,9 @@ impl MailboxCommandHandler {
                     // retry: the redelivery re-runs the fold-based dedupe against the moved
                     // stream and lands Duplicate only if the fact is genuinely in it.
                     Err(e) if is_version_conflict(&e) => {
+                        if let Some(a) = &activation {
+                            a.invalidate_scoped();
+                        }
                         return Err(sqlx::Error::Protocol(e.to_string()));
                     }
                     Err(DomainError::Repository(detail)) => {
@@ -394,6 +443,9 @@ impl MailboxCommandHandler {
             // A conflict surfaced by the recorder itself: the stream moved under it — retry, same
             // reasoning as the flush-time clash above.
             Err(e) if is_version_conflict(&e) => {
+                if let Some(a) = &activation {
+                    a.invalidate_scoped();
+                }
                 return Err(sqlx::Error::Protocol(e.to_string()));
             }
             // Transient infrastructure failure while loading/folding the stream: ABORT for retry.
@@ -413,10 +465,13 @@ impl MailboxCommandHandler {
     /// the flush just made durable (both delivery routes share this — subscriptions must hear
     /// mailbox-written facts exactly as they heard PgEventStore-written ones). `chained` names
     /// the PM lane a B2 hop was enqueued on — its worker is nudged post-commit, never before.
+    /// `promote` is the activation promotion/invalidation closure (apply-after-commit) — it runs
+    /// FIRST, so a subscription-triggered read-through can never observe a pre-commit held state.
     fn fanout_delivery(
         &self,
         staged: &[application::staging::StagedAppend],
         chained: Option<&'static str>,
+        promote: Option<Box<dyn FnOnce() + Send>>,
     ) -> Delivery {
         let envelopes: Vec<AppendedEvent> = match &self.event_bus {
             Some(_) => staged
@@ -437,10 +492,13 @@ impl MailboxCommandHandler {
         };
         let bus = self.event_bus.clone();
         let nudges = self.nudges.clone();
-        if bus.is_none() && (chained.is_none() || nudges.is_none()) {
+        if bus.is_none() && (chained.is_none() || nudges.is_none()) && promote.is_none() {
             return Delivery::of(HandlerVerdict::Succeeded);
         }
         Delivery::then(HandlerVerdict::Succeeded, move || {
+            if let Some(promote) = promote {
+                promote();
+            }
             if let Some(bus) = bus {
                 for envelope in envelopes {
                     bus.publish(envelope);
@@ -517,7 +575,14 @@ impl MailboxCommandHandler {
                         .await
                         .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
                         super::apply_schedules_in_tx(tx, message, &self.reminder_windows).await?;
-                        Ok(self.fanout_delivery(&staged, None))
+                        // Same cross-writer rule as the prepared PM commit: the saga leg's
+                        // appends (OrderPlaced on the Order stream) stale-out held copies.
+                        let promote = DeliveryActivation::promote_after_commit(
+                            &self.activations,
+                            None,
+                            &staged,
+                        );
+                        Ok(self.fanout_delivery(&staged, None, promote))
                     }
                     // Lost optimistic-concurrency race: retry the WHOLE leg (the run row's
                     // expect and the aggregates' record-idempotency absorb the replay) — the

@@ -24,6 +24,7 @@
 //! dispatch) and the seeding widths (its actor catalog); this crate owns claim, drain, fence,
 //! checkpoint, and nothing else.
 
+pub mod activation;
 pub mod completion;
 pub mod lease;
 pub mod message;
@@ -31,6 +32,7 @@ pub mod partition;
 pub mod schedule;
 pub mod worker;
 
+pub use activation::ActivationCache;
 pub use completion::{complete_fenced, CompletionError};
 pub use lease::{
     claim_due_lanes, heartbeat, ownership_census, release_lane, seed_partitions, steal_from,
@@ -39,4 +41,4 @@ pub use lease::{
 pub use message::{Delivery, DeliveryObserver, HandlerVerdict, InboundMessage, MessageHandler, Prepared};
 pub use partition::stable_partition;
 pub use schedule::promote_due;
-pub use worker::{MailboxWorker, WorkerConfig};
+pub use worker::{LaneEvents, MailboxWorker, WorkerConfig};

@@ -4452,6 +4452,9 @@ fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
             Some(s) if s != "principals" => s,
             _ => continue,
         };
+        // The activations sub-block is legal on ANY mailbox actor (aggregate or PM) — validate
+        // it before the aggregate-only addressing checks below.
+        validate_mailbox_activations(node, name, issues);
         if node.get("type").and_then(|x| x.as_str()) != Some("aggregate") {
             continue;
         }
@@ -4531,6 +4534,57 @@ fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>) {
                     ));
                 }
             }
+        }
+    }
+}
+
+/// The optional `mailbox.activations` sub-block (PROP-20260728-152752 §3.5, #272 D3): `false`
+/// opts the actor out of the ACTOR_ACTIVATIONS-gated held-state cache; a mapping tunes it
+/// (`enabled`, `idle_seconds` — the per-actor passivation override). Anything else is a shape
+/// error: a knob that parses to nothing would silently run the global defaults.
+fn validate_mailbox_activations(node: &Value, name: &str, issues: &mut Vec<Issue>) {
+    let Some(act) = node.get("mailbox").and_then(|m| m.get("activations")) else {
+        return;
+    };
+    match act {
+        Value::Bool(_) => {}
+        Value::Mapping(m) => {
+            for (k, v) in m {
+                match k.as_str() {
+                    Some("enabled") => {
+                        if v.as_bool().is_none() {
+                            issues.push(err(
+                                "mb-activations-shape",
+                                format!("actors.yaml/{}", name),
+                                format!("mailbox.activations.enabled must be a bool, got {:?}.", v),
+                            ));
+                        }
+                    }
+                    Some("idle_seconds") => {
+                        if !v.as_i64().map(|n| n >= 1).unwrap_or(false) {
+                            issues.push(err(
+                                "mb-activations-shape",
+                                format!("actors.yaml/{}", name),
+                                format!("mailbox.activations.idle_seconds must be an integer >= 1, got {:?} (to disable the cache for this actor, use `activations: false`).", v),
+                            ));
+                        }
+                    }
+                    other => {
+                        issues.push(err(
+                            "mb-activations-shape",
+                            format!("actors.yaml/{}", name),
+                            format!("mailbox.activations knows only `enabled` and `idle_seconds`, got {:?}.", other),
+                        ));
+                    }
+                }
+            }
+        }
+        other => {
+            issues.push(err(
+                "mb-activations-shape",
+                format!("actors.yaml/{}", name),
+                format!("mailbox.activations must be a bool or a {{enabled, idle_seconds}} mapping, got {:?}.", other),
+            ));
         }
     }
 }
@@ -12512,6 +12566,32 @@ fn emit_infra_command_router(model: &Model) -> String {
     );
     for (actor, width) in &widths {
         out.push_str(&format!("    (\"{}\", {}),\n", actor, width));
+    }
+    out.push_str("];\n");
+    // The per-actor activation policy (PROP-20260728-152752 §3.5, #272 D3): rendered for EVERY
+    // mailbox actor so the composition root resolves policy from the spec, never from code
+    // defaults it can drift from. Absent block = enabled under the global gate, global idle.
+    out.push_str(
+        "\n/// Per-actor ACTIVATION policy (actors.yaml `mailbox.activations`, gated globally by\n/// configuration.yaml `ACTOR_ACTIVATIONS`): `(actor_type, enabled, idle-seconds override)`.\n/// An absent spec block renders as `(true, None)` — enabled under the global gate, passivating\n/// at the global `ACTOR_ACTIVATION_IDLE_SECONDS`.\npub const ACTOR_ACTIVATIONS: &[(&str, bool, Option<i64>)] = &[\n",
+    );
+    for (actor, _) in &widths {
+        let (enabled, idle) = model
+            .defs
+            .get("actors.yaml")
+            .and_then(|m| m.get(actor.as_str()))
+            .and_then(|def| def.get("mailbox"))
+            .and_then(|m| m.get("activations"))
+            .map(|act| match act {
+                Value::Bool(b) => (*b, None),
+                Value::Mapping(m) => (
+                    m.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+                    m.get("idle_seconds").and_then(|v| v.as_i64()),
+                ),
+                _ => (true, None),
+            })
+            .unwrap_or((true, None));
+        let idle = idle.map(|n| format!("Some({})", n)).unwrap_or_else(|| "None".to_string());
+        out.push_str(&format!("    (\"{}\", {}, {}),\n", actor, enabled, idle));
     }
     out.push_str("];\n");
     out

@@ -734,8 +734,49 @@ pub fn router() -> Router {
                             pool.clone(),
                         )),
                     };
-                    let handler = Arc::new(
-                        infrastructure::mailbox::MailboxCommandHandler::new(deps)
+                    // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
+                    // held-state cache, its per-actor policy from the GENERATED table, and a
+                    // sweep timer so idle actors leave memory on schedule (not only when
+                    // touched). OFF, `activations` is None and every delivery folds from the
+                    // log exactly as before.
+                    let activations = if config.actor_activations {
+                        let cache = Arc::new(infrastructure::mailbox::StreamActivations::new(
+                            (config.actor_activation_max_memory_mb.max(1) as usize) * 1024 * 1024,
+                        ));
+                        let per_actor: std::collections::HashMap<&'static str, (bool, Option<std::time::Duration>)> =
+                            infrastructure::generated::command_router::ACTOR_ACTIVATIONS
+                                .iter()
+                                .map(|(actor, enabled, idle)| {
+                                    (*actor, (*enabled, idle.map(|s| std::time::Duration::from_secs(s.max(1) as u64))))
+                                })
+                                .collect();
+                        let settings = Arc::new(infrastructure::mailbox::ActivationSettings {
+                            cache: cache.clone(),
+                            idle_default: std::time::Duration::from_secs(
+                                config.actor_activation_idle_seconds.max(1) as u64,
+                            ),
+                            per_actor,
+                        });
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                                let swept = cache.sweep();
+                                if swept > 0 {
+                                    tracing::debug!(swept, "activations: idle passivation sweep");
+                                }
+                            }
+                        });
+                        tracing::info!(
+                            max_memory_mb = config.actor_activation_max_memory_mb,
+                            idle_seconds = config.actor_activation_idle_seconds,
+                            "activations: held-state cache ON (ACTOR_ACTIVATIONS)"
+                        );
+                        Some(settings)
+                    } else {
+                        None
+                    };
+                    let handler = Arc::new({
+                        let mut h = infrastructure::mailbox::MailboxCommandHandler::new(deps)
                             .with_event_bus(event_bus.clone())
                             // The declared reminder windows (actors.yaml `after:` →
                             // configuration.yaml), so `schedules:` deliveries start their
@@ -745,8 +786,12 @@ pub fn router() -> Router {
                             // PM-addressed copy in the SAME completion transaction, and the PM
                             // lane's worker is nudged post-commit.
                             .with_pm_fact_chaining(config.pm_mailbox_delivery)
-                            .with_nudges(mailbox_nudges.clone()),
-                    );
+                            .with_nudges(mailbox_nudges.clone());
+                        if let Some(settings) = &activations {
+                            h = h.with_activations(settings.clone());
+                        }
+                        h
+                    });
                     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(
                         operation_status_bus.clone(),
                     ));
@@ -800,6 +845,15 @@ pub fn router() -> Router {
                                 .with_observer(observer.clone());
                                 if let Some(nudge) = mailbox_nudges.get(actor_type) {
                                     w = w.with_nudge(nudge);
+                                }
+                                // A lane this worker stops owning drops its held activations —
+                                // the new owner may write those actors (§3.5 eviction rules).
+                                if let Some(settings) = &activations {
+                                    w = w.with_lane_events(Arc::new(
+                                        infrastructure::mailbox::ActivationLaneEvents(
+                                            settings.cache.clone(),
+                                        ),
+                                    ));
                                 }
                                 w
                             },

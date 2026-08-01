@@ -765,3 +765,26 @@ pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
     ("RestaurantAccount", 100),
     ("Rider", 100),
 ];
+
+/// Per-actor ACTIVATION policy (actors.yaml `mailbox.activations`, gated globally by
+/// configuration.yaml `ACTOR_ACTIVATIONS`): `(actor_type, enabled, idle-seconds override)`.
+/// An absent spec block renders as `(true, None)` — enabled under the global gate, passivating
+/// at the global `ACTOR_ACTIVATION_IDLE_SECONDS`.
+pub const ACTOR_ACTIVATIONS: &[(&str, bool, Option<i64>)] = &[
+    ("Cart", true, None),
+    ("Catalog", true, None),
+    ("Conversation", true, None),
+    ("Customer", true, None),
+    ("CustomerCredit", true, None),
+    ("DeliveryJob", true, None),
+    ("DeliveryPartnerRegistration", true, None),
+    ("Order", true, None),
+    ("Payment", true, None),
+    ("PlaceOrderProcess", true, None),
+    ("Prospect", true, None),
+    ("Reclamation", true, None),
+    ("RefundProcess", true, None),
+    ("Restaurant", true, None),
+    ("RestaurantAccount", true, None),
+    ("Rider", true, None),
+];

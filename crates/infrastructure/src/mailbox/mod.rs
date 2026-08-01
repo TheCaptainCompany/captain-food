@@ -3,10 +3,12 @@
 //! the command dispatch (generated router over the application handlers), the staged-event flush
 //! into the fenced completion transaction, and the post-commit status-bus fan-out.
 
+mod activation;
 mod enqueue;
 mod handler;
 mod pm_delivery;
 
+pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, StreamActivations};
 pub use enqueue::{
     cancel_reminder, enqueue_inbound_fact, enqueue_worker_command, inbound_fact_for,
     inbound_message_id, inbound_namespace, reminder_message_id, schedule_reminder,

@@ -421,6 +421,21 @@ keys:
       authority never — the ownership_version fence is commit-time). Keep at roughly a third of
       MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
 
+  ACTOR_ACTIVATIONS:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      ACTIVATIONS (#272 D3, PROP-20260728-152752 §3.5): ON, each mailbox delivery folds the
+      delivered actor's own stream through a shared held-state cache — filled on first load,
+      extended with the committed appends strictly AFTER the fenced transaction commits
+      (apply-after-commit), dropped on a lost version race, on lane loss, on idle expiry and
+      under the memory bound. OFF (the default — gate-then-stabilize; the flip is its own
+      one-line ADR after staging smoke), every delivery folds from the log, byte-identically
+      to the pre-D3 runtime. Correctness never depends on the cache: a stale hold loses the
+      UNIQUE(stream_name, version) race, aborts, invalidates and refolds.
+
   ACTOR_ACTIVATION_IDLE_SECONDS:
     type: int
     default: 300
@@ -429,7 +444,16 @@ keys:
       unsolicited for this long is dropped, its next message paying one rehydration fold.
       Per-actor overrides live in actors.yaml (mailbox.activations.idle_seconds). Zero would
       disable the cache; too high and idle aggregates hold memory the LRU bound must then evict.
-      Reader lands with the #242 slice-4 activations.
+      Read by the ACTOR_ACTIVATIONS-gated cache (#272 D3).
+
+  ACTOR_ACTIVATION_MAX_MEMORY_MB:
+    type: int
+    default: 64
+    gates: >
+      The activation cache's byte bound (PROP-20260728-152752 §3.5 "hot cache pressure evicts by
+      size"): crossing it evicts least-recently-used held states, sized by their serialized event
+      payloads. Idle actors expire by the clock (ACTOR_ACTIVATION_IDLE_SECONDS); this bound is
+      the backstop for a hot Friday-peak set larger than memory should carry.
 
   ORDER_RETENTION_WINDOW_DAYS:
     type: int
