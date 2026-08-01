@@ -13,3 +13,5 @@ pub(crate) mod reminders;
 pub(crate) use reminders::*;
 pub(crate) mod services;
 pub(crate) use services::*;
+pub(crate) mod translations;
+pub(crate) use translations::*;
