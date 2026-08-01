@@ -1,7 +1,18 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-07-30. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-01. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> 🐛 **2026-08-01 — prod-smoke hotfix: authenticated GraphQL was fully down in production
+> (`503 "auth unavailable"` on every non-`/public` role path).** Root cause: `AuthContext::from_env`
+> read `SUPABASE_JWKS_URL`/`SUPABASE_URL` straight from `std::env`, but those are **non-secret baked
+> config** (ADR-20260729-020000) — present in the resolved `Config`, absent from the Render env — so the
+> JWKS URL resolved empty and the verifier fail-closed. Fixed by feeding the resolved `config.*` values
+> through a new `AuthContext::from_config(...)` (env-override precedence preserved); regression guard
+> `from_config_uses_its_arguments_not_env`. Same trap as `263f2a2` (smoke script), now closed in the
+> server. Decision recorded in
+> [ADR-20260801-080339](adr/ADR-20260801-080339-auth-verifier-reads-resolved-config-not-env.md).
+> `cargo build -p server` + `cargo test -p server` green; recovers on next deploy.
 
 > 🚧 **2026-07-30 — the actor-runtime redesign is APPROVED and in build (ADR-20260730-231500).**
 > Three proposals approved in-session by the product owner (*"we can build it now"*):

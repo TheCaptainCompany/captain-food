@@ -923,7 +923,10 @@ pub fn router() -> Router {
         .layer(Extension(ssr_exec))
         // API auth (ADR-0047): the Supabase-JWT verifier, available to the `/{role}/graphql` handler which
         // gates every non-public path. Shared as an Extension so the JWKS cache is process-wide.
-        .layer(Extension(auth::AuthContext::from_env()))
+        .layer(Extension(auth::AuthContext::from_config(
+            config.supabase_jwks_url.clone(),
+            config.supabase_url.clone(),
+        )))
         // Outer layer: stamp every response with its server-side build time.
         .layer(middleware::from_fn(response_timing))
 }

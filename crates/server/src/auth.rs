@@ -117,16 +117,24 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
-    /// Build from env: `SUPABASE_JWKS_URL` (public keys) and `SUPABASE_URL` (used to derive the expected
-    /// `iss = {SUPABASE_URL}/auth/v1`). With no JWKS URL, only `/public` works; other paths return `503`.
-    pub fn from_env() -> Arc<Self> {
-        let jwks_url = std::env::var("SUPABASE_JWKS_URL").ok().filter(|s| !s.is_empty());
-        let issuer = std::env::var("SUPABASE_URL")
-            .ok()
+    /// Build from the **resolved** configuration: `jwks_url` (public keys) and `supabase_url` (used to
+    /// derive the expected `iss = {SUPABASE_URL}/auth/v1`) come from the generated `Config`, which applies
+    /// precedence env > baked profile > default (ADR-20260729-020000). With no JWKS URL, only `/public`
+    /// works; other paths return `503`.
+    ///
+    /// These two are **non-secret baked** config: on the deployed service they live inside the image, NOT
+    /// in the process environment. Reading them straight from `std::env` here (as this did) made every
+    /// authenticated path fail closed with `503 "auth unavailable"` in production, where the JWKS URL is
+    /// baked into the digest, not set as a Render env var — the same trap `263f2a2` fixed for the smoke
+    /// script. `EXTERNAL_API_TOKENS` stays an env read: it is a **secret**, delivered by CI into the
+    /// service environment, and carries no baked value.
+    pub fn from_config(jwks_url: String, supabase_url: String) -> Arc<Self> {
+        let jwks_url = Some(jwks_url).filter(|s| !s.is_empty());
+        let issuer = Some(supabase_url)
             .filter(|s| !s.is_empty())
             .map(|u| format!("{}/auth/v1", u.trim_end_matches('/')));
         if jwks_url.is_none() {
-            tracing::warn!("SUPABASE_JWKS_URL not set -- non-public GraphQL paths will return 503 (fail closed)");
+            tracing::warn!("SUPABASE_JWKS_URL resolved empty -- non-public GraphQL paths will return 503 (fail closed)");
         }
         let external_tokens: Vec<String> = std::env::var("EXTERNAL_API_TOKENS")
             .ok()
@@ -436,6 +444,26 @@ mod tests {
             http: reqwest::Client::new(),
             cache: RwLock::new(None),
         }
+    }
+
+    #[test]
+    fn from_config_uses_its_arguments_not_env() {
+        // Regression guard (prod-smoke L4 503 "auth unavailable", 2026-08-01): SUPABASE_JWKS_URL /
+        // SUPABASE_URL are non-secret BAKED config (ADR-20260729-020000) — present in the resolved
+        // `Config`, absent from the deployed service's env. The verifier must take them from that
+        // resolved config, never from `std::env` directly, or every authenticated path fails closed.
+        let ctx = AuthContext::from_config(
+            "https://example.test/jwks.json".into(),
+            "https://proj.supabase.co/".into(),
+        );
+        assert_eq!(ctx.jwks_url.as_deref(), Some("https://example.test/jwks.json"));
+        // issuer is derived from supabase_url, trailing slash trimmed.
+        assert_eq!(ctx.issuer.as_deref(), Some("https://proj.supabase.co/auth/v1"));
+
+        // Empty resolved values (e.g. profile with no baked value and no env) → fail closed, no issuer.
+        let empty = AuthContext::from_config(String::new(), String::new());
+        assert!(empty.jwks_url.is_none(), "empty JWKS URL must yield no verifier (fail closed)");
+        assert!(empty.issuer.is_none());
     }
 
     #[test]
