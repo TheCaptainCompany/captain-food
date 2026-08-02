@@ -49,8 +49,20 @@ use domain::generated::scalars::{
 };
 use domain::shared::errors::DomainError;
 use hmac::{Hmac, Mac};
+use infrastructure::generated::actor_clients::PaymentClient;
+use infrastructure::mailbox::{surrogate_actor_id, EnqueueOutcome};
 use serde::Deserialize;
 use sha2::Sha256;
+
+/// The adjacently-tagged NAME of an adapted event — used only to name a fact the ingest match
+/// cannot route (a defect path that exists so extending the ACL without extending the match
+/// fails loudly instead of silently mis-filing).
+fn event_type_of(event: &DomainEvent) -> String {
+    serde_json::to_value(event)
+        .ok()
+        .and_then(|v| v.get("eventType").and_then(|t| t.as_str()).map(str::to_owned))
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -434,37 +446,58 @@ impl StripeWebhookIngestor {
             }
         };
 
-        // Enqueue the ADAPTED business event on its actor lane (ADR-20260731-122500) (external vocabulary stops here). The tagged serde form
-        // (`{"eventType": …, "payload": …}`) is what the kind-EVENT route deserializes back.
-        let tagged = serde_json::to_value(&domain_event).map_err(|e| {
-            DomainError::Repository(format!("adapted event for {} unserializable: {e}", event.id))
-        })?;
-        let fact = match infrastructure::mailbox::inbound_fact_for(
-            "stripe",
-            &event.id,
-            stripe_correlation_id(&event.id),
-            tagged,
-        ) {
-            Ok(f) => f,
-            // A mapped family the lane resolver cannot address is an ACL/schema drift — recorded
-            // as unmappable (mirror kept), never a 5xx retry storm.
-            Err(e) => {
+        // Record the ADAPTED business event on its actor lane through the typed `PaymentClient`
+        // (#284 slice 3; ADR-20260731-122500 — external vocabulary stops here). The client
+        // serializes the DOMAIN enum's own tagged form and derives the deterministic
+        // `(source, external_id)` identity, so a webhook redelivery collides on the pk instead of
+        // double-applying. The Payment lane id is the UUIDv5 surrogate over the gateway's intent
+        // id — the same derivation the typed drift guard pins.
+        let corr = stripe_correlation_id(&event.id);
+        let recorded = match domain_event {
+            DomainEvent::PaymentCaptured(e) => {
+                let lane = surrogate_actor_id("Payment", &e.payment_intent_id.0);
+                PaymentClient::new(self.mailbox.clone(), lane)
+                    .record(e, "stripe", &event.id, corr)
+                    .await?
+            }
+            DomainEvent::PaymentFailed(e) => {
+                let lane = surrogate_actor_id("Payment", &e.payment_intent_id.0);
+                PaymentClient::new(self.mailbox.clone(), lane)
+                    .record(e, "stripe", &event.id, corr)
+                    .await?
+            }
+            DomainEvent::PaymentRefunded(e) => {
+                let lane = surrogate_actor_id("Payment", &e.payment_intent_id.0);
+                PaymentClient::new(self.mailbox.clone(), lane)
+                    .record(e, "stripe", &event.id, corr)
+                    .await?
+            }
+            // The ACL maps exactly the three payment facts; a NEW family must be routed here (its
+            // typed client + lane) in the same change that teaches the ACL to map it. Recorded as
+            // unmappable (mirror kept), never a 5xx retry storm.
+            other => {
                 self.raw.mark_processed(&event.id).await?;
-                return Ok(StripeIngestOutcome::Unmappable { reason: e.to_string() });
+                return Ok(StripeIngestOutcome::Unmappable {
+                    reason: format!(
+                        "adapted event '{}' has no typed mailbox route — extend the ingest match \
+                         alongside the ACL",
+                        event_type_of(&other)
+                    ),
+                });
             }
         };
-        let outcome = match infrastructure::mailbox::enqueue_inbound_fact(self.mailbox.as_ref(), fact).await? {
-            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
+        let outcome = match recorded {
+            EnqueueOutcome::Enqueued => {
                 if let Some(nudge) = &self.on_staged {
                     nudge();
                 }
                 StripeIngestOutcome::Recorded { event_type: event.event_type.clone() }
             }
-            infrastructure::mailbox::EnqueueOutcome::Deduplicated(_) => StripeIngestOutcome::Duplicate,
+            EnqueueOutcome::Deduplicated(_) => StripeIngestOutcome::Duplicate,
             // Never applied twice (safe direction), but a conflict is a keying signal, not a
             // dedupe — log it. (Every redelivery of a pre-flip BACKFILLED event lands here too:
             // the backfill stored md5 hashes, the live path sha256.)
-            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(status) => {
+            EnqueueOutcome::PayloadConflict(status) => {
                 tracing::warn!(source = "stripe", external_id = %event.id, row_status = ?status, "payload conflict under a redelivered provider id -- not enqueued");
                 StripeIngestOutcome::Duplicate
             },
