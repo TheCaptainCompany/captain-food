@@ -1678,19 +1678,22 @@ keys:
         );
     }
 
-    /// The mailbox door stays CLOSED (#284 slice 3, PROP-20260728-152752 §2.1): a `MailboxEntry`
-    /// may be assembled only behind the typed actor clients — i.e. by the shared constructors in
-    /// `infrastructure::mailbox::enqueue`, by the reminders constructor feeding the in-tx upsert,
-    /// by the type's own module (definition + mem-double seeding), or by integration tests that
-    /// seed rows directly. Any other construction site is a NEW door the typed clients cannot
-    /// guard, exactly the drift #284 exists to make impossible.
+    /// The mailbox door stays CLOSED (#284 slice 3, PROP-20260728-152752 §2.1; #290 phase 1,
+    /// PROP-20260802-130500 D1): a `MailboxEntry` may be assembled only inside the actor_client
+    /// boundary crate — the shared constructors in `actor_client::enqueue`, the reminders
+    /// constructor (`actor_client::reminders::scheduled_entry`), the type's own module
+    /// (definition + mem double + the D5 fixtures), or tests going through the fixture door. Any
+    /// other construction site is a NEW door the typed clients cannot guard — and since #290
+    /// phase 1 it also fails to COMPILE (pub(crate) fields), so this scan is belt-and-braces on
+    /// the boundary crate itself, where an in-crate shortcut around the shared constructors would
+    /// still build.
     ///
     /// Style of `makefile_recipe_lines_are_ascii`: executable, loud, never skips — every
     /// allowlisted path is asserted to exist AND to still contain the construction it excuses, so
     /// the guard fails loudly if its targets move instead of silently no-oping. The scan matches
     /// Whitespace-tolerant detector for `MailboxEntry {` — `MailboxEntry{`, a line break before the
     /// brace, or extra spaces must not slip past the guard (the #292 review's evasion NIT). A `use
-    /// … as` alias still would; the belt-and-braces answer to that is #290's compiler enforcement.
+    /// … as` alias still would; the compiler enforcement above is what closes that for good.
     fn mentions_entry_construction(text: &str) -> bool {
         let mut rest = text;
         while let Some(i) = rest.find("MailboxEntry") {
@@ -1788,9 +1791,9 @@ keys:
             offenders.is_empty(),
             "`MailboxEntry {{` is constructed outside the sanctioned doors:\n{}\n\n\
              Fix: go through a generated typed actor client \
-             (infrastructure::generated::actor_clients — send/record/schedule), or, for \
-             crate-internal machinery, the shared constructors in \
-             infrastructure::mailbox::enqueue. If this is genuinely a new sanctioned constructor, \
+             (actor_client::generated::actor_clients — send/record/schedule), or, for \
+             actor_client-internal machinery, the shared constructors in \
+             actor_client::enqueue. If this is genuinely a new sanctioned constructor, \
              add it to this test's allowlist WITH its justification. Why: a hand-assembled row \
              bypasses the one derivation every door shares (lane, partition, principal, channel, \
              deterministic identity) — the exact drift #284's typed clients exist to prevent.",
