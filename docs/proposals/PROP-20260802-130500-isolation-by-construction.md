@@ -8,7 +8,9 @@
   strongly boundary everything and protect bad AI behavior that could use easy path instead of the
   right one."* Precedent: the product owner's C# DDD + actor-model practice — one assembly per actor
   client, one per actor implementation; the assembly is the boundary.
-- **Realized by**: _(filled per phase)_
+- **Realized by**: phase 1 — [#297 "refactor(#290): the actor-client crate is the compiler-enforced mailbox door (phase 1)"](https://github.com/TheCaptainCompany/captain-food/pull/297)
+  (merged 2026-08-02, incl. [ADR-20260802-170059](../adr/ADR-20260802-170059-client-surface-is-spec-gated.md));
+  phases 2–3 pending
 
 ---
 

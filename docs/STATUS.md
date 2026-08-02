@@ -3,9 +3,10 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-02. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> 🚧 **2026-08-02 — [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)
-> phase 1 built ([PROP-20260802-130500](proposals/PROP-20260802-130500-isolation-by-construction.md)
-> D1+D3+D4+D5)**: the mailbox door is COMPILER-enforced now. New boundary crate
+> ✅ **2026-08-02 — [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)
+> phase 1 MERGED ([PR #297](https://github.com/TheCaptainCompany/captain-food/pull/297);
+> [PROP-20260802-130500](proposals/PROP-20260802-130500-isolation-by-construction.md)
+> D1+D3+D4+D5, two independent review passes)**: the mailbox door is COMPILER-enforced now. New boundary crate
 > `crates/actor_client` (between `application` and `infrastructure`) owns the `Mailbox` port,
 > `MailboxEntry` with **pub(crate) fields + getters** (constructing one outside the crate does not
 > compile), `Envelope`, the shared entry constructors, `reminders::scheduled_entry`, the FROZEN
