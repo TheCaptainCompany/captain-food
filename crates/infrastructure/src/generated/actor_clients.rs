@@ -200,7 +200,7 @@ impl CartClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: CartCommand>(
         &self,
         msg: M,
@@ -378,7 +378,7 @@ impl CatalogClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: CatalogCommand>(
         &self,
         msg: M,
@@ -525,7 +525,7 @@ impl ConversationClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: ConversationCommand>(
         &self,
         msg: M,
@@ -704,7 +704,7 @@ impl CustomerClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: CustomerCommand>(
         &self,
         msg: M,
@@ -835,7 +835,7 @@ impl CustomerCreditClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: CustomerCreditCommand>(
         &self,
         msg: M,
@@ -1048,7 +1048,7 @@ impl DeliveryJobClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: DeliveryJobCommand>(
         &self,
         msg: M,
@@ -1183,7 +1183,7 @@ impl DeliveryPartnerRegistrationClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: DeliveryPartnerRegistrationCommand>(
         &self,
         msg: M,
@@ -1365,7 +1365,7 @@ impl OrderClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: OrderCommand>(
         &self,
         msg: M,
@@ -1537,7 +1537,7 @@ impl PaymentClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: PaymentCommand>(
         &self,
         msg: M,
@@ -1678,7 +1678,7 @@ impl PlaceOrderProcessClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: PlaceOrderProcessCommand>(
         &self,
         msg: M,
@@ -1813,7 +1813,7 @@ impl ProspectClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: ProspectCommand>(
         &self,
         msg: M,
@@ -1956,7 +1956,7 @@ impl ReclamationClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: ReclamationCommand>(
         &self,
         msg: M,
@@ -2094,7 +2094,7 @@ impl RefundProcessClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: RefundProcessCommand>(
         &self,
         msg: M,
@@ -2280,7 +2280,7 @@ impl RestaurantClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: RestaurantCommand>(
         &self,
         msg: M,
@@ -2415,7 +2415,7 @@ impl RestaurantAccountClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: RestaurantAccountCommand>(
         &self,
         msg: M,
@@ -2550,7 +2550,7 @@ impl RiderClient {
 
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the drift guard in `tests/actor_clients.rs` proves it).
+    /// inputs, field for field (the in-crate drift guard (`mailbox::enqueue::drift_guard`) proves it).
     pub async fn send<M: RiderCommand>(
         &self,
         msg: M,

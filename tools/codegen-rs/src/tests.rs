@@ -1688,6 +1688,21 @@ keys:
     /// Style of `makefile_recipe_lines_are_ascii`: executable, loud, never skips — every
     /// allowlisted path is asserted to exist AND to still contain the construction it excuses, so
     /// the guard fails loudly if its targets move instead of silently no-oping. The scan matches
+    /// Whitespace-tolerant detector for `MailboxEntry {` — `MailboxEntry{`, a line break before the
+    /// brace, or extra spaces must not slip past the guard (the #292 review's evasion NIT). A `use
+    /// … as` alias still would; the belt-and-braces answer to that is #290's compiler enforcement.
+    fn mentions_entry_construction(text: &str) -> bool {
+        let mut rest = text;
+        while let Some(i) = rest.find("MailboxEntry") {
+            let after = &rest[i + "MailboxEntry".len()..];
+            if after.trim_start().starts_with('{') {
+                return true;
+            }
+            rest = after;
+        }
+        false
+    }
+
     /// `MailboxEntry {` (construction OR destructuring); a destructuring in a new src file trips
     /// it too, on purpose — naming the file in the allowlist is a conscious decision, not noise.
     #[test]
@@ -1714,7 +1729,7 @@ keys:
                 )
             });
             assert!(
-                src.contains("MailboxEntry {"),
+                mentions_entry_construction(&src),
                 "allowlisted file {rel} ({why}) no longer constructs MailboxEntry — the \
                  constructor moved; move this allowlist entry with it so the guard stays real"
             );
@@ -1747,7 +1762,7 @@ keys:
                 panic!("cannot read {rel_str} — a partially-scanned tree is a silent no-op");
             };
             for (idx, line) in src.lines().enumerate() {
-                if !line.contains("MailboxEntry {") {
+                if !mentions_entry_construction(line) {
                     continue;
                 }
                 hits += 1;

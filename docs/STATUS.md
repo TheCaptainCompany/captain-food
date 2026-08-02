@@ -33,7 +33,7 @@
 > the domain command's own serde form (absent optionals as explicit `null`, defaulted arrays as
 > `[]`), not the null-stripped GraphQL input — dedupe is self-consistent post-deploy, but a
 > same-`messageId` retry straddling the deploy for a command with absent optional fields maps to
-> Conflict instead of replay. **Slice 3 built (branch `typed-clients-slice3`, final)**: every
+> Conflict instead of replay. **Slice 3 built (PR #292, final)**: every
 > adapter is on the typed clients — SIRENE (`MarkRestaurantClosed` via `RestaurantClient::send`
 > with the journal-derived envelope, the row-by-row fallback via typed `record`; the BATCHED
 > `enqueue_inbound_facts` fast path stays as the crate-internal bulk door, D8 deferred), HubRise
