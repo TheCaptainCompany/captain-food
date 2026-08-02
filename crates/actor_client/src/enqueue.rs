@@ -399,7 +399,7 @@ pub(crate) async fn schedule_mapped(
 /// Withdraw a reminder that has not been promoted yet: `SCHEDULED → CANCELLED`
 /// (ADR-20260731-150500 §3). `false` = the row is absent, already delivered, or already
 /// cancelled — the caller decides whether losing that race matters.
-/// TEST-ONLY since #284 slice 3: the typed clients' `cancel` is the public withdrawal door; this
+/// TEST-ONLY since #284 slice 3: the typed clients' `cancel_scheduling` is the public withdrawal door; this
 /// remains the reference the DB-gated `mailbox_schedule_pg` tests exercise against the real DDL.
 #[cfg(any(test, feature = "test-fixtures"))]
 pub async fn cancel_reminder(
@@ -709,10 +709,10 @@ mod drift_guard {
     /// Typed `schedule` has no free-function counterpart (it mints the first kind-COMMAND
     /// SCHEDULED rows), so its guard is ABSOLUTE assertions instead of a drift comparison: the row
     /// must carry the same `command_entry` columns as an immediate send plus the `scheduled_at`
-    /// the caller gave — and `cancel` must withdraw it exactly once.
+    /// the caller gave — and `cancel_scheduling` must withdraw it exactly once.
     ///
     /// Exercises the ORDER client on purpose: the scheduling surface is SPEC-GATED (product-owner
-    /// directive, 2026-08-02 — no `schedule`/`cancel` without a `reminders:` declaration), and
+    /// directive, 2026-08-02 — no `schedule`/`cancel_scheduling` without a `reminders:` declaration), and
     /// Order is the one declaring actor today. A `RestaurantClient` (no declaration) has no
     /// `schedule` method at all — that absence is a compile fact, not something a runtime test
     /// can assert.
@@ -740,9 +740,9 @@ mod drift_guard {
         assert_eq!(row.partition(), crate::partition::stable_partition(&order_id, 100));
         assert_eq!(mailbox.scheduled_at(message_id), Some(at), "parked until due, not delivered now");
 
-        assert!(client.cancel(message_id).await.expect("cancel"), "a SCHEDULED row cancels");
+        assert!(client.cancel_scheduling(message_id).await.expect("cancel"), "a SCHEDULED row cancels");
         assert!(
-            !client.cancel(message_id).await.expect("second cancel"),
+            !client.cancel_scheduling(message_id).await.expect("second cancel"),
             "a spent cancellation reports false, not an error"
         );
     }

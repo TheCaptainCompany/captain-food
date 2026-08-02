@@ -2558,7 +2558,7 @@ Catalog:
     /// THE DECLARATION IS THE PERMISSION (product-owner directive, 2026-08-02, generalized to the
     /// whole client surface): per actor, `send` + the sealed `{Actor}Command` trait exist IFF the
     /// actor's `receives` declares ≥1 COMMAND; `record` + `{Actor}Fact` IFF it declares ≥1
-    /// inbound FACT; `schedule`/`cancel` IFF it declares `reminders:`. An unjustified surface is
+    /// inbound FACT; `schedule`/`cancel_scheduling` IFF it declares `reminders:`. An unjustified surface is
     /// ABSENT (a compile error at any call site), never uncallable-but-present. Bidirectional
     /// over the real catalog, with the per-actor declaration sets re-derived HERE from the model
     /// (an independent scan — the guard does not trust the emitter's own).
@@ -2617,7 +2617,7 @@ Catalog:
                     "receives >=1 inbound FACT",
                 ),
                 ("pub async fn schedule", declaring.contains(name), "declares reminders:"),
-                ("pub async fn cancel", declaring.contains(name), "declares reminders:"),
+                ("pub async fn cancel_scheduling", declaring.contains(name), "declares reminders:"),
             ];
             for (needle, justified, why) in surface {
                 assert_eq!(

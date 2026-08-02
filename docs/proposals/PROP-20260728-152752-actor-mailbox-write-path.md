@@ -142,7 +142,9 @@ conversation.schedule(Envelope::new(post_message, principal), at).await?; // -> 
 - **The surface itself is spec-gated** (product-owner directive, 2026-08-02 —
   [ADR-20260802-170059](../adr/ADR-20260802-170059-client-surface-is-spec-gated.md)): a client
   method EXISTS only if the spec declares a use for it — `send` iff ≥1 declared command, `record`
-  iff ≥1 declared inbound fact, `schedule`/`cancel` iff a `reminders:` declaration. No dead
+  iff ≥1 declared inbound fact, `schedule`/`cancel_scheduling` iff a `reminders:` declaration
+  (the withdrawal method named `cancel_scheduling` per #308 — it cancels a scheduled reminder,
+  never an in-flight command; keyed by `message_id`, lane-scoping declined). No dead
   surface: an unjustified method is absent, not merely uncallable (`PaymentClient` has no `send`;
   only `OrderClient` schedules today).
 - **Status reads are symmetric**: the one generic `ActorClient` exposes

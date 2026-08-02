@@ -20,6 +20,9 @@ components:
   command-bus:
     description: "Dispatches commands to handlers; span 'command.receive'/'command.validate'/'command.handle'."
     instrumented: true
+  actor-client:
+    description: "The compiler-enforced mailbox door (crates/actor_client — #290 phase 1, PROP-20260802-130500 D1/D4): one GENERATED typed client per actor with a SPEC-GATED surface (send/record/schedule/cancel_scheduling exist only where actors.yaml declares a use, ADR-20260802-170059) plus the generic ActorClient operation-status read door. The only place a mailbox row can be constructed (MailboxEntry fields private); graphql-gateway and the ACLs enqueue through it, and PgMailbox (infrastructure) is the SQL adapter behind its Mailbox port. Port-level assembly, pure — NOT instrumented."
+    instrumented: false
   command-handlers:
     description: "One handler per aggregate; validates invariants then appends events. Pure domain — NOT instrumented."
     instrumented: false

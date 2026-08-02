@@ -16,7 +16,13 @@ declaration is the permission:
 |---|---|
 | `send` | the actor's `receives` declares ≥1 COMMAND |
 | `record` | the actor's `receives` declares ≥1 inbound EVENT/fact |
-| `schedule` / `cancel` | the actor declares `reminders:` |
+| `schedule` / `cancel_scheduling` | the actor declares `reminders:` |
+
+The withdrawal method is named **`cancel_scheduling`** (product-owner decision, 2026-08-02,
+[#308 "Decide cancel lane-scoping (from the #288 review) — now OrderClient-only"](https://github.com/TheCaptainCompany/captain-food/issues/308)):
+the name says exactly what it withdraws — a SCHEDULED reminder, never an in-flight command — which
+resolves the #288 review's confusion concern; it stays keyed by `message_id` (minted by `schedule`,
+so holding the id is the capability), lane-scoping declined.
 
 Before, an unjustified method was *uncallable* (sealed trait with no implementors) but present;
 now it is **absent** — calling it is a compile error, and the surface guard
