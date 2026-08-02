@@ -15,7 +15,15 @@ renders blank or half-drawn.
 3. **No bare comparison `<` / `>` either** (e.g. `position > checkpoint`, `|now−t| > 300s`). Reword:
    `position after checkpoint`, `|now−t| over 300s`.
 4. **No `;` in label/message text** — mermaid can treat it as a statement separator. Reword or drop it.
+   In a sequence-diagram `Note`, the text after the `;` is parsed as a NEW statement, so the whole
+   diagram dies (bit `PROP-20260802-130500` — this rule existed and was violated anyway; see the
+   validation section below for the gate that actually catches it).
 5. **`<br/>` for line breaks is fine** — it's real HTML the renderer wants, and the formatter leaves it.
+6. **No parentheses in unquoted flowchart node labels** — in `graph`/`flowchart`, `AC[foo (bar)]`
+   makes mermaid read `(` as a shape token and the parse dies (`got 'PS'`). Quote the label:
+   `AC["foo (bar)"]`. Quoted labels also make `*`, `/` and other punctuation safe, and `<br/>`
+   still works inside the quotes. (Sequence-diagram participant aliases tolerate parens unquoted —
+   `participant A as Foo (pure)` is fine.)
 
 ## Quick reference
 
@@ -28,6 +36,30 @@ renders blank or half-drawn.
 
 Prose **outside** mermaid fences is unaffected: `` `Order-<id>` `` inside backticks renders literally and is
 fine — this rule is strictly about ```mermaid blocks.
+
+## Validate every block BEFORE pushing (the rules above are prose — this is the gate)
+
+Two GitHub-render failures were both caught by a HUMAN looking at a merged page (`sagas.md`/
+`stripe-process.md` 2026-07-28, `PROP-20260802-130500` 2026-08-02 — the second violated a rule
+already written on this page). The check that actually binds costs one curl per diagram:
+**mermaid.ink renders the same pako fragment mermaid.live uses and returns HTTP 400 + the parse
+error for a broken diagram**. Since regenerating pako links is already part of any edit to a fenced
+block, validation is the same loop:
+
+```bash
+python3 - <<'EOF' path/to/doc.md | while read -r p; do
+import base64, json, re, sys, zlib
+src = open(sys.argv[1], encoding='utf-8').read()
+for code in re.findall(r'```mermaid\n(.*?)```', src, re.S):
+    state = json.dumps({"code": code.strip(), "mermaid": {"theme": "default"}})
+    print(base64.urlsafe_b64encode(zlib.compress(state.encode(), 9)).decode().rstrip('='))
+EOF
+  curl -sS -o /dev/null -w "HTTP %{http_code}\n" "https://mermaid.ink/svg/pako:$p"; done
+```
+
+Anything but `HTTP 200` for every block: fetch the body (drop `-o /dev/null`) — it contains the
+mermaid parse error with line/column. Do this for EVERY doc whose ```mermaid blocks you touched;
+"it looks right" has now failed twice.
 
 ## Every sequence diagram carries a mermaid.live pan/zoom link (product-owner directive, 2026-07-28)
 

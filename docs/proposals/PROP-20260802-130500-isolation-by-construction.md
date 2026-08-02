@@ -83,7 +83,7 @@ graph TD
     end
     subgraph "ports + doors"
         application --> domain
-        AC[actor-client crate<br/>port + Entry(private) + Envelope<br/>+ generated typed clients<br/>+ OperationStatusClient] --> domain
+        AC["actor-client crate<br/>port + Entry (private) + Envelope<br/>+ generated typed clients<br/>+ OperationStatusClient"] --> domain
         AC --> application
     end
     subgraph "phase 2: per-actor permission"
@@ -93,19 +93,21 @@ graph TD
     end
     subgraph "adapters (the ONLY sqlx/reqwest holders, each scoped)"
         infrastructure --> AC
-        stripe[adapters/*] --> AC
+        stripe["adapters/*"] --> AC
     end
     server --> AC
     server --> infrastructure
     stripe -. "manifest names ONLY the clients it may address" .-> CP
 ```
 
+<a href="https://mermaid.live/view#pako:eNp9U01PwzAM_StWTnyVSRwRQkKFGwIEXNDKwSQejdSmwXEHE-K_47Sb6DTAh6rxs_2eHefT2M6ROQXzyhhreLysAqil_mV0VMaHQAx7sWfar8wIZ3Ndiz6MZwpuJy92LAkONa7jNE3EGBtvUXwXoCjOtwpluyjnlUErHRe28RQELKPQ2QvPznNRrXkVhFeqif1Skf3Bs6Smi2PUIbySilbIgayifsdCaY3exgwq_4Og9KkcwMo8_yFncE9U_9NzjYng5BSUoBhayH-tTymnTWZQ3s9HSQVTEuwZgyj9cVISOVa6i3ISXG6CLfI_YXebsIirlv4o-JtsdBiFOMGe1AS3N9dPkN6ajxnT27vKg7prnMJHQGhrSFbn7LZ2wYcFYxLureiaDPOaKlPER5r_EM0ONtPelUW81H2bYhPXNtEaHqprr9pJi8EvsuSALaWxldzT-v7BC7S4AnRO565bCXk05Z05AtPqRaF3-hY-jaa0w6twtMC-EfP19Q3iAgCA" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+
 One sequence, the whole contract:
 
 ```mermaid
 sequenceDiagram
     participant ACL as any producer (GraphQL / ACL / worker)
-    box actor-client crate (the boundary)
+    box actor-client crate — the boundary
         participant C as RestaurantClient (generated)
         participant E as MailboxEntry (private fields)
     end
@@ -115,8 +117,10 @@ sequenceDiagram
     C->>E: pub(crate) constructor — ONLY reachable here
     Note over ACL,E: an Entry literal anywhere else DOES NOT COMPILE
     C->>PG: port.insert(&entry)
-    Note over PG: reads via getters; SQL lives here alone
+    Note over PG: reads via getters — SQL lives here alone
 ```
+
+<a href="https://mermaid.live/view#pako:eNp9UltLKzEQ_ivDPsgWWm_41AdB1qUIte3R8yL4Mk2m22A2WSfJeor438-k24KomLeQ7zZf5r1QXlMxhSLQayKn6NZgw9g-O5DTIUejTIcuwk01BwyAbgcde50UMZQzxm77Zw5n--czePP8Qjwa2Gv_D1BFzxNlDYmEYowEz-ny_OIK4pYEkZxG3g34r45V9nugEDGx3KtBpGzIURbSo59pdabdo7HiX7vIOyg7Nn223hiyOhx45PT3KVezzF41Bz6Uxm0YQ-SkYmI6UGXYyfV1NYUgIqVq9VjUerK-OyIWXux8Lx0JdixIAU0_D-PbFp0-lhEILYmK827CpMj0pKGlELAhuF3Wj7BY_oVqeb-6m9eDQyUJ6il0aV3uex2B8m4I6vmou1zMn4AJ1RbXlmBLTD_lEx10MJRlTZR6bf7ot4wHsuG3DKuZhPAcT40LxLE8oSzzrYYMkyA6QG8QGoriEo4xH2WFrMwc9gkBrXdUjKFoiVs0WvbzvZB9afebqmmDycbi4-M_0PXl1Q" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 ## 4. Mockups
 
