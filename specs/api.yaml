@@ -252,8 +252,12 @@ types:
       One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a
       (actorType, partition) row from the mailbox_partitions registry joined with live
       pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT
-      rendered as decimal strings (GraphQL Int is 32-bit). NON-PROJECTED (transient) — write-path
-      infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
+      rendered as decimal strings (GraphQL Int is 32-bit). retryingAttempts = the largest
+      attempts counter among the lane's RECEIVED rows (> 0 means a head row is failing and being
+      re-paced); poisoned = rows terminally FAILED by the delivery-attempts cap
+      (PROP-20260802-223522 D4) — each one is an operator event. NON-PROJECTED (transient) —
+      write-path infrastructure, no backing View_*; lanes show zero traffic until the #242
+      worker flip.
     properties:
       actorType: { type: string }
       partition: { type: integer }
@@ -264,6 +268,8 @@ types:
       pending: { type: integer }
       scheduled: { type: integer }
       oldestPendingAt: { type: string, format: date-time, nullable: true }
+      retryingAttempts: { type: integer }
+      poisoned: { type: integer }
   Operation:
     description: >
       Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance

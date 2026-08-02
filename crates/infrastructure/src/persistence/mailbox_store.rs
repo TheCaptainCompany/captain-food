@@ -50,6 +50,14 @@ impl MailboxNudges {
             n.notify_one();
         }
     }
+
+    /// Wake EVERY registered worker — the listener's catch-up on (re)connect: notifications have
+    /// no replay, so a listener that was down assumes every type may have pending work.
+    pub fn nudge_all(&self) {
+        for n in self.map.values() {
+            n.notify_one();
+        }
+    }
 }
 
 pub struct PgMailbox {
@@ -73,13 +81,24 @@ impl PgMailbox {
 #[async_trait]
 impl Mailbox for PgMailbox {
     async fn insert(&self, entry: &MailboxEntry) -> Result<MailboxInsertOutcome, DomainError> {
+        // The pg_notify rides the INSERT's own transaction (PROP-20260802-223522 D1/D2): the
+        // notification exists only if the row does, is delivered at COMMIT, and carries the
+        // actor type so exactly that type's workers wake — in THIS process via the in-process
+        // nudge below, in every OTHER process via the `inbound_messages` LISTEN connection
+        // (see `mailbox_wake`). A conflicting (duplicate) insert notifies nobody. Postgres
+        // deduplicates identical (channel, payload) notifications within one transaction, so
+        // multi-row producers coalesce per actor type for free.
         let inserted = sqlx::query(
-            "INSERT INTO inbound_messages \
-               (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
-                payload_hash, channel, user_id, user_type, correlation_id, cause_id, session_id, \
-                trace_id, source, external_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) \
-             ON CONFLICT (message_id) DO NOTHING",
+            "WITH ins AS ( \
+               INSERT INTO inbound_messages \
+                 (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
+                  payload_hash, channel, user_id, user_type, correlation_id, cause_id, session_id, \
+                  trace_id, source, external_id) \
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) \
+               ON CONFLICT (message_id) DO NOTHING \
+               RETURNING actor_type \
+             ) \
+             SELECT pg_notify('inbound_messages', actor_type) FROM ins",
         )
         .bind(entry.message_id())
         .bind(entry.kind())
@@ -98,11 +117,10 @@ impl Mailbox for PgMailbox {
         .bind(entry.trace_id())
         .bind(entry.source())
         .bind(entry.external_id())
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .map_err(db_err)?
-        .rows_affected()
-            == 1;
+        .is_some();
         if inserted {
             if let Some(nudges) = &self.nudges {
                 nudges.nudge(entry.actor_type());
@@ -231,8 +249,10 @@ impl Mailbox for PgMailbox {
         }
         let mut inserted: Vec<uuid::Uuid> = Vec::with_capacity(entries.len());
         for chunk in entries.chunks(INSERT_MANY_CHUNK) {
+            // Same commit-atomic pg_notify as `insert`, batched: one notification per DISTINCT
+            // actor type that actually gained a row (the RETURNING set), not one per row.
             let mut qb = sqlx::QueryBuilder::new(
-                "INSERT INTO inbound_messages \
+                "WITH ins AS (INSERT INTO inbound_messages \
                    (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
                     payload_hash, channel, user_id, user_type, correlation_id, cause_id, session_id, \
                     trace_id, source, external_id) ",
@@ -256,7 +276,11 @@ impl Mailbox for PgMailbox {
                     .push_bind(e.source().map(str::to_owned))
                     .push_bind(e.external_id().map(str::to_owned));
             });
-            qb.push(" ON CONFLICT (message_id) DO NOTHING RETURNING message_id");
+            qb.push(
+                " ON CONFLICT (message_id) DO NOTHING RETURNING message_id, actor_type) \
+                 SELECT message_id \
+                 FROM ins, LATERAL (SELECT pg_notify('inbound_messages', ins.actor_type)) AS _n",
+            );
             let ids: Vec<(uuid::Uuid,)> =
                 qb.build_query_as().fetch_all(&self.pool).await.map_err(db_err)?;
             inserted.extend(ids.into_iter().map(|(id,)| id));

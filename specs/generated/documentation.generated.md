@@ -10058,7 +10058,7 @@ The uniform acceptance EVERY mutation returns (acceptance-first writes, ADR-2026
 <a id="type-mailboxlane"></a>
 #### 🧩 Type: `MailboxLane`
 
-One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) row from the mailbox_partitions registry joined with live pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
+One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) row from the mailbox_partitions registry joined with live pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). retryingAttempts = the largest attempts counter among the lane's RECEIVED rows (> 0 means a head row is failing and being re-paced); poisoned = rows terminally FAILED by the delivery-attempts cap (PROP-20260802-223522 D4) — each one is an operator event. NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
 
 
 - **Read model**: _(resolved within a parent projection)_
@@ -10074,6 +10074,8 @@ One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a 
 | <a id="type-mailboxlane--pending"></a>`pending` | `integer` | ✅ |
 | <a id="type-mailboxlane--scheduled"></a>`scheduled` | `integer` | ✅ |
 | <a id="type-mailboxlane--oldestpendingat"></a>`oldestPendingAt` | `string` _date-time_ | ⬜ |
+| <a id="type-mailboxlane--retryingattempts"></a>`retryingAttempts` | `integer` | ✅ |
+| <a id="type-mailboxlane--poisoned"></a>`poisoned` | `integer` | ✅ |
 
 <a id="type-operation"></a>
 #### 🧩 Type: `Operation`
@@ -10296,7 +10298,7 @@ _criticality: **high**_
 | `command.journal` | `INTERNAL` | ✅ | — | `business.message_id`*, `business.journal_status`* |
 | `command.dispatch` | `INTERNAL` | ✅ | — | `business.message_id`*, `business.dispatch_outcome`* |
 
-- **Metrics**: `commands_accepted_total` _(counter)_, `command_duplicates_total` _(counter)_, `command_sync_conflicts_total` _(counter)_, `command_completion_ms` _(histogram)_ · **Business metrics**: —
+- **Metrics**: `commands_accepted_total` _(counter)_, `command_duplicates_total` _(counter)_, `command_sync_conflicts_total` _(counter)_, `command_completion_ms` _(histogram)_, `mailbox_poison_failed_total` _(counter)_, `mailbox_push_down_total` _(counter)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans [`command.receive`, `command.journal`, `command.dispatch`]
 - **SLOs**: p95 ≤ 150ms · p99 ≤ 400ms · error rate ≤ 0.5%
 

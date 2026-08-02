@@ -68,6 +68,13 @@ pub mod metric {
     pub const COMMAND_DUPLICATES_TOTAL: &str = "command_duplicates_total";
     pub const COMMAND_SYNC_CONFLICTS_TOTAL: &str = "command_sync_conflicts_total";
     pub const COMMAND_COMPLETION_MS: &str = "command_completion_ms";
+    /// A mailbox delivery terminally FAILED by the attempts cap (PROP-20260802-223522 D4) — an
+    /// operator event, attribute `actor_type`.
+    pub const MAILBOX_POISON_FAILED_TOTAL: &str = "mailbox_poison_failed_total";
+    /// The mailbox push listener lost delivery continuity (attribute `reason`: connection_lost |
+    /// canary_timeout | connection_healed — the last is sqlx's silent in-place reconnect, where
+    /// `live` never flapped but the gap's notifications are gone and a catch-up nudge ran).
+    pub const MAILBOX_PUSH_DOWN_TOTAL: &str = "mailbox_push_down_total";
     pub const PLACE_ORDER_DURATION_MS: &str = "place_order_duration_ms";
     pub const ORDERS_PLACED_TOTAL: &str = "orders_placed_total";
     pub const CHECKOUT_PAYMENT_FAILURES_TOTAL: &str = "checkout_payment_failures_total";

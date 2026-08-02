@@ -159,6 +159,8 @@ CREATE TABLE inbound_messages (
   scheduled_at TIMESTAMPTZ NULL,
   status TEXT NOT NULL,
   error JSONB NULL,
+  attempts SMALLINT NOT NULL,
+  last_attempt_at TIMESTAMPTZ NULL,
   received_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ NULL,
   UNIQUE (source, external_id)
@@ -172,6 +174,7 @@ CREATE INDEX ON inbound_messages (source);
 CREATE INDEX ON inbound_messages (status);
 CREATE INDEX ON inbound_messages (received_at);
 CREATE INDEX ON inbound_messages (actor_type, partition, position);
+CREATE INDEX ON inbound_messages (actor_type, partition);
 CREATE INDEX ON inbound_messages (actor_id, position);
 CREATE INDEX ON inbound_messages (scheduled_at);
 

@@ -126,6 +126,10 @@ async fn setup(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the actor-mailbox migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox attempts migration");
     sqlx::raw_sql(
         "CREATE TABLE delivered_probe (\n\
            delivery BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\
@@ -181,7 +185,7 @@ fn worker(
         // the first worker must grab everything so the rebalance (not a claim-bound accident)
         // is what gives the second worker its share. lease_seconds must survive slow-CI beats
         // yet expire quickly after the hard crash.
-        WorkerConfig { lease_seconds: 6, heartbeat_seconds: 1, batch: 20, max_claims_per_pass: 100 },
+        WorkerConfig { lease_seconds: 6, heartbeat_seconds: 1, batch: 20, max_claims_per_pass: 100, ..WorkerConfig::default() },
         Arc::new(ProbeHandler { worker: id, tracker, delivered }),
     )
 }

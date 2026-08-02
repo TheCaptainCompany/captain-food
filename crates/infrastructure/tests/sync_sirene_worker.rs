@@ -55,6 +55,10 @@ async fn reset_schema(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the actor-mailbox migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox attempts migration");
     sqlx::raw_sql(
         r#"
         CREATE TABLE external_sirene_restaurants (

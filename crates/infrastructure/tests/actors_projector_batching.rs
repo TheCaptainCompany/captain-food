@@ -124,6 +124,10 @@ async fn reset_schema(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the actor-mailbox migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox attempts migration");
 }
 
 fn deps_over(pool: &PgPool) -> CommandDeps {
@@ -228,8 +232,7 @@ async fn actors_and_batching_projector_converge_concurrently() {
                 lease_seconds: 30,
                 heartbeat_seconds: 1,
                 batch: 10,
-                max_claims_per_pass: 60,
-            },
+                max_claims_per_pass: 60, ..WorkerConfig::default() },
             handler.clone(),
         ));
         worker.seed(5).await.expect("seed");

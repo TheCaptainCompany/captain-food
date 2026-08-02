@@ -35,6 +35,8 @@ fn decode_lane(row: &PgRow) -> Result<MailboxLaneRow, DomainError> {
         pending: row.try_get::<i64, _>("pending").map_err(db_err)?,
         scheduled: row.try_get::<i64, _>("scheduled").map_err(db_err)?,
         oldest_pending_at: row.try_get("oldest_pending_at").map_err(db_err)?,
+        retrying_attempts: row.try_get::<i64, _>("retrying_attempts").map_err(db_err)?,
+        poisoned: row.try_get::<i64, _>("poisoned").map_err(db_err)?,
     })
 }
 
@@ -46,16 +48,25 @@ impl MailboxLaneRepository for PgMailboxLaneRepository {
         // even while a backlog is large (which is exactly when someone is staring at it).
         let rows = sqlx::query(
             "SELECT p.actor_type, p.partition, p.ownership_version, p.claimed_by, p.lease_until, \
-                    p.checkpoint, b.pending, b.scheduled, b.oldest_pending_at \
+                    p.checkpoint, b.pending, b.scheduled, b.oldest_pending_at, \
+                    COALESCE(b.retrying_attempts, 0)::bigint AS retrying_attempts, \
+                    COALESCE(x.poisoned, 0)::bigint AS poisoned \
              FROM mailbox_partitions p \
              LEFT JOIN LATERAL ( \
                  SELECT count(*) FILTER (WHERE m.status = 'RECEIVED') AS pending, \
                         count(*) FILTER (WHERE m.status = 'SCHEDULED') AS scheduled, \
-                        min(m.received_at) FILTER (WHERE m.status = 'RECEIVED') AS oldest_pending_at \
+                        min(m.received_at) FILTER (WHERE m.status = 'RECEIVED') AS oldest_pending_at, \
+                        max(m.attempts) FILTER (WHERE m.status = 'RECEIVED') AS retrying_attempts \
                  FROM inbound_messages m \
                  WHERE m.actor_type = p.actor_type AND m.partition = p.partition \
                    AND m.status IN ('RECEIVED', 'SCHEDULED') \
              ) b ON true \
+             LEFT JOIN LATERAL ( \
+                 SELECT count(*) AS poisoned \
+                 FROM inbound_messages m \
+                 WHERE m.actor_type = p.actor_type AND m.partition = p.partition \
+                   AND m.status = 'FAILED' AND (m.error->>'code') = 'DeliveryInfrastructureError' \
+             ) x ON true \
              ORDER BY p.actor_type, p.partition",
         )
         .fetch_all(&self.pool)

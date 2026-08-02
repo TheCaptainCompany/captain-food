@@ -92,6 +92,10 @@ async fn setup(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the actor-mailbox migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox attempts migration");
     sqlx::raw_sql(
         "CREATE TABLE domain_events (\n\
            position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\
@@ -248,7 +252,9 @@ async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writ
         pool.clone(),
         "w-A",
         "Conversation",
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        // Pacing off: these tests redeliver after induced failures on the very next pass;
+        // the spacing window (#313 D4) has its own poison tests.
+        WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     )
     .with_lane_events(Arc::new(ActivationLaneEvents(settings.cache.clone())));
@@ -366,7 +372,9 @@ async fn stale_hold_cannot_commit_a_wrong_rejection() {
         pool.clone(),
         "w-A",
         "Conversation",
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        // Pacing off: these tests redeliver after induced failures on the very next pass;
+        // the spacing window (#313 D4) has its own poison tests.
+        WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     );
     worker.seed(5).await.expect("seed");
@@ -464,7 +472,9 @@ async fn per_actor_opt_out_caches_nothing() {
         pool.clone(),
         "w-A",
         "Conversation",
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        // Pacing off: these tests redeliver after induced failures on the very next pass;
+        // the spacing window (#313 D4) has its own poison tests.
+        WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     );
     worker.seed(5).await.expect("seed");

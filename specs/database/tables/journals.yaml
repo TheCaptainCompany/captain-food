@@ -57,12 +57,15 @@ inbound_messages:
     scheduled_at:   { type: timestamptz, nullable: true, note: "Reminders / scheduled operations: eligible only once due (promotion pass)." }
     status:         { type: { $ref: 'scalars.yaml#/InboundMessageStatus' }, index: true, note: "SCHEDULED -> (CANCELLED | RECEIVED); RECEIVED -> SUCCEEDED | REJECTED | FAILED | IGNORED | DUPLICATE." }
     error:          { type: jsonb, nullable: true, note: "{ code, context } on REJECTED/FAILED — surfaced as Operation.errorCode." }
+    attempts:       { type: smallint, note: "Delivery attempts whose completion TRANSACTION failed (infrastructure error — the row itself records nothing then, so this counter is incremented OUTSIDE the failed tx). At MAILBOX_MAX_DELIVERY_ATTEMPTS the row flips to FAILED with the error recorded, unblocking the lane (PROP-20260802-223522 D4). Default 0; handler verdicts never touch it." }
+    last_attempt_at: { type: timestamptz, nullable: true, note: "When the last FAILED delivery attempt ran — the worker spaces re-attempts at least a retry-spacing apart (push-driven retries have no natural cadence, so without this a nudge storm could burn the whole cap in seconds)." }
     received_at:    { type: timestamptz, index: true }
     completed_at:   { type: timestamptz, nullable: true }
   constraints:
     - unique: [source, external_id]    # delivery-level dedupe for adapted facts (partial in DDL: WHERE source IS NOT NULL — slice-3 migration detail)
   indexes:
     - [actor_type, partition, position]   # the drain index (partial WHERE status = RECEIVED in the migration)
+    - [actor_type, partition]             # poison supervision count (partial WHERE FAILED + DeliveryInfrastructureError in the migration)
     - [actor_id, position]                # per-instance history + the Reminders-companion load
     - [scheduled_at]                      # the promotion pass (partial WHERE status = SCHEDULED in the migration)
 

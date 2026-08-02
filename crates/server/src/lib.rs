@@ -863,6 +863,38 @@ pub fn router() -> Router {
                         // receivers' `changed()` into an instant wake again.
                         std::future::pending::<()>().await;
                     });
+                    // MAILBOX PUSH (#313, PROP-20260802-223522): one LISTEN connection fans
+                    // committed enqueues out to the same per-actor-type nudges the in-process
+                    // producers use — cross-process too, so a standalone adapter's recorded fact
+                    // wakes these workers on commit. While the listener is live the full pass
+                    // stretches to the 60 s safety net (beat stays on the heartbeat); whenever
+                    // it is down — or RUN_MAILBOX_PUSH=false — workers run the pre-push cadence.
+                    let mailbox_push = if config.run_mailbox_push {
+                        let push = infrastructure::persistence::mailbox_wake::MailboxPush::new();
+                        infrastructure::persistence::mailbox_wake::spawn_mailbox_listener(
+                            url.clone(),
+                            pool.clone(),
+                            mailbox_nudges.clone(),
+                            push.clone(),
+                        );
+                        Some(push)
+                    } else {
+                        tracing::warn!(toggle = "RUN_MAILBOX_PUSH", "mailbox push OFF -- workers poll at the heartbeat cadence");
+                        None
+                    };
+                    // The spec-declared knobs, wired (MAILBOX_* in specs/configuration.yaml):
+                    // cadence + lease from config, and the D4 poison cap.
+                    let worker_config = actor_runtime::WorkerConfig {
+                        lease_seconds: config.mailbox_lease_seconds,
+                        heartbeat_seconds: config.mailbox_heartbeat_seconds.max(1) as u64,
+                        max_delivery_attempts: config
+                            .mailbox_max_delivery_attempts
+                            .clamp(0, i16::MAX as i64) as i16,
+                        // The spec prose says "retry spacing default = the heartbeat" — wire it
+                        // so that stays true when MAILBOX_HEARTBEAT_SECONDS is tuned.
+                        retry_spacing_seconds: config.mailbox_heartbeat_seconds.max(1) as u64,
+                        ..actor_runtime::WorkerConfig::default()
+                    };
                     for (actor_type, width) in
                         infrastructure::generated::command_router::ACTOR_MAILBOXES
                     {
@@ -872,12 +904,15 @@ pub fn router() -> Router {
                                     pool.clone(),
                                     worker_id.clone(),
                                     *actor_type,
-                                    actor_runtime::WorkerConfig::default(),
+                                    worker_config.clone(),
                                     handler.clone(),
                                 )
                                 .with_observer(observer.clone());
                                 if let Some(nudge) = mailbox_nudges.get(actor_type) {
                                     w = w.with_nudge(nudge);
+                                }
+                                if let Some(push) = &mailbox_push {
+                                    w = w.with_push_live(push.live_flag());
                                 }
                                 // A lane this worker stops owning drops its held activations —
                                 // the new owner may write those actors (§3.5 eviction rules).

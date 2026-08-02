@@ -66,6 +66,10 @@ async fn setup(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the actor-mailbox migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox attempts migration");
     sqlx::raw_sql(
         "CREATE TABLE delivered_probe (\n\
            delivery BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n\
@@ -114,7 +118,7 @@ fn worker(pool: &PgPool, id: &'static str) -> MailboxWorker {
         ACTOR_TYPE,
         // Fast loop so the test converges in seconds; small claim bound so BOTH workers get lanes
         // even when one starts a beat earlier.
-        WorkerConfig { lease_seconds: 30, heartbeat_seconds: 1, batch: 20, max_claims_per_pass: 4 },
+        WorkerConfig { lease_seconds: 30, heartbeat_seconds: 1, batch: 20, max_claims_per_pass: 4, ..WorkerConfig::default() },
         Arc::new(ProbeHandler { worker: id }),
     )
 }

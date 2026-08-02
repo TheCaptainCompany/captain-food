@@ -237,6 +237,10 @@ pub struct Config {
     pub run_process_managers: bool,
     /// Push wake for the drain loops (ADR-20260802-200416): one dedicated LISTEN connection turns each committed append's pg_notify into an immediate drain of the projector AND the saga runner, replacing the 1.5 s poll as the primary signal (~70,900 idle queries/hour -> ~120). OFF, both loops fall back to unassisted 1.5 s polling — correct but bandwidth-expensive; the escape hatch for a deployment behind a TRANSACTION-mode pooler, which silently cannot carry LISTEN (session pooler required, e.g. Supabase port 5432).
     pub run_event_push: bool,
+    /// Push wake for the actor mailbox (PROP-20260802-223522 D1/D2, ADR-20260802-224532): the PgMailbox door raises pg_notify('inbound_messages', actor_type) inside every enqueue transaction, and one dedicated LISTEN connection per consuming process turns it into an immediate nudge of that actor type's worker — including ACROSS processes, so a standalone adapter's recorded fact wakes the monolith's worker on commit instead of waiting out the heartbeat (up to 10 s on the payment path). While push is confirmed live the full drain pass stretches to the 60 s safety net; lease renewal (beat) stays on MAILBOX_HEARTBEAT_SECONDS unconditionally. OFF — or whenever the listener is down — workers fall back to full passes at the heartbeat cadence: exactly the pre-push behaviour, never worse. Liveness is CANARY-VERIFIED, not assumed: the listener notifies itself on the same channel every canary interval and drops to down (mailbox_push_down_total{reason}) when the echo does not come back within the next interval — this catches the transaction-mode pooler's failure mode, where LISTEN registers but silently delivers nothing (session pooler required, e.g. Supabase port 5432 — same constraint as RUN_EVENT_PUSH).
+    pub run_mailbox_push: bool,
+    /// Poison bound (PROP-20260802-223522 D4): a delivery whose completion transaction fails with an infrastructure error (the status flip aborts with it, so nothing is recorded on the row) increments inbound_messages.attempts OUTSIDE the failed transaction; at this cap the row flips to terminal FAILED with the error recorded and the lane's head-of-line unblocks. Counts only actual delivery attempts — a lane that cannot be claimed consumes none, and re-attempts are PACED at least a retry-spacing apart (default = the heartbeat), because push-driven retries have no natural cadence: without spacing, a nudge storm at Friday peak could burn the whole cap on a seconds-long transient blip (review #314 MAJOR-3). 0 = no cap: the pre-#313 infinite-retry behaviour, kept as the rollback lever. Handler REJECTED/FAILED verdicts are terminal on the first attempt and never involve this cap. A poison flip is an OPERATOR EVENT: counted (mailbox_poison_failed_total{actor_type}) and surfaced per lane on the ADMIN mailboxLanes supervision query (retryingAttempts/poisoned).
+    pub mailbox_max_delivery_attempts: i64,
     /// The generic deletion engine (ADR-20260731-214500 §4): runs the declared deletion journeys (tombstone -> stream deletion -> ledger receipt) for every actors.yaml `deletion:` block. OFF, recorded expiry facts accumulate and no stream is ever erased — GDPR deletion pauses, data is never lost. DEFAULT OFF (gate-then-stabilize): this worker DELETES event streams; the default flips by its own one-line ADR after the gated form is smoked in staging. Readiness at GET /deletion.
     pub run_deletion_engine: bool,
     /// The Runtime D1 flip (#272, ADR-20260801-023000): ON, the three process-manager mutations (placeOrder / approveRefund / denyRefund) deliver through the PM mailboxes via the PREPARE phase (Stripe call with no transaction open, one fenced commit), the Payment lane chains the inbound Stripe facts to the PM lanes in the recording transaction (B2), and the saga runner's Stripe-fact triggers retire. OFF, the legacy journal+spawn path and the runner handle everything exactly as before -- the client contract is byte-identical on both arms (each arm replays the OTHER acceptance store's messageIds as duplicates, so a retry never re-executes across a flip), and every startup with the gate ON backfills un-reacted Stripe facts past the runner checkpoints onto the PM lanes (idempotent), so flipping in EITHER direction loses no saga hop. DEFAULT OFF (gate-then-stabilize): this flips the MONEY PATH; the default flips by its own one-line ADR after the gated form is smoked in staging, and command_journal DROPs only at that deploy.
@@ -409,6 +413,11 @@ impl Config {
             .or_else(|| baked("RUN_EVENT_PUSH", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_EVENT_PUSH", &v, true))
             .unwrap_or(true);
+        let run_mailbox_push = raw("RUN_MAILBOX_PUSH")
+            .or_else(|| baked("RUN_MAILBOX_PUSH", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_MAILBOX_PUSH", &v, true))
+            .unwrap_or(true);
+        let mailbox_max_delivery_attempts = raw("MAILBOX_MAX_DELIVERY_ATTEMPTS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(5);
         let run_deletion_engine = raw("RUN_DELETION_ENGINE")
             .or_else(|| baked("RUN_DELETION_ENGINE", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_DELETION_ENGINE", &v, false))
@@ -561,6 +570,8 @@ impl Config {
                 run_projector,
                 run_process_managers,
                 run_event_push,
+                run_mailbox_push,
+                mailbox_max_delivery_attempts,
                 run_deletion_engine,
                 pm_mailbox_delivery,
                 run_retention_sweep,
@@ -640,6 +651,8 @@ impl Config {
         out.push_str(&format!("  RUN_PROJECTOR              = {}\n", self.run_projector));
         out.push_str(&format!("  RUN_PROCESS_MANAGERS       = {}\n", self.run_process_managers));
         out.push_str(&format!("  RUN_EVENT_PUSH             = {}\n", self.run_event_push));
+        out.push_str(&format!("  RUN_MAILBOX_PUSH           = {}\n", self.run_mailbox_push));
+        out.push_str(&format!("  MAILBOX_MAX_DELIVERY_ATTEMPTS = {}\n", self.mailbox_max_delivery_attempts));
         out.push_str(&format!("  RUN_DELETION_ENGINE        = {}\n", self.run_deletion_engine));
         out.push_str(&format!("  PM_MAILBOX_DELIVERY        = {}\n", self.pm_mailbox_delivery));
         out.push_str(&format!("  RUN_RETENTION_SWEEP        = {}\n", self.run_retention_sweep));
@@ -673,7 +686,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 58;
+pub const KEY_COUNT: usize = 60;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -708,6 +721,8 @@ pub const DECLARED_KEYS: &[&str] = &[
     "RUN_PROJECTOR",
     "RUN_PROCESS_MANAGERS",
     "RUN_EVENT_PUSH",
+    "RUN_MAILBOX_PUSH",
+    "MAILBOX_MAX_DELIVERY_ATTEMPTS",
     "RUN_DELETION_ENGINE",
     "PM_MAILBOX_DELIVERY",
     "RUN_RETENTION_SWEEP",
@@ -761,6 +776,8 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_PROCESS_MANAGERS", "staging", "true"),
     ("RUN_EVENT_PUSH", "production", "true"),
     ("RUN_EVENT_PUSH", "staging", "true"),
+    ("RUN_MAILBOX_PUSH", "production", "true"),
+    ("RUN_MAILBOX_PUSH", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),
     ("RUN_RETENTION_SWEEP", "staging", "true"),
     ("RUN_SIRENE_WORKER", "production", "true"),

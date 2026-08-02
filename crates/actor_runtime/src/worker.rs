@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tokio::sync::Notify;
 
 use crate::completion::{complete_fenced, CompletionError};
@@ -15,7 +15,8 @@ use crate::lease::{
 use crate::message::{DeliveryObserver, InboundMessage, MessageHandler};
 
 /// Tuning knobs — the host wires these from ITS configuration source (specs/configuration.yaml:
-/// `MAILBOX_LEASE_SECONDS`, `MAILBOX_HEARTBEAT_SECONDS`); the defaults mirror the spec defaults.
+/// `MAILBOX_LEASE_SECONDS`, `MAILBOX_HEARTBEAT_SECONDS`, `MAILBOX_MAX_DELIVERY_ATTEMPTS`); the
+/// defaults mirror the spec defaults.
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
     /// How far ahead a claim/renewal pushes `lease_until` (~30s).
@@ -27,11 +28,35 @@ pub struct WorkerConfig {
     pub batch: i64,
     /// Max lanes claimed in one pass (spread bound — leaves claimable lanes for peers).
     pub max_claims_per_pass: i64,
+    /// Poison bound (PROP-20260802-223522 D4): after this many delivery attempts whose completion
+    /// TRANSACTION failed (infrastructure error — nothing was recorded on the row), the row flips
+    /// to terminal FAILED with the error recorded and the lane's head-of-line unblocks. `0` = no
+    /// cap (the pre-#313 infinite-retry behaviour, the rollback lever). Handler verdicts are
+    /// terminal on their first attempt and never touch the counter.
+    pub max_delivery_attempts: i16,
+    /// Full-pass cadence while push is CONFIRMED live (see [`MailboxWorker::with_push_live`]):
+    /// promotion + claim + drain stretch to this safety net, because enqueues wake the worker
+    /// directly. Lease renewal never stretches — `beat` stays on `heartbeat_seconds`.
+    pub pushed_pass_seconds: u64,
+    /// Minimum spacing between delivery ATTEMPTS of the same failing row (#314 review MAJOR-3):
+    /// push-driven retries have no natural cadence — a nudge storm at peak would burn the whole
+    /// attempts cap on a seconds-long transient blip. A head row inside its spacing window makes
+    /// the lane WAIT (head-of-line, never skip past); the default restores the approved
+    /// cap x cadence arithmetic (>= ~50 s to poison at cap 5). `0` disables the pacing.
+    pub retry_spacing_seconds: u64,
 }
 
 impl Default for WorkerConfig {
     fn default() -> Self {
-        Self { lease_seconds: 30, heartbeat_seconds: 10, batch: 100, max_claims_per_pass: 100 }
+        Self {
+            lease_seconds: 30,
+            heartbeat_seconds: 10,
+            batch: 100,
+            max_claims_per_pass: 100,
+            max_delivery_attempts: 5,
+            pushed_pass_seconds: 60,
+            retry_spacing_seconds: 10,
+        }
     }
 }
 
@@ -54,8 +79,15 @@ pub struct MailboxWorker {
     handler: Arc<dyn MessageHandler>,
     observer: Option<Arc<dyn DeliveryObserver>>,
     /// Enqueue-side wake signal: a producer's `notify_one` cuts the delivery latency from the
-    /// heartbeat poll to ~immediate. Purely an accelerator — the poll is the guarantee.
+    /// heartbeat poll to ~immediate. Purely an accelerator — the poll is the guarantee. Fed
+    /// in-process by `PgMailbox` and (since #313) cross-process by the `inbound_messages`
+    /// LISTEN connection, which nudges the same signal.
     nudge: Option<Arc<Notify>>,
+    /// Whether a mailbox LISTEN connection is currently up (shared flag set by the listener,
+    /// PROP-20260802-223522 D5). While `true`, the FULL pass (promotion + claim + drain)
+    /// stretches to `pushed_pass_seconds` — enqueues wake us directly. While `false` (or when
+    /// never wired), full passes run at `heartbeat_seconds`: exactly the pre-push cadence.
+    push_live: Option<Arc<std::sync::atomic::AtomicBool>>,
     lane_events: Option<Arc<dyn LaneEvents>>,
     lanes: tokio::sync::Mutex<Vec<Lane>>,
 }
@@ -76,6 +108,7 @@ impl MailboxWorker {
             handler,
             observer: None,
             nudge: None,
+            push_live: None,
             lane_events: None,
             lanes: tokio::sync::Mutex::new(Vec::new()),
         }
@@ -97,6 +130,17 @@ impl MailboxWorker {
     /// fresh message is drained on the next pass instead of waiting out the heartbeat sleep.
     pub fn with_nudge(mut self, nudge: Arc<Notify>) -> Self {
         self.nudge = Some(nudge);
+        self
+    }
+
+    /// Attach the listener-liveness flag (PROP-20260802-223522 D5; canary-verified by the
+    /// listener, so a silently-deaf LISTEN also drops it): while it reads `true` the full pass
+    /// stretches to `pushed_pass_seconds`. When it drops, the NEXT full pass reschedules on the
+    /// heartbeat cadence — one already-scheduled stretched gap may stand, bounded by
+    /// `pushed_pass_seconds` and covered by the listener's down-transition nudge-all (pending
+    /// work drains immediately; only promotion waits out that one gap).
+    pub fn with_push_live(mut self, live: Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.push_live = Some(live);
         self
     }
 
@@ -215,13 +259,37 @@ impl MailboxWorker {
         Ok(())
     }
 
-    /// Drain one pass over every owned lane, head-of-line per lane. Returns delivered count.
+    /// The IDLE GATE (PROP-20260802-223522 D3): which of this actor type's partitions hold
+    /// deliverable rows, in ONE query (served by the partial index `idx_inbound_messages_drain`).
+    /// An idle pass costs this single round trip instead of one SELECT per owned lane; a row
+    /// landing between this snapshot and the per-lane drain is caught by the next wake or the
+    /// safety net — exactly the same window the pre-gate per-lane SELECT had after ITS read.
+    async fn lanes_with_work(&self) -> sqlx::Result<std::collections::HashSet<i16>> {
+        let rows = sqlx::query(
+            "SELECT DISTINCT partition FROM inbound_messages \
+             WHERE actor_type = $1 AND status = 'RECEIVED'",
+        )
+        .bind(&self.actor_type)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(|r| r.try_get::<i16, _>("partition")).collect::<Result<_, _>>()
+    }
+
+    /// Drain one pass over every owned lane that HAS WORK (the [`Self::lanes_with_work`] gate),
+    /// head-of-line per lane. Returns delivered count.
     /// A fenced-out / already-completed delivery drops the lane on the spot (the authority is
     /// gone); an infrastructure error stops THAT lane's pass and moves on to the next lane —
     /// one failing lane (a poisoned head row, a data-dependent flush error) must never starve
     /// the worker's other lanes; the failing lane retries next pass.
     pub async fn drain(&self) -> sqlx::Result<u64> {
-        let lanes: Vec<Lane> = self.lanes.lock().await.clone();
+        let working = self.lanes_with_work().await?;
+        if working.is_empty() {
+            return Ok(0);
+        }
+        let lanes: Vec<Lane> = {
+            let owned = self.lanes.lock().await;
+            owned.iter().filter(|l| working.contains(&l.partition)).cloned().collect()
+        };
         let mut delivered = 0u64;
         for lane in lanes {
             match self.drain_lane(&lane).await {
@@ -268,7 +336,7 @@ impl MailboxWorker {
             let rows = sqlx::query(
                 "SELECT message_id, position, kind, actor_type, actor_id, partition, message_type, \
                         payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
-                        session_id, received_at \
+                        session_id, received_at, attempts, last_attempt_at \
                  FROM inbound_messages \
                  WHERE actor_type = $1 AND partition = $2 AND status = 'RECEIVED' \
                  ORDER BY position \
@@ -284,15 +352,76 @@ impl MailboxWorker {
                 return Ok(delivered);
             }
             for row in &rows {
-                let message = InboundMessage::decode(row).map_err(CompletionError::Db)?;
-                let verdict = complete_fenced(
+                // ATTEMPT PACING (#314 review MAJOR-3): a previously-failed row inside its
+                // spacing window makes the whole lane WAIT — head-of-line means never skipping
+                // past an undelivered row, and pacing means never burning the cap in a nudge
+                // storm. The next wake or safety pass re-checks.
+                if self.config.retry_spacing_seconds > 0 {
+                    let attempts: i16 = row.try_get("attempts").map_err(CompletionError::Db)?;
+                    if attempts > 0 {
+                        let last: Option<chrono::DateTime<chrono::Utc>> =
+                            row.try_get("last_attempt_at").map_err(CompletionError::Db)?;
+                        if let Some(last) = last {
+                            let spacing =
+                                chrono::Duration::seconds(self.config.retry_spacing_seconds as i64);
+                            if chrono::Utc::now() - last < spacing {
+                                return Ok(delivered);
+                            }
+                        }
+                    }
+                }
+                let message = match InboundMessage::decode(row) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        // An undecodable head row is the poison class too (#314 review MINOR-6):
+                        // it can never deliver, so without the cap it wedges its lane forever.
+                        // No observer callback — there is no decoded message to hand it.
+                        let message_id: uuid::Uuid =
+                            row.try_get("message_id").map_err(CompletionError::Db)?;
+                        if self.poison_raw(message_id, &e.to_string()).await? {
+                            continue;
+                        }
+                        return Err(CompletionError::Db(e));
+                    }
+                };
+                let verdict = match complete_fenced(
                     &self.pool,
                     lane,
                     &self.worker_id,
                     &message,
                     self.handler.as_ref(),
                 )
-                .await?;
+                .await
+                {
+                    Ok(v) => v,
+                    Err(CompletionError::Db(e)) => {
+                        // POISON PATH (PROP-20260802-223522 D4): the completion TRANSACTION
+                        // failed, so the row itself recorded nothing. Count the attempt in its
+                        // own statement (outside the aborted tx); at the cap, flip the row to
+                        // terminal FAILED and keep draining — the lane's head-of-line unblocks.
+                        // Below the cap, stop THIS lane's pass (head-of-line: never deliver
+                        // past an undelivered row) and retry after the spacing window.
+                        match self.poison(&message, &e).await {
+                            Ok(true) => continue,
+                            Ok(false) => return Err(CompletionError::Db(e)),
+                            Err(pe) => {
+                                // Keep BOTH errors visible (#314 review MINOR-7): the poison
+                                // bookkeeping failing (DB fully down) must not swallow the
+                                // completion error that evidences the original failure.
+                                tracing::warn!(
+                                    worker = %self.worker_id,
+                                    actor_type = %message.actor_type,
+                                    partition = message.partition,
+                                    completion_error = %e,
+                                    bookkeeping_error = %pe,
+                                    "mailbox: delivery failed AND its attempt could not be recorded"
+                                );
+                                return Err(CompletionError::Db(e));
+                            }
+                        }
+                    }
+                    Err(other) => return Err(other),
+                };
                 if let Some(obs) = &self.observer {
                     obs.committed(&message, &verdict);
                 }
@@ -322,9 +451,135 @@ impl MailboxWorker {
         }
     }
 
-    /// The production loop: promote → claim → drain → beat, then sleep a heartbeat (or until a
-    /// producer's nudge). `shutdown` flips the loop off; owned lanes are released so peers take over
-    /// immediately instead of waiting out the lease.
+    /// Record one failed delivery ATTEMPT (stamping `last_attempt_at` — the pacing clock) and,
+    /// at the configured cap, flip the row to terminal FAILED with the error recorded (its only
+    /// evidence — the aborted completion transaction wrote nothing). Returns `true` when the row
+    /// was flipped (the lane may continue past it). `max_delivery_attempts == 0` disables the
+    /// cap: attempts are still counted (diagnostic), the row never flips — the pre-#313
+    /// behaviour. The status predicate keeps both statements no-ops if a concurrent owner
+    /// completed the row meanwhile; under a dual-belief window (a stolen lane, both owners
+    /// failing) the counter can advance faster — the cap is a bound, not an exact count.
+    async fn poison_raw(&self, message_id: uuid::Uuid, err: &str) -> Result<bool, CompletionError> {
+        let attempts: i16 = sqlx::query_scalar(
+            "UPDATE inbound_messages \
+             SET attempts = attempts + 1, last_attempt_at = now() \
+             WHERE message_id = $1 AND status = 'RECEIVED' \
+             RETURNING attempts",
+        )
+        .bind(message_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(CompletionError::Db)?
+        .unwrap_or(0);
+        let cap = self.config.max_delivery_attempts;
+        if cap <= 0 || attempts < cap {
+            tracing::warn!(
+                worker = %self.worker_id,
+                actor_type = %self.actor_type,
+                message_id = %message_id,
+                attempts,
+                cap,
+                error = %err,
+                "mailbox: delivery attempt failed -- will retry after the spacing window"
+            );
+            return Ok(false);
+        }
+        let flipped = sqlx::query(
+            "UPDATE inbound_messages \
+             SET status = 'FAILED', error = $2, completed_at = now() \
+             WHERE message_id = $1 AND status = 'RECEIVED'",
+        )
+        .bind(message_id)
+        .bind(serde_json::json!({
+            "code": "DeliveryInfrastructureError",
+            "context": { "detail": err, "attempts": attempts },
+        }))
+        .execute(&self.pool)
+        .await
+        .map_err(CompletionError::Db)?
+        .rows_affected()
+            == 1;
+        if flipped {
+            tracing::error!(
+                worker = %self.worker_id,
+                actor_type = %self.actor_type,
+                message_id = %message_id,
+                attempts,
+                error = %err,
+                "mailbox: delivery attempts exhausted -- row FAILED, lane unblocked (operator attention needed)"
+            );
+        }
+        Ok(flipped)
+    }
+
+    /// [`Self::poison_raw`] plus the operator-event seam: on the flip, the observer emits the
+    /// contract counter (`mailbox_poison_failed_total{actor_type}`) and publishes the terminal
+    /// FAILED so a waiting client's status poll resolves (PROP-20260802-223522 D4).
+    async fn poison(&self, message: &InboundMessage, err: &sqlx::Error) -> Result<bool, CompletionError> {
+        let text = err.to_string();
+        let flipped = self.poison_raw(message.message_id, &text).await?;
+        if flipped {
+            if let Some(obs) = &self.observer {
+                obs.poisoned(message, &text);
+            }
+        }
+        Ok(flipped)
+    }
+
+    /// One FULL pass: promotion, claim (or the fair-share rebalance when nothing is claimable),
+    /// gated drain, lease renewal. Errors are logged and retried next pass, never propagated —
+    /// see the liveness note on [`Self::run`].
+    async fn full_pass(&self) {
+        if let Err(e) = self.promote().await {
+            tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: promotion failed -- retrying next pass");
+        }
+        match self.claim().await {
+            Ok(0) => {
+                // Nothing claimable — every lane is live-owned. If the spread is unfair
+                // (deploy overlap, a scaled-up replica set), take one lane from the largest
+                // owner; the next passes converge the rest.
+                if let Err(e) = self.rebalance().await {
+                    tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: rebalance failed -- retrying next pass");
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: claim failed -- retrying next pass");
+            }
+        }
+        if let Err(e) = self.drain().await {
+            tracing::error!(worker = %self.worker_id, error = %e, "mailbox: drain pass failed");
+        }
+        if let Err(e) = self.beat().await {
+            tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: heartbeat failed -- retrying next pass");
+        }
+    }
+
+    /// How long until the next FULL pass: the stretched safety net while a mailbox listener is
+    /// confirmed live (enqueues wake us directly), the heartbeat cadence otherwise — losing push
+    /// reverts to exactly the pre-push behaviour, never past it.
+    fn full_pass_interval(&self, heartbeat_pause: std::time::Duration) -> std::time::Duration {
+        match &self.push_live {
+            Some(live) if live.load(std::sync::atomic::Ordering::Relaxed) => {
+                std::time::Duration::from_secs(self.config.pushed_pass_seconds)
+            }
+            _ => heartbeat_pause,
+        }
+    }
+
+    /// The production loop. Two clocks and one wake signal (PROP-20260802-223522):
+    ///
+    /// - the FULL pass (promote → claim/rebalance → gated drain → beat) runs on
+    ///   [`Self::full_pass_interval`] — the heartbeat cadence normally, the stretched safety net
+    ///   while push is confirmed live;
+    /// - `beat` ALSO runs alone on the heartbeat cadence between stretched full passes — the
+    ///   lease clock never depends on push being healthy, or the fence would die with the
+    ///   listener;
+    /// - a NUDGE (in-process producer or the LISTEN fan-out) triggers claim + gated drain
+    ///   immediately — delivery starts on commit, not on a timer.
+    ///
+    /// `shutdown` flips the loop off; owned lanes are released so peers take over immediately
+    /// instead of waiting out the lease.
     ///
     /// LIVENESS OVER PROPAGATION: a transient claim/beat/drain error is logged and retried next
     /// pass — a momentary pool exhaustion (most likely exactly at peak) must never permanently
@@ -335,35 +590,27 @@ impl MailboxWorker {
     /// into a zero-sleep busy loop against the database.
     pub async fn run(&self, mut shutdown: tokio::sync::watch::Receiver<bool>) -> sqlx::Result<()> {
         let mut sender_gone = false;
+        let heartbeat_pause = std::time::Duration::from_secs(self.config.heartbeat_seconds);
+        // First full pass is due immediately; every full pass beats, so the beat clock trails it.
+        let mut next_full = tokio::time::Instant::now();
+        let mut next_beat = next_full + heartbeat_pause;
         loop {
             if *shutdown.borrow() {
                 break;
             }
-            if let Err(e) = self.promote().await {
-                tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: promotion failed -- retrying next pass");
-            }
-            match self.claim().await {
-                Ok(0) => {
-                    // Nothing claimable — every lane is live-owned. If the spread is unfair
-                    // (deploy overlap, a scaled-up replica set), take one lane from the largest
-                    // owner; the next passes converge the rest.
-                    if let Err(e) = self.rebalance().await {
-                        tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: rebalance failed -- retrying next pass");
-                    }
+            let now = tokio::time::Instant::now();
+            if now >= next_full {
+                self.full_pass().await;
+                let after = tokio::time::Instant::now();
+                next_full = after + self.full_pass_interval(heartbeat_pause);
+                next_beat = after + heartbeat_pause;
+            } else if now >= next_beat {
+                if let Err(e) = self.beat().await {
+                    tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: heartbeat failed -- retrying next beat");
                 }
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: claim failed -- retrying next pass");
-                }
+                next_beat = tokio::time::Instant::now() + heartbeat_pause;
             }
-            if let Err(e) = self.drain().await {
-                tracing::error!(worker = %self.worker_id, error = %e, "mailbox: drain pass failed");
-            }
-            if let Err(e) = self.beat().await {
-                tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: heartbeat failed -- retrying next pass");
-            }
-            let sleep =
-                tokio::time::sleep(std::time::Duration::from_secs(self.config.heartbeat_seconds));
+            let sleep = tokio::time::sleep_until(next_full.min(next_beat));
             tokio::pin!(sleep);
             let nudged = async {
                 match &self.nudge {
@@ -371,15 +618,16 @@ impl MailboxWorker {
                     None => std::future::pending().await,
                 }
             };
+            let mut deliver_now = false;
             if sender_gone {
                 tokio::select! {
                     _ = &mut sleep => {}
-                    _ = nudged => {}
+                    _ = nudged => { deliver_now = true; }
                 }
             } else {
                 tokio::select! {
                     _ = &mut sleep => {}
-                    _ = nudged => {}
+                    _ = nudged => { deliver_now = true; }
                     changed = shutdown.changed() => {
                         if changed.is_err() {
                             sender_gone = true;
@@ -387,6 +635,17 @@ impl MailboxWorker {
                             sleep.await;
                         }
                     }
+                }
+            }
+            if deliver_now && !*shutdown.borrow() {
+                // A producer says a row landed. Claim first — the nudge may precede this
+                // worker's first full pass over a claimable lane — then drain, gated. The full
+                // machinery (promotion, rebalance) stays on its own clock.
+                if let Err(e) = self.claim().await {
+                    tracing::warn!(worker = %self.worker_id, actor_type = %self.actor_type, error = %e, "mailbox: nudge claim failed -- draining owned lanes anyway");
+                }
+                if let Err(e) = self.drain().await {
+                    tracing::error!(worker = %self.worker_id, error = %e, "mailbox: nudge drain failed");
                 }
             }
         }

@@ -754,7 +754,7 @@ pub struct MutationAcceptance {
     pub duplicate: bool,
 }
 
-/// One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) row from the mailbox_partitions registry joined with live pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
+/// One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a (actorType, partition) row from the mailbox_partitions registry joined with live pending/scheduled counts from inbound_messages. checkpoint/ownershipVersion are BIGINT rendered as decimal strings (GraphQL Int is 32-bit). retryingAttempts = the largest attempts counter among the lane's RECEIVED rows (> 0 means a head row is failing and being re-paced); poisoned = rows terminally FAILED by the delivery-attempts cap (PROP-20260802-223522 D4) — each one is an operator event. NON-PROJECTED (transient) — write-path infrastructure, no backing View_*; lanes show zero traffic until the #242 worker flip.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct MailboxLane {
@@ -776,6 +776,10 @@ pub struct MailboxLane {
     pub scheduled: i64,
     #[graphql(name = "oldestPendingAt")]
     pub oldest_pending_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "retryingAttempts")]
+    pub retrying_attempts: i64,
+    #[graphql(name = "poisoned")]
+    pub poisoned: i64,
 }
 
 /// Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance handle: polled by `operationStatus`, streamed by `operationStatusChanged`. `errorCode` is the stable errors.yaml code when the operation REJECTED/FAILED after acceptance (the async home of the P-10 rejection contract — sync validation failures still use GraphQL errors). Ownership- scoped in the resolver: the journaling actor (JWT), the journaling session (X-SESSION-ID), or ADMIN. NON-PROJECTED (transient) — served from the command_journal, no backing View_*.
@@ -1466,6 +1470,8 @@ impl From<MailboxLaneRow> for MailboxLane {
             pending: row.pending,
             scheduled: row.scheduled,
             oldest_pending_at: row.oldest_pending_at,
+            retrying_attempts: row.retrying_attempts,
+            poisoned: row.poisoned,
         }
     }
 }

@@ -126,6 +126,10 @@ async fn reset_schema(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the actor-mailbox migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox attempts migration");
     sqlx::raw_sql("DROP TABLE IF EXISTS mailbox_partitions").execute(pool).await.expect("trim");
     // THE REAL SPEC FUNCTION — the single source of the retention windows.
     sqlx::raw_sql(include_str!("../../../specs/database/functions/sweep_retention.sql"))

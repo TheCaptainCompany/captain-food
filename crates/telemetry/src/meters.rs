@@ -77,6 +77,35 @@ pub mod acceptance {
     }
 }
 
+/// Mailbox push + poison signals of the `command-acceptance` contract (PROP-20260802-223522).
+pub mod mailbox {
+    use super::*;
+
+    fn poison_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MAILBOX_POISON_FAILED_TOTAL).build())
+    }
+
+    fn push_down_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MAILBOX_PUSH_DOWN_TOTAL).build())
+    }
+
+    /// A delivery terminally FAILED by the attempts cap — the operator event D4 names
+    /// (`mailbox_poison_failed_total{actor_type}`). The row carries the error evidence; this
+    /// counter is what a trigger can watch.
+    pub fn poison_failed(actor_type: &str) {
+        poison_counter().add(1, &[KeyValue::new("actor_type", actor_type.to_string())]);
+    }
+
+    /// The push listener went DOWN (`mailbox_push_down_total{reason}`): connection lost, or the
+    /// liveness canary timed out (the transaction-pooler silently-deaf-LISTEN mode). Workers are
+    /// on the pre-push cadence until recovery.
+    pub fn push_down(reason: &str) {
+        push_down_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+}
+
 /// The `place-order` contract: one technical histogram plus the two BAM counters.
 pub mod place_order {
     use super::*;
