@@ -541,6 +541,12 @@ pub(crate) fn emit_config(model: &Model) -> String {
         }
         let f = field(&k.name);
         let gates_lit = k.gates.replace('\n', " ").trim().replace('"', "\\\"");
+        // Escaped for a NORMAL Rust string literal (see the emission below), NOT a raw one. This was
+        // previously emitted into `r"..."`, where escapes are not processed -- so every `\.` in a spec
+        // pattern reached the regex engine as `\\.` (a LITERAL backslash followed by any char) and the
+        // key could never match its own valid value. `OTEL_TRACES_SAMPLE_RATIO=1.0` was reported INVALID
+        // against `^(0(\.[0-9]+)?|1(\.0+)?)$`, which on a production/staging profile REFUSES THE BOOT.
+        // Only the `development` profile's "starting anyway" fallback kept it off production's floor.
         let pat_lit = pat.replace('\\', "\\\\").replace('"', "\\\"");
         // Optional keys are Option<String> here; required ones were unwrapped to String above.
         let value_expr = if k.required.is_empty() && k.default.is_none() {
@@ -549,7 +555,7 @@ pub(crate) fn emit_config(model: &Model) -> String {
             format!("Some({f}.as_str())")
         };
         out.push_str(&format!(
-            "        if let Some(v) = {value_expr} {{\n            if !v.is_empty() && !matches_pattern(r\"{pat_lit}\", v) {{\n                problems.invalid.push(InvalidKey {{ name: \"{n}\", scalar: \"{scalar}\", pattern: r\"{pat_lit}\", gates: \"{g}\" }});\n            }}\n        }}\n",
+            "        if let Some(v) = {value_expr} {{\n            if !v.is_empty() && !matches_pattern(\"{pat_lit}\", v) {{\n                problems.invalid.push(InvalidKey {{ name: \"{n}\", scalar: \"{scalar}\", pattern: \"{pat_lit}\", gates: \"{g}\" }});\n            }}\n        }}\n",
             n = k.name,
             g = gates_lit
         ));
