@@ -120,6 +120,7 @@ saying "yes to all" is a reasonable use of five minutes.
 
 | Date | Decision | Answer | Recorded in |
 |---|---|---|---|
+| 2026-08-02 | **PROP-20260802-130500 D1–D6** — isolation by construction | **All six answered** (D1 via PROP-20260728-152752 D9). D2 **(a) handler crates per actor** — aggregates AND process managers, domain value types stay one crate · D3 **cargo-deny capability allowlist in phase 1** (who may hold `sqlx`/`reqwest`) · D4 **one generic `ActorClient` with `get_operation_status(message_id)`** — operation status is generic to all operations, so neither a per-actor client method nor a separate `OperationStatusClient` type; per-actor typed clients stay write-side · D5 **`test-fixtures` feature + CI check** · D6 **later, separately — against the recommendation** (own change after phase 1). Scope directive: "per actor" includes the two process managers at every phase. | Product owner, this register (§14) + [PROP-20260802-130500](PROP-20260802-130500-isolation-by-construction.md), realized by [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290) |
 | 2026-07-29 | **PROP-170500 D1 + D2** — telemetry backend and sampling | **D1 answered: Honeycomb**, over OTLP/HTTP, pinned to the **EU (`eu1`)** region — a GDPR constraint, not a default, since spans carry `customerId`/`orderId` and ADR-0042 pinned data to Frankfurt. `HONEYCOMB_API_KEY` supplied as a repo Actions secret and pushed to Render by CI. Telemetry **degrades, never gates**: no telemetry key is `required:`, so a missing ingest key drops the exporter and keeps structured logs rather than refusing to serve orders. **D2 answered but NARROWED — against the recommendation**: parent-based HEAD sampling at `1.0` (keep everything), not tail-based. Tail sampling needs Refinery, i.e. a service to run and pay for, which contradicts ADR-0042's minimal-ops-pre-PMF posture — and D2's own justification says the volume is not there yet. Revisit when ingest cost is measurable. | Product owner + [ADR-20260729-183000](../adr/ADR-20260729-183000-telemetry-is-honeycomb-eu-and-degrades-never-gates.md), realizing [#191](https://github.com/TheCaptainCompany/captain-food/issues/191) |
 | 2026-07-28 | **PROP-004616 D1–D6** — slug lifecycle + SIRENE inbound events | **All six answered.** D1 `RestaurantSlugConfigured` + `RestaurantSlugReconfigured` (in session) · D2 slug chosen **between claim and activation**, gated by "no activation without a configured slug" · D3 **write-side reservation table** with a real `UNIQUE` (also holds released slugs) · D4 the ACL stages **`RestaurantRegistered` only** — *against the recommendation*, and stricter: no registry-fact event, no ACL branching, the **aggregate** decides record/ignore/update · D5 **null the slug on `NON_PARTNER` rows** · D6 **both** `IGNORED` and `DUPLICATE`. Partially supersedes ADR-0045. | Product owner, this register + [ADR-20260728-011344](../adr/ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md) |
 | 2026-07-26 | **PROP-193000 D1–D4** — continuous development loop | **Deferred.** The daily architecture-review routine is sufficient for now; the dev loop stays off until the proposals are under control. `dev-loop.yml` remains `workflow_dispatch`-only with `dry_run` defaulting true. | Product owner, this register |
@@ -298,26 +299,26 @@ per-actor client crates second, per-actor implementation crates gated separately
 
 ---
 
-## 14. Isolation by construction — PROP-20260802-130500 (added 2026-08-02)
+## 14. Isolation by construction — PROP-20260802-130500 — ✅ DECIDED 2026-08-02
 
 [PROP-20260802-130500](PROP-20260802-130500-isolation-by-construction.md)
 ([#290](https://github.com/TheCaptainCompany/captain-food/issues/290)). The product owner's threat
 model, first-class: most code here is written by AI sessions, and a rule an agent can violate
 silently is a review burden forever — so buy compile-time enforcement wherever it is for sale.
 Measured finding behind it: the typed-client door is level-4 enforced while **nine crates hold
-`sqlx`** and can bypass every door with one query. D1 (client crate) is already decided (D9),
-and its scope was sharpened by product-owner directive (2026-08-02): **"per actor" includes the
-process managers** — one crate per PM and one per PM client at every phase, symmetric with
-aggregates (16 actors today = 14 aggregates + `PlaceOrderProcess` + `RefundProcess`). The rest
-are open:
+`sqlx`** and can bypass every door with one query. Scope (product-owner directive, 2026-08-02):
+**"per actor" includes the process managers** — one crate per PM and one per PM client at every
+phase, symmetric with aggregates (16 actors = 14 aggregates + `PlaceOrderProcess` +
+`RefundProcess`). All six decisions answered:
 
-| # | Decision | Recommendation |
+| # | Decision | Answer |
 |---|---|---|
-| D2 | Per-actor IMPLEMENTATION crates (phase-3 endpoint) | (a) handler crates per actor — aggregates AND process managers; domain types stay one crate |
-| **D3** | **`Cargo.toml` as capability allowlist (cargo-deny: who may hold `sqlx`/`reqwest`)** | **Adopt in phase 1 — the biggest win available; closes the raw-SQL side door the typed clients cannot see** |
-| D4 | The read door — **shape decided 2026-08-02**: one generic `ActorClient` with `get_operation_status(message_id)` — status is generic to all operations, so neither a per-actor client nor a separate `OperationStatusClient` type | In the client crate, phase 1 (absorbs the #284 tail once, not twice) |
-| D5 | Cross-crate test fixtures | `test-fixtures` cargo feature + CI check no release artifact enables it |
-| D6 | Lint floor | `unreachable_pub = deny` in boundary crates, `unsafe_code = forbid`, `cargo-machete` in CI — adopt with phase 1 |
+| D1 | The client door becomes a crate | Dedicated `actor-client` crate (decided as PROP-20260728-152752 D9) |
+| D2 | Per-actor IMPLEMENTATION crates (phase-3 endpoint) | (a) handler crates per actor — aggregates AND process managers; domain types stay one crate — ✅ as recommended |
+| D3 | `Cargo.toml` as capability allowlist (cargo-deny: who may hold `sqlx`/`reqwest`) | Adopt in phase 1 — ✅ as recommended |
+| D4 | The read door | One generic `ActorClient` with `get_operation_status(message_id)` — status is generic to all operations, so neither a per-actor client method nor a separate `OperationStatusClient` type; in the client crate, phase 1 |
+| D5 | Cross-crate test fixtures | `test-fixtures` cargo feature + CI check that no release artifact enables it — ✅ as recommended |
+| D6 | Lint floor | **Later, separately — against the recommendation**: lands as its own change after phase 1, tracked on #290's checklist |
 
 ---
 
