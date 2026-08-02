@@ -24,6 +24,7 @@
 //! the adapters depend on this crate. `actor_client` holds NO sqlx/reqwest — the D3 capability
 //! allowlist (tools/codegen-rs `capability_dependencies_are_allowlisted`) keeps it that way.
 
+pub mod client;
 mod enqueue;
 pub mod mailbox;
 mod partition;
@@ -33,6 +34,7 @@ pub mod reminders;
 /// command-addressing tables, emitted by tools/codegen-rs from specs/actors.yaml.
 pub mod generated;
 
+pub use client::ActorClient;
 pub use enqueue::{
     enqueue_inbound_facts, inbound_message_id, inbound_namespace, reminder_message_id,
     surrogate_actor_id, EnqueueOutcome, InboundFact, ScheduleOutcome,

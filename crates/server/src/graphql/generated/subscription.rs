@@ -29,7 +29,11 @@ impl SubscriptionRoot {
     #[graphql(name = "operationStatusChanged")]
     async fn operation_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Operation>>> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
-        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
+        // The D4 read door (PROP-20260802-130500): the snapshot reads resolve through the ONE
+        // generic ActorClient, never a raw port method — same door as `operationStatus`.
+        let status_door = actor_client::ActorClient::new(
+            ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone(),
+        );
         let bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let wanted = input.message_id.0;
         let admin = matches!(
@@ -47,7 +51,7 @@ impl SubscriptionRoot {
             use domain::generated::scalars::InboundMessageStatus as M;
             // Snapshot-first, MAILBOX-FIRST (#242 flip): the acceptance already inserted the row —
             // in inbound_messages post-flip, in command_journal for the legacy PM-leg mutations.
-            if let Ok(Some(row)) = mailbox.by_message(wanted).await {
+            if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
                 let owned = admin
                     || (principal_uuid.is_some() && principal_uuid == row.user_id)
                     || (session.is_some() && session == row.session_id);
@@ -93,7 +97,7 @@ impl SubscriptionRoot {
                     // Lagged: the durable row is the pull truth — re-read (mailbox first) and
                     // finish if terminal.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        if let Ok(Some(row)) = mailbox.by_message(wanted).await {
+                        if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
                             let terminal = !matches!(row.status, M::RECEIVED | M::SCHEDULED);
                             yield Ok(super::mutation::operation_from_mailbox(&row));
                             if terminal {

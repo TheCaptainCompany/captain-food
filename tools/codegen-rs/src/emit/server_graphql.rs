@@ -612,10 +612,13 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
         ),
         // The command status poll (ADR-20260720-015500): PUBLIC, ownership-scoped — a
         // non-owned/unknown messageId resolves null (no existence oracle). MAILBOX-FIRST
-        // (#242 flip): post-flip acceptances live in inbound_messages; the command_journal
-        // read remains as the fallback for pre-flip rows and the legacy PM-leg mutations.
+        // (#242 flip): post-flip acceptances live in inbound_messages, read through the ONE
+        // generic ActorClient — the D4 read door (PROP-20260802-130500: status is an
+        // envelope-level outcome keyed by message_id alone, so the read side is actor-agnostic
+        // while the write side stays per-actor). The command_journal read remains as the
+        // fallback for pre-flip rows and the legacy PM-leg mutations.
         "operationStatus" => Some(
-            "        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?;\n        if let Some(row) = mailbox\n            .by_message(input.message_id.0)\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n        {\n            if !super::mutation::mailbox_operation_owned(ctx, &row) {\n                return Ok(None);\n            }\n            return Ok(Some(super::mutation::operation_from_mailbox(&row)));\n        }\n        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?;\n        let Some(row) = journal\n            .by_message(input.message_id.0)\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n        else {\n            return Ok(None);\n        };\n        if !super::mutation::operation_owned(ctx, &row) {\n            return Ok(None);\n        }\n        Ok(Some(super::mutation::operation_from_journal(&row)))",
+            "        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();\n        let status_door = actor_client::ActorClient::new(mailbox);\n        if let Some(row) = status_door\n            .get_operation_status(input.message_id.0)\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n        {\n            if !super::mutation::mailbox_operation_owned(ctx, &row) {\n                return Ok(None);\n            }\n            return Ok(Some(super::mutation::operation_from_mailbox(&row)));\n        }\n        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?;\n        let Some(row) = journal\n            .by_message(input.message_id.0)\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n        else {\n            return Ok(None);\n        };\n        if !super::mutation::operation_owned(ctx, &row) {\n            return Ok(None);\n        }\n        Ok(Some(super::mutation::operation_from_journal(&row)))",
         ),
         // The checkout payment state (ADR-20260720-015500): served from the PlaceOrderProcess run
         // row (the declared PM-privacy exception); initiator-scoped — ADMIN, the checkout's
@@ -1443,7 +1446,11 @@ pub(crate) fn wired_subscription_body(name: &str) -> Option<&'static str> {
         // setup — a non-owned/unknown messageId yields an EMPTY stream (no existence oracle).
         "operationStatusChanged" => Some(
             r#"        let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
-        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
+        // The D4 read door (PROP-20260802-130500): the snapshot reads resolve through the ONE
+        // generic ActorClient, never a raw port method — same door as `operationStatus`.
+        let status_door = actor_client::ActorClient::new(
+            ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone(),
+        );
         let bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let wanted = input.message_id.0;
         let admin = matches!(
@@ -1461,7 +1468,7 @@ pub(crate) fn wired_subscription_body(name: &str) -> Option<&'static str> {
             use domain::generated::scalars::InboundMessageStatus as M;
             // Snapshot-first, MAILBOX-FIRST (#242 flip): the acceptance already inserted the row —
             // in inbound_messages post-flip, in command_journal for the legacy PM-leg mutations.
-            if let Ok(Some(row)) = mailbox.by_message(wanted).await {
+            if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
                 let owned = admin
                     || (principal_uuid.is_some() && principal_uuid == row.user_id)
                     || (session.is_some() && session == row.session_id);
@@ -1507,7 +1514,7 @@ pub(crate) fn wired_subscription_body(name: &str) -> Option<&'static str> {
                     // Lagged: the durable row is the pull truth — re-read (mailbox first) and
                     // finish if terminal.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        if let Ok(Some(row)) = mailbox.by_message(wanted).await {
+                        if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
                             let terminal = !matches!(row.status, M::RECEIVED | M::SCHEDULED);
                             yield Ok(super::mutation::operation_from_mailbox(&row));
                             if terminal {
