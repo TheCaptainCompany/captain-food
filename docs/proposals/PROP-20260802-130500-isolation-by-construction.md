@@ -193,7 +193,7 @@ all operations** — `message_id` is globally unique and the status is an envelo
 (PENDING/SUCCEEDED/REJECTED/…), carrying nothing actor-specific — so reading it through a per-actor
 client like `RestaurantClient` would be inappropriate, and a name like `OperationStatusClient`
 overstates it into a second concept. The split is: **per-actor typed clients = the write side**
-(send/record/schedule/cancel — where WHICH actor matters at compile time); **the one generic
+(send/record/schedule/cancel_scheduling — where WHICH actor matters at compile time); **the one generic
 `ActorClient` = the read side** (where it does not).
 
 | Option | Pros | Cons |
@@ -226,7 +226,8 @@ generalized: *"we should do the same for every method of the system, because it'
 declaration in the spec IS the permission; dead surface is an open door with no declared owner.
 Recorded as [ADR-20260802-170059](../adr/ADR-20260802-170059-client-surface-is-spec-gated.md);
 realized for the generated clients in phase 1 (send ⇔ command, record ⇔ inbound fact,
-schedule/cancel ⇔ reminders — guard re-derives the rule from actors.yaml). The system-wide audit:
+schedule/cancel_scheduling ⇔ reminders — guard re-derives the rule from actors.yaml; the
+withdrawal method named `cancel_scheduling` per #308, lane-scoping declined). The system-wide audit:
 
 | surface | declaration that gates it | state |
 |---|---|---|

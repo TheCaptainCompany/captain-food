@@ -8,8 +8,8 @@
 // only place such a row can exist at all. EVERY method is spec-gated (product-owner
 // directive, 2026-08-02 — the declaration is the permission): `send` + `{Actor}Command` exist
 // iff the actor receives >=1 COMMAND, `record` + `{Actor}Fact` iff it receives >=1 inbound
-// FACT, `schedule`/`cancel` iff it declares `reminders:`. An unjustified surface is ABSENT — a
-// compile error at any call site — never uncallable-but-present.
+// FACT, `schedule`/`cancel_scheduling` iff it declares `reminders:`. An unjustified surface is
+// ABSENT — a compile error at any call site — never uncallable-but-present.
 
 use std::sync::Arc;
 
@@ -1075,11 +1075,13 @@ impl OrderClient {
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
     }
 
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
+    /// Withdraw a SCHEDULED reminder (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
+    /// matters. Named `cancel_scheduling` (product-owner decision 2026-08-02, #308): the name says
+    /// exactly what it withdraws — a scheduled reminder, never an in-flight command. Keyed by
+    /// `message_id` like the port beneath it: the id is minted by `schedule`, so holding it IS the
+    /// capability (decided over lane-scoping, #308).
+    pub async fn cancel_scheduling(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the

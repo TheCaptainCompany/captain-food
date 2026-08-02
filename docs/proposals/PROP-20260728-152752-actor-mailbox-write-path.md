@@ -1,6 +1,6 @@
 # PROP-20260728-152752 — The write path becomes an actor mailbox: `inbound_messages` replaces both journals, partitioned workers deliver to the actors
 
-- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D9 (client isolation) answered 2026-08-02: a dedicated actor-client crate, then per-actor crates. D8 (batched-send signature) answered 2026-08-02: deferred — no `send_many` for now; the singular client comes first and parallelisation is discussed after.** §2.1 is REALIZED (see Realized-by); its tails live in [#303 "ActorClient::watch — relocate OperationStatusBus behind the actor-client boundary"](https://github.com/TheCaptainCompany/captain-food/issues/303) and [#308 "Decide cancel lane-scoping (from the #288 review) — now OrderClient-only"](https://github.com/TheCaptainCompany/captain-food/issues/308)
+- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D9 (client isolation) answered 2026-08-02: a dedicated actor-client crate, then per-actor crates. D8 (batched-send signature) answered 2026-08-02: deferred — no `send_many` for now; the singular client comes first and parallelisation is discussed after.** §2.1 is REALIZED (see Realized-by); its one remaining tail is [#303 "ActorClient::watch — relocate OperationStatusBus behind the actor-client boundary"](https://github.com/TheCaptainCompany/captain-food/issues/303) (#308 decided 2026-08-02: `cancel_scheduling`, lane-scoping declined)
 - **Date**: 2026-07-28
 - **Tracking issue**: [#242 "Write path: command_journal becomes the consumed queue — a worker executes commands in position order, and journal completion commits in the SAME transaction as the event append"](https://github.com/TheCaptainCompany/captain-food/issues/242)
 - **Supersedes**: the union-view mechanism recorded on #242 (2026-07-28) — the product owner unified
@@ -142,7 +142,9 @@ conversation.schedule(Envelope::new(post_message, principal), at).await?; // -> 
 - **The surface itself is spec-gated** (product-owner directive, 2026-08-02 —
   [ADR-20260802-170059](../adr/ADR-20260802-170059-client-surface-is-spec-gated.md)): a client
   method EXISTS only if the spec declares a use for it — `send` iff ≥1 declared command, `record`
-  iff ≥1 declared inbound fact, `schedule`/`cancel` iff a `reminders:` declaration. No dead
+  iff ≥1 declared inbound fact, `schedule`/`cancel_scheduling` iff a `reminders:` declaration
+  (the withdrawal method named `cancel_scheduling` per #308 — it cancels a scheduled reminder,
+  never an in-flight command; keyed by `message_id`, lane-scoping declined). No dead
   surface: an unjustified method is absent, not merely uncallable (`PaymentClient` has no `send`;
   only `OrderClient` schedules today).
 - **Status reads are symmetric**: the one generic `ActorClient` exposes

@@ -9,8 +9,11 @@
 > D1+D3+D4+D5, two independent review passes)**: the mailbox door is COMPILER-enforced now.
 > #290 and #284 are CLOSED (product owner, "close all the phases"); every remaining item is its
 > own backlog issue — #302 lint floor · #303 watch/bus · #304 Mailbox-port hole · #305 View_*
-> reads · #306 phase 2 · #307 phase 3 · #308 cancel lane-scoping · #309 C4 (full links in the
-> proposal header). New boundary crate
+> reads · #306 phase 2 · #307 phase 3 (full links in the proposal header). **#308 and #309 are
+> DONE (2026-08-02, same session): the withdrawal method is `cancel_scheduling` (renamed per
+> #308 — it cancels a SCHEDULED reminder, never an in-flight command; still `reminders:`-gated,
+> `message_id`-keyed, lane-scoping declined) and C4 L3 carries the `actor-client` component
+> (approved spec edit, #309).** New boundary crate
 > `crates/actor_client` (between `application` and `infrastructure`) owns the `Mailbox` port,
 > `MailboxEntry` with **pub(crate) fields + getters** (constructing one outside the crate does not
 > compile), `Envelope`, the shared entry constructors, `reminders::scheduled_entry`, the FROZEN
@@ -47,7 +50,7 @@
 > allowlist moved to the actor_client paths. **Surface directive
 > ([ADR-20260802-170059](adr/ADR-20260802-170059-client-surface-is-spec-gated.md), product owner
 > 2026-08-02): no client method without a usage declaration in the spec** — `send` ⇔ ≥1 declared
-> command, `record` ⇔ ≥1 declared inbound fact, `schedule`/`cancel` ⇔ a `reminders:` declaration;
+> command, `record` ⇔ ≥1 declared inbound fact, `schedule`/`cancel_scheduling` ⇔ a `reminders:` declaration;
 > unjustified methods are ABSENT, not uncallable (`PaymentClient` is record-only, only
 > `OrderClient` schedules); guard `client_surface_exists_only_with_a_spec_declaration` re-derives
 > the rule from actors.yaml. Behavior frozen: drift guards, `graphql_typed_send`,
@@ -82,7 +85,8 @@
 > the clients, constructors and door now live in the `actor_client` boundary crate.)* New emitter
 > generates the actor clients (then `crates/infrastructure/src/generated/actor_clients.rs`; now
 > `crates/actor_client/src/generated/actor_clients.rs`) — one `{Actor}Client` per mailbox actor
-> (`send`/`record`/`schedule`/`cancel`) with SEALED per-actor `{Actor}Command`/`{Actor}Fact` marker
+> (`send`/`record`/`schedule`/`cancel` — the latter renamed `cancel_scheduling` per #308,
+> 2026-08-02) with SEALED per-actor `{Actor}Command`/`{Actor}Fact` marker
 > traits, so sending a message the actor does not `receive` is a COMPILE error. Clients delegate to
 > the shared crate-internal constructors extracted in `enqueue` (`command_entry`,
 > `insert_mapped`, `schedule_mapped`) — MemMailbox drift guards prove typed `send`/`record` rows are
