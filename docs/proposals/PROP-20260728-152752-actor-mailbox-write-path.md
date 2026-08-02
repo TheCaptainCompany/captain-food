@@ -135,9 +135,10 @@ conversation.schedule(Envelope::new(post_message, principal), at).await?; // -> 
 - **The inbox is enforced by the type system**: a `ConversationClient` exposes
   `send(Envelope<PostMessage>)`, `send(Envelope<EscalateToAdmin>)`, … and nothing else — sending
   a message the actor does not `receive` is a **compile error**, not a runtime rejection.
-- **Status reads are symmetric**: a generic `OperationStatusClient` (`status(message_id)` /
-  `watch(message_id)`) backs the `operationStatus` query and the `operationStatusChanged`
-  subscription — nobody SELECTs the table either.
+- **Status reads are symmetric**: each typed client exposes `get_operation_status(message_id)` /
+  `watch(message_id)` (product-owner directive, 2026-08-02 — the actor client is the door in both
+  directions, no separate status-client type), backing the `operationStatus` query and the
+  `operationStatusChanged` subscription — nobody SELECTs the table either.
 - **Responses ride a queue too** (product-owner directive, 2026-07-30): every completion —
   SUCCEEDED / REJECTED {errorCode} / FAILED / IGNORED / DUPLICATE — is **published post-commit
   onto a response bus keyed by `message_id`** (the `OperationStatusBus`, generalized), so a
