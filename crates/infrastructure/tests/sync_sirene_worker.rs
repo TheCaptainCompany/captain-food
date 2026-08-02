@@ -312,7 +312,7 @@ async fn deliver_once(pool: &PgPool) -> u64 {
         WorkerConfig { lease_seconds: 0, ..WorkerConfig::default() },
         Arc::new(MailboxCommandHandler::new(deps)),
     );
-    worker.seed(100).await.expect("seed");
+    worker.seed(5).await.expect("seed");
     worker.claim().await.expect("claim");
     worker.drain().await.expect("drain")
 }

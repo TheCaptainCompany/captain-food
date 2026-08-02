@@ -171,7 +171,7 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
     assert_eq!(actor_id, cart_id, "the lane is the declared identity property (cartId)");
     assert_eq!(
         partition,
-        actor_client::stable_partition(&cart_id, 100),
+        actor_client::stable_partition(&cart_id, 5),
         "the FROZEN partition over the Cart mailbox width"
     );
     assert_eq!(message_type, "AddCartLine");

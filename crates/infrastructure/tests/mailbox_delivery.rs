@@ -224,7 +224,7 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
         Arc::new(MailboxCommandHandler::new(deps_over(&pool))),
     )
     .with_observer(Arc::new(StatusBusObserver::new(bus.clone())));
-    worker.seed(100).await.expect("seed");
+    worker.seed(5).await.expect("seed");
     worker.claim().await.expect("claim");
     let delivered = worker.drain().await.expect("drain");
     assert_eq!(delivered, 3, "all three commands delivered in one pass");
