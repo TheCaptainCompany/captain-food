@@ -14,6 +14,16 @@
 > [ADR-20260801-080339](adr/ADR-20260801-080339-auth-verifier-reads-resolved-config-not-env.md).
 > `cargo build -p server` + `cargo test -p server` green; recovers on next deploy.
 
+> 🚧 **2026-08-02 — the isolation program is APPROVED, phase 1 launching
+> ([PROP-20260802-130500 "Isolation by construction"](proposals/PROP-20260802-130500-isolation-by-construction.md),
+> [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)).**
+> All six decisions answered by the product owner (DECISIONS.md §14/§5): dedicated `actor-client`
+> crate; phase-2/3 per-actor crates cover aggregates AND both process managers; cargo-deny
+> capability allowlist (`sqlx`/`reqwest`) in phase 1; the read door is ONE generic `ActorClient`
+> with `get_operation_status(message_id)` (operation status is actor-agnostic — per-actor typed
+> clients stay write-side); `test-fixtures` feature + CI release-graph check; lint floor deferred
+> to its own change after phase 1 (against the recommendation).
+
 > 🚧 **2026-08-02 — [#284 "Typed actor clients (PROP-20260728-152752 §2.1)"](https://github.com/TheCaptainCompany/captain-food/issues/284)
 > slice 1 built (branch `claude/situation-explanation-cj06o2`)**: new emitter generates
 > `crates/infrastructure/src/generated/actor_clients.rs` — one `{Actor}Client` per mailbox actor

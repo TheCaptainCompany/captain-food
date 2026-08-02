@@ -1,6 +1,7 @@
 # PROP-20260802-130500 — Isolation by construction: strong boundaries as the defense against the easy path
 
-- **Status**: Proposed — D1 already decided (2026-08-02, in session: PROP-20260728-152752 D9); D2–D6 open
+- **Status**: Approved — D1–D6 all decided (product owner, 2026-08-02; D6 deferred to its own
+  change, against the recommendation). Phases deliver under #290, each gated independently.
 - **Date**: 2026-08-02
 - **Tracking issue**: [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)
 - **Origin**: product-owner directive, 2026-08-02 — *"I want to have the more isolation as possible to
@@ -148,7 +149,7 @@ other actors' events, so it is where a shortcut would most naturally reach acros
 crate manifest naming exactly the clients it may address (phase 2 mechanics) is the compile-time
 form of its checkpoint discipline.
 
-### D2 — Per-actor IMPLEMENTATION crates (the phase-3 endpoint)
+### D2 — Per-actor IMPLEMENTATION crates (the phase-3 endpoint) *(DECIDED — option (a), product owner, 2026-08-02)*
 
 | Option | Pros | Cons |
 |---|---|---|
@@ -156,7 +157,7 @@ form of its checkpoint discipline.
 | (b) Full vertical slices (domain types split per actor too) | Maximal isolation | Breaks the ubiquitous-language single `domain` — `Money`, `OrderId` used by all; forces a shared-kernel crate anyway; highest churn for the least marginal enforcement |
 | (c) Stop at clients (no implementation split) | Zero cost | The implementation side keeps level-1 boundaries; an AI editing `application` can still touch every actor's handlers in one place |
 
-### D3 — `Cargo.toml` as the capability allowlist (the biggest win available)
+### D3 — `Cargo.toml` as the capability allowlist (the biggest win available) *(DECIDED — adopt in phase 1, product owner, 2026-08-02)*
 
 `cargo-deny` (or workspace `[bans]`) with an explicit, justified allowlist per capability crate:
 `sqlx` only in `{infrastructure, actor_runtime, sirene_ingest, adapters/* (their OWN staging tables,
@@ -191,7 +192,7 @@ overstates it into a second concept. The split is: **per-actor typed clients = t
 | `get_operation_status` on each per-actor typed client | Send door and status in one object | Inappropriate per the directive: pretends a generic read is actor-specific; 16 copies of one capability |
 | Keep repo traits as today | No work | The read side stays level 1 while the write side is level 4 — the asymmetry invites the shortcut |
 
-### D5 — Cross-crate test fixtures without reopening the door
+### D5 — Cross-crate test fixtures without reopening the door *(DECIDED — feature + CI check, product owner, 2026-08-02)*
 
 The drift guards and mem doubles need to build entries; `#[cfg(test)]` does not cross crates.
 
@@ -200,19 +201,20 @@ The drift guards and mem doubles need to build entries; `#[cfg(test)]` does not 
 | **A `test-fixtures` cargo feature on the client crate, with a CI check that no release artifact enables it** ✅ | Explicit, greppable, deniable by cargo-deny in release graphs | A feature is opt-in-able by mistake; hence the CI check is part of the option, not optional |
 | `#[doc(hidden)] pub` constructor | Simplest | A hidden pub is still pub — exactly the easy path this proposal exists to remove |
 
-### D6 — The lint floor (cheap, workspace-wide, immediate)
+### D6 — The lint floor (cheap, workspace-wide) *(DECIDED — later, separately; against the recommendation, product owner, 2026-08-02)*
 
 Workspace `[lints]`: `unreachable_pub = deny` in boundary crates (a `pub` nobody outside uses is an
 open door someone WILL use), `unsafe_code = forbid` outside FFI crates, plus `cargo-machete` in CI
-(an unused dependency is an unheld capability someone can silently start using). Recommended:
-**adopt with phase 1** — pure configuration, no code movement, and it makes several classes of
-easy-path silent-drift loud immediately.
+(an unused dependency is an unheld capability someone can silently start using). The recommendation
+was to adopt with phase 1; the product owner decided it lands **as its own change after phase 1** —
+tracked on #290's checklist so it does not silently drop.
 
 ## 6. Phasing (extends #290's checklist; each phase gates independently)
 
 1. **Phase 1**: `actor-client` crate (D1) + the generic `ActorClient` read door (D4) + capability allowlist (D3)
-   + lint floor (D6) + `test-fixtures` mechanism (D5). Behavior frozen by the existing drift guards;
-   the textual door guard stays as the tripwire on the boundary itself.
+   + `test-fixtures` mechanism (D5). Behavior frozen by the existing drift guards;
+   the textual door guard stays as the tripwire on the boundary itself. The lint floor (D6) follows
+   as its own change (product-owner decision, 2026-08-02).
 2. **Phase 2**: per-actor client crates — one per aggregate AND one per process manager (16 today),
    manifests codegen-emitted; an adapter's `Cargo.toml` names exactly the actors it may address.
 3. **Phase 3**: per-actor handler crates per D2(a) — again one per aggregate and one per process
