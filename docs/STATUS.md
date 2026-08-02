@@ -24,7 +24,7 @@
 > field-for-field identical to the free-function enqueue; `record` always keys on
 > `inbound_message_id(source, external_id)`. The caller-side `Envelope` (transport metadata only, no
 > payload/addressing) is hand-written in `application::mailbox`. **No batched send — D8 is answered:
-> not for now.** **Slice 2 built (branch `typed-clients-slice2`)**: the GraphQL resolver emitter no
+> not for now.** **Slice 2 built (PR #289)**: the GraphQL resolver emitter no
 > longer constructs `MailboxEntry` inline — both the aggregate-routed template and the gated PM
 > template's mailbox arm deserialize the typed command and `send` through the generated
 > `{Actor}Client` (identity extraction + the birth-command `now_v7` mint stay in the resolver; the

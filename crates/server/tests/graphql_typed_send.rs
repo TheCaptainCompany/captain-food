@@ -68,6 +68,17 @@ impl application::queries::SlugReservationRepository for AlwaysFreeSlugs {
 fn schema_over(
     mailbox: Arc<dyn application::mailbox::Mailbox>,
 ) -> server::graphql_schema::CaptainSchema {
+    schema_with(mailbox, Arc::new(application::journal::mem::MemCommandJournal::default()), false)
+}
+
+/// The full-control variant: SHARED doubles + an explicit PM-mailbox gate, so one test can accept
+/// a command on the gate-ON arm and retry it on the gate-OFF arm against the same stores — the
+/// request-time rollback scenario the #272/#289 cross-arm checks exist for.
+fn schema_with(
+    mailbox: Arc<dyn application::mailbox::Mailbox>,
+    journal: Arc<dyn application::journal::CommandJournal>,
+    pm_mailbox_delivery: bool,
+) -> server::graphql_schema::CaptainSchema {
     server::graphql_schema::build_schema(
         None,
         Some(server::graphql_schema::WriteDeps {
@@ -78,12 +89,12 @@ fn schema_over(
             payments: Arc::new(infrastructure::FailClosedPaymentGateway),
             pm_state: Arc::new(application::generated::pm_state::mem::MemPaymentProcessState::default()),
             refund_state: Arc::new(application::generated::pm_state::mem::MemRefundProcessState::default()),
-            journal: Arc::new(application::journal::mem::MemCommandJournal::default()),
+            journal,
             mailbox,
             status_bus: infrastructure::OperationStatusBus::default(),
             auth_sessions: Arc::new(application::auth_sessions::NoopAuthSessionStore),
             slug_reservations: Arc::new(AlwaysFreeSlugs),
-            pm_mailbox_delivery: false,
+            pm_mailbox_delivery,
         }),
         None,
     )
@@ -130,24 +141,46 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
     //    the typed value the resolver validated is the value that was sent, so the omitted
     //    `selectedOptionIds` input key lands as the command's defaulted `[]`.
     let row = mem.entry(message_id).expect("one mailbox row keyed by the supplied messageId");
-    assert_eq!(row.kind, "COMMAND");
-    assert_eq!(row.actor_type, "Cart");
-    assert_eq!(row.actor_id, cart_id, "the lane is the declared identity property (cartId)");
+    // FULL destructure, no `..`: an 18th MailboxEntry column is a COMPILE error here, so the
+    // freeze cannot silently under-assert (the #289 review's exhaustiveness finding).
+    let application::mailbox::MailboxEntry {
+        message_id: row_message_id,
+        kind,
+        actor_type,
+        actor_id,
+        partition,
+        message_type,
+        payload: row_payload,
+        payload_hash: row_payload_hash,
+        channel,
+        user_id,
+        user_type,
+        correlation_id,
+        cause_id,
+        session_id,
+        trace_id,
+        source,
+        external_id,
+    } = row;
+    assert_eq!(row_message_id, message_id);
+    assert_eq!(kind, "COMMAND");
+    assert_eq!(actor_type, "Cart");
+    assert_eq!(actor_id, cart_id, "the lane is the declared identity property (cartId)");
     assert_eq!(
-        row.partition,
+        partition,
         actor_runtime::stable_partition(&cart_id, 100),
         "the FROZEN partition over the Cart mailbox width"
     );
-    assert_eq!(row.message_type, "AddCartLine");
-    assert_eq!(row.channel, "GRAPHQL");
-    assert_eq!(row.user_id, None, "anonymous PUBLIC caller");
-    assert_eq!(row.user_type, "PUBLIC");
-    assert_eq!(row.correlation_id, message_id);
-    assert_eq!(row.cause_id, None);
-    assert_eq!(row.session_id, Some(session), "the X-SESSION-ID ownership scope rides the row");
-    assert_eq!(row.trace_id, None);
-    assert_eq!(row.source, None);
-    assert_eq!(row.external_id, None);
+    assert_eq!(message_type, "AddCartLine");
+    assert_eq!(channel, "GRAPHQL");
+    assert_eq!(user_id, None, "anonymous PUBLIC caller");
+    assert_eq!(user_type, "PUBLIC");
+    assert_eq!(correlation_id, message_id);
+    assert_eq!(cause_id, None);
+    assert_eq!(session_id, Some(session), "the X-SESSION-ID ownership scope rides the row");
+    assert_eq!(trace_id, None);
+    assert_eq!(source, None);
+    assert_eq!(external_id, None);
     let expected_cmd = AddCartLine {
         cart_id: CartId(cart_id),
         restaurant_id: RestaurantId(restaurant_id),
@@ -160,9 +193,9 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
         session_id: SessionId(session),
     };
     let expected_payload = serde_json::to_value(&expected_cmd).expect("serialize command");
-    assert_eq!(row.payload, expected_payload, "payload = the typed command's serde form");
+    assert_eq!(row_payload, expected_payload, "payload = the typed command's serde form");
     assert_eq!(
-        row.payload_hash,
+        row_payload_hash,
         application::journal::payload_hash(&expected_payload),
         "hash over the payload as stored"
     );
@@ -195,4 +228,49 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
     let ext = resp.errors[0].extensions.as_ref().expect("extensions");
     assert_eq!(ext.get("code"), Some(&async_graphql::Value::from("Conflict")));
     assert_eq!(mem.entries().len(), 1, "the conflict enqueued nothing");
+}
+
+
+/// The #289 review's BLOCKING finding, pinned: the gated-PM LEGACY arm's cross-arm dedupe must
+/// hash the TYPED command form the mailbox arm stores — for a command with an ABSENT OPTIONAL,
+/// the null-stripped GraphQL input hashes differently, and before the fix a same-payload retry
+/// straddling a gate rollback got a synchronous Conflict instead of `duplicate: true`. On the
+/// money path (`placeOrder`/`approveRefund`), that is a 409 to a caller who did nothing wrong.
+#[tokio::test]
+async fn a_gate_rollback_retry_with_an_absent_optional_replays_as_duplicate_not_conflict() {
+    let mailbox = Arc::new(MemMailbox::default());
+    let journal: Arc<application::journal::mem::MemCommandJournal> = Arc::new(Default::default());
+    let order_id = uuid::Uuid::from_u128(0x0D_0E);
+    let message_id = uuid::Uuid::from_u128(0x7E57);
+    // `reason` is deliberately ABSENT — the field whose explicit-null typed form diverges from the
+    // null-stripped input form. With `reason` present the two forms coincide and this test would
+    // prove nothing (which is why the DenyRefund coverage could not catch the bug).
+    let mutation = format!(
+        r#"mutation {{ approveRefund(input: {{ orderId: "{order_id}", amount: {{ amountCents: 500, currency: "EUR" }} }}, metadata: {{ messageId: "{message_id}" }}) {{ operationStatus duplicate }} }}"#
+    );
+
+    // Gate ON: accepted on the MAILBOX arm — the typed hash is what the row stores.
+    let gate_on = schema_with(mailbox.clone(), journal.clone(), true);
+    let resp = gate_on
+        .execute(async_graphql::Request::new(mutation.clone()).data(RequestRole::Admin))
+        .await;
+    assert!(resp.errors.is_empty(), "gate-ON accept errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json data");
+    assert_eq!(data["approveRefund"]["operationStatus"], "PENDING");
+    assert_eq!(data["approveRefund"]["duplicate"], false);
+    assert!(mailbox.entry(message_id).is_some(), "accepted onto the mailbox");
+
+    // Gate rolled back OFF, SAME stores: the retry lands on the LEGACY arm, whose cross-arm check
+    // consults the mailbox row. Same messageId + same input MUST replay as a duplicate.
+    let gate_off = schema_with(mailbox.clone(), journal, false);
+    let resp = gate_off
+        .execute(async_graphql::Request::new(mutation).data(RequestRole::Admin))
+        .await;
+    assert!(resp.errors.is_empty(), "the rollback retry must not Conflict: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json data");
+    assert_eq!(
+        data["approveRefund"]["duplicate"], true,
+        "a committed acceptance replays as a duplicate across the gate flip"
+    );
+    assert_eq!(mailbox.entries().len(), 1, "the retry wrote nothing new anywhere");
 }
