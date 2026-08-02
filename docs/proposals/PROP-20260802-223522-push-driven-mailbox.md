@@ -1,6 +1,6 @@
 # PROP-20260802-223522 — Push-driven mailbox: NOTIFY everywhere, idle gate, poison policy
 
-- **Status**: Proposed
+- **Status**: Approved (product owner, in-session "Perfect go ahead", 2026-08-02; ADR-20260802-224532; D1–D5 as recommended, unresolved questions copied to #313)
 - **Date**: 2026-08-02
 - **Tracking issue**: [#313 "Push-driven mailbox: pg_notify on inbound_messages, idle lane gate, poison policy (PROP-20260802-223522)"](https://github.com/TheCaptainCompany/captain-food/issues/313)
 - **Realized by**: (pending)

@@ -322,7 +322,7 @@ phase, symmetric with aggregates (16 actors = 14 aggregates + `PlaceOrderProcess
 
 ---
 
-## 15. Push-driven mailbox — PROP-20260802-223522 — ⏳ OPEN
+## 15. Push-driven mailbox — PROP-20260802-223522 — ✅ DECIDED 2026-08-02
 
 [PROP-20260802-223522](PROP-20260802-223522-push-driven-mailbox.md)
 ([#313 "Push-driven mailbox: pg_notify on inbound_messages, idle lane gate, poison policy (PROP-20260802-223522)"](https://github.com/TheCaptainCompany/captain-food/issues/313)).
@@ -330,14 +330,16 @@ Extends [#301](https://github.com/TheCaptainCompany/captain-food/pull/301)'s NOT
 last polling surface: the actor mailbox (post-audit: it out-polled what #301 removed, ~8×; interim
 width-5 mitigation merged as ADR-20260802-220402). Also closes the up-to-10 s adapter→worker wake
 gap on the money path, and bounds the silent infinite-retry poison mode found 2026-08-02.
+**Approved as recommended, D1–D5** (product owner, in-session, 2026-08-02; ADR-20260802-224532);
+unresolved questions live on the tracking issue's checklist.
 
 | # | Decision | Recommended | Answer |
 |---|---|---|---|
-| D1 | Wake transport | `pg_notify` in the enqueue transaction (one door: `PgMailbox`) | ⏳ |
-| D2 | Channel topology | One channel, payload = `actor_type` (per-type coalescing) | ⏳ |
-| D3 | Idle gate | One lanes-with-work query per pass (partial index exists) | ⏳ |
-| D4 | Poison policy | `attempts` cap (default 5) → terminal `FAILED` + error on the row | ⏳ |
-| D5 | Gating | Own toggle (worker-toggle pattern) + `MAILBOX_MAX_DELIVERY_ATTEMPTS` (0 = today) | ⏳ |
+| D1 | Wake transport | `pg_notify` in the enqueue transaction (one door: `PgMailbox`) | ✅ as recommended (2026-08-02) |
+| D2 | Channel topology | One channel, payload = `actor_type` (per-type coalescing) | ✅ as recommended (2026-08-02) |
+| D3 | Idle gate | One lanes-with-work query per pass (partial index exists) | ✅ as recommended (2026-08-02) |
+| D4 | Poison policy | `attempts` cap (default 5) → terminal `FAILED` + error on the row | ✅ as recommended (2026-08-02) |
+| D5 | Gating | Own toggle (worker-toggle pattern) + `MAILBOX_MAX_DELIVERY_ATTEMPTS` (0 = today) | ✅ as recommended (2026-08-02) |
 
 Unresolved questions (proposal §Unresolved): requeue tooling, backoff shape, poison alerting
 (page for Payment/PlaceOrderProcess?), adapter-side fleet posture once push is live.
