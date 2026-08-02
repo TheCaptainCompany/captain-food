@@ -85,7 +85,7 @@ async fn standalone_fleet_delivers_without_a_monolith() {
     setup(&pool).await;
 
     let order = uuid::Uuid::from_u128(0x57A1);
-    let partition = actor_runtime::stable_partition(&order, 100);
+    let partition = actor_client::stable_partition(&order, 100);
     let message_id = uuid::Uuid::from_u128(0x57A2);
     sqlx::query(
         "INSERT INTO inbound_messages \

@@ -27,15 +27,16 @@ use std::sync::Arc;
 
 use actor_runtime::{MailboxWorker, WorkerConfig};
 use application::generated::services::{IdentityService, PaymentService};
-use application::mailbox::Mailbox;
+use actor_client::mailbox::Mailbox;
 use domain::generated::events::RestaurantRegistered;
 use domain::generated::scalars::{
     AddressLine, CityName, CountryCode, PostalCode, RestaurantDisplayName, RestaurantId,
     RestaurantListingStatus,
 };
-use infrastructure::generated::actor_clients::RestaurantClient;
+use actor_client::generated::actor_clients::RestaurantClient;
 use infrastructure::generated::command_router::CommandDeps;
-use infrastructure::mailbox::{EnqueueOutcome, MailboxCommandHandler};
+use actor_client::EnqueueOutcome;
+use infrastructure::mailbox::MailboxCommandHandler;
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
     PgCatalogRepository, PgCustomerRepository, PgEventStore, PgProspectionRepository,

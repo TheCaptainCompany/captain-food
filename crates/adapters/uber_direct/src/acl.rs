@@ -35,8 +35,8 @@ use domain::generated::events::{
 use domain::generated::scalars::{DeliveryJobId, DeliveryStatus, ExternalReference, PhoneNumber};
 use domain::shared::errors::DomainError;
 use hmac::{Hmac, Mac};
-use infrastructure::generated::actor_clients::DeliveryJobClient;
-use infrastructure::mailbox::EnqueueOutcome;
+use actor_client::generated::actor_clients::DeliveryJobClient;
+use actor_client::EnqueueOutcome;
 use serde::Deserialize;
 use sha2::Sha256;
 
@@ -300,14 +300,14 @@ pub enum UberIngestOutcome {
 /// surface as `Err` (5xx → Uber retries); everything else is definitive.
 pub struct UberDirectWebhookIngestor {
     raw: Arc<dyn RawUberDirectEvents>,
-    mailbox: Arc<dyn application::mailbox::Mailbox>,
+    mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     on_staged: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl UberDirectWebhookIngestor {
     pub fn new(
         raw: Arc<dyn RawUberDirectEvents>,
-        mailbox: Arc<dyn application::mailbox::Mailbox>,
+        mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     ) -> Self {
         Self { raw, mailbox, on_staged: None }
     }
@@ -531,7 +531,7 @@ mod tests {
     #[tokio::test]
     async fn ingest_stages_the_fact_and_dedupes_redelivery() {
         let raw = Arc::new(MemRaw::default());
-        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+        let inbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let ingestor = UberDirectWebhookIngestor::new(raw.clone(), inbox.clone());
         let event = pickup_event();
         let body = serde_json::json!({

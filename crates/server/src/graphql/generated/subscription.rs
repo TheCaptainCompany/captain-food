@@ -29,7 +29,7 @@ impl SubscriptionRoot {
     #[graphql(name = "operationStatusChanged")]
     async fn operation_status_changed(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusChangedSubscriptionInput) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Operation>>> {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
-        let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
+        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
         let bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
         let wanted = input.message_id.0;
         let admin = matches!(

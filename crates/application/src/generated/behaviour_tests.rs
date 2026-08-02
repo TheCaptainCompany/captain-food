@@ -2149,21 +2149,21 @@ async fn test_order_delivered() {
     ]);
     // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2)
     {
-        use crate::mailbox::MailboxScheduleOutcome;
-        let mailbox = crate::mailbox::mem::MemMailbox::default();
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
         let actor_id = support::uid("order-1");
-        let spec = crate::generated::reminders::reminder_schedules_for("Order", "MarkOrderDelivered")
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "MarkOrderDelivered")
             .find(|s| s.reminder == "OrderExpired")
             .expect("TestOrderDelivered: schedule declared in actors.yaml");
         let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);
-        let first = crate::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
             .await
             .expect("TestOrderDelivered: declare");
         assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderDelivered: expected a fresh SCHEDULED row, got {first:?}");
-        let row = crate::reminders::reminder_message_id(actor_id, spec.reminder);
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
         assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderDelivered: due at +window");
         let t2 = t1 + chrono::Duration::days(1);
-        let again = crate::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
             .await
             .expect("TestOrderDelivered: redeclare");
         assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderDelivered: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");
@@ -2188,21 +2188,21 @@ async fn test_order_rejected() {
     ]);
     // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2)
     {
-        use crate::mailbox::MailboxScheduleOutcome;
-        let mailbox = crate::mailbox::mem::MemMailbox::default();
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
         let actor_id = support::uid("order-1");
-        let spec = crate::generated::reminders::reminder_schedules_for("Order", "RejectOrder")
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "RejectOrder")
             .find(|s| s.reminder == "OrderExpired")
             .expect("TestOrderRejected: schedule declared in actors.yaml");
         let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);
-        let first = crate::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
             .await
             .expect("TestOrderRejected: declare");
         assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderRejected: expected a fresh SCHEDULED row, got {first:?}");
-        let row = crate::reminders::reminder_message_id(actor_id, spec.reminder);
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
         assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderRejected: due at +window");
         let t2 = t1 + chrono::Duration::days(1);
-        let again = crate::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
             .await
             .expect("TestOrderRejected: redeclare");
         assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderRejected: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");
@@ -2227,21 +2227,21 @@ async fn test_order_cancelled_by_customer() {
     ]);
     // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2)
     {
-        use crate::mailbox::MailboxScheduleOutcome;
-        let mailbox = crate::mailbox::mem::MemMailbox::default();
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
         let actor_id = support::uid("order-1");
-        let spec = crate::generated::reminders::reminder_schedules_for("Order", "CancelOrderByCustomer")
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "CancelOrderByCustomer")
             .find(|s| s.reminder == "OrderExpired")
             .expect("TestOrderCancelledByCustomer: schedule declared in actors.yaml");
         let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);
-        let first = crate::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
             .await
             .expect("TestOrderCancelledByCustomer: declare");
         assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderCancelledByCustomer: expected a fresh SCHEDULED row, got {first:?}");
-        let row = crate::reminders::reminder_message_id(actor_id, spec.reminder);
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
         assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderCancelledByCustomer: due at +window");
         let t2 = t1 + chrono::Duration::days(1);
-        let again = crate::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
             .await
             .expect("TestOrderCancelledByCustomer: redeclare");
         assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderCancelledByCustomer: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");
@@ -2266,21 +2266,21 @@ async fn test_order_cancelled_by_restaurant() {
     ]);
     // schedules: OrderExpired — the third observable effect (ADR-20260731-214500 §2)
     {
-        use crate::mailbox::MailboxScheduleOutcome;
-        let mailbox = crate::mailbox::mem::MemMailbox::default();
+        use actor_client::MailboxScheduleOutcome;
+        let mailbox = actor_client::mailbox::mem::MemMailbox::default();
         let actor_id = support::uid("order-1");
-        let spec = crate::generated::reminders::reminder_schedules_for("Order", "CancelOrderByRestaurant")
+        let spec = actor_client::reminders::reminder_schedules_for("Order", "CancelOrderByRestaurant")
             .find(|s| s.reminder == "OrderExpired")
             .expect("TestOrderCancelledByRestaurant: schedule declared in actors.yaml");
         let t1 = chrono::Utc::now() + chrono::Duration::days(spec.after_default_days);
-        let first = crate::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
+        let first = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t1, support::actor().correlation_id)
             .await
             .expect("TestOrderCancelledByRestaurant: declare");
         assert!(matches!(first, MailboxScheduleOutcome::Scheduled), "TestOrderCancelledByRestaurant: expected a fresh SCHEDULED row, got {first:?}");
-        let row = crate::reminders::reminder_message_id(actor_id, spec.reminder);
+        let row = actor_client::reminder_message_id(actor_id, spec.reminder);
         assert_eq!(mailbox.scheduled_at(row), Some(t1), "TestOrderCancelledByRestaurant: due at +window");
         let t2 = t1 + chrono::Duration::days(1);
-        let again = crate::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
+        let again = actor_client::reminders::declare(&mailbox, spec, actor_id, 0, t2, support::actor().correlation_id)
             .await
             .expect("TestOrderCancelledByRestaurant: redeclare");
         assert!(matches!(again, MailboxScheduleOutcome::Rescheduled), "TestOrderCancelledByRestaurant: re-declaring must postpone the SAME row (ADR-20260731-150500), got {again:?}");

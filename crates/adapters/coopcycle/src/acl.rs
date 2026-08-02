@@ -36,8 +36,8 @@ use domain::generated::events::{
 use domain::generated::scalars::{DeliveryJobId, DeliveryStatus, ExternalReference, PhoneNumber};
 use domain::shared::errors::DomainError;
 use hmac::{Hmac, Mac};
-use infrastructure::generated::actor_clients::DeliveryJobClient;
-use infrastructure::mailbox::EnqueueOutcome;
+use actor_client::generated::actor_clients::DeliveryJobClient;
+use actor_client::EnqueueOutcome;
 use serde::Deserialize;
 use sha2::Sha256;
 
@@ -349,14 +349,14 @@ pub enum CoopCycleIngestOutcome {
 /// infrastructure failures surface as `Err` (5xx → co-op retries); everything else is definitive.
 pub struct CoopCycleWebhookIngestor {
     raw: Arc<dyn RawCoopCycleEvents>,
-    mailbox: Arc<dyn application::mailbox::Mailbox>,
+    mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     on_staged: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl CoopCycleWebhookIngestor {
     pub fn new(
         raw: Arc<dyn RawCoopCycleEvents>,
-        mailbox: Arc<dyn application::mailbox::Mailbox>,
+        mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     ) -> Self {
         Self { raw, mailbox, on_staged: None }
     }
@@ -562,7 +562,7 @@ mod tests {
     #[tokio::test]
     async fn ingest_namespaces_the_key_by_instance_and_stages_the_fact() {
         let raw = Arc::new(MemRaw::default());
-        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+        let inbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let ingestor = CoopCycleWebhookIngestor::new(raw.clone(), inbox.clone());
         let event = accepted_event();
         let body = serde_json::to_value(&serde_json::json!({

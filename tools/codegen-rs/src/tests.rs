@@ -1710,15 +1710,20 @@ keys:
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let root = root.canonicalize().expect("repo root resolves");
 
-        // The sanctioned constructor sites, relative to the repo root.
+        // The sanctioned constructor sites, relative to the repo root. Since #290 phase 1
+        // (PROP-20260802-130500 D1) ALL of them live inside the actor_client boundary crate —
+        // `MailboxEntry` fields are pub(crate) there, so the COMPILER now enforces what this scan
+        // tripwires: an entry construction anywhere else no longer merely fails this test, it
+        // fails to build. The scan stays as belt-and-braces on the boundary crate itself (an
+        // in-crate shortcut around the shared constructors would still compile).
         const ALLOWED: &[(&str, &str)] = &[
-            // The type itself + the in-memory double's test seeding helper.
-            ("crates/application/src/mailbox.rs", "the MailboxEntry definition + mem double"),
+            // The type itself + the mem double's seeding + the D5 test-fixtures conversions.
+            ("crates/actor_client/src/mailbox.rs", "the MailboxEntry definition + mem double + fixtures"),
             // `scheduled_entry`: the generated-reminders row constructor the in-tx `schedules:`
-            // upsert (`apply_schedules_in_tx`) binds from (ADR-20260731-214500).
-            ("crates/application/src/reminders.rs", "the reminders scheduled_entry constructor"),
-            // The shared pub(crate) constructors every door (typed client or bulk path) delegates to.
-            ("crates/infrastructure/src/mailbox/enqueue.rs", "the shared enqueue constructors"),
+            // upsert (`infrastructure::mailbox::apply_schedules_in_tx`) binds from (ADR-20260731-214500).
+            ("crates/actor_client/src/reminders.rs", "the reminders scheduled_entry constructor"),
+            // The shared crate-internal constructors every door (typed client or bulk path) delegates to.
+            ("crates/actor_client/src/enqueue.rs", "the shared enqueue constructors"),
         ];
         for (rel, why) in ALLOWED {
             let path = root.join(rel);
@@ -2244,6 +2249,11 @@ Catalog:
         let router = emit_infra_command_router(&model);
         let committed_router = std::fs::read_to_string(root.join("crates/infrastructure/src/generated/command_router.rs")).expect("committed command_router.rs");
         assert_eq!(router, committed_router, "command_router.rs must stay byte-identical across the typed-identity migration");
+        // The addressing half of the frozen routing contract lives in the actor_client crate
+        // since #290 phase 1 — same byte-identity requirement.
+        let addresses = emit_actor_addresses(&model);
+        let committed_addresses = std::fs::read_to_string(root.join("crates/actor_client/src/generated/addresses.rs")).expect("committed addresses.rs");
+        assert_eq!(addresses, committed_addresses, "addresses.rs must stay byte-identical across the typed-identity migration");
         let states = emit_domain_states(&model);
         let committed_states = std::fs::read_to_string(root.join("crates/domain/src/generated/states.rs")).expect("committed states.rs");
         assert_eq!(states, committed_states, "states.rs must stay byte-identical across the typed-requires migration");
@@ -2437,16 +2447,22 @@ Catalog:
         // #284 slice 1 (PROP-20260728-152752 §2.1): the typed-client surface must span the SAME
         // actor set the composition root spawns workers for — one client + sealed Command/Fact
         // marker traits per ACTOR_MAILBOXES entry. The actor list is parsed out of the EMITTED
-        // router (not re-derived from the spec), so the two artifacts cannot diverge silently.
+        // addresses table (not re-derived from the spec), so the two artifacts cannot diverge
+        // silently — and the router must keep RE-EXPORTING that one definition (#290 phase 1).
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
-        let clients = emit_infra_actor_clients(&model);
+        let clients = emit_actor_clients(&model);
+        let addresses = emit_actor_addresses(&model);
         let router = emit_infra_command_router(&model);
-        let block = router
+        assert!(
+            router.contains("pub use actor_client::generated::addresses::{mailbox_address, ACTOR_MAILBOXES};"),
+            "the router must re-export the ONE addressing definition, never re-emit it"
+        );
+        let block = addresses
             .split("pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[")
             .nth(1)
             .and_then(|rest| rest.split("];").next())
-            .expect("ACTOR_MAILBOXES block in the emitted router");
+            .expect("ACTOR_MAILBOXES block in the emitted addresses table");
         let actors: Vec<&str> = block
             .lines()
             .filter_map(|l| l.trim().strip_prefix("(\""))

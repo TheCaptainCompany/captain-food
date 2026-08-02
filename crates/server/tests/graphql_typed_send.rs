@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use application::mailbox::mem::MemMailbox;
+use actor_client::mailbox::mem::MemMailbox;
 use domain::generated::commands::{AddCartLine, CartLine};
 use domain::generated::scalars::{CartId, CartLineId, OfferId, RestaurantId, SessionId};
 use server::graphql_acl::RequestRole;
@@ -66,7 +66,7 @@ impl application::queries::SlugReservationRepository for AlwaysFreeSlugs {
 /// mutation resolvers pull exactly `Arc<dyn Mailbox>` from ctx, so a `MemMailbox` observes every
 /// column the typed client writes.
 fn schema_over(
-    mailbox: Arc<dyn application::mailbox::Mailbox>,
+    mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
 ) -> server::graphql_schema::CaptainSchema {
     schema_with(mailbox, Arc::new(application::journal::mem::MemCommandJournal::default()), false)
 }
@@ -75,7 +75,7 @@ fn schema_over(
 /// a command on the gate-ON arm and retry it on the gate-OFF arm against the same stores — the
 /// request-time rollback scenario the #272/#289 cross-arm checks exist for.
 fn schema_with(
-    mailbox: Arc<dyn application::mailbox::Mailbox>,
+    mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     journal: Arc<dyn application::journal::CommandJournal>,
     pm_mailbox_delivery: bool,
 ) -> server::graphql_schema::CaptainSchema {
@@ -141,9 +141,12 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
     //    the typed value the resolver validated is the value that was sent, so the omitted
     //    `selectedOptionIds` input key lands as the command's defaulted `[]`.
     let row = mem.entry(message_id).expect("one mailbox row keyed by the supplied messageId");
-    // FULL destructure, no `..`: an 18th MailboxEntry column is a COMPILE error here, so the
-    // freeze cannot silently under-assert (the #289 review's exhaustiveness finding).
-    let application::mailbox::MailboxEntry {
+    // FULL destructure, no `..`, via the D5 EntryFixture mirror (PROP-20260802-130500):
+    // `MailboxEntry` fields are private outside the actor_client crate now, and the fixture
+    // conversions are themselves full-field (no `..`) inside that crate — so an 18th column
+    // still breaks compilation before it can silently under-assert (the #289 review's
+    // exhaustiveness finding, preserved across the boundary move).
+    let actor_client::mailbox::fixtures::EntryFixture {
         message_id: row_message_id,
         kind,
         actor_type,
@@ -161,14 +164,14 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
         trace_id,
         source,
         external_id,
-    } = row;
+    } = row.into_fixture();
     assert_eq!(row_message_id, message_id);
     assert_eq!(kind, "COMMAND");
     assert_eq!(actor_type, "Cart");
     assert_eq!(actor_id, cart_id, "the lane is the declared identity property (cartId)");
     assert_eq!(
         partition,
-        actor_runtime::stable_partition(&cart_id, 100),
+        actor_client::stable_partition(&cart_id, 100),
         "the FROZEN partition over the Cart mailbox width"
     );
     assert_eq!(message_type, "AddCartLine");

@@ -1,0 +1,40 @@
+# Captain.Food — the ACTOR-CLIENT crate: the compiler-enforced door to the actor mailbox
+# (PROP-20260802-130500 D1, realized under #290 phase 1).
+#
+# THE CRATE IS THE PERMISSION: `MailboxEntry` lives here with pub(crate) fields, its constructors
+# are crate-internal, and the generated typed actor clients (src/generated/actor_clients.rs) are
+# the only code that can assemble a mailbox row. Obtaining a `MailboxEntry` outside this crate
+# DOES NOT COMPILE — the textual door guard (`mailbox_entry_is_constructed_only_behind_the_typed_doors`)
+# stays as the belt-and-braces tripwire on the boundary itself.
+#
+# Position in the graph (outer -> inner): infrastructure/server/adapters -> actor_client ->
+# application -> domain. This crate owns the mailbox PORT (the trait `infrastructure::PgMailbox`
+# implements over SQL) and the frozen partition routing; it holds NO sqlx and NO reqwest — it is a
+# door, not an adapter (the D3 capability allowlist proves that stays true).
+[package]
+name = "actor_client"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+publish = false
+description = "Captain.Food actor-client boundary crate: the Mailbox port, the private MailboxEntry + Envelope, the generated per-actor typed clients (write door) and the generic ActorClient (read door). The ONLY crate that can construct a mailbox row (PROP-20260802-130500 D1/D4)."
+
+[features]
+# Cross-crate TEST access (PROP-20260802-130500 D5): the entry fixture constructor/destructurer,
+# the in-memory mailbox double and the drift-guard reference implementations. Enabled ONLY from
+# [dev-dependencies] — the codegen guard `test_fixtures_feature_never_reaches_a_release_artifact`
+# fails the build if any [dependencies] entry (i.e. a release artifact) turns it on.
+test-fixtures = []
+
+[dependencies]
+domain = { path = "../domain" }
+application = { path = "../application" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true, features = ["v5"] }
+
+[dev-dependencies]
+# Async runtime for the in-crate drift guards (typed door vs reference constructors).
+tokio = { workspace = true }

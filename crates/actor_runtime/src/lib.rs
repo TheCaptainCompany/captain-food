@@ -28,7 +28,6 @@ pub mod activation;
 pub mod completion;
 pub mod lease;
 pub mod message;
-pub mod partition;
 pub mod schedule;
 pub mod worker;
 
@@ -39,6 +38,10 @@ pub use lease::{
     steal_lane, Lane, OwnershipCensus,
 };
 pub use message::{Delivery, DeliveryObserver, HandlerVerdict, InboundMessage, MessageHandler, Prepared};
-pub use partition::stable_partition;
+// NOTE (#290 phase 1, PROP-20260802-130500 D1): `stable_partition` — the FROZEN producer-side
+// routing hash — moved to the `actor_client` boundary crate. This runtime never computes a
+// partition itself (producers stamp the column; the drain trusts it), so the function was an
+// export of convenience here, and keeping it would have forced the client crate to depend on the
+// whole runtime for one pure function.
 pub use schedule::promote_due;
 pub use worker::{LaneEvents, MailboxWorker, WorkerConfig};
