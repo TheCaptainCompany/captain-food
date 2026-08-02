@@ -477,8 +477,8 @@ async fn operation_status_changed_streams_the_journal_lifecycle() {
         Arc::new(application::journal::mem::MemCommandJournal::default());
     // The mailbox-first snapshot read (#242 flip): empty here — these tests drive the journal
     // (the legacy PM-leg path), and the arm falls back to it when the mailbox has no row.
-    let mailbox: Arc<dyn application::mailbox::Mailbox> =
-        Arc::new(application::mailbox::mem::MemMailbox::default());
+    let mailbox: Arc<dyn actor_client::mailbox::Mailbox> =
+        Arc::new(actor_client::mailbox::mem::MemMailbox::default());
     let status_bus = infrastructure::OperationStatusBus::default();
 
     let message_id = uuid::Uuid::new_v4();
@@ -545,8 +545,8 @@ async fn operation_status_changed_hides_non_owned_operations() {
         Arc::new(application::journal::mem::MemCommandJournal::default());
     // The mailbox-first snapshot read (#242 flip): empty here — these tests drive the journal
     // (the legacy PM-leg path), and the arm falls back to it when the mailbox has no row.
-    let mailbox: Arc<dyn application::mailbox::Mailbox> =
-        Arc::new(application::mailbox::mem::MemMailbox::default());
+    let mailbox: Arc<dyn actor_client::mailbox::Mailbox> =
+        Arc::new(actor_client::mailbox::mem::MemMailbox::default());
     let status_bus = infrastructure::OperationStatusBus::default();
 
     let message_id = uuid::Uuid::new_v4();

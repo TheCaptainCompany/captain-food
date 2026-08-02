@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use async_graphql::Schema;
 use application::journal::CommandJournal;
-use application::mailbox::Mailbox;
+use actor_client::mailbox::Mailbox;
 use application::pm_state::{PaymentProcessStateStore, RefundProcessStateStore};
 use application::generated::services::{IdentityService, PaymentService};
 use application::ports::{EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};

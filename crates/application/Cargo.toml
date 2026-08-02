@@ -35,3 +35,8 @@ tracing = "0.1"
 [dev-dependencies]
 # Async runtime for the behaviour tests (tests.yaml Given/When/Then over the command handlers).
 tokio = { workspace = true }
+# DEV-ONLY cycle, deliberately (PROP-20260802-130500 D1/D5): the generated behaviour tests assert
+# the `schedules:` third effect through the mailbox door, which lives in the actor_client boundary
+# crate above this one. Cargo permits dev-dependency cycles (the lib graph stays acyclic); the
+# `test-fixtures` feature is what exposes the mem double, and only dev-dependencies may enable it.
+actor_client = { path = "../actor_client", features = ["test-fixtures"] }

@@ -315,7 +315,7 @@ async fn enqueue_pm(
     .bind(id)
     .bind(actor_type)
     .bind(actor_id)
-    .bind(actor_runtime::stable_partition(&actor_id, 100))
+    .bind(actor_client::stable_partition(&actor_id, 100))
     .bind(message_type)
     .bind(&payload)
     .bind(format!("h{n}"))
@@ -622,7 +622,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
     assert_eq!(drain_all(&pm_worker).await, 1);
 
     // Leg 2 — the inbound Stripe fact on the Payment lane, with B2 chaining ON.
-    let payment_actor = infrastructure::mailbox::surrogate_actor_id("Payment", "pi_prepare_test");
+    let payment_actor = actor_client::surrogate_actor_id("Payment", "pi_prepare_test");
     let captured = serde_json::json!({
         "eventType": "PaymentCaptured",
         "payload": {
@@ -642,7 +642,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
     )
     .bind(fact_id)
     .bind(payment_actor)
-    .bind(actor_runtime::stable_partition(&payment_actor, 100))
+    .bind(actor_client::stable_partition(&payment_actor, 100))
     .bind(&captured)
     .execute(&pool)
     .await

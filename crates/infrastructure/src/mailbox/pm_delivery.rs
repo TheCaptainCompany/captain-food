@@ -192,14 +192,14 @@ pub(super) async fn chain_target_of(
             Ok(Some((
                 "PlaceOrderProcess",
                 order.unwrap_or_else(|| {
-                    super::surrogate_actor_id("PlaceOrderProcess", &e.payment_intent_id.0)
+                    actor_client::surrogate_actor_id("PlaceOrderProcess", &e.payment_intent_id.0)
                 }),
             )))
         }
         E::PaymentFailed(e) => Ok(Some((
             "PlaceOrderProcess",
             by_intent(&e.payment_intent_id).await?.unwrap_or_else(|| {
-                super::surrogate_actor_id("PlaceOrderProcess", &e.payment_intent_id.0)
+                actor_client::surrogate_actor_id("PlaceOrderProcess", &e.payment_intent_id.0)
             }),
         ))),
         E::PaymentRefunded(e) => Ok(Some(("RefundProcess", e.order_id.0))),
@@ -249,7 +249,7 @@ pub(super) async fn chain_pm_copy_in_tx(
     .bind(chained_id)
     .bind(actor_type)
     .bind(actor_id)
-    .bind(actor_runtime::stable_partition(&actor_id, width as u16))
+    .bind(actor_client::stable_partition(&actor_id, width as u16))
     .bind(&message.message_type)
     .bind(&message.payload)
     .bind(&message.payload_hash)
@@ -373,7 +373,7 @@ pub async fn backfill_stripe_facts_to_pm_lanes(
         .bind(chained_id)
         .bind(actor_type)
         .bind(actor_id)
-        .bind(actor_runtime::stable_partition(&actor_id, width as u16))
+        .bind(actor_client::stable_partition(&actor_id, width as u16))
         .bind(&event_type)
         .bind(&tagged)
         .bind(application::journal::payload_hash(&tagged))

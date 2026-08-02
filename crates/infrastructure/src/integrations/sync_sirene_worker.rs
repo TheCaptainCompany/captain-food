@@ -49,7 +49,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use application::journal::{payload_hash, CommandJournalEntry};
-use application::mailbox::{Envelope, Mailbox};
+use actor_client::mailbox::{Envelope, Mailbox};
 use application::repository::Repository;
 use domain::restaurant::RestaurantState;
 use chrono::{DateTime, Utc};
@@ -59,8 +59,8 @@ use domain::generated::scalars::{
     CommandChannel, RestaurantListingStatus, RestaurantStatus,
 };
 
-use crate::generated::actor_clients::RestaurantClient;
-use crate::mailbox::{enqueue_inbound_facts, EnqueueOutcome, InboundFact};
+use actor_client::generated::actor_clients::RestaurantClient;
+use actor_client::{enqueue_inbound_facts, EnqueueOutcome, InboundFact};
 use crate::persistence::mailbox_store::PgMailbox;
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};

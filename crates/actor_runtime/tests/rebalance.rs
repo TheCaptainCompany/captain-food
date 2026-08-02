@@ -140,9 +140,17 @@ async fn setup(pool: &PgPool) {
     .expect("probe table");
 }
 
+/// A deterministic in-range lane per actor for SEEDING rows. The runtime never computes
+/// partitions (producers stamp the column; the drain trusts it), and the FROZEN product routing
+/// hash lives in the actor_client boundary crate (#290 phase 1) — this test only needs "all of
+/// one actor's rows land on one lane", not that specific hash.
+fn test_partition(actor_id: &uuid::Uuid) -> i16 {
+    (actor_id.as_u128() % PARTITIONS as u128) as i16
+}
+
 async fn enqueue(pool: &PgPool, n: u128) {
     let actor_id = uuid::Uuid::from_u128(1 + (n % ACTORS));
-    let partition = actor_runtime::stable_partition(&actor_id, PARTITIONS as u16);
+    let partition = test_partition(&actor_id);
     sqlx::query(
         "INSERT INTO inbound_messages \
            (message_id, kind, actor_type, actor_id, partition, message_type, payload, payload_hash, \

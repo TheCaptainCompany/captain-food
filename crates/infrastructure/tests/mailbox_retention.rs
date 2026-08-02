@@ -16,7 +16,8 @@
 
 use std::sync::Arc;
 
-use actor_runtime::{stable_partition, MailboxWorker, WorkerConfig};
+use actor_client::stable_partition;
+use actor_runtime::{MailboxWorker, WorkerConfig};
 use application::generated::services::{IdentityService, PaymentService};
 use application::reminders::reminder_message_id;
 

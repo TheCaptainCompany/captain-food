@@ -1,6 +1,6 @@
 //! Generated-artifact emitters, one module per artifact family (#277 split).
 
-pub(crate) mod actor_clients; // infrastructure actor_clients.rs — typed per-actor mailbox clients (#284)
+pub(crate) mod actor_clients; // actor_client crate: typed per-actor mailbox clients (#284) + addressing tables (#290)
 pub(crate) mod behaviour_tests; // application behaviour_tests.rs from tests.yaml (§7 corpus)
 pub(crate) mod docs; // documentation.generated.{md,html} + context map + story parsing
 pub(crate) mod pm_orchestrators; // application process_managers.rs (typed-step PM legs)

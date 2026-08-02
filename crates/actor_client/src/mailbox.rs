@@ -1,39 +1,228 @@
 //! The write-side MAILBOX port (#242 Runtime C3, PROP-20260728-152752 §2): the typed door every
-//! command submission enters through once the resolvers flip — an `inbound_messages` insert,
-//! idempotent by `message_id` (same payload hash → the original acceptance replays; a different
-//! one → the caller raises the synchronous Conflict), addressed by `(actor_type, actor_id)` with
-//! the partition stamped by the FROZEN routing hash. Replaces `journal::CommandJournal` as the
-//! acceptance surface; the mailbox worker (not a spawned task) delivers.
+//! command submission enters through — an `inbound_messages` insert, idempotent by `message_id`
+//! (same payload hash → the original acceptance replays; a different one → the caller raises the
+//! synchronous Conflict), addressed by `(actor_type, actor_id)` with the partition stamped by the
+//! FROZEN routing hash. The mailbox worker (not a spawned task) delivers.
+//!
+//! Since #290 phase 1 (PROP-20260802-130500 D1) this module is the COMPILER-ENFORCED boundary:
+//! [`MailboxEntry`] has `pub(crate)` fields, so a row can be assembled only inside this crate —
+//! by the shared constructors in `crate::enqueue` and `crate::reminders`, behind the generated
+//! typed clients. Everyone else reads through the getters; obtaining an entry anywhere else does
+//! not compile. Cross-crate TESTS go through [`fixtures`] (the D5 `test-fixtures` feature), never
+//! through a public constructor.
 
 use async_trait::async_trait;
 use domain::generated::scalars::InboundMessageStatus;
 use domain::shared::errors::DomainError;
 
 /// One mailbox insert — the envelope is the columns (ADR-0041), `payload` is business-only.
+///
+/// Fields are `pub(crate)` ON PURPOSE: the crate is the permission (PROP-20260802-130500). The
+/// SQL side (`infrastructure::PgMailbox`) binds columns through the getters below.
 #[derive(Debug, Clone)]
 pub struct MailboxEntry {
-    pub message_id: uuid::Uuid,
+    pub(crate) message_id: uuid::Uuid,
     /// COMMAND | EVENT | MESSAGE.
-    pub kind: String,
-    pub actor_type: String,
-    pub actor_id: uuid::Uuid,
-    /// `stable_partition(actor_id, width)` — stamped by the CALLER (the client knows the
-    /// partitioning; the table stays a dumb mailbox).
-    pub partition: i16,
-    pub message_type: String,
-    pub payload: serde_json::Value,
-    pub payload_hash: String,
+    pub(crate) kind: String,
+    pub(crate) actor_type: String,
+    pub(crate) actor_id: uuid::Uuid,
+    /// `stable_partition(actor_id, width)` — stamped by the constructors in this crate (the
+    /// client knows the partitioning; the table stays a dumb mailbox).
+    pub(crate) partition: i16,
+    pub(crate) message_type: String,
+    pub(crate) payload: serde_json::Value,
+    pub(crate) payload_hash: String,
     /// GRAPHQL | WORKER | EXTERNAL.
-    pub channel: String,
-    pub user_id: Option<uuid::Uuid>,
-    pub user_type: String,
-    pub correlation_id: uuid::Uuid,
-    pub cause_id: Option<uuid::Uuid>,
-    pub session_id: Option<uuid::Uuid>,
-    pub trace_id: Option<String>,
+    pub(crate) channel: String,
+    pub(crate) user_id: Option<uuid::Uuid>,
+    pub(crate) user_type: String,
+    pub(crate) correlation_id: uuid::Uuid,
+    pub(crate) cause_id: Option<uuid::Uuid>,
+    pub(crate) session_id: Option<uuid::Uuid>,
+    pub(crate) trace_id: Option<String>,
     /// Owning adapter for kind EVENT ('stripe', …) — with `external_id`, the delivery-level dedupe.
-    pub source: Option<String>,
-    pub external_id: Option<String>,
+    pub(crate) source: Option<String>,
+    pub(crate) external_id: Option<String>,
+}
+
+/// The READ surface of an entry: one getter per column, for the SQL adapter that binds them and
+/// the tests that assert them. No setter, no public constructor — that is the point.
+impl MailboxEntry {
+    pub fn message_id(&self) -> uuid::Uuid {
+        self.message_id
+    }
+    /// COMMAND | EVENT | MESSAGE.
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+    pub fn actor_type(&self) -> &str {
+        &self.actor_type
+    }
+    pub fn actor_id(&self) -> uuid::Uuid {
+        self.actor_id
+    }
+    pub fn partition(&self) -> i16 {
+        self.partition
+    }
+    pub fn message_type(&self) -> &str {
+        &self.message_type
+    }
+    pub fn payload(&self) -> &serde_json::Value {
+        &self.payload
+    }
+    pub fn payload_hash(&self) -> &str {
+        &self.payload_hash
+    }
+    /// GRAPHQL | WORKER | EXTERNAL.
+    pub fn channel(&self) -> &str {
+        &self.channel
+    }
+    pub fn user_id(&self) -> Option<uuid::Uuid> {
+        self.user_id
+    }
+    pub fn user_type(&self) -> &str {
+        &self.user_type
+    }
+    pub fn correlation_id(&self) -> uuid::Uuid {
+        self.correlation_id
+    }
+    pub fn cause_id(&self) -> Option<uuid::Uuid> {
+        self.cause_id
+    }
+    pub fn session_id(&self) -> Option<uuid::Uuid> {
+        self.session_id
+    }
+    pub fn trace_id(&self) -> Option<&str> {
+        self.trace_id.as_deref()
+    }
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
+    }
+    pub fn external_id(&self) -> Option<&str> {
+        self.external_id.as_deref()
+    }
+}
+
+/// Cross-crate TEST access to the raw entry shape (PROP-20260802-130500 D5): compiled only for
+/// this crate's own tests or under the `test-fixtures` feature, which only `[dev-dependencies]`
+/// may enable (CI-guarded). The exhaustiveness CONTRACT: both conversions below list every field
+/// with no `..` rest pattern, so adding an 18th `MailboxEntry` column breaks THIS module's
+/// compilation — which forces [`EntryFixture`] to grow with it, which keeps every out-of-crate
+/// full-destructure freeze test (e.g. `graphql_typed_send`) exhaustive by construction.
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod fixtures {
+    use super::MailboxEntry;
+
+    /// The all-public mirror of [`MailboxEntry`] for tests: seed rows with
+    /// `EntryFixture { .. }.into()`, freeze rows with `entry.into_fixture()` + full destructure.
+    #[derive(Debug, Clone)]
+    pub struct EntryFixture {
+        pub message_id: uuid::Uuid,
+        pub kind: String,
+        pub actor_type: String,
+        pub actor_id: uuid::Uuid,
+        pub partition: i16,
+        pub message_type: String,
+        pub payload: serde_json::Value,
+        pub payload_hash: String,
+        pub channel: String,
+        pub user_id: Option<uuid::Uuid>,
+        pub user_type: String,
+        pub correlation_id: uuid::Uuid,
+        pub cause_id: Option<uuid::Uuid>,
+        pub session_id: Option<uuid::Uuid>,
+        pub trace_id: Option<String>,
+        pub source: Option<String>,
+        pub external_id: Option<String>,
+    }
+
+    impl From<EntryFixture> for MailboxEntry {
+        fn from(f: EntryFixture) -> Self {
+            // FULL destructure + full construction, no `..`: the compile-time lockstep guarantee.
+            let EntryFixture {
+                message_id,
+                kind,
+                actor_type,
+                actor_id,
+                partition,
+                message_type,
+                payload,
+                payload_hash,
+                channel,
+                user_id,
+                user_type,
+                correlation_id,
+                cause_id,
+                session_id,
+                trace_id,
+                source,
+                external_id,
+            } = f;
+            MailboxEntry {
+                message_id,
+                kind,
+                actor_type,
+                actor_id,
+                partition,
+                message_type,
+                payload,
+                payload_hash,
+                channel,
+                user_id,
+                user_type,
+                correlation_id,
+                cause_id,
+                session_id,
+                trace_id,
+                source,
+                external_id,
+            }
+        }
+    }
+
+    impl MailboxEntry {
+        /// The entry as its all-public test mirror — the read half of the fixture contract.
+        pub fn into_fixture(self) -> EntryFixture {
+            let MailboxEntry {
+                message_id,
+                kind,
+                actor_type,
+                actor_id,
+                partition,
+                message_type,
+                payload,
+                payload_hash,
+                channel,
+                user_id,
+                user_type,
+                correlation_id,
+                cause_id,
+                session_id,
+                trace_id,
+                source,
+                external_id,
+            } = self;
+            EntryFixture {
+                message_id,
+                kind,
+                actor_type,
+                actor_id,
+                partition,
+                message_type,
+                payload,
+                payload_hash,
+                channel,
+                user_id,
+                user_type,
+                correlation_id,
+                cause_id,
+                session_id,
+                trace_id,
+                source,
+                external_id,
+            }
+        }
+    }
 }
 
 /// The transport ENVELOPE a caller supplies with one typed message (#284 slice 1,
@@ -136,7 +325,9 @@ pub trait Mailbox: Send + Sync {
         Ok(inserted)
     }
 
-    /// The row behind an acceptance handle (the `operationStatus` lookup).
+    /// The row behind an acceptance handle. Callers outside this crate read it through
+    /// [`crate::ActorClient::get_operation_status`] — the D4 read door — never by naming this
+    /// method on a bare pool.
     async fn by_message(
         &self,
         message_id: uuid::Uuid,
@@ -158,7 +349,10 @@ pub trait Mailbox: Send + Sync {
     async fn cancel_scheduled(&self, message_id: uuid::Uuid) -> Result<bool, DomainError>;
 }
 
-/// In-memory double for tests (mirrors `journal::mem::MemCommandJournal`).
+/// In-memory double for tests (mirrors `journal::mem::MemCommandJournal`). Compiled only for this
+/// crate's own tests or under the D5 `test-fixtures` feature — a mem double in a release
+/// artifact would be a mailbox that silently swallows commands.
+#[cfg(any(test, feature = "test-fixtures"))]
 pub mod mem {
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -313,7 +507,7 @@ mod tests {
             actor_id: uuid::Uuid::from_u128(0x0AD1),
             partition: 0,
             message_type: "OrderExpired".into(),
-            payload_hash: crate::journal::payload_hash(&payload),
+            payload_hash: application::journal::payload_hash(&payload),
             payload,
             channel: "WORKER".into(),
             user_id: None,

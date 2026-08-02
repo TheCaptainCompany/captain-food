@@ -241,6 +241,26 @@ fn main() {
         }
         eprintln!("✓ wrote {}", path.display());
     }
+    // crates/actor_client/src/generated/: the typed per-actor clients + the frozen addressing
+    // tables (#290 phase 1, PROP-20260802-130500 D1) — emitted INTO the boundary crate that owns
+    // the private MailboxEntry, so the write door is compiler-enforced.
+    let client_gen = repo_root(&specs).join("crates/actor_client/src/generated");
+    if let Err(e) = fs::create_dir_all(&client_gen) {
+        eprintln!("✗ create {}: {}", client_gen.display(), e);
+        std::process::exit(1);
+    }
+    for (name, content) in [
+        ("actor_clients.rs", emit_actor_clients(&model)),
+        ("addresses.rs", emit_actor_addresses(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod actor_clients;\npub mod addresses;\n".to_string()),
+    ] {
+        let path = client_gen.join(name);
+        if let Err(e) = fs::write(&path, content) {
+            eprintln!("✗ write {}: {}", path.display(), e);
+            std::process::exit(1);
+        }
+        eprintln!("✓ wrote {}", path.display());
+    }
     // crates/infrastructure/src/generated/: the Postgres PM state stores from process_managers.yaml
     // (issue #27) — the adapter side of the application pm_state ports.
     let infra_gen = repo_root(&specs).join("crates/infrastructure/src/generated");
@@ -252,7 +272,7 @@ fn main() {
     // (ADR-20260731-214500) — absent, neither the file nor its mod.rs line is emitted (zero drift).
     let deletion_policy = emit_infra_deletion_policy(&model);
     let infra_mod = format!(
-        "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\npub mod command_router;\npub mod actor_clients;\n{}",
+        "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\npub mod command_router;\n{}",
         if deletion_policy.is_some() { "pub mod deletion_policy;\n" } else { "" }
     );
     let mut infra_files: Vec<(&str, String)> = vec![
@@ -260,7 +280,6 @@ fn main() {
         ("service_clients.rs", emit_services_http_clients(&model)),
         ("service_bindings.rs", emit_service_bindings(&model)),
         ("command_router.rs", emit_infra_command_router(&model)),
-        ("actor_clients.rs", emit_infra_actor_clients(&model)),
         ("mod.rs", infra_mod),
     ];
     if let Some(dp) = deletion_policy {

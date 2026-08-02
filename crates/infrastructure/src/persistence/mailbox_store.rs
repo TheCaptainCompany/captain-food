@@ -1,4 +1,4 @@
-//! Postgres adapter for the [`application::mailbox::Mailbox`] port (#242 Runtime C3): the
+//! Postgres adapter for the [`actor_client::mailbox::Mailbox`] port (#242 Runtime C3): the
 //! `inbound_messages` insert every flipped resolver performs, and the status read behind
 //! `operationStatus`. Idempotency rides the `message_id` primary key: `ON CONFLICT DO NOTHING`
 //! then read back — the caller discriminates replay (same hash) from conflict (different hash).
@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use application::mailbox::{
+use actor_client::mailbox::{
     Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome, MailboxStatusRow,
 };
 use async_trait::async_trait;
@@ -81,23 +81,23 @@ impl Mailbox for PgMailbox {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) \
              ON CONFLICT (message_id) DO NOTHING",
         )
-        .bind(entry.message_id)
-        .bind(&entry.kind)
-        .bind(&entry.actor_type)
-        .bind(entry.actor_id)
-        .bind(entry.partition)
-        .bind(&entry.message_type)
-        .bind(&entry.payload)
-        .bind(&entry.payload_hash)
-        .bind(&entry.channel)
-        .bind(entry.user_id)
-        .bind(&entry.user_type)
-        .bind(entry.correlation_id)
-        .bind(entry.cause_id)
-        .bind(entry.session_id)
-        .bind(&entry.trace_id)
-        .bind(&entry.source)
-        .bind(&entry.external_id)
+        .bind(entry.message_id())
+        .bind(entry.kind())
+        .bind(entry.actor_type())
+        .bind(entry.actor_id())
+        .bind(entry.partition())
+        .bind(entry.message_type())
+        .bind(entry.payload())
+        .bind(entry.payload_hash())
+        .bind(entry.channel())
+        .bind(entry.user_id())
+        .bind(entry.user_type())
+        .bind(entry.correlation_id())
+        .bind(entry.cause_id())
+        .bind(entry.session_id())
+        .bind(entry.trace_id())
+        .bind(entry.source())
+        .bind(entry.external_id())
         .execute(&self.pool)
         .await
         .map_err(db_err)?
@@ -105,14 +105,14 @@ impl Mailbox for PgMailbox {
             == 1;
         if inserted {
             if let Some(nudges) = &self.nudges {
-                nudges.nudge(&entry.actor_type);
+                nudges.nudge(entry.actor_type());
             }
             return Ok(MailboxInsertOutcome::Inserted);
         }
         let row = sqlx::query(
             "SELECT status, payload_hash FROM inbound_messages WHERE message_id = $1",
         )
-        .bind(entry.message_id)
+        .bind(entry.message_id())
         .fetch_one(&self.pool)
         .await
         .map_err(db_err)?;
@@ -148,23 +148,23 @@ impl Mailbox for PgMailbox {
                WHERE inbound_messages.status = 'SCHEDULED' \
              RETURNING (xmax = 0) AS inserted",
         )
-        .bind(entry.message_id)
-        .bind(&entry.kind)
-        .bind(&entry.actor_type)
-        .bind(entry.actor_id)
-        .bind(entry.partition)
-        .bind(&entry.message_type)
-        .bind(&entry.payload)
-        .bind(&entry.payload_hash)
-        .bind(&entry.channel)
-        .bind(entry.user_id)
-        .bind(&entry.user_type)
-        .bind(entry.correlation_id)
-        .bind(entry.cause_id)
-        .bind(entry.session_id)
-        .bind(&entry.trace_id)
-        .bind(&entry.source)
-        .bind(&entry.external_id)
+        .bind(entry.message_id())
+        .bind(entry.kind())
+        .bind(entry.actor_type())
+        .bind(entry.actor_id())
+        .bind(entry.partition())
+        .bind(entry.message_type())
+        .bind(entry.payload())
+        .bind(entry.payload_hash())
+        .bind(entry.channel())
+        .bind(entry.user_id())
+        .bind(entry.user_type())
+        .bind(entry.correlation_id())
+        .bind(entry.cause_id())
+        .bind(entry.session_id())
+        .bind(entry.trace_id())
+        .bind(entry.source())
+        .bind(entry.external_id())
         .bind(scheduled_at)
         .fetch_optional(&self.pool)
         .await
@@ -180,7 +180,7 @@ impl Mailbox for PgMailbox {
                 let row = sqlx::query(
                     "SELECT status, payload_hash FROM inbound_messages WHERE message_id = $1",
                 )
-                .bind(entry.message_id)
+                .bind(entry.message_id())
                 .fetch_one(&self.pool)
                 .await
                 .map_err(db_err)?;
@@ -238,23 +238,23 @@ impl Mailbox for PgMailbox {
                     trace_id, source, external_id) ",
             );
             qb.push_values(chunk, |mut b, e| {
-                b.push_bind(e.message_id)
-                    .push_bind(e.kind.clone())
-                    .push_bind(e.actor_type.clone())
-                    .push_bind(e.actor_id)
-                    .push_bind(e.partition)
-                    .push_bind(e.message_type.clone())
-                    .push_bind(e.payload.clone())
-                    .push_bind(e.payload_hash.clone())
-                    .push_bind(e.channel.clone())
-                    .push_bind(e.user_id)
-                    .push_bind(e.user_type.clone())
-                    .push_bind(e.correlation_id)
-                    .push_bind(e.cause_id)
-                    .push_bind(e.session_id)
-                    .push_bind(e.trace_id.clone())
-                    .push_bind(e.source.clone())
-                    .push_bind(e.external_id.clone());
+                b.push_bind(e.message_id())
+                    .push_bind(e.kind().to_owned())
+                    .push_bind(e.actor_type().to_owned())
+                    .push_bind(e.actor_id())
+                    .push_bind(e.partition())
+                    .push_bind(e.message_type().to_owned())
+                    .push_bind(e.payload().to_owned())
+                    .push_bind(e.payload_hash().to_owned())
+                    .push_bind(e.channel().to_owned())
+                    .push_bind(e.user_id())
+                    .push_bind(e.user_type().to_owned())
+                    .push_bind(e.correlation_id())
+                    .push_bind(e.cause_id())
+                    .push_bind(e.session_id())
+                    .push_bind(e.trace_id().map(str::to_owned))
+                    .push_bind(e.source().map(str::to_owned))
+                    .push_bind(e.external_id().map(str::to_owned));
             });
             qb.push(" ON CONFLICT (message_id) DO NOTHING RETURNING message_id");
             let ids: Vec<(uuid::Uuid,)> =
@@ -265,9 +265,9 @@ impl Mailbox for PgMailbox {
             if let Some(nudges) = &self.nudges {
                 let new: std::collections::HashSet<uuid::Uuid> = inserted.iter().copied().collect();
                 let mut woken: std::collections::HashSet<&str> = std::collections::HashSet::new();
-                for e in entries.iter().filter(|e| new.contains(&e.message_id)) {
-                    if woken.insert(e.actor_type.as_str()) {
-                        nudges.nudge(&e.actor_type);
+                for e in entries.iter().filter(|e| new.contains(&e.message_id())) {
+                    if woken.insert(e.actor_type()) {
+                        nudges.nudge(e.actor_type());
                     }
                 }
             }

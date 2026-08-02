@@ -29,9 +29,10 @@ impl QueryRoot {
     /// Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the command_journal, no View_*.
     #[graphql(name = "operationStatus")]
     async fn operation_status(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusQueryInput) -> async_graphql::Result<Option<Operation>> {
-        let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?;
-        if let Some(row) = mailbox
-            .by_message(input.message_id.0)
+        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
+        let status_door = actor_client::ActorClient::new(mailbox);
+        if let Some(row) = status_door
+            .get_operation_status(input.message_id.0)
             .await
             .map_err(|e| async_graphql::Error::new(e.to_string()))?
         {

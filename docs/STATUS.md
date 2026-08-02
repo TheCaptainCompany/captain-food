@@ -3,6 +3,53 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-02. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-02 — [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)
+> phase 1 built ([PROP-20260802-130500](proposals/PROP-20260802-130500-isolation-by-construction.md)
+> D1+D3+D4+D5)**: the mailbox door is COMPILER-enforced now. New boundary crate
+> `crates/actor_client` (between `application` and `infrastructure`) owns the `Mailbox` port,
+> `MailboxEntry` with **pub(crate) fields + getters** (constructing one outside the crate does not
+> compile), `Envelope`, the shared entry constructors, `reminders::scheduled_entry`, the FROZEN
+> `stable_partition` (re-homed from `actor_runtime`, golden test moved with it), the GENERATED
+> typed per-actor clients (emitter retargeted; addressing tables split into
+> `generated/addresses.rs`, re-exported by the infra `command_router` — one definition), and the
+> **D4 read door**: one generic `ActorClient.get_operation_status(message_id)` — the only
+> sanctioned read over `inbound_messages` status; the generated `operationStatus` query and the
+> `operationStatusChanged` snapshot both resolve through it (`watch` deferred: the
+> `OperationStatusBus` still lives in infrastructure keyed to the legacy journal status — its
+> relocation is a recorded follow-up, not improvised). `infrastructure` keeps ONLY the SQL side
+> (`PgMailbox` binds via getters; `apply_schedules_in_tx` binds the actor_client constructor).
+> **Review hardening (independent pass, 2026-08-02)**: (1) the D8-deferred UNTYPED bulk fact door
+> (`enqueue_inbound_facts`/`InboundFact`) sits behind the `bulk-door` cargo feature, with
+> `infrastructure` (the SIRENE sweep) the ONE manifest allowed to enable it. Honest limits of the
+> gate: cargo features UNIFY, so once infrastructure lights it the symbols RESOLVE graph-wide —
+> the manifest grant is the loud reviewable act, and the enforcement is the guard
+> `bulk_door_feature_is_granted_only_to_infrastructure` (bidirectional, verified red), which also
+> SOURCE-SCANS every crate: naming either symbol outside `infrastructure`/`actor_client` is
+> CI-red, closing the demonstrated manifest-less evasion. Every bulk fact is validated at the
+> door: `event_type` against the generated `ACTOR_INBOUND_FACTS` table (the same actors.yaml
+> `receives` scan the sealed `{Actor}Fact` traits come from — the runtime re-proof of the typed
+> path's compile check) AND payload-tag coherence (the adjacent `eventType` must equal the row's
+> `message_type`, or delivery would route on a lie). (2) the generated
+> `ReminderSchedule` is `#[non_exhaustive]`, so an out-of-crate spec literal — the forgery route
+> into `scheduled_entry` — is a compile error (E0639); specs come from the generated table only.
+> **D3**: codegen guard `capability_dependencies_are_allowlisted` — `sqlx`/`reqwest` only in an
+> explicit per-crate allowlist with WHYs (server keeps both exceptions: PgPool construction +
+> /health probe; Supabase JWKS fetch), bidirectional (stale entries fail), verified red on a
+> planted grant. **D5**: cross-crate test access rides the `test-fixtures` cargo feature (mem
+> double, `EntryFixture` full-field mirror keeping out-of-crate freeze tests exhaustive, reference
+> impls), dev-dependencies only — guard `test_fixtures_feature_never_reaches_a_release_artifact`
+> fails any release-graph grant (verified red). The textual door guard stays as belt-and-braces,
+> allowlist moved to the actor_client paths. **Surface directive
+> ([ADR-20260802-170059](adr/ADR-20260802-170059-client-surface-is-spec-gated.md), product owner
+> 2026-08-02): no client method without a usage declaration in the spec** — `send` ⇔ ≥1 declared
+> command, `record` ⇔ ≥1 declared inbound fact, `schedule`/`cancel` ⇔ a `reminders:` declaration;
+> unjustified methods are ABSENT, not uncallable (`PaymentClient` is record-only, only
+> `OrderClient` schedules); guard `client_surface_exists_only_with_a_spec_declaration` re-derives
+> the rule from actors.yaml. Behavior frozen: drift guards, `graphql_typed_send`,
+> byte-identity codegen tests all green; validator 0 errors. **D6 (lint floor) deliberately NOT
+> here** — its own change per the product-owner decision; phase 2 (per-actor client crates) and
+> the C4 update follow on #290's checklist.
+
 > 🐛 **2026-08-01 — prod-smoke hotfix: authenticated GraphQL was fully down in production
 > (`503 "auth unavailable"` on every non-`/public` role path).** Root cause: `AuthContext::from_env`
 > read `SUPABASE_JWKS_URL`/`SUPABASE_URL` straight from `std::env`, but those are **non-secret baked
@@ -25,16 +72,19 @@
 > to its own change after phase 1 (against the recommendation).
 
 > 🚧 **2026-08-02 — [#284 "Typed actor clients (PROP-20260728-152752 §2.1)"](https://github.com/TheCaptainCompany/captain-food/issues/284)
-> slice 1 built (branch `claude/situation-explanation-cj06o2`)**: new emitter generates
-> `crates/infrastructure/src/generated/actor_clients.rs` — one `{Actor}Client` per mailbox actor
+> slice 1 built (branch `claude/situation-explanation-cj06o2`)**. *(Path/visibility claims in this
+> entry describe the pre-#290 layout; the 2026-08-02 #290 phase-1 entry above supersedes them —
+> the clients, constructors and door now live in the `actor_client` boundary crate.)* New emitter
+> generates the actor clients (then `crates/infrastructure/src/generated/actor_clients.rs`; now
+> `crates/actor_client/src/generated/actor_clients.rs`) — one `{Actor}Client` per mailbox actor
 > (`send`/`record`/`schedule`/`cancel`) with SEALED per-actor `{Actor}Command`/`{Actor}Fact` marker
 > traits, so sending a message the actor does not `receive` is a COMPILE error. Clients delegate to
-> the shared `pub(crate)` constructors extracted in `mailbox::enqueue` (`command_entry`,
+> the shared crate-internal constructors extracted in `enqueue` (`command_entry`,
 > `insert_mapped`, `schedule_mapped`) — MemMailbox drift guards prove typed `send`/`record` rows are
 > field-for-field identical to the free-function enqueue; `record` always keys on
 > `inbound_message_id(source, external_id)`. The caller-side `Envelope` (transport metadata only, no
-> payload/addressing) is hand-written in `application::mailbox`. **No batched send — D8 is answered:
-> not for now.** **Slice 2 built (PR #289)**: the GraphQL resolver emitter no
+> payload/addressing) was hand-written in `application::mailbox` (now `actor_client::mailbox`,
+> #290). **No batched send — D8 is answered: not for now.** **Slice 2 built (PR #289)**: the GraphQL resolver emitter no
 > longer constructs `MailboxEntry` inline — both the aggregate-routed template and the gated PM
 > template's mailbox arm deserialize the typed command and `send` through the generated
 > `{Actor}Client` (identity extraction + the birth-command `now_v7` mint stay in the resolver; the
@@ -46,16 +96,17 @@
 > Conflict instead of replay. **Slice 3 built (PR #292, final)**: every
 > adapter is on the typed clients — SIRENE (`MarkRestaurantClosed` via `RestaurantClient::send`
 > with the journal-derived envelope, the row-by-row fallback via typed `record`; the BATCHED
-> `enqueue_inbound_facts` fast path stays as the crate-internal bulk door, D8 deferred), HubRise
-> connect/enrich (`RestaurantAccountClient`/`RestaurantClient`/`CatalogClient`), and the four
-> webhook ACLs (Stripe → `PaymentClient`, Uber Direct/Avelo37/CoopCycle → `DeliveryJobClient` —
-> `inbound_fact_for`'s runtime family→lane switch is DELETED; the sealed Fact traits check it at
-> compile time). The free-function surface is CLOSED: `enqueue_inbound_fact(s)`/`InboundFact` are
-> `pub(crate)`, `enqueue_worker_command`/`schedule_reminder`/`cancel_reminder` are `#[cfg(test)]`
-> reference implementations for the drift guards (moved in-crate to
-> `mailbox/enqueue.rs::{drift_guard, schedule_pg}` so the guard compares against the real
-> reference while the door stays shut); the public surface is the clients (re-exported as
-> `mailbox::actor_clients`) + outcome enums + id derivations. Codegen guard
+> `enqueue_inbound_facts` fast path stayed as the then-crate-internal bulk door, D8 deferred —
+> since #290 it is the `bulk-door`-feature-gated, receives-validated door in `actor_client`),
+> HubRise connect/enrich (`RestaurantAccountClient`/`RestaurantClient`/`CatalogClient`), and the
+> four webhook ACLs (Stripe → `PaymentClient`, Uber Direct/Avelo37/CoopCycle → `DeliveryJobClient`
+> — `inbound_fact_for`'s runtime family→lane switch is DELETED; the sealed Fact traits check it at
+> compile time). The free-function surface was CLOSED at the then-crate boundary
+> (`enqueue_inbound_fact(s)`/`InboundFact` crate-internal; `enqueue_worker_command`/
+> `schedule_reminder`/`cancel_reminder` test-only reference implementations for the drift guards —
+> all superseded by #290's actor_client crate, where the same closure is compiler-enforced and the
+> reference impls ride the `test-fixtures` feature); the public surface is the clients + outcome
+> enums + id derivations. Codegen guard
 > `mailbox_entry_is_constructed_only_behind_the_typed_doors` fails the build on any new
 > `MailboxEntry` construction site (allowlist asserted-to-exist; verified red on a planted
 > violation). Same change also restored the LOST `#[test]` on `makefile_recipe_lines_are_ascii`

@@ -49,8 +49,8 @@ use domain::generated::scalars::{
 };
 use domain::shared::errors::DomainError;
 use hmac::{Hmac, Mac};
-use infrastructure::generated::actor_clients::PaymentClient;
-use infrastructure::mailbox::{surrogate_actor_id, EnqueueOutcome};
+use actor_client::generated::actor_clients::PaymentClient;
+use actor_client::{surrogate_actor_id, EnqueueOutcome};
 use serde::Deserialize;
 use sha2::Sha256;
 
@@ -401,7 +401,7 @@ pub enum StripeIngestOutcome {
 /// ports so the flow is unit-testable in memory.
 pub struct StripeWebhookIngestor {
     raw: Arc<dyn RawStripeEvents>,
-    mailbox: Arc<dyn application::mailbox::Mailbox>,
+    mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     /// Optional post-staging nudge (the composition root wires it to the drain worker's `run_once`)
     /// so delivery lag is near zero; the worker's poll loop is the safety net.
     on_staged: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -410,7 +410,7 @@ pub struct StripeWebhookIngestor {
 impl StripeWebhookIngestor {
     pub fn new(
         raw: Arc<dyn RawStripeEvents>,
-        mailbox: Arc<dyn application::mailbox::Mailbox>,
+        mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     ) -> Self {
         Self { raw, mailbox, on_staged: None }
     }
@@ -755,7 +755,7 @@ mod tests {
 
     fn ingestor_over(
         raw: Arc<MemRawStripeEvents>,
-        inbox: Arc<application::mailbox::mem::MemMailbox>,
+        inbox: Arc<actor_client::mailbox::mem::MemMailbox>,
     ) -> StripeWebhookIngestor {
         StripeWebhookIngestor::new(raw, inbox)
     }
@@ -763,7 +763,7 @@ mod tests {
     #[tokio::test]
     async fn a_delivery_is_mirrored_and_staged_for_the_drain() {
         let raw = Arc::new(MemRawStripeEvents::default());
-        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+        let inbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let ingestor = ingestor_over(raw.clone(), inbox.clone());
         let event = sample_succeeded();
         let raw_body = serde_json::json!({ "id": event.id, "verbatim": true });
@@ -782,20 +782,20 @@ mod tests {
         // …and the ADAPTED business event awaits the MAILBOX worker (no domain append here).
         let entries = inbox.entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].kind, "EVENT");
-        assert_eq!(entries[0].source.as_deref(), Some("stripe"));
-        assert_eq!(entries[0].external_id.as_deref(), Some(event.id.as_str()));
-        assert_eq!(entries[0].message_type, "PaymentCaptured");
-        assert_eq!(entries[0].correlation_id, stripe_correlation_id(&event.id));
-        assert_eq!(entries[0].actor_type, "Payment", "addressed to the Payment lane");
-        let staged: DomainEvent = serde_json::from_value(entries[0].payload.clone()).unwrap();
+        assert_eq!(entries[0].kind(), "EVENT");
+        assert_eq!(entries[0].source(), Some("stripe"));
+        assert_eq!(entries[0].external_id(), Some(event.id.as_str()));
+        assert_eq!(entries[0].message_type(), "PaymentCaptured");
+        assert_eq!(entries[0].correlation_id(), stripe_correlation_id(&event.id));
+        assert_eq!(entries[0].actor_type(), "Payment", "addressed to the Payment lane");
+        let staged: DomainEvent = serde_json::from_value(entries[0].payload().clone()).unwrap();
         assert!(matches!(staged, DomainEvent::PaymentCaptured(_)));
     }
 
     #[tokio::test]
     async fn redelivered_webhook_is_a_no_op() {
         let raw = Arc::new(MemRawStripeEvents::default());
-        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+        let inbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let ingestor = ingestor_over(raw, inbox.clone());
         let event = sample_succeeded();
         let raw_body = serde_json::json!({ "id": event.id });
@@ -814,7 +814,7 @@ mod tests {
     #[tokio::test]
     async fn ignored_and_unmappable_deliveries_are_mirrored_but_never_staged() {
         let raw = Arc::new(MemRawStripeEvents::default());
-        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+        let inbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let ingestor = ingestor_over(raw.clone(), inbox.clone());
 
         let ignored = event_from_json(serde_json::json!({

@@ -1,16 +1,15 @@
-//! The WORKER/EXTERNAL-channel enqueue machinery (ADR-20260731-122500 "the mailbox is the only
-//! door"): fire-and-forget hand-off for every non-GraphQL producer. A producer records the
-//! HAND-OFF, not the outcome — deterministic `message_id`s keep redelivery idempotent (a
-//! re-enqueue dedupes on the mailbox pk), and the mailbox ledger owns what happens next.
+//! The shared mailbox-entry CONSTRUCTORS (ADR-20260731-122500 "the mailbox is the only door"):
+//! the one place a typed message becomes a [`MailboxEntry`] row. Producers never see this module —
+//! the only doors offered outside the crate are the GENERATED typed actor clients
+//! (`crate::generated::actor_clients`), which delegate here — so a typed send and any other
+//! channel can never drift on lane, partition, principal or channel.
 //!
-//! Since #284 slice 3 this module is `pub(crate)` PLUMBING: the only doors offered outside the
-//! crate are the GENERATED typed actor clients (`crate::generated::actor_clients`), which
-//! delegate to the shared constructors here. The free functions remain in-crate as the shared
-//! reference implementations (and, for `enqueue_inbound_facts`, as the D8-deferred bulk door the
-//! SIRENE sweep batches through); the codegen guard `mailbox_entry_is_constructed_only_behind_the_typed_doors`
-//! keeps `MailboxEntry` construction from reappearing anywhere else.
+//! Since #290 phase 1 (PROP-20260802-130500 D1) the boundary is the CRATE: `MailboxEntry` fields
+//! are `pub(crate)`, so these constructors physically cannot be re-implemented anywhere else. The
+//! codegen guard `mailbox_entry_is_constructed_only_behind_the_typed_doors` stays as the textual
+//! tripwire on this crate itself.
 
-use application::mailbox::{
+use crate::mailbox::{
     Envelope, Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
 };
 // Only the test-only `enqueue_worker_command` reference implementation still takes an `Actor`.
@@ -19,7 +18,7 @@ use application::ports::Actor;
 use domain::generated::scalars::InboundMessageStatus;
 use domain::shared::errors::DomainError;
 
-use crate::generated::command_router::{mailbox_address, ACTOR_MAILBOXES};
+use crate::generated::addresses::{mailbox_address, ACTOR_INBOUND_FACTS, ACTOR_MAILBOXES};
 
 /// What one fire-and-forget enqueue did.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,13 +34,8 @@ pub enum EnqueueOutcome {
     PayloadConflict(InboundMessageStatus),
 }
 
-/// Enqueue one WORKER-channel command (SIRENE close signals, HubRise imports). The address —
-/// which actor, which payload key carries its id, how many partitions — comes from the SAME
-/// generated map the GraphQL resolvers were built from, so no channel can address differently
-/// than another. `Err` only on infrastructure failure or an unroutable command type.
 /// The payload's DECLARED identity, per the actor's `identity` in actors.yaml — the ONE derivation
-/// every door shares, free-function and typed client alike, so no channel can address a command
-/// differently than another.
+/// every door shares, so no channel can address a command differently than another.
 ///
 /// `Ok(Some(id))` = the declared property was present and parsed; `Ok(None)` = this actor declares
 /// NO identity property (the lane id is minted by the caller); `Err` = the property is DECLARED but
@@ -128,7 +122,7 @@ pub(crate) fn command_entry(
         kind: "COMMAND".into(),
         actor_type: actor_type.into(),
         actor_id,
-        partition: actor_runtime::stable_partition(&actor_id, width),
+        partition: crate::partition::stable_partition(&actor_id, width),
         message_type: command_type.into(),
         payload,
         payload_hash,
@@ -149,10 +143,16 @@ pub(crate) fn command_entry(
 /// UUIDv5 surrogate when the aggregate id is not a uuid — e.g. `Payment-<intentId>` lanes). The
 /// dedupe identity is `(source, external_id)`: `message_id = UUIDv5(source:external_id)` in the
 /// inbound namespace, so a webhook redelivery collides on the pk instead of double-applying.
-/// CRATE-INTERNAL since #284 slice 3: producers outside the crate hold TYPED facts and go through
-/// a client's `record`; only the generated clients and the SIRENE bulk path assemble this.
+///
+/// Reachable outside this crate ONLY through the `bulk-door` cargo feature (#290 review
+/// BLOCKING-1a), as the input of [`enqueue_inbound_facts`] — and only `infrastructure` may enable
+/// that feature (guard test `bulk_door_feature_is_granted_only_to_infrastructure`; its one
+/// producer is the SIRENE sweep). It cannot set kind, identity, partition or principal — those
+/// are derived by the shared [`inbound_entry`] constructor, exactly as for a typed client
+/// `record` — and its `event_type` is validated against the actor's declared `receives` at the
+/// door. Singular producers hold TYPED facts and go through a client's `record`.
 #[derive(Debug, Clone)]
-pub(crate) struct InboundFact {
+pub struct InboundFact {
     pub source: String,
     pub external_id: String,
     /// events.yaml key (`PaymentCaptured`, …).
@@ -190,6 +190,13 @@ pub(crate) async fn enqueue_inbound_fact(
 
 /// The one place an [`InboundFact`] becomes a [`MailboxEntry`]. Shared by the singular and batched
 /// enqueue so they cannot drift on lane, principal or channel.
+///
+/// The RECEIVES check (#290 review BLOCKING-1b): the typed clients prove "this actor records this
+/// fact" at COMPILE time through the sealed `{Actor}Fact` traits; this constructor is also fed by
+/// the UNTYPED bulk door, so it re-proves membership at runtime against the generated
+/// [`ACTOR_INBOUND_FACTS`] table (the same actors.yaml `receives` scan the traits come from). An
+/// undeclared (actor, event) pair is refused at the door — the interim containment while the D8
+/// typed-batch API stays deferred.
 pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainError> {
     let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == fact.actor_type) else {
         return Err(DomainError::Repository(format!(
@@ -197,6 +204,30 @@ pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainErr
             fact.actor_type, fact.event_type
         )));
     };
+    let received = ACTOR_INBOUND_FACTS
+        .iter()
+        .find(|(a, _)| *a == fact.actor_type)
+        .is_some_and(|(_, facts)| facts.contains(&fact.event_type.as_str()));
+    if !received {
+        return Err(DomainError::Repository(format!(
+            "'{}' does not receive inbound fact '{}' (actors.yaml `receives`) — refusing an \
+             undeclared event type at the mailbox door",
+            fact.actor_type, fact.event_type
+        )));
+    }
+    // TAG COHERENCE (#290 re-review): delivery routes on the payload's adjacent `eventType` tag,
+    // while the row's `message_type` column comes from `fact.event_type` — if they disagree, the
+    // row lies about what it carries and the receives check above proved the wrong thing. The
+    // typed `record` path cannot diverge (the tag is serialized FROM `into_domain_event`); the
+    // untyped bulk path must prove it here.
+    let tag = fact.payload.get("eventType").and_then(|t| t.as_str());
+    if tag != Some(fact.event_type.as_str()) {
+        return Err(DomainError::Repository(format!(
+            "inbound fact '{}' carries payload tag {:?} — the row's message_type and the \
+             delivery route would disagree; refusing the incoherent fact at the mailbox door",
+            fact.event_type, tag
+        )));
+    }
     let message_id = inbound_message_id(&fact.source, &fact.external_id);
     let payload_hash = application::journal::payload_hash(&fact.payload);
     Ok(MailboxEntry {
@@ -204,7 +235,7 @@ pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainErr
         kind: "EVENT".into(),
         actor_type: fact.actor_type.clone(),
         actor_id: fact.actor_id,
-        partition: actor_runtime::stable_partition(&fact.actor_id, *width),
+        partition: crate::partition::stable_partition(&fact.actor_id, *width),
         message_type: fact.event_type,
         payload: fact.payload,
         payload_hash: payload_hash.clone(),
@@ -238,9 +269,16 @@ pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainErr
 /// paths cannot drift on partition, principal or channel — a batched row and a singular row for the
 /// same fact are byte-identical.
 ///
-/// CRATE-INTERNAL: the infrastructure-internal bulk door (PROP-20260728-152752 D8 deferred — no
-/// batched client API). The SIRENE sweep is its one producer.
-pub(crate) async fn enqueue_inbound_facts(
+/// The D8-deferred BULK door (PROP-20260728-152752 — no batched client API): its ONE sanctioned
+/// producer is the SIRENE sweep in `infrastructure`. INTERIM CONTAINMENT until the typed-batch
+/// design lands (#290 review BLOCKING-1): (a) reachable outside this crate only through the
+/// `bulk-door` cargo feature, which the guard test allows `infrastructure` alone to enable — a
+/// loud, D3-style manifest grant (cargo feature unification means a sibling crate in the same
+/// build could technically NAME the item once infrastructure lit the feature, which is exactly
+/// why the guard fails the MANIFEST grant, the reviewable act); (b) every fact's `event_type` is
+/// validated against the target actor's declared `receives` in [`inbound_entry`] — the runtime
+/// re-proof of what the sealed `{Actor}Fact` traits prove at compile time on the typed path.
+pub async fn enqueue_inbound_facts(
     mailbox: &dyn Mailbox,
     facts: Vec<InboundFact>,
 ) -> Result<Vec<bool>, DomainError> {
@@ -283,10 +321,11 @@ pub use application::reminders::reminder_message_id;
 /// `{"eventType","payload"}` form, exactly like an adapted inbound fact.
 ///
 /// TEST-ONLY since #284 slice 3: production reminders are declared by the in-tx `schedules:`
-/// upsert (`apply_schedules_in_tx`); this remains the reference implementation for the reminder
-/// row shape, exercised by the DB-gated `schedule_pg` tests below.
-#[cfg(test)]
-pub(crate) async fn schedule_reminder(
+/// upsert (`infrastructure::mailbox::apply_schedules_in_tx`); this remains the reference
+/// implementation for the reminder row shape, exercised by infrastructure's DB-gated
+/// `mailbox_schedule_pg` tests against the real DDL — hence `test-fixtures`, not `cfg(test)`.
+#[cfg(any(test, feature = "test-fixtures"))]
+pub async fn schedule_reminder(
     mailbox: &dyn Mailbox,
     actor_type: &str,
     actor_id: uuid::Uuid,
@@ -316,7 +355,7 @@ pub(crate) async fn schedule_reminder(
         kind: "MESSAGE".into(),
         actor_type: actor_type.to_owned(),
         actor_id,
-        partition: actor_runtime::stable_partition(&actor_id, *width),
+        partition: crate::partition::stable_partition(&actor_id, *width),
         message_type: event_type,
         payload: payload_event_tagged,
         payload_hash: payload_hash.clone(),
@@ -361,9 +400,9 @@ pub(crate) async fn schedule_mapped(
 /// (ADR-20260731-150500 §3). `false` = the row is absent, already delivered, or already
 /// cancelled — the caller decides whether losing that race matters.
 /// TEST-ONLY since #284 slice 3: the typed clients' `cancel` is the public withdrawal door; this
-/// remains the reference the `schedule_pg` tests exercise against the real DDL.
-#[cfg(test)]
-pub(crate) async fn cancel_reminder(
+/// remains the reference the DB-gated `mailbox_schedule_pg` tests exercise against the real DDL.
+#[cfg(any(test, feature = "test-fixtures"))]
+pub async fn cancel_reminder(
     mailbox: &dyn Mailbox,
     actor_id: uuid::Uuid,
     reminder_name: &str,
@@ -398,10 +437,6 @@ pub fn surrogate_actor_id(actor_type: &str, key: &str) -> uuid::Uuid {
     uuid::Uuid::new_v5(&inbound_namespace(), format!("{actor_type}:{key}").as_bytes())
 }
 
-// `inbound_fact_for` (the string-keyed family→lane switch) is GONE (#284 slice 3): every ACL now
-// holds its TYPED fact and records through the generated client, whose sealed Fact traits enforce
-// family membership at compile time — the runtime switch had nothing left to check.
-
 // ================================================================================================
 // Tests
 // ================================================================================================
@@ -412,15 +447,15 @@ pub fn surrogate_actor_id(actor_type: &str, key: &str) -> uuid::Uuid {
 /// If either assertion ever fails, the clients stopped delegating to the shared constructors in
 /// this module and the two doors have drifted. In-memory mailbox double; no Postgres.
 ///
-/// These live as UNIT tests (not `tests/actor_clients.rs`) since #284 slice 3: the free-function
-/// door is `pub(crate)` now — the guard deliberately compares the public typed door against the
-/// crate-internal reference implementation, which only an in-crate test can still name.
+/// These live as UNIT tests since #284 slice 3: the free-function door is crate-internal — the
+/// guard deliberately compares the public typed door against the crate-internal reference
+/// implementation, which only an in-crate test can still name.
 #[cfg(test)]
 mod drift_guard {
     use std::sync::Arc;
 
-    use application::mailbox::mem::MemMailbox;
-    use application::mailbox::{Envelope, MailboxEntry};
+    use crate::mailbox::mem::MemMailbox;
+    use crate::mailbox::{Envelope, MailboxEntry};
     use application::ports::Actor;
     use domain::generated::commands::MarkRestaurantClosed;
     use domain::generated::entities::Money;
@@ -603,6 +638,54 @@ mod drift_guard {
         );
     }
 
+    /// BLOCKING-1b invariant (#290 review): the UNTYPED bulk door must refuse an event type the
+    /// target actor does not `receive` — singular and batched forms alike, since both feed the
+    /// shared `inbound_entry`. Without this, the bulk path would skip the membership check the
+    /// sealed `{Actor}Fact` traits enforce on the typed path, and an arbitrary event type could
+    /// be parked on an arbitrary lane. Nothing may reach the mailbox on a refusal.
+    #[tokio::test]
+    async fn an_undeclared_inbound_fact_is_refused_at_the_door() {
+        let actor_id = super::surrogate_actor_id("Payment", "pi_bad");
+        let bad = |event_type: &str, actor_type: &str| InboundFact {
+            source: "stripe".into(),
+            external_id: "evt_bad".into(),
+            event_type: event_type.into(),
+            payload: serde_json::json!({ "eventType": event_type, "payload": {} }),
+            correlation_id: uuid::Uuid::from_u128(0xC0),
+            actor_type: actor_type.into(),
+            actor_id,
+        };
+
+        // Payment does NOT receive OrderPlaced: the singular form refuses...
+        let mailbox = MemMailbox::default();
+        let err = enqueue_inbound_fact(&mailbox, bad("OrderPlaced", "Payment"))
+            .await
+            .expect_err("an undeclared (actor, event) pair must refuse");
+        assert!(err.to_string().contains("does not receive"), "the error names the check: {err}");
+        assert!(mailbox.entries().is_empty(), "nothing reaches the mailbox on a refusal");
+
+        // ...and the batched form refuses the WHOLE batch (all-or-nothing entry construction).
+        let err = super::enqueue_inbound_facts(
+            &mailbox,
+            vec![bad("PaymentCaptured", "Payment"), bad("OrderPlaced", "Payment")],
+        )
+        .await
+        .expect_err("a batch carrying one undeclared fact must refuse");
+        assert!(err.to_string().contains("does not receive"), "{err}");
+        assert!(mailbox.entries().is_empty(), "a refused batch enqueues nothing");
+
+        // TAG COHERENCE (#290 re-review): a RECEIVED event_type whose payload carries a DIFFERENT
+        // adjacent tag must refuse too — delivery routes on the tag, so accepting it would land a
+        // row whose message_type lies about what the worker will actually deserialize.
+        let mut incoherent = bad("PaymentCaptured", "Payment");
+        incoherent.payload = serde_json::json!({ "eventType": "PaymentFailed", "payload": {} });
+        let err = enqueue_inbound_fact(&mailbox, incoherent)
+            .await
+            .expect_err("a tag/event_type mismatch must refuse");
+        assert!(err.to_string().contains("payload tag"), "the error names the mismatch: {err}");
+        assert!(mailbox.entries().is_empty(), "nothing reaches the mailbox on a refusal");
+    }
+
     /// Fix-1 invariant (#288 review): a payload whose DECLARED identity names a DIFFERENT
     /// aggregate than the client's lane must be REFUSED at the door. Accepting it would park the
     /// command on one lane while the handler acts on another aggregate — per-aggregate
@@ -627,12 +710,18 @@ mod drift_guard {
     /// SCHEDULED rows), so its guard is ABSOLUTE assertions instead of a drift comparison: the row
     /// must carry the same `command_entry` columns as an immediate send plus the `scheduled_at`
     /// the caller gave — and `cancel` must withdraw it exactly once.
+    ///
+    /// Exercises the ORDER client on purpose: the scheduling surface is SPEC-GATED (product-owner
+    /// directive, 2026-08-02 — no `schedule`/`cancel` without a `reminders:` declaration), and
+    /// Order is the one declaring actor today. A `RestaurantClient` (no declaration) has no
+    /// `schedule` method at all — that absence is a compile fact, not something a runtime test
+    /// can assert.
     #[tokio::test]
     async fn typed_schedule_parks_a_command_row_and_cancel_withdraws_it_once() {
-        let restaurant_id = uuid::Uuid::from_u128(0xF00D);
-        let cmd = MarkRestaurantClosed {
-            restaurant_id: RestaurantId(restaurant_id),
-            reason: Some("scheduled closure".into()),
+        let order_id = uuid::Uuid::from_u128(0x0DE7);
+        let cmd = domain::generated::commands::MarkOrderDelivered {
+            order_id: domain::generated::scalars::OrderId(order_id),
+            restaurant_id: RestaurantId(uuid::Uuid::from_u128(0xF00D)),
         };
         let message_id = uuid::Uuid::from_u128(0x5C);
         let at = chrono::DateTime::parse_from_rfc3339("2026-08-03T06:00:00Z")
@@ -640,15 +729,15 @@ mod drift_guard {
             .with_timezone(&chrono::Utc);
 
         let mailbox = Arc::new(MemMailbox::default());
-        let client = RestaurantClient::new(mailbox.clone(), restaurant_id);
+        let client = crate::generated::actor_clients::OrderClient::new(mailbox.clone(), order_id);
         client.schedule(cmd, test_envelope(message_id), at).await.expect("typed schedule");
 
         let row = mailbox.entry(message_id).expect("scheduled row");
-        assert_eq!(row.kind, "COMMAND");
-        assert_eq!(row.actor_type, "Restaurant");
-        assert_eq!(row.actor_id, restaurant_id);
-        assert_eq!(row.message_type, "MarkRestaurantClosed");
-        assert_eq!(row.partition, actor_runtime::stable_partition(&restaurant_id, 100));
+        assert_eq!(row.kind(), "COMMAND");
+        assert_eq!(row.actor_type(), "Order");
+        assert_eq!(row.actor_id(), order_id);
+        assert_eq!(row.message_type(), "MarkOrderDelivered");
+        assert_eq!(row.partition(), crate::partition::stable_partition(&order_id, 100));
         assert_eq!(mailbox.scheduled_at(message_id), Some(at), "parked until due, not delivered now");
 
         assert!(client.cancel(message_id).await.expect("cancel"), "a SCHEDULED row cancels");
@@ -670,217 +759,5 @@ mod drift_guard {
             user_type: "EXTERNAL".into(),
             channel: "WORKER".into(),
         }
-    }
-}
-
-/// DB-gated tests for the REMINDER write path (#272 Runtime D, ADR-20260731-150500 /
-/// ADR-20260731-153000): `schedule_reminder` over the real `PgMailbox` against the real
-/// migration DDL — the deterministic `UUIDv5(actor_id, purpose)` identity, the SCHEDULED row
-/// with `position` NULL (the sequence must NOT be consumed at declare time), reschedule IN PLACE
-/// while SCHEDULED, Duplicate once the occurrence is spent, and `SCHEDULED → CANCELLED` beating
-/// the promotion pass.
-///
-/// Unit tests since #284 slice 3 (`schedule_reminder`/`cancel_reminder` are `pub(crate)` now).
-/// Needs `DATABASE_URL`; skips otherwise (DB_TESTS_REQUIRED makes the skip loud, #230).
-#[cfg(test)]
-mod schedule_pg {
-    use domain::generated::scalars::InboundMessageStatus;
-    use sqlx::{PgPool, Row};
-
-    use super::{cancel_reminder, reminder_message_id, schedule_reminder, ScheduleOutcome};
-    use crate::persistence::mailbox_store::PgMailbox;
-
-    async fn setup(pool: &PgPool) {
-        sqlx::raw_sql(
-            "DROP TABLE IF EXISTS inbound_messages, mailbox_partitions CASCADE;\n\
-             DROP SEQUENCE IF EXISTS inbound_messages_position_seq;",
-        )
-        .execute(pool)
-        .await
-        .expect("drop");
-        sqlx::raw_sql(include_str!(
-            "../../../../migrations/20260731063000_actor_mailbox_tables.sql"
-        ))
-        .execute(pool)
-        .await
-        .expect("apply the actor-mailbox migration");
-    }
-
-    fn gated() -> Option<String> {
-        match std::env::var("DATABASE_URL") {
-            Ok(url) => Some(url),
-            Err(_) => {
-                assert!(
-                    std::env::var("DB_TESTS_REQUIRED").is_err(),
-                    "DB_TESTS_REQUIRED is set but DATABASE_URL is not — a DB-gated test may not skip here (#230)"
-                );
-                eprintln!("SKIP mailbox schedule_pg test: DATABASE_URL not set");
-                None
-            }
-        }
-    }
-
-    /// Serialize the suite: every test resets the same tables.
-    static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-    fn tagged(window: &str) -> serde_json::Value {
-        serde_json::json!({
-            "eventType": "OrderExpired",
-            "payload": { "orderId": "9b2f8f3e-0000-0000-0000-000000000ad1", "window": window },
-        })
-    }
-
-    async fn row(pool: &PgPool, message_id: uuid::Uuid) -> sqlx::postgres::PgRow {
-        sqlx::query(
-            "SELECT kind, message_type, channel, status, position, scheduled_at, completed_at, \
-                    payload, payload_hash \
-             FROM inbound_messages WHERE message_id = $1",
-        )
-        .bind(message_id)
-        .fetch_one(pool)
-        .await
-        .expect("row")
-    }
-
-    /// §1 (with ADR-153000 §1a): declaring the reminder writes ONE SCHEDULED row — kind MESSAGE,
-    /// message_type = the payload FACT, position NULL and the sequence untouched — and
-    /// re-declaring with a later time moves the SAME row in place.
-    #[tokio::test]
-    async fn schedule_then_redeclare_reschedules_the_same_row_in_place() {
-        let Some(url) = gated() else { return };
-        let _guard = DB_LOCK.lock().await;
-        let pool = PgPool::connect(&url).await.expect("connect");
-        setup(&pool).await;
-        let mailbox = PgMailbox::new(pool.clone());
-
-        let order = uuid::Uuid::from_u128(0x0AD1);
-        let t1 = chrono::Utc::now() + chrono::Duration::days(365);
-        let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), t1, order)
-            .await
-            .expect("schedule");
-        assert_eq!(out, ScheduleOutcome::Scheduled);
-
-        let mid = reminder_message_id(order, "expire");
-        let r = row(&pool, mid).await;
-        assert_eq!(r.get::<String, _>("kind"), "MESSAGE");
-        assert_eq!(r.get::<String, _>("message_type"), "OrderExpired");
-        assert_eq!(r.get::<String, _>("channel"), "WORKER");
-        assert_eq!(r.get::<String, _>("status"), "SCHEDULED");
-        assert_eq!(r.get::<Option<i64>, _>("position"), None, "no position until promotion");
-        assert_eq!(
-            r.get::<chrono::DateTime<chrono::Utc>, _>("scheduled_at").timestamp_micros(),
-            t1.timestamp_micros()
-        );
-        // The declare must not have consumed the position sequence: the next immediate row takes 1.
-        let next: i64 = sqlx::query("SELECT nextval('inbound_messages_position_seq') AS v")
-            .fetch_one(&pool)
-            .await
-            .expect("nextval")
-            .get("v");
-        assert_eq!(next, 1, "declaring a reminder must not burn a position");
-
-        // Re-declare with a LATER time and a newer payload: Rescheduled — same identity, one row,
-        // scheduled_at and payload moved (ADR-150500 §1: the row "always carries the latest time").
-        let t2 = t1 + chrono::Duration::days(365);
-        let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P2Y"), t2, order)
-            .await
-            .expect("reschedule");
-        assert_eq!(out, ScheduleOutcome::Rescheduled);
-        let count: i64 = sqlx::query("SELECT count(*) AS n FROM inbound_messages")
-            .fetch_one(&pool)
-            .await
-            .expect("count")
-            .get("n");
-        assert_eq!(count, 1, "reschedule converges on ONE pending row");
-        let r = row(&pool, mid).await;
-        assert_eq!(
-            r.get::<String, _>("status"),
-            "SCHEDULED",
-            "a reschedule never transitions status"
-        );
-        assert_eq!(r.get::<Option<i64>, _>("position"), None);
-        assert_eq!(
-            r.get::<chrono::DateTime<chrono::Utc>, _>("scheduled_at").timestamp_micros(),
-            t2.timestamp_micros()
-        );
-        assert_eq!(
-            r.get::<serde_json::Value, _>("payload").pointer("/payload/window"),
-            Some(&serde_json::json!("P2Y")),
-            "the re-declaration's payload replaced the original"
-        );
-    }
-
-    /// §2: once the promotion pass has stamped a position the occurrence is SPENT — a
-    /// re-declaration is a Duplicate (same payload) or a PayloadConflict (different payload), and
-    /// the row is untouched either way.
-    #[tokio::test]
-    async fn redeclaring_a_promoted_reminder_is_a_duplicate_untouched() {
-        let Some(url) = gated() else { return };
-        let _guard = DB_LOCK.lock().await;
-        let pool = PgPool::connect(&url).await.expect("connect");
-        setup(&pool).await;
-        let mailbox = PgMailbox::new(pool.clone());
-
-        let order = uuid::Uuid::from_u128(0x0AD2);
-        let due = chrono::Utc::now() - chrono::Duration::seconds(1);
-        schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), due, order)
-            .await
-            .expect("schedule");
-        assert_eq!(actor_runtime::promote_due(&pool, "Order").await.expect("promote"), 1);
-
-        // Same payload → the idempotent redelivery case, carrying the row's live status.
-        let later = chrono::Utc::now() + chrono::Duration::days(30);
-        let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), later, order)
-            .await
-            .expect("re-declare");
-        assert_eq!(out, ScheduleOutcome::Deduplicated(InboundMessageStatus::RECEIVED));
-        // Different payload → the conflict case. Untouched all the same.
-        let out = schedule_reminder(&mailbox, "Order", order, "expire", tagged("P2Y"), later, order)
-            .await
-            .expect("re-declare, conflicting");
-        assert_eq!(out, ScheduleOutcome::PayloadConflict(InboundMessageStatus::RECEIVED));
-
-        let r = row(&pool, reminder_message_id(order, "expire")).await;
-        assert_eq!(r.get::<String, _>("status"), "RECEIVED");
-        assert_eq!(
-            r.get::<chrono::DateTime<chrono::Utc>, _>("scheduled_at").timestamp_micros(),
-            due.timestamp_micros(),
-            "a spent occurrence's scheduled_at never moves"
-        );
-        assert_eq!(
-            r.get::<serde_json::Value, _>("payload").pointer("/payload/window"),
-            Some(&serde_json::json!("P1Y")),
-            "a spent occurrence's payload never moves"
-        );
-    }
-
-    /// §3: cancellation is the explicit withdrawal — `SCHEDULED → CANCELLED`, terminal, never
-    /// promoted, and idempotently `false` on a second attempt (or after promotion won the race).
-    #[tokio::test]
-    async fn cancelled_reminder_is_never_promoted() {
-        let Some(url) = gated() else { return };
-        let _guard = DB_LOCK.lock().await;
-        let pool = PgPool::connect(&url).await.expect("connect");
-        setup(&pool).await;
-        let mailbox = PgMailbox::new(pool.clone());
-
-        let order = uuid::Uuid::from_u128(0x0AD3);
-        // Already due — so a promotion pass WOULD take it if cancellation did not win first.
-        let due = chrono::Utc::now() - chrono::Duration::seconds(1);
-        schedule_reminder(&mailbox, "Order", order, "expire", tagged("P1Y"), due, order)
-            .await
-            .expect("schedule");
-
-        assert!(cancel_reminder(&mailbox, order, "expire").await.expect("cancel"));
-        assert!(
-            !cancel_reminder(&mailbox, order, "expire").await.expect("re-cancel"),
-            "already CANCELLED"
-        );
-        assert_eq!(actor_runtime::promote_due(&pool, "Order").await.expect("promote"), 0);
-
-        let r = row(&pool, reminder_message_id(order, "expire")).await;
-        assert_eq!(r.get::<String, _>("status"), "CANCELLED");
-        assert_eq!(r.get::<Option<i64>, _>("position"), None, "never promoted, never deliverable");
-        assert!(r.get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").is_some());
     }
 }

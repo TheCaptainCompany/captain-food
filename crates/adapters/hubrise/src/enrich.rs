@@ -54,9 +54,9 @@
 
 use std::sync::Arc;
 
-use application::mailbox::{Envelope, Mailbox};
-use infrastructure::generated::actor_clients::CatalogClient;
-use infrastructure::mailbox::EnqueueOutcome;
+use actor_client::mailbox::{Envelope, Mailbox};
+use actor_client::generated::actor_clients::CatalogClient;
+use actor_client::EnqueueOutcome;
 use domain::generated::commands::{ImportCatalog, UpdateOfferStock};
 use domain::shared::errors::DomainError;
 use domain::generated::entities::{CatalogCategory, Money, Offer, OptionList, Product, ProductItemOption, TaxRate};
@@ -740,8 +740,8 @@ mod tests {
     /// post-state, which enrichment now presumes (issue #20).
     async fn enricher_with(
         puller: FakePuller,
-    ) -> (HubRiseEnricher<FakePuller>, Arc<application::mailbox::mem::MemMailbox>) {
-        let mailbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+    ) -> (HubRiseEnricher<FakePuller>, Arc<actor_client::mailbox::mem::MemMailbox>) {
+        let mailbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let connections = Arc::new(crate::connections::mem::MemHubRiseConnections::default());
         connections
             .upsert(
@@ -989,13 +989,13 @@ mod tests {
         // mirrored callback's identity (#15) and addressed to the derived Catalog lane.
         let message_id = derive("command", "cb_1:ImportCatalog");
         let entry = mailbox.entry(message_id).expect("enqueued");
-        assert_eq!(entry.kind, "COMMAND");
-        assert_eq!(entry.channel, "WORKER");
-        assert_eq!(entry.message_type, "ImportCatalog");
-        assert_eq!(entry.actor_type, "Catalog");
-        assert_eq!(entry.actor_id, derive_catalog_id("cat_1").0);
-        assert_eq!(entry.cause_id, Some(derive("callback", "cb_1")));
-        assert_eq!(entry.correlation_id, derive("callback", "cb_1"));
+        assert_eq!(entry.kind(), "COMMAND");
+        assert_eq!(entry.channel(), "WORKER");
+        assert_eq!(entry.message_type(), "ImportCatalog");
+        assert_eq!(entry.actor_type(), "Catalog");
+        assert_eq!(entry.actor_id(), derive_catalog_id("cat_1").0);
+        assert_eq!(entry.cause_id(), Some(derive("callback", "cb_1")));
+        assert_eq!(entry.correlation_id(), derive("callback", "cb_1"));
 
         // 2) Inventory callback → one enqueue per SKU ('applied' counts HAND-OFFS now).
         let out = enricher.enrich(&callback("inventory")).await.unwrap();
@@ -1005,8 +1005,8 @@ mod tests {
             &format!("cb_1:UpdateOfferStock:{}", derive_offer_id("SKU-CHEESE").0),
         );
         let entry = mailbox.entry(stock_message).expect("enqueued");
-        assert_eq!(entry.message_type, "UpdateOfferStock");
-        assert_eq!(entry.actor_type, "Catalog");
+        assert_eq!(entry.message_type(), "UpdateOfferStock");
+        assert_eq!(entry.actor_type(), "Catalog");
     }
 
     #[tokio::test]

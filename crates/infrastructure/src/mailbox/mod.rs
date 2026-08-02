@@ -4,10 +4,12 @@
 //! into the fenced completion transaction, and the post-commit status-bus fan-out.
 
 mod activation;
-// `pub(crate)`: the GENERATED typed actor clients (`crate::generated::actor_clients`) delegate to
-// the shared entry constructors in here (`command_entry`, `insert_mapped`, `schedule_mapped`) so
-// the typed door and the free-function door cannot drift; the module stays crate-private.
-pub(crate) mod enqueue;
+// NOTE (#290 phase 1, PROP-20260802-130500 D1): the entry CONSTRUCTORS (`enqueue`), the typed
+// actor clients, the outcome enums and the deterministic id derivations all moved to the
+// `actor_client` boundary crate — building a `MailboxEntry` is that crate's exclusive,
+// compiler-enforced permission. This module keeps ONLY what is genuinely infrastructure: the
+// delivery glue over SQL (handler, in-tx flush/schedules), the PM lane chaining, the standalone
+// worker spawn, and the activation cache.
 mod handler;
 mod pm_delivery;
 mod standalone;
@@ -16,21 +18,6 @@ pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, Str
 pub use standalone::{
     shutdown_signal, spawn_standalone_workers, standalone_deps, standalone_workers_enabled,
 };
-// The PUBLIC surface after #284 slice 3: outcome enums (returned by the typed clients) and the
-// deterministic id derivations (adapters key lanes and look rows up with them) — NOT the singular
-// free-function enqueues, which are crate-internal plumbing behind the generated clients.
-pub use enqueue::{
-    inbound_message_id, inbound_namespace, reminder_message_id, surrogate_actor_id,
-    EnqueueOutcome, ScheduleOutcome,
-};
-// In-crate machinery: the generated clients delegate to `enqueue_inbound_fact`; the SIRENE sweep
-// batches through `enqueue_inbound_facts` (the D8-deferred bulk door) and builds `InboundFact`s.
-// (The retired reference implementations — `enqueue_worker_command`, `schedule_reminder`,
-// `cancel_reminder` — are `#[cfg(test)]` inside `enqueue` now, alive only for its drift guards.)
-pub(crate) use enqueue::{enqueue_inbound_fact, enqueue_inbound_facts, InboundFact};
-// The one typed door, re-exported here so `infrastructure::mailbox` names everything a producer
-// needs: `mailbox::actor_clients::{RestaurantClient, …}` next to the outcome enums above.
-pub use crate::generated::actor_clients;
 pub use handler::{MailboxCommandHandler, StatusBusObserver};
 pub use pm_delivery::backfill_stripe_facts_to_pm_lanes;
 
@@ -110,7 +97,7 @@ pub async fn apply_schedules_in_tx(
                 spec.after_days_key
             )));
         };
-        let entry = application::reminders::scheduled_entry(
+        let entry = actor_client::reminders::scheduled_entry(
             spec,
             message.actor_id,
             message.partition,
@@ -131,23 +118,23 @@ pub async fn apply_schedules_in_tx(
                    payload_hash = EXCLUDED.payload_hash \
                WHERE inbound_messages.status = 'SCHEDULED'",
         )
-        .bind(entry.message_id)
-        .bind(&entry.kind)
-        .bind(&entry.actor_type)
-        .bind(entry.actor_id)
-        .bind(entry.partition)
-        .bind(&entry.message_type)
-        .bind(&entry.payload)
-        .bind(&entry.payload_hash)
-        .bind(&entry.channel)
-        .bind(entry.user_id)
-        .bind(&entry.user_type)
-        .bind(entry.correlation_id)
-        .bind(entry.cause_id)
-        .bind(entry.session_id)
-        .bind(&entry.trace_id)
-        .bind(&entry.source)
-        .bind(&entry.external_id)
+        .bind(entry.message_id())
+        .bind(entry.kind())
+        .bind(entry.actor_type())
+        .bind(entry.actor_id())
+        .bind(entry.partition())
+        .bind(entry.message_type())
+        .bind(entry.payload())
+        .bind(entry.payload_hash())
+        .bind(entry.channel())
+        .bind(entry.user_id())
+        .bind(entry.user_type())
+        .bind(entry.correlation_id())
+        .bind(entry.cause_id())
+        .bind(entry.session_id())
+        .bind(entry.trace_id())
+        .bind(entry.source())
+        .bind(entry.external_id())
         .bind(scheduled_at)
         .execute(&mut **tx)
         .await?;

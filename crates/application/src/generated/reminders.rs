@@ -6,6 +6,13 @@
 // ADR-20260731-150500).
 
 /// One declared scheduling effect.
+///
+/// `#[non_exhaustive]` ON PURPOSE (#290 review BLOCKING-2): the fields are readable everywhere,
+/// but a LITERAL can be built only in this crate — i.e. only by this generated table. Without
+/// it, any crate could forge a spec (arbitrary actor_type/message_type/reminder identity) and
+/// feed it to `actor_client::reminders::scheduled_entry`, minting a real mailbox row around the
+/// sealed clients. Specs come from `REMINDER_SCHEDULES` / `reminder_schedules_for`, period.
+#[non_exhaustive]
 pub struct ReminderSchedule {
     pub actor_type: &'static str,
     /// The receives message (command or event name) whose successful delivery schedules.

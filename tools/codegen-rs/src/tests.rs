@@ -1678,19 +1678,22 @@ keys:
         );
     }
 
-    /// The mailbox door stays CLOSED (#284 slice 3, PROP-20260728-152752 §2.1): a `MailboxEntry`
-    /// may be assembled only behind the typed actor clients — i.e. by the shared constructors in
-    /// `infrastructure::mailbox::enqueue`, by the reminders constructor feeding the in-tx upsert,
-    /// by the type's own module (definition + mem-double seeding), or by integration tests that
-    /// seed rows directly. Any other construction site is a NEW door the typed clients cannot
-    /// guard, exactly the drift #284 exists to make impossible.
+    /// The mailbox door stays CLOSED (#284 slice 3, PROP-20260728-152752 §2.1; #290 phase 1,
+    /// PROP-20260802-130500 D1): a `MailboxEntry` may be assembled only inside the actor_client
+    /// boundary crate — the shared constructors in `actor_client::enqueue`, the reminders
+    /// constructor (`actor_client::reminders::scheduled_entry`), the type's own module
+    /// (definition + mem double + the D5 fixtures), or tests going through the fixture door. Any
+    /// other construction site is a NEW door the typed clients cannot guard — and since #290
+    /// phase 1 it also fails to COMPILE (pub(crate) fields), so this scan is belt-and-braces on
+    /// the boundary crate itself, where an in-crate shortcut around the shared constructors would
+    /// still build.
     ///
     /// Style of `makefile_recipe_lines_are_ascii`: executable, loud, never skips — every
     /// allowlisted path is asserted to exist AND to still contain the construction it excuses, so
     /// the guard fails loudly if its targets move instead of silently no-oping. The scan matches
     /// Whitespace-tolerant detector for `MailboxEntry {` — `MailboxEntry{`, a line break before the
     /// brace, or extra spaces must not slip past the guard (the #292 review's evasion NIT). A `use
-    /// … as` alias still would; the belt-and-braces answer to that is #290's compiler enforcement.
+    /// … as` alias still would; the compiler enforcement above is what closes that for good.
     fn mentions_entry_construction(text: &str) -> bool {
         let mut rest = text;
         while let Some(i) = rest.find("MailboxEntry") {
@@ -1710,15 +1713,20 @@ keys:
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let root = root.canonicalize().expect("repo root resolves");
 
-        // The sanctioned constructor sites, relative to the repo root.
+        // The sanctioned constructor sites, relative to the repo root. Since #290 phase 1
+        // (PROP-20260802-130500 D1) ALL of them live inside the actor_client boundary crate —
+        // `MailboxEntry` fields are pub(crate) there, so the COMPILER now enforces what this scan
+        // tripwires: an entry construction anywhere else no longer merely fails this test, it
+        // fails to build. The scan stays as belt-and-braces on the boundary crate itself (an
+        // in-crate shortcut around the shared constructors would still compile).
         const ALLOWED: &[(&str, &str)] = &[
-            // The type itself + the in-memory double's test seeding helper.
-            ("crates/application/src/mailbox.rs", "the MailboxEntry definition + mem double"),
+            // The type itself + the mem double's seeding + the D5 test-fixtures conversions.
+            ("crates/actor_client/src/mailbox.rs", "the MailboxEntry definition + mem double + fixtures"),
             // `scheduled_entry`: the generated-reminders row constructor the in-tx `schedules:`
-            // upsert (`apply_schedules_in_tx`) binds from (ADR-20260731-214500).
-            ("crates/application/src/reminders.rs", "the reminders scheduled_entry constructor"),
-            // The shared pub(crate) constructors every door (typed client or bulk path) delegates to.
-            ("crates/infrastructure/src/mailbox/enqueue.rs", "the shared enqueue constructors"),
+            // upsert (`infrastructure::mailbox::apply_schedules_in_tx`) binds from (ADR-20260731-214500).
+            ("crates/actor_client/src/reminders.rs", "the reminders scheduled_entry constructor"),
+            // The shared crate-internal constructors every door (typed client or bulk path) delegates to.
+            ("crates/actor_client/src/enqueue.rs", "the shared enqueue constructors"),
         ];
         for (rel, why) in ALLOWED {
             let path = root.join(rel);
@@ -1783,13 +1791,374 @@ keys:
             offenders.is_empty(),
             "`MailboxEntry {{` is constructed outside the sanctioned doors:\n{}\n\n\
              Fix: go through a generated typed actor client \
-             (infrastructure::generated::actor_clients — send/record/schedule), or, for \
-             crate-internal machinery, the shared constructors in \
-             infrastructure::mailbox::enqueue. If this is genuinely a new sanctioned constructor, \
+             (actor_client::generated::actor_clients — send/record/schedule), or, for \
+             actor_client-internal machinery, the shared constructors in \
+             actor_client::enqueue. If this is genuinely a new sanctioned constructor, \
              add it to this test's allowlist WITH its justification. Why: a hand-assembled row \
              bypasses the one derivation every door shares (lane, partition, principal, channel, \
              deterministic identity) — the exact drift #284's typed clients exist to prevent.",
             offenders.join("\n")
+        );
+    }
+
+    /// The Cargo.toml CAPABILITY ALLOWLIST (#290 phase 1, PROP-20260802-130500 D3): `sqlx` (talk
+    /// to the database) and `reqwest` (reach the network) may appear in a crate's RELEASE
+    /// dependency sections only when that crate is explicitly allowlisted here WITH its reason.
+    /// This is the side door the typed mailbox clients cannot see — "add sqlx to some crate and
+    /// just query the table" — turned into a red test on the very `Cargo.toml` diff that grants
+    /// the capability. cargo-deny was considered and skipped: it is not present in the dev/CI
+    /// images and `[bans]` cannot express per-crate grants of a workspace-wide dependency; this
+    /// test is executable everywhere `cargo test` runs (CI's `codegen` job included), in the
+    /// house style of the Makefile and mailbox-door guards.
+    ///
+    /// BOTH directions are asserted, like the door guard: a non-allowlisted holder fails, and an
+    /// allowlisted crate that no longer holds the capability fails too — a stale excuse is an
+    /// open door someone will eventually use. Dev-dependencies are out of scope on purpose: a
+    /// test may talk SQL; the release graph may not grow a capability silently.
+    #[test]
+    fn capability_dependencies_are_allowlisted() {
+        // (manifest path, capability, WHY the crate holds it)
+        const ALLOWED: &[(&str, &str, &str)] = &[
+            // ── sqlx — who may talk to Postgres at all ──
+            ("crates/infrastructure/Cargo.toml", "sqlx",
+             "THE adapter layer: event store, View_* read repos, and the SQL side of the mailbox boundary (PgMailbox)"),
+            ("crates/actor_runtime/Cargo.toml", "sqlx",
+             "the durable mailbox runtime is SQL by design (leases, fencing, head-of-line drain); its extraction floor is 'sqlx + tokio + serde'"),
+            ("crates/sirene_ingest/Cargo.toml", "sqlx",
+             "raw SIRENE ingestion into its OWN staging tables (ADR-0045)"),
+            ("crates/adapters/stripe/Cargo.toml", "sqlx",
+             "the adapter owns its webhook staging/dedupe tables (ADR-0045 posture)"),
+            ("crates/adapters/hubrise/Cargo.toml", "sqlx",
+             "the adapter owns its connection/staging tables (ADR-0045 posture)"),
+            ("crates/adapters/avelo37/Cargo.toml", "sqlx",
+             "the adapter owns its webhook staging tables (ADR-0045 posture)"),
+            ("crates/adapters/coopcycle/Cargo.toml", "sqlx",
+             "the adapter owns its webhook staging tables (ADR-0045 posture)"),
+            ("crates/adapters/uber_direct/Cargo.toml", "sqlx",
+             "the adapter owns its webhook staging tables (ADR-0045 posture)"),
+            ("crates/server/Cargo.toml", "sqlx",
+             "composition root: constructs the PgPool it injects and runs the /health _sqlx_migrations schema probe (ADR-0042/0043) — moving pool construction behind a port still leaks sqlx types through every wiring signature, so the exception stays until that refactor is designed"),
+            // ── reqwest — who may reach the network ──
+            ("crates/infrastructure/Cargo.toml", "reqwest",
+             "the generated /services/* HTTP clients (ADR-20260719-214500) + OVH SMS outbound"),
+            ("crates/sirene_ingest/Cargo.toml", "reqwest", "the SIRENE API client"),
+            ("crates/telemetry/Cargo.toml", "reqwest", "OTLP-over-HTTP export to Honeycomb EU"),
+            ("crates/web/Cargo.toml", "reqwest", "the SSR data layer resolves screens over HTTP"),
+            ("crates/adapters/stripe/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/adapters/hubrise/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/adapters/avelo37/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/adapters/coopcycle/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/adapters/uber_direct/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/server/Cargo.toml", "reqwest",
+             "the ADR-0047 auth verifier fetches the Supabase JWKS over HTTPS (identity wrapper lives in server today; measured holder kept with this WHY)"),
+        ];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut manifests = Vec::new();
+        walk(&root.join("crates"), &mut manifests);
+        walk(&root.join("tools"), &mut manifests);
+        manifests.sort();
+        assert!(!manifests.is_empty(), "found no member manifests to scan");
+
+        /// The capabilities a manifest GRANTS in its release graph: dependency names found in any
+        /// `[...dependencies]` section that is not a dev-dependencies section. Line-based on
+        /// purpose (matches the workspace's one-line dependency style); a multi-line dep TABLE
+        /// (`[dependencies.sqlx]`) is caught by the section header match.
+        fn release_grants(src: &str, dep: &str) -> bool {
+            let mut in_release_deps = false;
+            for line in src.lines() {
+                let t = line.trim();
+                if t.starts_with('[') {
+                    let header = t.trim_start_matches('[').trim_end_matches(']');
+                    // `[dependencies.sqlx]`-style table headers grant directly.
+                    if header.ends_with(&format!("dependencies.{dep}"))
+                        && !header.contains("dev-dependencies")
+                    {
+                        return true;
+                    }
+                    in_release_deps =
+                        header.ends_with("dependencies") && !header.contains("dev-dependencies");
+                    continue;
+                }
+                if in_release_deps
+                    && (t.starts_with(&format!("{dep} ")) || t.starts_with(&format!("{dep}=")))
+                {
+                    return true;
+                }
+            }
+            false
+        }
+
+        let mut offenders: Vec<String> = Vec::new();
+        for m in &manifests {
+            let rel = m.strip_prefix(&root).unwrap_or(m).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
+            });
+            for cap in ["sqlx", "reqwest"] {
+                let holds = release_grants(&src, cap);
+                let excused = ALLOWED.iter().any(|(p, c, _)| *p == rel && *c == cap);
+                if holds && !excused {
+                    offenders.push(format!("  {rel} grants `{cap}` without an allowlist entry"));
+                }
+                if !holds && excused {
+                    offenders.push(format!(
+                        "  {rel} is allowlisted for `{cap}` but no longer holds it — remove the stale entry"
+                    ));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "the Cargo.toml capability allowlist (PROP-20260802-130500 D3) is violated:\n{}\n\n\
+             Fix: either the crate should not hold this capability (talk through a port /\n\
+             the actor_client doors instead), or holding it is a DELIBERATE architectural\n\
+             decision — then add it to this test's allowlist WITH the reason. Why: any crate\n\
+             holding sqlx can bypass every domain rule with one query, and any crate holding\n\
+             reqwest can exfiltrate or call side effects review never sees; the allowlist makes\n\
+             the grant a loud, reviewable diff instead of a silent Cargo.toml line.",
+            offenders.join("\n")
+        );
+    }
+
+    /// The D5 escape-hatch guard (#290 phase 1, PROP-20260802-130500 D5): the `test-fixtures`
+    /// feature on `actor_client` (mem mailbox double, EntryFixture conversions, drift-guard
+    /// reference impls) may be enabled ONLY from `[dev-dependencies]` — a release artifact that
+    /// turns it on would ship a public constructor for the very type the boundary crate exists to
+    /// seal. The check is part of the D5 decision, not optional: a feature is opt-in-able by
+    /// mistake, so the mistake must be CI-red.
+    #[test]
+    fn test_fixtures_feature_never_reaches_a_release_artifact() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+        // The feature must still exist under this exact name — if it is renamed, this guard must
+        // move with it, never silently scan for nothing.
+        let client_manifest = std::fs::read_to_string(root.join("crates/actor_client/Cargo.toml"))
+            .expect("crates/actor_client/Cargo.toml readable");
+        assert!(
+            client_manifest.contains("test-fixtures = []"),
+            "actor_client no longer declares the `test-fixtures` feature — move this guard with it"
+        );
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut manifests = Vec::new();
+        walk(&root.join("crates"), &mut manifests);
+        walk(&root.join("tools"), &mut manifests);
+        manifests.sort();
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut dev_grants = 0usize;
+        for m in &manifests {
+            let rel = m.strip_prefix(&root).unwrap_or(m).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
+            });
+            if rel == "crates/actor_client/Cargo.toml" {
+                continue; // the declaring crate itself
+            }
+            let mut section = String::new();
+            for line in src.lines() {
+                let t = line.trim();
+                if t.starts_with('[') {
+                    section = t.trim_start_matches('[').trim_end_matches(']').to_string();
+                    continue;
+                }
+                if t.contains("test-fixtures") {
+                    if section.contains("dev-dependencies") {
+                        dev_grants += 1;
+                    } else {
+                        offenders.push(format!("  {rel} [{section}]: {t}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            dev_grants > 0,
+            "no [dev-dependencies] enables `test-fixtures` anywhere — either the feature was \
+             renamed (move this guard with it) or the scan went blind; both must be loud"
+        );
+        assert!(
+            offenders.is_empty(),
+            "`test-fixtures` is enabled OUTSIDE [dev-dependencies] — a release artifact would \
+             ship the sealed type's test constructors:\n{}\n\nFix: move the grant to that \
+             crate's [dev-dependencies] (tests get it; the shipped lib/bin never does).",
+            offenders.join("\n")
+        );
+    }
+
+    /// The BULK-DOOR grant guard (#290 review BLOCKING-1a): the `bulk-door` feature on
+    /// `actor_client` (the untyped `enqueue_inbound_facts` + `InboundFact` export) may be enabled
+    /// by EXACTLY ONE manifest — `crates/infrastructure` (its SIRENE sweep is the D8-deferred
+    /// bulk producer). Cargo features UNIFY across a build graph, so once infrastructure lights
+    /// the feature a sibling crate could technically NAME the export — which is precisely why
+    /// this guard fails the MANIFEST grant, the loud reviewable act, in any other crate (dev or
+    /// release: a test wanting the bulk door is a scope decision, not a convenience). Both
+    /// directions, like the capability allowlist: a second grant fails, and infrastructure
+    /// dropping the grant while the feature still exists fails too (a stale gate is a gate
+    /// nobody notices being reopened).
+    #[test]
+    fn bulk_door_feature_is_granted_only_to_infrastructure() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+        // The feature must still exist under this exact name — renamed means this guard moves
+        // with it, never silently scans for nothing.
+        let client_manifest = std::fs::read_to_string(root.join("crates/actor_client/Cargo.toml"))
+            .expect("crates/actor_client/Cargo.toml readable");
+        assert!(
+            client_manifest.contains("bulk-door = []"),
+            "actor_client no longer declares the `bulk-door` feature — move this guard with it"
+        );
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut manifests = Vec::new();
+        walk(&root.join("crates"), &mut manifests);
+        walk(&root.join("tools"), &mut manifests);
+        manifests.sort();
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut infrastructure_grants = false;
+        for m in &manifests {
+            let rel = m.strip_prefix(&root).unwrap_or(m).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
+            });
+            if rel == "crates/actor_client/Cargo.toml" {
+                continue; // the declaring crate itself
+            }
+            for (idx, line) in src.lines().enumerate() {
+                if line.contains("bulk-door") && !line.trim_start().starts_with('#') {
+                    if rel == "crates/infrastructure/Cargo.toml" {
+                        infrastructure_grants = true;
+                    } else {
+                        offenders.push(format!("  {rel}:{}: {}", idx + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(
+            infrastructure_grants,
+            "crates/infrastructure no longer enables `bulk-door` — either the SIRENE bulk path \
+             moved (move this guard's allowlist with it) or the gate went stale; both must be loud"
+        );
+        assert!(
+            offenders.is_empty(),
+            "`bulk-door` is granted outside crates/infrastructure — a second crate would gain \
+             the UNTYPED batched fact door the sealed {{Actor}}Fact traits exist to prevent:\n{}\n\n\
+             Fix: record facts through the typed clients' `record`, or make the new bulk \
+             producer a deliberate decision — then move it behind infrastructure or extend this \
+             allowlist WITH the reason.",
+            offenders.join("\n")
+        );
+
+        // THE NAMING SCAN — what the feature gate provably cannot close (#290 re-review):
+        // cargo features UNIFY, so once infrastructure lights `bulk-door` the export resolves for
+        // EVERY crate in the graph — a manifest-less scratch crate compiling
+        // `pub use actor_client::{enqueue_inbound_facts, InboundFact}` was demonstrated. The
+        // manifest grant above is the loud reviewable act; THIS scan is the enforcement: any
+        // source reference to the bulk-door symbols outside `crates/infrastructure` (the one
+        // sanctioned producer) and `crates/actor_client` (the definition) fails, door-guard
+        // style. Allowlist-asserted-alive: infrastructure must still NAME both symbols, or the
+        // producer moved and this scan went stale.
+        fn walk_rs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk_rs(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut sources = Vec::new();
+        walk_rs(&root.join("crates"), &mut sources);
+        sources.sort();
+        assert!(!sources.is_empty(), "found no crate sources to scan");
+
+        const SYMBOLS: &[&str] = &["enqueue_inbound_facts", "InboundFact"];
+        let mut named_offenders: Vec<String> = Vec::new();
+        let mut infra_names: HashSet<&str> = HashSet::new();
+        for f in &sources {
+            let rel = f.strip_prefix(&root).unwrap_or(f).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(f).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned tree is a silent no-op")
+            });
+            let inside_the_door = rel.starts_with("crates/actor_client/")
+                || rel.starts_with("crates/infrastructure/");
+            for (idx, line) in src.lines().enumerate() {
+                for sym in SYMBOLS {
+                    if !line.contains(sym) {
+                        continue;
+                    }
+                    if rel.starts_with("crates/infrastructure/") {
+                        infra_names.insert(sym);
+                    }
+                    if !inside_the_door {
+                        named_offenders.push(format!("  {rel}:{}: {}", idx + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            infra_names.len(),
+            SYMBOLS.len(),
+            "crates/infrastructure no longer names {SYMBOLS:?} — the SIRENE bulk producer moved; \
+             move this scan's allowlist with it so the guard stays real"
+        );
+        assert!(
+            named_offenders.is_empty(),
+            "the bulk-door symbols are NAMED outside crates/infrastructure — feature \
+             unification makes the export resolve graph-wide, so the reference itself is the \
+             violation:\n{}\n\nFix: record facts through a typed client's `record`; a new bulk \
+             producer is a scope decision recorded on the issue, then added to this scan's \
+             allowlist WITH the reason.",
+            named_offenders.join("\n")
         );
     }
 
@@ -2186,6 +2555,82 @@ Catalog:
         assert!(issues.iter().all(|i| i.level == Level::Warning), "both stay WARN — the mailbox mints an addressing-only id (calibration, see §2d doc)");
     }
 
+    /// THE DECLARATION IS THE PERMISSION (product-owner directive, 2026-08-02, generalized to the
+    /// whole client surface): per actor, `send` + the sealed `{Actor}Command` trait exist IFF the
+    /// actor's `receives` declares ≥1 COMMAND; `record` + `{Actor}Fact` IFF it declares ≥1
+    /// inbound FACT; `schedule`/`cancel` IFF it declares `reminders:`. An unjustified surface is
+    /// ABSENT (a compile error at any call site), never uncallable-but-present. Bidirectional
+    /// over the real catalog, with the per-actor declaration sets re-derived HERE from the model
+    /// (an independent scan — the guard does not trust the emitter's own).
+    #[test]
+    fn client_surface_exists_only_with_a_spec_declaration() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let declaring: HashSet<String> =
+            parse_reminders(&model).into_iter().map(|r| r.actor).collect();
+        assert!(
+            !declaring.is_empty(),
+            "no actor declares reminders — if the Order pilot left the spec, this guard needs a \
+             new positive case, not silence"
+        );
+        // Independent per-actor receives scan: ref path encodes the kind (§1b).
+        let mut has_commands: HashSet<String> = HashSet::new();
+        let mut has_facts: HashSet<String> = HashSet::new();
+        if let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") {
+            for (k, def) in actors {
+                let Some(name) = k.as_str().filter(|s| *s != "principals") else { continue };
+                let Some(receives) = def.get("receives").and_then(|r| r.as_sequence()) else {
+                    continue;
+                };
+                for entry in receives {
+                    let Some(r) =
+                        entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str())
+                    else {
+                        continue;
+                    };
+                    if r.starts_with("commands.yaml#/") {
+                        has_commands.insert(name.to_string());
+                    } else if r.starts_with("events.yaml#/") {
+                        has_facts.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        assert!(!has_commands.is_empty() && !has_facts.is_empty(), "the receives scan went blind");
+
+        let clients = emit_actor_clients(&model);
+        let mut seen_blocks = 0usize;
+        for block in clients.split("\n// ─── ").skip(1) {
+            let name = block.split(' ').next().expect("actor name heads the block");
+            seen_blocks += 1;
+            let surface = [
+                ("pub async fn send", has_commands.contains(name), "receives >=1 COMMAND"),
+                (
+                    &format!("pub trait {name}Command") as &str,
+                    has_commands.contains(name),
+                    "receives >=1 COMMAND",
+                ),
+                ("pub async fn record", has_facts.contains(name), "receives >=1 inbound FACT"),
+                (
+                    &format!("pub trait {name}Fact") as &str,
+                    has_facts.contains(name),
+                    "receives >=1 inbound FACT",
+                ),
+                ("pub async fn schedule", declaring.contains(name), "declares reminders:"),
+                ("pub async fn cancel", declaring.contains(name), "declares reminders:"),
+            ];
+            for (needle, justified, why) in surface {
+                assert_eq!(
+                    block.contains(needle),
+                    justified,
+                    "{name}: `{needle}` must exist IFF the actor {why} in actors.yaml — the spec \
+                     declaration is the permission (product-owner directive, 2026-08-02)"
+                );
+            }
+        }
+        assert!(seen_blocks > 1, "the per-actor block scan went blind — fix the separator parse");
+    }
+
     /// The §2e fixture: a declared state field with clean lineage, a typed acting ref over it.
     const REQ_SCALARS: &str = "CustomerId: { type: string }\nOrderId: { type: string }\n";
     const REQ_EVENTS: &str = "ConversationOpened:\n  type: object\n  properties:\n    customerId: { $ref: 'scalars.yaml#/CustomerId' }\n";
@@ -2244,6 +2689,11 @@ Catalog:
         let router = emit_infra_command_router(&model);
         let committed_router = std::fs::read_to_string(root.join("crates/infrastructure/src/generated/command_router.rs")).expect("committed command_router.rs");
         assert_eq!(router, committed_router, "command_router.rs must stay byte-identical across the typed-identity migration");
+        // The addressing half of the frozen routing contract lives in the actor_client crate
+        // since #290 phase 1 — same byte-identity requirement.
+        let addresses = emit_actor_addresses(&model);
+        let committed_addresses = std::fs::read_to_string(root.join("crates/actor_client/src/generated/addresses.rs")).expect("committed addresses.rs");
+        assert_eq!(addresses, committed_addresses, "addresses.rs must stay byte-identical across the typed-identity migration");
         let states = emit_domain_states(&model);
         let committed_states = std::fs::read_to_string(root.join("crates/domain/src/generated/states.rs")).expect("committed states.rs");
         assert_eq!(states, committed_states, "states.rs must stay byte-identical across the typed-requires migration");
@@ -2437,16 +2887,22 @@ Catalog:
         // #284 slice 1 (PROP-20260728-152752 §2.1): the typed-client surface must span the SAME
         // actor set the composition root spawns workers for — one client + sealed Command/Fact
         // marker traits per ACTOR_MAILBOXES entry. The actor list is parsed out of the EMITTED
-        // router (not re-derived from the spec), so the two artifacts cannot diverge silently.
+        // addresses table (not re-derived from the spec), so the two artifacts cannot diverge
+        // silently — and the router must keep RE-EXPORTING that one definition (#290 phase 1).
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
-        let clients = emit_infra_actor_clients(&model);
+        let clients = emit_actor_clients(&model);
+        let addresses = emit_actor_addresses(&model);
         let router = emit_infra_command_router(&model);
-        let block = router
+        assert!(
+            router.contains("pub use actor_client::generated::addresses::{mailbox_address, ACTOR_MAILBOXES};"),
+            "the router must re-export the ONE addressing definition, never re-emit it"
+        );
+        let block = addresses
             .split("pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[")
             .nth(1)
             .and_then(|rest| rest.split("];").next())
-            .expect("ACTOR_MAILBOXES block in the emitted router");
+            .expect("ACTOR_MAILBOXES block in the emitted addresses table");
         let actors: Vec<&str> = block
             .lines()
             .filter_map(|l| l.trim().strip_prefix("(\""))
@@ -2454,13 +2910,11 @@ Catalog:
             .collect();
         assert!(!actors.is_empty(), "expected at least one mailbox actor in the emitted router");
         for actor in &actors {
-            for item in [
-                format!("pub struct {actor}Client"),
-                format!("pub trait {actor}Command"),
-                format!("pub trait {actor}Fact"),
-            ] {
-                assert!(clients.contains(&item), "generated actor_clients.rs lacks `{item}`");
-            }
+            // The CLIENT struct exists for every mailbox actor (it is the lane handle); the
+            // marker traits and methods are SPEC-GATED per declaration — asserted bidirectionally
+            // by `client_surface_exists_only_with_a_spec_declaration` below.
+            let item = format!("pub struct {actor}Client");
+            assert!(clients.contains(&item), "generated actor_clients.rs lacks `{item}`");
         }
         // The seal itself must be present — without the private supertrait module the whole
         // compile-time guarantee (no impls outside the generated file) evaporates.

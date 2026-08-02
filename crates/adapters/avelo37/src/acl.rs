@@ -49,8 +49,8 @@ use domain::generated::events::{
 use domain::generated::scalars::{DeliveryJobId, DeliveryStatus, ExternalReference, PhoneNumber};
 use domain::shared::errors::DomainError;
 use hmac::{Hmac, Mac};
-use infrastructure::generated::actor_clients::DeliveryJobClient;
-use infrastructure::mailbox::EnqueueOutcome;
+use actor_client::generated::actor_clients::DeliveryJobClient;
+use actor_client::EnqueueOutcome;
 use serde::Deserialize;
 use sha2::Sha256;
 
@@ -374,7 +374,7 @@ pub enum Avelo37IngestOutcome {
 /// ports so the flow is unit-testable in memory.
 pub struct Avelo37WebhookIngestor {
     raw: Arc<dyn RawAvelo37Events>,
-    mailbox: Arc<dyn application::mailbox::Mailbox>,
+    mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     /// Optional post-staging nudge (the composition root wires it to the drain worker's `run_once`)
     /// so delivery lag is near zero; the worker's poll loop is the safety net.
     on_staged: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -383,7 +383,7 @@ pub struct Avelo37WebhookIngestor {
 impl Avelo37WebhookIngestor {
     pub fn new(
         raw: Arc<dyn RawAvelo37Events>,
-        mailbox: Arc<dyn application::mailbox::Mailbox>,
+        mailbox: Arc<dyn actor_client::mailbox::Mailbox>,
     ) -> Self {
         Self { raw, mailbox, on_staged: None }
     }
@@ -687,7 +687,7 @@ mod tests {
     #[tokio::test]
     async fn a_delivery_is_mirrored_and_staged_for_the_drain() {
         let raw = Arc::new(MemRawAvelo37Events::default());
-        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+        let inbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let ingestor = Avelo37WebhookIngestor::new(raw.clone(), inbox.clone());
         let event = sample_accepted();
         let raw_body = serde_json::json!({ "id": event.id, "verbatim": true });
@@ -706,20 +706,20 @@ mod tests {
         // …and the ADAPTED business event awaits the drain worker (no domain append here).
         let entries = inbox.entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].kind, "EVENT");
-        assert_eq!(entries[0].source.as_deref(), Some("avelo37"));
-        assert_eq!(entries[0].external_id.as_deref(), Some(event.id.as_str()));
-        assert_eq!(entries[0].message_type, "DeliveryAcceptedByPartner");
-        assert_eq!(entries[0].correlation_id, avelo37_correlation_id(&event.id));
-        assert_eq!(entries[0].actor_type, "DeliveryJob", "addressed to the DeliveryJob lane");
-        let staged: DomainEvent = serde_json::from_value(entries[0].payload.clone()).unwrap();
+        assert_eq!(entries[0].kind(), "EVENT");
+        assert_eq!(entries[0].source(), Some("avelo37"));
+        assert_eq!(entries[0].external_id(), Some(event.id.as_str()));
+        assert_eq!(entries[0].message_type(), "DeliveryAcceptedByPartner");
+        assert_eq!(entries[0].correlation_id(), avelo37_correlation_id(&event.id));
+        assert_eq!(entries[0].actor_type(), "DeliveryJob", "addressed to the DeliveryJob lane");
+        let staged: DomainEvent = serde_json::from_value(entries[0].payload().clone()).unwrap();
         assert!(matches!(staged, DomainEvent::DeliveryAcceptedByPartner(_)));
     }
 
     #[tokio::test]
     async fn redelivered_webhook_is_a_no_op() {
         let raw = Arc::new(MemRawAvelo37Events::default());
-        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+        let inbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let ingestor = Avelo37WebhookIngestor::new(raw, inbox.clone());
         let event = sample_accepted();
         let raw_body = serde_json::json!({ "id": event.id });
@@ -738,7 +738,7 @@ mod tests {
     #[tokio::test]
     async fn ignored_and_unmappable_deliveries_are_mirrored_but_never_staged() {
         let raw = Arc::new(MemRawAvelo37Events::default());
-        let inbox = Arc::new(application::mailbox::mem::MemMailbox::default());
+        let inbox = Arc::new(actor_client::mailbox::mem::MemMailbox::default());
         let ingestor = Avelo37WebhookIngestor::new(raw.clone(), inbox.clone());
 
         let ignored = event_from_json(serde_json::json!({

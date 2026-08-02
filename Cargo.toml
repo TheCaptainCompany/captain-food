@@ -14,6 +14,11 @@ members = [
     "crates/actor_runtime",    # durable-mailbox actor machinery (ADR-20260730-234918) — EXTRACTION-READY:
                                # zero Captain.Food crates (enforced by its dependency_rule test); generic
                                # over a MessageHandler, so another product can lift it wholesale
+    "crates/actor_client",     # the actor-mailbox BOUNDARY crate (PROP-20260802-130500 D1/D4, #290):
+                               # the Mailbox port, the private MailboxEntry, the generated typed
+                               # clients (write door) and the generic ActorClient (read door). The
+                               # ONLY crate that can construct a mailbox row — the compiler enforces
+                               # what the door-guard test used to scan for. No sqlx, no reqwest.
     "crates/infrastructure",   # adapters implementing ports — depends on application, domain, sirene_ingest (wire types)
     "crates/adapters/stripe",  # Stripe partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin
     "crates/adapters/hubrise", # HubRise partner adapter (ADR-20260718-213352) — ACL + webhook shell + standalone bin

@@ -27,11 +27,11 @@
 
 use std::sync::Arc;
 
-use application::mailbox::{Envelope, Mailbox};
-use infrastructure::generated::actor_clients::{
+use actor_client::mailbox::{Envelope, Mailbox};
+use actor_client::generated::actor_clients::{
     CatalogClient, RestaurantAccountClient, RestaurantClient,
 };
-use infrastructure::mailbox::EnqueueOutcome;
+use actor_client::EnqueueOutcome;
 use application::queries::RestaurantReadRepository;
 use domain::generated::commands::{CreateCatalog, RegisterRestaurant, RegisterRestaurantAccount};
 use domain::generated::entities::{Address, TaxRate};
@@ -574,8 +574,8 @@ impl<G: HubRiseConnectGateway> ConnectService for HubRiseConnectFlow<G> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use application::mailbox::mem::MemMailbox;
-    use application::mailbox::MailboxEntry;
+    use actor_client::mailbox::mem::MemMailbox;
+    use actor_client::mailbox::MailboxEntry;
     use application::queries::{RestaurantFilter, RestaurantRow};
     use domain::generated::scalars::{
         OrderAcceptanceMode, RestaurantId as RestaurantIdScalar, RestaurantStatus,
@@ -719,7 +719,7 @@ mod tests {
 
     /// The enqueued entries of one command type (attempt-scoped ids make direct lookup moot).
     fn entries_of(mailbox: &MemMailbox, command_type: &str) -> Vec<MailboxEntry> {
-        mailbox.entries().into_iter().filter(|e| e.message_type == command_type).collect()
+        mailbox.entries().into_iter().filter(|e| e.message_type() == command_type).collect()
     }
 
     #[tokio::test]
@@ -740,32 +740,32 @@ mod tests {
         // lanes, payloads carrying the pulled data.
         let acc = entries_of(&mailbox, "RegisterRestaurantAccount");
         assert_eq!(acc.len(), 1);
-        assert_eq!(acc[0].kind, "COMMAND");
-        assert_eq!(acc[0].channel, "WORKER");
-        assert_eq!(acc[0].actor_type, "RestaurantAccount");
-        assert_eq!(acc[0].actor_id, derive_restaurant_account_id("acc_1").0);
-        assert_eq!(acc[0].payload["legalName"], serde_json::json!("Bella Pizza"));
-        assert_eq!(acc[0].payload["defaultCurrency"], serde_json::json!("EUR"));
-        assert_eq!(acc[0].payload["ref"], serde_json::json!("acc_1"));
+        assert_eq!(acc[0].kind(), "COMMAND");
+        assert_eq!(acc[0].channel(), "WORKER");
+        assert_eq!(acc[0].actor_type(), "RestaurantAccount");
+        assert_eq!(acc[0].actor_id(), derive_restaurant_account_id("acc_1").0);
+        assert_eq!(acc[0].payload()["legalName"], serde_json::json!("Bella Pizza"));
+        assert_eq!(acc[0].payload()["defaultCurrency"], serde_json::json!("EUR"));
+        assert_eq!(acc[0].payload()["ref"], serde_json::json!("acc_1"));
 
         let resto = entries_of(&mailbox, "RegisterRestaurant");
         assert_eq!(resto.len(), 1);
-        assert_eq!(resto[0].actor_type, "Restaurant");
-        assert_eq!(resto[0].actor_id, derive_restaurant_id("loc_1").0);
-        assert_eq!(resto[0].payload["accountId"], serde_json::json!(derive_restaurant_account_id("acc_1").0));
-        assert_eq!(resto[0].payload["listingStatus"], serde_json::json!("PASSIVE_PARTNER"));
-        assert_eq!(resto[0].payload["ref"], serde_json::json!("loc_1"));
-        assert_eq!(resto[0].payload["address"]["city"], serde_json::json!("Tours"));
-        assert_eq!(resto[0].payload["preparationTimeMinutes"], serde_json::json!(15));
+        assert_eq!(resto[0].actor_type(), "Restaurant");
+        assert_eq!(resto[0].actor_id(), derive_restaurant_id("loc_1").0);
+        assert_eq!(resto[0].payload()["accountId"], serde_json::json!(derive_restaurant_account_id("acc_1").0));
+        assert_eq!(resto[0].payload()["listingStatus"], serde_json::json!("PASSIVE_PARTNER"));
+        assert_eq!(resto[0].payload()["ref"], serde_json::json!("loc_1"));
+        assert_eq!(resto[0].payload()["address"]["city"], serde_json::json!("Tours"));
+        assert_eq!(resto[0].payload()["preparationTimeMinutes"], serde_json::json!(15));
 
         // The catalog: created AND initially imported (no waiting for the first callback), on the
         // SAME Catalog lane — head-of-line order delivers CreateCatalog before ImportCatalog.
         let create = entries_of(&mailbox, "CreateCatalog");
         let import = entries_of(&mailbox, "ImportCatalog");
         assert_eq!((create.len(), import.len()), (1, 1));
-        assert_eq!(create[0].actor_id, derive_catalog_id("cat_1").0);
-        assert_eq!(import[0].actor_id, derive_catalog_id("cat_1").0, "same lane = ordered delivery");
-        assert_eq!(import[0].payload["products"].as_array().map(Vec::len), Some(1));
+        assert_eq!(create[0].actor_id(), derive_catalog_id("cat_1").0);
+        assert_eq!(import[0].actor_id(), derive_catalog_id("cat_1").0, "same lane = ordered delivery");
+        assert_eq!(import[0].payload()["products"].as_array().map(Vec::len), Some(1));
 
         // The token is stored keyed by the RestaurantAccount, with the location snapshot for
         // callback→token resolution.

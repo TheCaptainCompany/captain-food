@@ -202,7 +202,7 @@ fn schema_over_with_gate(pool: &PgPool, status_bus: infrastructure::OperationSta
         Arc::new(infrastructure::persistence::PgRefundProcessState::new(pool.clone()));
     let journal: Arc<dyn application::journal::CommandJournal> =
         Arc::new(PgCommandJournal::new(pool.clone()));
-    let mailbox: Arc<dyn application::mailbox::Mailbox> =
+    let mailbox: Arc<dyn actor_client::mailbox::Mailbox> =
         Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()));
     server::graphql_schema::build_schema(
         Some(server::graphql_schema::ReadDeps {
@@ -587,12 +587,14 @@ async fn pm_gate_cross_arm_duplicate_replays_instead_of_reexecuting() {
 
     // --- Direction 2: accepted on the MAILBOX arm, retried on the LEGACY arm (gate rolled back).
     let mailbox = infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone());
-    use application::mailbox::Mailbox as _;
+    use actor_client::mailbox::Mailbox as _;
     let order2 = uuid::Uuid::new_v4();
     let message2 = uuid::Uuid::new_v4();
     let payload2 = serde_json::json!({ "orderId": order2, "reason": "cold food" });
+    // Seed through the D5 EntryFixture door (PROP-20260802-130500): raw MailboxEntry
+    // construction does not compile outside the actor_client crate.
     mailbox
-        .insert(&application::mailbox::MailboxEntry {
+        .insert(&actor_client::mailbox::fixtures::EntryFixture {
             message_id: message2,
             kind: "COMMAND".into(),
             actor_type: "RefundProcess".into(),
@@ -610,7 +612,8 @@ async fn pm_gate_cross_arm_duplicate_replays_instead_of_reexecuting() {
             trace_id: None,
             source: None,
             external_id: None,
-        })
+        }
+        .into())
         .await
         .expect("seed mailbox acceptance");
     sqlx::query("UPDATE inbound_messages SET status = 'REJECTED', error = '{\"code\":\"RefundNotPending\"}', completed_at = now() WHERE message_id = $1")

@@ -9,6 +9,13 @@ description = "Captain.Food infrastructure: adapters implementing the applicatio
 [dependencies]
 domain = { path = "../domain" }
 application = { path = "../application" }
+# The actor-mailbox BOUNDARY crate (#290 phase 1, PROP-20260802-130500 D1): infrastructure keeps
+# ONLY the SQL side of the mailbox (`PgMailbox` implements the port over the entry getters); every
+# entry construction — typed clients, reminders, the SIRENE bulk door — lives behind actor_client.
+# `bulk-door` (#290 review BLOCKING-1a): the ONE sanctioned grant of the untyped batched fact
+# door — the SIRENE sweep's fast path. Any other crate enabling this feature is CI-red
+# (codegen guard `bulk_door_feature_is_granted_only_to_infrastructure`).
+actor_client = { path = "../actor_client", features = ["bulk-door"] }
 # The durable-mailbox actor machinery (#242, ADR-20260730-234918) — the dependency points INWARD:
 # infrastructure implements its MessageHandler; actor_runtime never sees a Captain.Food type.
 actor_runtime = { path = "../actor_runtime" }
@@ -54,3 +61,10 @@ base64 = "0.22"
 # Auth-session encryption at rest (#112): AES-256-GCM over the parked provider tokens, under the
 # AUTH_SESSION_KEY env secret. RustCrypto, same family as hmac/sha2 above.
 aes-gcm = "0.10"
+
+[dev-dependencies]
+# The D5 `test-fixtures` gate (PROP-20260802-130500): the DB-gated reminder tests exercise the
+# reference `schedule_reminder`/`cancel_reminder` implementations against the real DDL, and the
+# integration tests seed mailbox rows through the EntryFixture conversion — test-only doors a
+# release build of this crate never sees.
+actor_client = { path = "../actor_client", features = ["test-fixtures"] }
