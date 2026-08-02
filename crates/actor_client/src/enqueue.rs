@@ -18,7 +18,7 @@ use application::ports::Actor;
 use domain::generated::scalars::InboundMessageStatus;
 use domain::shared::errors::DomainError;
 
-use crate::generated::addresses::{mailbox_address, ACTOR_MAILBOXES};
+use crate::generated::addresses::{mailbox_address, ACTOR_INBOUND_FACTS, ACTOR_MAILBOXES};
 
 /// What one fire-and-forget enqueue did.
 #[derive(Debug, Clone, PartialEq)]
@@ -144,10 +144,13 @@ pub(crate) fn command_entry(
 /// dedupe identity is `(source, external_id)`: `message_id = UUIDv5(source:external_id)` in the
 /// inbound namespace, so a webhook redelivery collides on the pk instead of double-applying.
 ///
-/// PUBLIC only as the input of [`enqueue_inbound_facts`], the D8-deferred BULK door (its one
-/// producer is the SIRENE sweep in `infrastructure`): it cannot set kind, identity, partition or
-/// principal — those are derived by the shared [`inbound_entry`] constructor, exactly as for a
-/// typed client `record`. Singular producers hold TYPED facts and go through a client's `record`.
+/// Reachable outside this crate ONLY through the `bulk-door` cargo feature (#290 review
+/// BLOCKING-1a), as the input of [`enqueue_inbound_facts`] — and only `infrastructure` may enable
+/// that feature (guard test `bulk_door_feature_is_granted_only_to_infrastructure`; its one
+/// producer is the SIRENE sweep). It cannot set kind, identity, partition or principal — those
+/// are derived by the shared [`inbound_entry`] constructor, exactly as for a typed client
+/// `record` — and its `event_type` is validated against the actor's declared `receives` at the
+/// door. Singular producers hold TYPED facts and go through a client's `record`.
 #[derive(Debug, Clone)]
 pub struct InboundFact {
     pub source: String,
@@ -187,6 +190,13 @@ pub(crate) async fn enqueue_inbound_fact(
 
 /// The one place an [`InboundFact`] becomes a [`MailboxEntry`]. Shared by the singular and batched
 /// enqueue so they cannot drift on lane, principal or channel.
+///
+/// The RECEIVES check (#290 review BLOCKING-1b): the typed clients prove "this actor records this
+/// fact" at COMPILE time through the sealed `{Actor}Fact` traits; this constructor is also fed by
+/// the UNTYPED bulk door, so it re-proves membership at runtime against the generated
+/// [`ACTOR_INBOUND_FACTS`] table (the same actors.yaml `receives` scan the traits come from). An
+/// undeclared (actor, event) pair is refused at the door — the interim containment while the D8
+/// typed-batch API stays deferred.
 pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainError> {
     let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == fact.actor_type) else {
         return Err(DomainError::Repository(format!(
@@ -194,6 +204,17 @@ pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainErr
             fact.actor_type, fact.event_type
         )));
     };
+    let received = ACTOR_INBOUND_FACTS
+        .iter()
+        .find(|(a, _)| *a == fact.actor_type)
+        .is_some_and(|(_, facts)| facts.contains(&fact.event_type.as_str()));
+    if !received {
+        return Err(DomainError::Repository(format!(
+            "'{}' does not receive inbound fact '{}' (actors.yaml `receives`) — refusing an \
+             undeclared event type at the mailbox door",
+            fact.actor_type, fact.event_type
+        )));
+    }
     let message_id = inbound_message_id(&fact.source, &fact.external_id);
     let payload_hash = application::journal::payload_hash(&fact.payload);
     Ok(MailboxEntry {
@@ -236,9 +257,14 @@ pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainErr
 /// same fact are byte-identical.
 ///
 /// The D8-deferred BULK door (PROP-20260728-152752 — no batched client API): its ONE sanctioned
-/// producer is the SIRENE sweep. It became `pub` when the boundary moved into this crate (#290
-/// phase 1) — it grants no column control (everything is derived by [`inbound_entry`]), but a new
-/// caller showing up in review is a scope question, not a convenience.
+/// producer is the SIRENE sweep in `infrastructure`. INTERIM CONTAINMENT until the typed-batch
+/// design lands (#290 review BLOCKING-1): (a) reachable outside this crate only through the
+/// `bulk-door` cargo feature, which the guard test allows `infrastructure` alone to enable — a
+/// loud, D3-style manifest grant (cargo feature unification means a sibling crate in the same
+/// build could technically NAME the item once infrastructure lit the feature, which is exactly
+/// why the guard fails the MANIFEST grant, the reviewable act); (b) every fact's `event_type` is
+/// validated against the target actor's declared `receives` in [`inbound_entry`] — the runtime
+/// re-proof of what the sealed `{Actor}Fact` traits prove at compile time on the typed path.
 pub async fn enqueue_inbound_facts(
     mailbox: &dyn Mailbox,
     facts: Vec<InboundFact>,
@@ -597,6 +623,43 @@ mod drift_guard {
             matches!(round_tripped, domain::generated::events::DomainEvent::PaymentCaptured(_)),
             "the adjacent tag routes back to the variant that was recorded"
         );
+    }
+
+    /// BLOCKING-1b invariant (#290 review): the UNTYPED bulk door must refuse an event type the
+    /// target actor does not `receive` — singular and batched forms alike, since both feed the
+    /// shared `inbound_entry`. Without this, the bulk path would skip the membership check the
+    /// sealed `{Actor}Fact` traits enforce on the typed path, and an arbitrary event type could
+    /// be parked on an arbitrary lane. Nothing may reach the mailbox on a refusal.
+    #[tokio::test]
+    async fn an_undeclared_inbound_fact_is_refused_at_the_door() {
+        let actor_id = super::surrogate_actor_id("Payment", "pi_bad");
+        let bad = |event_type: &str, actor_type: &str| InboundFact {
+            source: "stripe".into(),
+            external_id: "evt_bad".into(),
+            event_type: event_type.into(),
+            payload: serde_json::json!({ "eventType": event_type, "payload": {} }),
+            correlation_id: uuid::Uuid::from_u128(0xC0),
+            actor_type: actor_type.into(),
+            actor_id,
+        };
+
+        // Payment does NOT receive OrderPlaced: the singular form refuses...
+        let mailbox = MemMailbox::default();
+        let err = enqueue_inbound_fact(&mailbox, bad("OrderPlaced", "Payment"))
+            .await
+            .expect_err("an undeclared (actor, event) pair must refuse");
+        assert!(err.to_string().contains("does not receive"), "the error names the check: {err}");
+        assert!(mailbox.entries().is_empty(), "nothing reaches the mailbox on a refusal");
+
+        // ...and the batched form refuses the WHOLE batch (all-or-nothing entry construction).
+        let err = super::enqueue_inbound_facts(
+            &mailbox,
+            vec![bad("PaymentCaptured", "Payment"), bad("OrderPlaced", "Payment")],
+        )
+        .await
+        .expect_err("a batch carrying one undeclared fact must refuse");
+        assert!(err.to_string().contains("does not receive"), "{err}");
+        assert!(mailbox.entries().is_empty(), "a refused batch enqueues nothing");
     }
 
     /// Fix-1 invariant (#288 review): a payload whose DECLARED identity names a DIFFERENT

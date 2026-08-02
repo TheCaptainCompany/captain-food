@@ -134,3 +134,29 @@ pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
     ("RestaurantAccount", 100),
     ("Rider", 100),
 ];
+
+/// Every mailbox actor's declared inbound FACT set (the `events.yaml#/…` refs in its
+/// actors.yaml `receives`) — the SAME scan the sealed `{Actor}Fact` marker traits are generated
+/// from. The typed clients prove membership at COMPILE time; this table exists so the one
+/// untyped path (`enqueue_inbound_facts`, the feature-gated bulk door) re-proves it at RUNTIME
+/// in `inbound_entry` — an undeclared (actor, event) pair is refused at the door, never
+/// enqueued. Actors that receive no inbound facts render an empty slice on purpose: absent and
+/// empty must both refuse.
+pub const ACTOR_INBOUND_FACTS: &[(&str, &[&str])] = &[
+    ("Cart", &["CartCheckedOut"]),
+    ("Catalog", &["OfferStockUpdated"]),
+    ("Conversation", &[]),
+    ("Customer", &[]),
+    ("CustomerCredit", &[]),
+    ("DeliveryJob", &["DeliveryAcceptedByPartner", "DeliveryDispatchFailed", "DeliveryOfferTimedOut", "DeliveryRejectedByPartner", "DeliveryRequested", "DeliveryStatusUpdated"]),
+    ("DeliveryPartnerRegistration", &[]),
+    ("Order", &["OrderPlaced"]),
+    ("Payment", &["PaymentCaptured", "PaymentFailed", "PaymentIntentCreated", "PaymentRefunded", "RefundApproved", "RefundDenied", "RefundOpened"]),
+    ("PlaceOrderProcess", &["PaymentCaptured", "PaymentFailed"]),
+    ("Prospect", &[]),
+    ("Reclamation", &[]),
+    ("RefundProcess", &["PaymentRefunded"]),
+    ("Restaurant", &["RestaurantRegistered"]),
+    ("RestaurantAccount", &[]),
+    ("Rider", &[]),
+];

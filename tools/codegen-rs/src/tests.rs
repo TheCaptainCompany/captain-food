@@ -2016,6 +2016,85 @@ keys:
         );
     }
 
+    /// The BULK-DOOR grant guard (#290 review BLOCKING-1a): the `bulk-door` feature on
+    /// `actor_client` (the untyped `enqueue_inbound_facts` + `InboundFact` export) may be enabled
+    /// by EXACTLY ONE manifest — `crates/infrastructure` (its SIRENE sweep is the D8-deferred
+    /// bulk producer). Cargo features UNIFY across a build graph, so once infrastructure lights
+    /// the feature a sibling crate could technically NAME the export — which is precisely why
+    /// this guard fails the MANIFEST grant, the loud reviewable act, in any other crate (dev or
+    /// release: a test wanting the bulk door is a scope decision, not a convenience). Both
+    /// directions, like the capability allowlist: a second grant fails, and infrastructure
+    /// dropping the grant while the feature still exists fails too (a stale gate is a gate
+    /// nobody notices being reopened).
+    #[test]
+    fn bulk_door_feature_is_granted_only_to_infrastructure() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+        // The feature must still exist under this exact name — renamed means this guard moves
+        // with it, never silently scans for nothing.
+        let client_manifest = std::fs::read_to_string(root.join("crates/actor_client/Cargo.toml"))
+            .expect("crates/actor_client/Cargo.toml readable");
+        assert!(
+            client_manifest.contains("bulk-door = []"),
+            "actor_client no longer declares the `bulk-door` feature — move this guard with it"
+        );
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut manifests = Vec::new();
+        walk(&root.join("crates"), &mut manifests);
+        walk(&root.join("tools"), &mut manifests);
+        manifests.sort();
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut infrastructure_grants = false;
+        for m in &manifests {
+            let rel = m.strip_prefix(&root).unwrap_or(m).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
+            });
+            if rel == "crates/actor_client/Cargo.toml" {
+                continue; // the declaring crate itself
+            }
+            for (idx, line) in src.lines().enumerate() {
+                if line.contains("bulk-door") && !line.trim_start().starts_with('#') {
+                    if rel == "crates/infrastructure/Cargo.toml" {
+                        infrastructure_grants = true;
+                    } else {
+                        offenders.push(format!("  {rel}:{}: {}", idx + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(
+            infrastructure_grants,
+            "crates/infrastructure no longer enables `bulk-door` — either the SIRENE bulk path \
+             moved (move this guard's allowlist with it) or the gate went stale; both must be loud"
+        );
+        assert!(
+            offenders.is_empty(),
+            "`bulk-door` is granted outside crates/infrastructure — a second crate would gain \
+             the UNTYPED batched fact door the sealed {{Actor}}Fact traits exist to prevent:\n{}\n\n\
+             Fix: record facts through the typed clients' `record`, or make the new bulk \
+             producer a deliberate decision — then move it behind infrastructure or extend this \
+             allowlist WITH the reason.",
+            offenders.join("\n")
+        );
+    }
+
     // ─── §2f — reminders + declarative deletion (ADR-20260731-214500) ───────────────────────────
 
     const RD_SCALARS: &str = "OrderId: { type: string }\nRestaurantId: { type: string }\nCatalogId: { type: string }\n";

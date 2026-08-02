@@ -12,7 +12,10 @@ application = { path = "../application" }
 # The actor-mailbox BOUNDARY crate (#290 phase 1, PROP-20260802-130500 D1): infrastructure keeps
 # ONLY the SQL side of the mailbox (`PgMailbox` implements the port over the entry getters); every
 # entry construction — typed clients, reminders, the SIRENE bulk door — lives behind actor_client.
-actor_client = { path = "../actor_client" }
+# `bulk-door` (#290 review BLOCKING-1a): the ONE sanctioned grant of the untyped batched fact
+# door — the SIRENE sweep's fast path. Any other crate enabling this feature is CI-red
+# (codegen guard `bulk_door_feature_is_granted_only_to_infrastructure`).
+actor_client = { path = "../actor_client", features = ["bulk-door"] }
 # The durable-mailbox actor machinery (#242, ADR-20260730-234918) — the dependency points INWARD:
 # infrastructure implements its MessageHandler; actor_runtime never sees a Captain.Food type.
 actor_runtime = { path = "../actor_runtime" }

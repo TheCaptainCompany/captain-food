@@ -25,6 +25,11 @@ description = "Captain.Food actor-client boundary crate: the Mailbox port, the p
 # [dev-dependencies] — the codegen guard `test_fixtures_feature_never_reaches_a_release_artifact`
 # fails the build if any [dependencies] entry (i.e. a release artifact) turns it on.
 test-fixtures = []
+# The D8-deferred UNTYPED bulk fact door (`enqueue_inbound_facts` + `InboundFact`), #290 review
+# BLOCKING-1a: only `infrastructure` may enable this (its SIRENE sweep is the one sanctioned
+# producer) — the codegen guard `bulk_door_feature_is_granted_only_to_infrastructure` fails the
+# build on any other manifest grant. Facts entering here are receives-validated at the door.
+bulk-door = []
 
 [dependencies]
 domain = { path = "../domain" }

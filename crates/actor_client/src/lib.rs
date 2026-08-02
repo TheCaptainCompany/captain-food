@@ -36,9 +36,15 @@ pub mod generated;
 
 pub use client::ActorClient;
 pub use enqueue::{
-    enqueue_inbound_facts, inbound_message_id, inbound_namespace, reminder_message_id,
-    surrogate_actor_id, EnqueueOutcome, InboundFact, ScheduleOutcome,
+    inbound_message_id, inbound_namespace, reminder_message_id, surrogate_actor_id,
+    EnqueueOutcome, ScheduleOutcome,
 };
+// The D8-deferred UNTYPED bulk fact door (#290 review BLOCKING-1a): exported only under the
+// `bulk-door` feature, which the guard test allows `infrastructure` alone to enable — its SIRENE
+// sweep is the one sanctioned producer. The facts are receives-validated in `inbound_entry`, so
+// even the bulk path cannot enqueue an event type its target actor does not declare.
+#[cfg(feature = "bulk-door")]
+pub use enqueue::{enqueue_inbound_facts, InboundFact};
 pub use mailbox::{
     Envelope, Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
     MailboxStatusRow,
