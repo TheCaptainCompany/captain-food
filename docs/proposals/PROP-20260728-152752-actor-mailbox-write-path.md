@@ -908,6 +908,12 @@ malformed element would revert 199 sound ones that share nothing with it but a s
 
 ### D9 — Compiler-enforced client isolation: the crate IS the boundary (ANSWERED 2026-08-02)
 
+> The isolation program now has its own proposal —
+> [PROP-20260802-130500 "Isolation by construction"](PROP-20260802-130500-isolation-by-construction.md)
+> — carrying the full option space (capability allowlists, the read door, per-actor implementation
+> crates, the lint floor) and the product owner's threat model: strong boundaries as the defense
+> against an AI taking the easy path. This D9 remains the origin decision; the map lives there.
+
 **Status: ANSWERED — product owner, 2026-08-02: Option B, and further — per-actor crates as the
 target ("improve the isolation with crates everywhere").** Precedent stated by the product owner:
 their C# DDD + actor-model practice used one assembly per actor client and one per actor

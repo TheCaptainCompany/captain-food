@@ -295,6 +295,27 @@ assembly-per-actor practice, crate as the boundary). Phased: one client crate fi
 per-actor client crates second, per-actor implementation crates gated separately. Tracked by
 [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290).
 
+
+---
+
+## 14. Isolation by construction — PROP-20260802-130500 (added 2026-08-02)
+
+[PROP-20260802-130500](PROP-20260802-130500-isolation-by-construction.md)
+([#290](https://github.com/TheCaptainCompany/captain-food/issues/290)). The product owner's threat
+model, first-class: most code here is written by AI sessions, and a rule an agent can violate
+silently is a review burden forever — so buy compile-time enforcement wherever it is for sale.
+Measured finding behind it: the typed-client door is level-4 enforced while **nine crates hold
+`sqlx`** and can bypass every door with one query. D1 (client crate) is already decided (D9);
+the rest are open:
+
+| # | Decision | Recommendation |
+|---|---|---|
+| D2 | Per-actor IMPLEMENTATION crates (phase-3 endpoint) | (a) handler crates per actor; domain types stay one crate |
+| **D3** | **`Cargo.toml` as capability allowlist (cargo-deny: who may hold `sqlx`/`reqwest`)** | **Adopt in phase 1 — the biggest win available; closes the raw-SQL side door the typed clients cannot see** |
+| D4 | The read door | `OperationStatusClient` in the client crate, phase 1 (absorbs the #284 tail once, not twice) |
+| D5 | Cross-crate test fixtures | `test-fixtures` cargo feature + CI check no release artifact enables it |
+| D6 | Lint floor | `unreachable_pub = deny` in boundary crates, `unsafe_code = forbid`, `cargo-machete` in CI — adopt with phase 1 |
+
 ---
 
 ## Maintenance
