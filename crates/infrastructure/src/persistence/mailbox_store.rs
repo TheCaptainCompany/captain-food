@@ -19,6 +19,11 @@ use super::db_err;
 use super::enum_sql::EnumText;
 
 /// The enqueue→worker wake registry: one [`tokio::sync::Notify`] per mailbox actor type. A
+/// Entries per statement in [`Mailbox::insert_many`]. Postgres caps a statement at 65535 bind
+/// parameters and each entry binds 17, so the hard ceiling is ~3855; 500 keeps each statement's
+/// parameter payload modest while still collapsing a 200-row producer batch into ONE round-trip.
+const INSERT_MANY_CHUNK: usize = 500;
+
 /// producer's successful insert nudges the actor type's in-process worker so delivery starts on
 /// the next pass instead of waiting out the heartbeat poll (the poll stays the guarantee — a
 /// nudge is an accelerator, and a process without the worker simply has nobody listening).
@@ -202,6 +207,72 @@ impl Mailbox for PgMailbox {
         .map_err(db_err)?
         .rows_affected()
             == 1)
+    }
+
+    /// One multi-row INSERT for the whole slice — the batched form of [`Self::insert`], same columns,
+    /// same `ON CONFLICT (message_id) DO NOTHING`, same semantics per row.
+    ///
+    /// `RETURNING message_id` is what makes the result honest: `ON CONFLICT DO NOTHING` returns only
+    /// the rows it actually wrote, so the returned set IS the set of new messages and everything
+    /// absent from it was already on the mailbox.
+    ///
+    /// Chunked at [`INSERT_MANY_CHUNK`] because Postgres caps a statement at 65535 bind parameters
+    /// and each entry binds 17 — a caller handing over a large slice must not hit a wall that has
+    /// nothing to do with its own batching.
+    ///
+    /// Nudges fire ONCE per distinct actor type that gained a row, not once per row: the nudge is a
+    /// wake-up for that type's worker, so N of them is N-1 wasted.
+    async fn insert_many(
+        &self,
+        entries: &[MailboxEntry],
+    ) -> Result<Vec<uuid::Uuid>, DomainError> {
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut inserted: Vec<uuid::Uuid> = Vec::with_capacity(entries.len());
+        for chunk in entries.chunks(INSERT_MANY_CHUNK) {
+            let mut qb = sqlx::QueryBuilder::new(
+                "INSERT INTO inbound_messages \
+                   (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
+                    payload_hash, channel, user_id, user_type, correlation_id, cause_id, session_id, \
+                    trace_id, source, external_id) ",
+            );
+            qb.push_values(chunk, |mut b, e| {
+                b.push_bind(e.message_id)
+                    .push_bind(e.kind.clone())
+                    .push_bind(e.actor_type.clone())
+                    .push_bind(e.actor_id)
+                    .push_bind(e.partition)
+                    .push_bind(e.message_type.clone())
+                    .push_bind(e.payload.clone())
+                    .push_bind(e.payload_hash.clone())
+                    .push_bind(e.channel.clone())
+                    .push_bind(e.user_id)
+                    .push_bind(e.user_type.clone())
+                    .push_bind(e.correlation_id)
+                    .push_bind(e.cause_id)
+                    .push_bind(e.session_id)
+                    .push_bind(e.trace_id.clone())
+                    .push_bind(e.source.clone())
+                    .push_bind(e.external_id.clone());
+            });
+            qb.push(" ON CONFLICT (message_id) DO NOTHING RETURNING message_id");
+            let ids: Vec<(uuid::Uuid,)> =
+                qb.build_query_as().fetch_all(&self.pool).await.map_err(db_err)?;
+            inserted.extend(ids.into_iter().map(|(id,)| id));
+        }
+        if !inserted.is_empty() {
+            if let Some(nudges) = &self.nudges {
+                let new: std::collections::HashSet<uuid::Uuid> = inserted.iter().copied().collect();
+                let mut woken: std::collections::HashSet<&str> = std::collections::HashSet::new();
+                for e in entries.iter().filter(|e| new.contains(&e.message_id)) {
+                    if woken.insert(e.actor_type.as_str()) {
+                        nudges.nudge(&e.actor_type);
+                    }
+                }
+            }
+        }
+        Ok(inserted)
     }
 
     async fn by_message(
