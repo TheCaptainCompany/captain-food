@@ -1798,6 +1798,142 @@ keys:
         );
     }
 
+    /// The Cargo.toml CAPABILITY ALLOWLIST (#290 phase 1, PROP-20260802-130500 D3): `sqlx` (talk
+    /// to the database) and `reqwest` (reach the network) may appear in a crate's RELEASE
+    /// dependency sections only when that crate is explicitly allowlisted here WITH its reason.
+    /// This is the side door the typed mailbox clients cannot see — "add sqlx to some crate and
+    /// just query the table" — turned into a red test on the very `Cargo.toml` diff that grants
+    /// the capability. cargo-deny was considered and skipped: it is not present in the dev/CI
+    /// images and `[bans]` cannot express per-crate grants of a workspace-wide dependency; this
+    /// test is executable everywhere `cargo test` runs (CI's `codegen` job included), in the
+    /// house style of the Makefile and mailbox-door guards.
+    ///
+    /// BOTH directions are asserted, like the door guard: a non-allowlisted holder fails, and an
+    /// allowlisted crate that no longer holds the capability fails too — a stale excuse is an
+    /// open door someone will eventually use. Dev-dependencies are out of scope on purpose: a
+    /// test may talk SQL; the release graph may not grow a capability silently.
+    #[test]
+    fn capability_dependencies_are_allowlisted() {
+        // (manifest path, capability, WHY the crate holds it)
+        const ALLOWED: &[(&str, &str, &str)] = &[
+            // ── sqlx — who may talk to Postgres at all ──
+            ("crates/infrastructure/Cargo.toml", "sqlx",
+             "THE adapter layer: event store, View_* read repos, and the SQL side of the mailbox boundary (PgMailbox)"),
+            ("crates/actor_runtime/Cargo.toml", "sqlx",
+             "the durable mailbox runtime is SQL by design (leases, fencing, head-of-line drain); its extraction floor is 'sqlx + tokio + serde'"),
+            ("crates/sirene_ingest/Cargo.toml", "sqlx",
+             "raw SIRENE ingestion into its OWN staging tables (ADR-0045)"),
+            ("crates/adapters/stripe/Cargo.toml", "sqlx",
+             "the adapter owns its webhook staging/dedupe tables (ADR-0045 posture)"),
+            ("crates/adapters/hubrise/Cargo.toml", "sqlx",
+             "the adapter owns its connection/staging tables (ADR-0045 posture)"),
+            ("crates/adapters/avelo37/Cargo.toml", "sqlx",
+             "the adapter owns its webhook staging tables (ADR-0045 posture)"),
+            ("crates/adapters/coopcycle/Cargo.toml", "sqlx",
+             "the adapter owns its webhook staging tables (ADR-0045 posture)"),
+            ("crates/adapters/uber_direct/Cargo.toml", "sqlx",
+             "the adapter owns its webhook staging tables (ADR-0045 posture)"),
+            ("crates/server/Cargo.toml", "sqlx",
+             "composition root: constructs the PgPool it injects and runs the /health _sqlx_migrations schema probe (ADR-0042/0043) — moving pool construction behind a port still leaks sqlx types through every wiring signature, so the exception stays until that refactor is designed"),
+            // ── reqwest — who may reach the network ──
+            ("crates/infrastructure/Cargo.toml", "reqwest",
+             "the generated /services/* HTTP clients (ADR-20260719-214500) + OVH SMS outbound"),
+            ("crates/sirene_ingest/Cargo.toml", "reqwest", "the SIRENE API client"),
+            ("crates/telemetry/Cargo.toml", "reqwest", "OTLP-over-HTTP export to Honeycomb EU"),
+            ("crates/web/Cargo.toml", "reqwest", "the SSR data layer resolves screens over HTTP"),
+            ("crates/adapters/stripe/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/adapters/hubrise/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/adapters/avelo37/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/adapters/coopcycle/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/adapters/uber_direct/Cargo.toml", "reqwest", "partner outbound API"),
+            ("crates/server/Cargo.toml", "reqwest",
+             "the ADR-0047 auth verifier fetches the Supabase JWKS over HTTPS (identity wrapper lives in server today; measured holder kept with this WHY)"),
+        ];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut manifests = Vec::new();
+        walk(&root.join("crates"), &mut manifests);
+        walk(&root.join("tools"), &mut manifests);
+        manifests.sort();
+        assert!(!manifests.is_empty(), "found no member manifests to scan");
+
+        /// The capabilities a manifest GRANTS in its release graph: dependency names found in any
+        /// `[...dependencies]` section that is not a dev-dependencies section. Line-based on
+        /// purpose (matches the workspace's one-line dependency style); a multi-line dep TABLE
+        /// (`[dependencies.sqlx]`) is caught by the section header match.
+        fn release_grants(src: &str, dep: &str) -> bool {
+            let mut in_release_deps = false;
+            for line in src.lines() {
+                let t = line.trim();
+                if t.starts_with('[') {
+                    let header = t.trim_start_matches('[').trim_end_matches(']');
+                    // `[dependencies.sqlx]`-style table headers grant directly.
+                    if header.ends_with(&format!("dependencies.{dep}"))
+                        && !header.contains("dev-dependencies")
+                    {
+                        return true;
+                    }
+                    in_release_deps =
+                        header.ends_with("dependencies") && !header.contains("dev-dependencies");
+                    continue;
+                }
+                if in_release_deps
+                    && (t.starts_with(&format!("{dep} ")) || t.starts_with(&format!("{dep}=")))
+                {
+                    return true;
+                }
+            }
+            false
+        }
+
+        let mut offenders: Vec<String> = Vec::new();
+        for m in &manifests {
+            let rel = m.strip_prefix(&root).unwrap_or(m).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
+            });
+            for cap in ["sqlx", "reqwest"] {
+                let holds = release_grants(&src, cap);
+                let excused = ALLOWED.iter().any(|(p, c, _)| *p == rel && *c == cap);
+                if holds && !excused {
+                    offenders.push(format!("  {rel} grants `{cap}` without an allowlist entry"));
+                }
+                if !holds && excused {
+                    offenders.push(format!(
+                        "  {rel} is allowlisted for `{cap}` but no longer holds it — remove the stale entry"
+                    ));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "the Cargo.toml capability allowlist (PROP-20260802-130500 D3) is violated:\n{}\n\n\
+             Fix: either the crate should not hold this capability (talk through a port /\n\
+             the actor_client doors instead), or holding it is a DELIBERATE architectural\n\
+             decision — then add it to this test's allowlist WITH the reason. Why: any crate\n\
+             holding sqlx can bypass every domain rule with one query, and any crate holding\n\
+             reqwest can exfiltrate or call side effects review never sees; the allowlist makes\n\
+             the grant a loud, reviewable diff instead of a silent Cargo.toml line.",
+            offenders.join("\n")
+        );
+    }
+
     // ─── §2f — reminders + declarative deletion (ADR-20260731-214500) ───────────────────────────
 
     const RD_SCALARS: &str = "OrderId: { type: string }\nRestaurantId: { type: string }\nCatalogId: { type: string }\n";
