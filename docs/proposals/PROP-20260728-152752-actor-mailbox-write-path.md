@@ -1,6 +1,6 @@
 # PROP-20260728-152752 — The write path becomes an actor mailbox: `inbound_messages` replaces both journals, partitioned workers deliver to the actors
 
-- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D8 (batched-send signature) added 2026-08-02 and is OPEN** — it blocks only `send_many`; §2.1 realization tracked by [#284](https://github.com/TheCaptainCompany/captain-food/issues/284)
+- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D8 (batched-send signature) answered 2026-08-02: deferred — no `send_many` for now; the singular client comes first and parallelisation is discussed after.** §2.1 realization tracked by [#284](https://github.com/TheCaptainCompany/captain-food/issues/284)
 - **Date**: 2026-07-28
 - **Tracking issue**: [#242 "Write path: command_journal becomes the consumed queue — a worker executes commands in position order, and journal completion commits in the SAME transaction as the event append"](https://github.com/TheCaptainCompany/captain-food/issues/242)
 - **Supersedes**: the union-view mechanism recorded on #242 (2026-07-28) — the product owner unified
@@ -859,10 +859,15 @@ The port is the decision that matters: `PlacementLookup` hides whether the answe
 registry, an in-process cache, or Redis — swapping implementations is a config change, not a
 design change.
 
-### D8 — The batched send: signature and compile-time checks (OPEN — product-owner question, 2026-08-02)
+### D8 — The batched send: signature and compile-time checks (ANSWERED 2026-08-02 — deferred)
 
-**Status: OPEN — the product owner has asked for this to be discussed, not defaulted.** Everything
-else in the client design is decided; this blocks only `send_many`.
+**Status: ANSWERED — product owner, 2026-08-02: no `send_many` on the typed client for now.**
+The client is built FIRST as §2.1 always specified it — per-actor, `send` + `schedule`, compile-time
+checked — and the parallelisation/batched-send question is a SEPARATE discussion to be had after it
+exists. None of the signature options below is adopted; they are retained as the option space for
+that later discussion. Until then the #283 batching survives as an infrastructure-internal measure
+(`enqueue_inbound_facts` over `Mailbox::insert_many`) — it fixed a measured 6x producer bottleneck
+and is NOT part of the client's public surface.
 
 Why a batched send exists at all: the SIRENE drain measured **~628 rows/min against ~3,800/min of
 ingest** in production, with ~99% of the wall-clock being per-row round-trips — the #215/#216
