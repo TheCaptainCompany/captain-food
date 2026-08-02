@@ -305,12 +305,15 @@ per-actor client crates second, per-actor implementation crates gated separately
 model, first-class: most code here is written by AI sessions, and a rule an agent can violate
 silently is a review burden forever — so buy compile-time enforcement wherever it is for sale.
 Measured finding behind it: the typed-client door is level-4 enforced while **nine crates hold
-`sqlx`** and can bypass every door with one query. D1 (client crate) is already decided (D9);
-the rest are open:
+`sqlx`** and can bypass every door with one query. D1 (client crate) is already decided (D9),
+and its scope was sharpened by product-owner directive (2026-08-02): **"per actor" includes the
+process managers** — one crate per PM and one per PM client at every phase, symmetric with
+aggregates (16 actors today = 14 aggregates + `PlaceOrderProcess` + `RefundProcess`). The rest
+are open:
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D2 | Per-actor IMPLEMENTATION crates (phase-3 endpoint) | (a) handler crates per actor; domain types stay one crate |
+| D2 | Per-actor IMPLEMENTATION crates (phase-3 endpoint) | (a) handler crates per actor — aggregates AND process managers; domain types stay one crate |
 | **D3** | **`Cargo.toml` as capability allowlist (cargo-deny: who may hold `sqlx`/`reqwest`)** | **Adopt in phase 1 — the biggest win available; closes the raw-SQL side door the typed clients cannot see** |
 | D4 | The read door | `OperationStatusClient` in the client crate, phase 1 (absorbs the #284 tail once, not twice) |
 | D5 | Cross-crate test fixtures | `test-fixtures` cargo feature + CI check no release artifact enables it |

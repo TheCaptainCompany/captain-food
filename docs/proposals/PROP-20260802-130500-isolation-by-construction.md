@@ -83,29 +83,33 @@ graph TD
     end
     subgraph "ports + doors"
         application --> domain
-        AC[actor-client crate<br/>port + Entry(private) + Envelope<br/>+ generated typed clients<br/>+ OperationStatusClient] --> domain
+        AC["actor-client crate<br/>port + Entry (private) + Envelope<br/>+ generated typed clients<br/>+ OperationStatusClient"] --> domain
         AC --> application
     end
-    subgraph "phase 2: per-actor permission"
+    subgraph "phase 2: per-actor permission — aggregates AND process managers"
         CR[client-restaurant] -.split.-> AC
         CC[client-cart] -.split.-> AC
         CP[client-payment] -.split.-> AC
+        PP["client-place-order-process (PM)"] -.split.-> AC
+        RP["client-refund-process (PM)"] -.split.-> AC
     end
     subgraph "adapters (the ONLY sqlx/reqwest holders, each scoped)"
         infrastructure --> AC
-        stripe[adapters/*] --> AC
+        stripe["adapters/*"] --> AC
     end
     server --> AC
     server --> infrastructure
     stripe -. "manifest names ONLY the clients it may address" .-> CP
 ```
 
+<a href="https://mermaid.live/view#pako:eNqNU8tu2zAQ_JUFT3YTxW3QU1AEMJTe8hDSXgqrhw25lghIJLOk3BpB_r0ryUJlJDXKg2Fx9jGzO3xR2htSV6AqxlDD95vSgZzYPY0XpbLOEcMidEzLUo1wf4xv0brxm5x5kxc8pwhnEuc5zhMxhMZqTNY7yLLro0L9WeebUqFOnjPdWHIJNGOiL0-8uu6LSs2vLvFeOLHdCbIcbnbU-DBGnUFFQlogA2kf5HcsFA_oQ-hB6f8tYepiPoCl-vkPOsP1jPUJzTVGgssrkAbZIKH_19oYe7Fld_nx02fAqmKqhFyE9f0NBPaaYoQWHVZ0PKr8cTMyz5hiwo7RJWF5EYVLuhBW63wWnE_BGvlEWDGFBdy3dKJgUcgiptgGNWWejQibGC-Ku-UwtffTH2fpTNvOmf_JfG-saDAkGQ0sUk3wcH_7A-Jz83vF9PxL5gK1b4RXPAdCXUPU4gNz5FXrtowxcaeT2HjY55ypIDbQ5m-j1YfJDW9pEe_kPcyx2dVxowM8VBetokSWbLc9ZYet7H-Q0ms6-BNsEh_sAY2RhYsVoB9NXqhzUK0YCa2Rt_qiJKUdXq2hLXZNUq-vfwAzxjKW" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+
 One sequence, the whole contract:
 
 ```mermaid
 sequenceDiagram
     participant ACL as any producer (GraphQL / ACL / worker)
-    box actor-client crate (the boundary)
+    box actor-client crate — the boundary
         participant C as RestaurantClient (generated)
         participant E as MailboxEntry (private fields)
     end
@@ -115,8 +119,10 @@ sequenceDiagram
     C->>E: pub(crate) constructor — ONLY reachable here
     Note over ACL,E: an Entry literal anywhere else DOES NOT COMPILE
     C->>PG: port.insert(&entry)
-    Note over PG: reads via getters; SQL lives here alone
+    Note over PG: reads via getters — SQL lives here alone
 ```
+
+<a href="https://mermaid.live/view#pako:eNp9UltLKzEQ_ivDPsgWWm_41AdB1qUIte3R8yL4Mk2m22A2WSfJeor438-k24KomLeQ7zZf5r1QXlMxhSLQayKn6NZgw9g-O5DTIUejTIcuwk01BwyAbgcde50UMZQzxm77Zw5n--czePP8Qjwa2Gv_D1BFzxNlDYmEYowEz-ny_OIK4pYEkZxG3g34r45V9nugEDGx3KtBpGzIURbSo59pdabdo7HiX7vIOyg7Nn223hiyOhx45PT3KVezzF41Bz6Uxm0YQ-SkYmI6UGXYyfV1NYUgIqVq9VjUerK-OyIWXux8Lx0JdixIAU0_D-PbFp0-lhEILYmK827CpMj0pKGlELAhuF3Wj7BY_oVqeb-6m9eDQyUJ6il0aV3uex2B8m4I6vmou1zMn4AJ1RbXlmBLTD_lEx10MJRlTZR6bf7ot4wHsuG3DKuZhPAcT40LxLE8oSzzrYYMkyA6QG8QGoriEo4xH2WFrMwc9gkBrXdUjKFoiVs0WvbzvZB9afebqmmDycbi4-M_0PXl1Q" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 ## 4. Mockups
 
@@ -131,11 +137,22 @@ Option B chosen: dedicated `actor-client` crate (entry private, constructors `pu
 clients co-resident), phased to per-actor client crates. Recorded there; restated here only so this
 proposal is the one map of the whole isolation program.
 
+**Scope of "per actor" (product-owner directive, 2026-08-02): every actor in actors.yaml — the
+process managers included.** The catalog today is 14 aggregates + 2 process managers
+(`PlaceOrderProcess`, `RefundProcess`), and the generated clients already treat them uniformly
+(`PlaceOrderProcessClient` and `RefundProcessClient` exist alongside the aggregate clients). The
+crate split keeps that symmetry at every phase: **phase 2 emits one client crate per process
+manager** exactly as per aggregate, and **phase 3 (D2) one implementation crate per process
+manager**. A PM is the actor most worth isolating, not least: it is the only actor that REACTS to
+other actors' events, so it is where a shortcut would most naturally reach across boundaries — its
+crate manifest naming exactly the clients it may address (phase 2 mechanics) is the compile-time
+form of its checkpoint discipline.
+
 ### D2 — Per-actor IMPLEMENTATION crates (the phase-3 endpoint)
 
 | Option | Pros | Cons |
 |---|---|---|
-| **(a) Handler crates per actor** (`actor-restaurant` = its command handlers + fold; `domain` types stay one crate) ✅ recommended | The C# topology; an actor's change rebuilds one small crate; a handler reaching into another actor's internals becomes a manifest edit, not an import; codegen already knows each actor's handler set | ~16 generated crates + manifests; cross-actor domain VALUE types stay shared (correct — they are the published language) |
+| **(a) Handler crates per actor — aggregates AND process managers** (`actor-restaurant` = its command handlers + fold; `actor-place-order-process` = its event reactions + checkpoint fold + reminder handlers; `domain` types stay one crate) ✅ recommended | The C# topology; an actor's change rebuilds one small crate; a handler reaching into another actor's internals becomes a manifest edit, not an import; codegen already knows each actor's handler set | ~16 generated crates + manifests; cross-actor domain VALUE types stay shared (correct — they are the published language) |
 | (b) Full vertical slices (domain types split per actor too) | Maximal isolation | Breaks the ubiquitous-language single `domain` — `Money`, `OrderId` used by all; forces a shared-kernel crate anyway; highest churn for the least marginal enforcement |
 | (c) Stop at clients (no implementation split) | Zero cost | The implementation side keeps level-1 boundaries; an AI editing `application` can still touch every actor's handlers in one place |
 
@@ -187,10 +204,11 @@ easy-path silent-drift loud immediately.
 1. **Phase 1**: `actor-client` crate (D1) + `OperationStatusClient` (D4) + capability allowlist (D3)
    + lint floor (D6) + `test-fixtures` mechanism (D5). Behavior frozen by the existing drift guards;
    the textual door guard stays as the tripwire on the boundary itself.
-2. **Phase 2**: per-actor client crates, manifests codegen-emitted; an adapter's `Cargo.toml` names
-   exactly the actors it may address.
-3. **Phase 3**: per-actor handler crates per D2(a), individually costed before committal — it
-   reshapes application/domain codegen and is a program, not a slice.
+2. **Phase 2**: per-actor client crates — one per aggregate AND one per process manager (16 today),
+   manifests codegen-emitted; an adapter's `Cargo.toml` names exactly the actors it may address.
+3. **Phase 3**: per-actor handler crates per D2(a) — again one per aggregate and one per process
+   manager — individually costed before committal; it reshapes application/domain codegen and is a
+   program, not a slice.
 4. C4 (`specs/architecture/`) updated per phase; every new boundary gets its guard demoted to
    tripwire only when the compiler takes over, never removed.
 
