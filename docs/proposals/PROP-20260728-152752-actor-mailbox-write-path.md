@@ -156,14 +156,19 @@ conversation.schedule(Envelope::new(post_message, principal), at).await?; // -> 
 - **Process managers get clients too** (D5): a PM that `receives:` a command is directly
   addressable from GraphQL through its own generated client — an actor is an actor.
 
-> **Realization tracked by [#284 "Typed actor clients (PROP-20260728-152752 §2.1)"](https://github.com/TheCaptainCompany/captain-food/issues/284)**
-> (product owner reaffirmed 2026-08-02). Interim state until it lands: the client responsibilities
-> live in `infrastructure::mailbox::enqueue` as free functions (send = `enqueue_worker_command` /
-> `enqueue_inbound_fact(s)`, schedule = `schedule_reminder`, cancel = `cancel_reminder`) — the
-> encapsulation holds (no caller names the table), but the per-actor TYPE does not exist yet, and the
-> generated GraphQL resolvers construct `MailboxEntry` inline instead of going through any client at
-> all. The batched send's signature is **D8 below — OPEN**, and blocks only the `send_many` part of
-> the migration; the singular client can land first.
+> **Realized by [#284 "Typed actor clients (PROP-20260728-152752 §2.1)"](https://github.com/TheCaptainCompany/captain-food/issues/284)**
+> (product owner reaffirmed 2026-08-02; three slices). The generated `{Actor}Client`s
+> (`infrastructure::generated::actor_clients`, sealed per-actor `Command`/`Fact` marker traits)
+> are the ONLY door: GraphQL resolvers `send` through them (slice 2), and every worker/adapter
+> channel — SIRENE, HubRise connect/enrich, the Stripe/Uber Direct/Avelo37/CoopCycle webhook
+> ACLs — sends/records through them too (slice 3). The former free-function surface in
+> `infrastructure::mailbox::enqueue` is `pub(crate)` plumbing the clients delegate to;
+> `enqueue_worker_command`/`schedule_reminder`/`cancel_reminder` survive only as `#[cfg(test)]`
+> reference implementations for the drift guards, and the codegen test
+> `mailbox_entry_is_constructed_only_behind_the_typed_doors` fails the build on any new
+> `MailboxEntry` construction site. One deliberate exception: the SIRENE sweep's BATCHED fast
+> path still uses the crate-internal `enqueue_inbound_facts` bulk door — **D8 below** stays
+> answered "not for now" (no public `send_many`), and that bulk door never left the crate.
 
 ## 3. Consumption: partitions, ordering, checkpoint
 
