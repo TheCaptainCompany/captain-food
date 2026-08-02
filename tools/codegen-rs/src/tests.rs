@@ -1934,6 +1934,85 @@ keys:
         );
     }
 
+    /// The D5 escape-hatch guard (#290 phase 1, PROP-20260802-130500 D5): the `test-fixtures`
+    /// feature on `actor_client` (mem mailbox double, EntryFixture conversions, drift-guard
+    /// reference impls) may be enabled ONLY from `[dev-dependencies]` — a release artifact that
+    /// turns it on would ship a public constructor for the very type the boundary crate exists to
+    /// seal. The check is part of the D5 decision, not optional: a feature is opt-in-able by
+    /// mistake, so the mistake must be CI-red.
+    #[test]
+    fn test_fixtures_feature_never_reaches_a_release_artifact() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+        // The feature must still exist under this exact name — if it is renamed, this guard must
+        // move with it, never silently scan for nothing.
+        let client_manifest = std::fs::read_to_string(root.join("crates/actor_client/Cargo.toml"))
+            .expect("crates/actor_client/Cargo.toml readable");
+        assert!(
+            client_manifest.contains("test-fixtures = []"),
+            "actor_client no longer declares the `test-fixtures` feature — move this guard with it"
+        );
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut manifests = Vec::new();
+        walk(&root.join("crates"), &mut manifests);
+        walk(&root.join("tools"), &mut manifests);
+        manifests.sort();
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut dev_grants = 0usize;
+        for m in &manifests {
+            let rel = m.strip_prefix(&root).unwrap_or(m).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
+            });
+            if rel == "crates/actor_client/Cargo.toml" {
+                continue; // the declaring crate itself
+            }
+            let mut section = String::new();
+            for line in src.lines() {
+                let t = line.trim();
+                if t.starts_with('[') {
+                    section = t.trim_start_matches('[').trim_end_matches(']').to_string();
+                    continue;
+                }
+                if t.contains("test-fixtures") {
+                    if section.contains("dev-dependencies") {
+                        dev_grants += 1;
+                    } else {
+                        offenders.push(format!("  {rel} [{section}]: {t}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            dev_grants > 0,
+            "no [dev-dependencies] enables `test-fixtures` anywhere — either the feature was \
+             renamed (move this guard with it) or the scan went blind; both must be loud"
+        );
+        assert!(
+            offenders.is_empty(),
+            "`test-fixtures` is enabled OUTSIDE [dev-dependencies] — a release artifact would \
+             ship the sealed type's test constructors:\n{}\n\nFix: move the grant to that \
+             crate's [dev-dependencies] (tests get it; the shipped lib/bin never does).",
+            offenders.join("\n")
+        );
+    }
+
     // ─── §2f — reminders + declarative deletion (ADR-20260731-214500) ───────────────────────────
 
     const RD_SCALARS: &str = "OrderId: { type: string }\nRestaurantId: { type: string }\nCatalogId: { type: string }\n";

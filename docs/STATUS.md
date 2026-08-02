@@ -3,6 +3,33 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-02. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> 🚧 **2026-08-02 — [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)
+> phase 1 built ([PROP-20260802-130500](proposals/PROP-20260802-130500-isolation-by-construction.md)
+> D1+D3+D4+D5)**: the mailbox door is COMPILER-enforced now. New boundary crate
+> `crates/actor_client` (between `application` and `infrastructure`) owns the `Mailbox` port,
+> `MailboxEntry` with **pub(crate) fields + getters** (constructing one outside the crate does not
+> compile), `Envelope`, the shared entry constructors, `reminders::scheduled_entry`, the FROZEN
+> `stable_partition` (re-homed from `actor_runtime`, golden test moved with it), the GENERATED
+> typed per-actor clients (emitter retargeted; addressing tables split into
+> `generated/addresses.rs`, re-exported by the infra `command_router` — one definition), and the
+> **D4 read door**: one generic `ActorClient.get_operation_status(message_id)` — the only
+> sanctioned read over `inbound_messages` status; the generated `operationStatus` query and the
+> `operationStatusChanged` snapshot both resolve through it (`watch` deferred: the
+> `OperationStatusBus` still lives in infrastructure keyed to the legacy journal status — its
+> relocation is a recorded follow-up, not improvised). `infrastructure` keeps ONLY the SQL side
+> (`PgMailbox` binds via getters; `apply_schedules_in_tx` binds the actor_client constructor).
+> **D3**: codegen guard `capability_dependencies_are_allowlisted` — `sqlx`/`reqwest` only in an
+> explicit per-crate allowlist with WHYs (server keeps both exceptions: PgPool construction +
+> /health probe; Supabase JWKS fetch), bidirectional (stale entries fail), verified red on a
+> planted grant. **D5**: cross-crate test access rides the `test-fixtures` cargo feature (mem
+> double, `EntryFixture` full-field mirror keeping out-of-crate freeze tests exhaustive, reference
+> impls), dev-dependencies only — guard `test_fixtures_feature_never_reaches_a_release_artifact`
+> fails any release-graph grant (verified red). The textual door guard stays as belt-and-braces,
+> allowlist moved to the actor_client paths. Behavior frozen: drift guards, `graphql_typed_send`,
+> byte-identity codegen tests all green; validator 0 errors. **D6 (lint floor) deliberately NOT
+> here** — its own change per the product-owner decision; phase 2 (per-actor client crates) and
+> the C4 update follow on #290's checklist.
+
 > 🐛 **2026-08-01 — prod-smoke hotfix: authenticated GraphQL was fully down in production
 > (`503 "auth unavailable"` on every non-`/public` role path).** Root cause: `AuthContext::from_env`
 > read `SUPABASE_JWKS_URL`/`SUPABASE_URL` straight from `std::env`, but those are **non-secret baked
