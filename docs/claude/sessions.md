@@ -120,7 +120,46 @@ The reader decides the owner. This matters because the boot report is supposed t
 integration configured in production?" from one `curl` — a key attributed to the wrong process is
 absent from the report that should have shown it.
 
-## 7. This file is your obligation, not just your reference
+## 7. A green deploy job does not mean the new code is running
+
+`deploy.yml` POSTs Render's deploy hook and exits. The job goes green when Render **accepts the
+trigger** — not when the image is live. On 2026-08-01 that gap put an **11-day-old binary (222 commits
+behind) against a schema 9 migrations ahead**: `deploy` green, `db-migrate` green on its success, and
+production quietly serving `426730b6` while every worker looped on
+`relation "inbound_events" does not exist`.
+
+Cost: a live incident, and ~30 minutes to diagnose from a startup log the product owner happened to
+paste. Nothing in CI would ever have said a word.
+
+**So after any deploy, verify what is actually RUNNING before you believe it landed.** The startup line
+`captain-food server starting — version <sha>` (and `/health`'s `version`) is the only ground truth; the
+workflow's own success is not evidence. If the SHA is not the one you deployed, the deploy did not
+happen — whatever GitHub says.
+
+Two traps behind it, both worth knowing before you reach for the same explanation:
+
+- A **service env-var change in Render redeploys the CURRENTLY configured image**, which can silently
+  override a deploy that was triggered but never completed. That is how this one was masked.
+- `/health`'s schema gate does **not** protect the in-process workers — they start and hammer the
+  database whatever the schema says, and the gate is looking at the new instance while the old one is
+  the one actually serving.
+
+Tracked as [#281](https://github.com/TheCaptainCompany/captain-food/issues/281); until it lands, the
+manual check above is the whole safety net.
+
+## 8. Generated code can enforce something the spec does not say
+
+`make validate` compiles patterns from the DECODED spec and is happy; the emitted Rust is a separate
+artifact that nothing re-read. A double-escaped pattern therefore shipped a regex that rejected the
+app's own valid default (`OTEL_TRACES_SAMPLE_RATIO=1.0`), and only the `development` profile's
+"starting anyway" fallback kept it off production's floor — `production` and `staging` refuse the boot.
+
+**When a generator writes a literal into generated source, the test must read the GENERATED file**, not
+the spec both sides agree on. `generated_config_patterns_match_the_spec_byte_for_byte` does that, and it
+was confirmed to FAIL on the reverted emitter before being trusted — a regression test never seen red is
+not a guard.
+
+## 9. This file is your obligation, not just your reference
 
 **Every session records what it learned** (ADR-20260730-034635), in the same change as the work. That
 is why this file exists, and it is how it stays worth reading.
@@ -139,7 +178,7 @@ is why this file exists, and it is how it stays worth reading.
 - **Writing nothing is a valid outcome.** A session that learned nothing transferable adds nothing.
   If this file ever reads like a diary it has failed, and the fix is deletion, not more headings.
 
-## 8. Commit the durable artifact, not the conversation
+## 10. Commit the durable artifact, not the conversation
 
 A long session slows down: every turn reprocesses the whole transcript. The mitigation is the
 operating model itself — **proposals, ADRs, `DECISIONS.md` and `STATUS.md` are how knowledge leaves a
