@@ -267,7 +267,7 @@ Three remain, and **D7 is not an engineering decision** — it needs whoever adv
 
 ---
 
-## 12. The batched send's signature — PROP-20260728-152752 D8 (added 2026-08-02)
+## 12. The batched send's signature — ✅ DECIDED 2026-08-02 (deferred)
 
 [PROP-20260728-152752](PROP-20260728-152752-actor-mailbox-write-path.md) is `Approved`, but the
 product owner raised ONE new decision while reaffirming §2.1 (typed actor clients — realization
@@ -277,9 +277,9 @@ what the TYPED form of the batched send looks like. The interim untyped
 fixed a 6x producer bottleneck and must be absorbed, not kept. Blocks only `send_many` — the
 singular typed client can land first.
 
-| # | Decision | Recommendation |
-|---|---|---|
-| **D8** | `send_many` signature + compile-time checks | **(a) Homogeneous generic batch** — `send_many(Vec<(Identity, Envelope<M>)>)`, one message type per call, zero new codegen surface; result `Vec<SendOutcome>` with per-element `message_id`; per-element atomicity, never all-or-nothing |
+| # | Decision | Recommendation | **Answer** |
+|---|---|---|---|
+| **D8** | `send_many` signature + compile-time checks | (a) Homogeneous generic batch | ⚠️ **Deferred — no `send_many` for now** (product owner, 2026-08-02). Build the client as §2.1 always specified it first — per-actor, `send` + `schedule`, compile-time checked — then discuss parallelisation separately. The #283 batching stays infrastructure-internal (`enqueue_inbound_facts`), outside the client's public surface, until that discussion |
 
 ---
 
