@@ -1,6 +1,6 @@
 # PROP-20260728-152752 — The write path becomes an actor mailbox: `inbound_messages` replaces both journals, partitioned workers deliver to the actors
 
-- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500
+- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D8 (batched-send signature) added 2026-08-02 and is OPEN** — it blocks only `send_many`; §2.1 realization tracked by [#284](https://github.com/TheCaptainCompany/captain-food/issues/284)
 - **Date**: 2026-07-28
 - **Tracking issue**: [#242 "Write path: command_journal becomes the consumed queue — a worker executes commands in position order, and journal completion commits in the SAME transaction as the event append"](https://github.com/TheCaptainCompany/captain-food/issues/242)
 - **Supersedes**: the union-view mechanism recorded on #242 (2026-07-28) — the product owner unified
@@ -155,6 +155,15 @@ conversation.schedule(Envelope::new(post_message, principal), at).await?; // -> 
   logic, centralized, generated.
 - **Process managers get clients too** (D5): a PM that `receives:` a command is directly
   addressable from GraphQL through its own generated client — an actor is an actor.
+
+> **Realization tracked by [#284 "Typed actor clients (PROP-20260728-152752 §2.1)"](https://github.com/TheCaptainCompany/captain-food/issues/284)**
+> (product owner reaffirmed 2026-08-02). Interim state until it lands: the client responsibilities
+> live in `infrastructure::mailbox::enqueue` as free functions (send = `enqueue_worker_command` /
+> `enqueue_inbound_fact(s)`, schedule = `schedule_reminder`, cancel = `cancel_reminder`) — the
+> encapsulation holds (no caller names the table), but the per-actor TYPE does not exist yet, and the
+> generated GraphQL resolvers construct `MailboxEntry` inline instead of going through any client at
+> all. The batched send's signature is **D8 below — OPEN**, and blocks only the `send_many` part of
+> the migration; the singular client can land first.
 
 ## 3. Consumption: partitions, ordering, checkpoint
 
@@ -849,6 +858,43 @@ about resolving the partition's **current owner address** (the §3.5 direct-call
 The port is the decision that matters: `PlacementLookup` hides whether the answer came from the
 registry, an in-process cache, or Redis — swapping implementations is a config change, not a
 design change.
+
+### D8 — The batched send: signature and compile-time checks (OPEN — product-owner question, 2026-08-02)
+
+**Status: OPEN — the product owner has asked for this to be discussed, not defaulted.** Everything
+else in the client design is decided; this blocks only `send_many`.
+
+Why a batched send exists at all: the SIRENE drain measured **~628 rows/min against ~3,800/min of
+ingest** in production, with ~99% of the wall-clock being per-row round-trips — the #215/#216
+finding again, on the producer side. [#283](https://github.com/TheCaptainCompany/captain-food/pull/283)
+fixed it with an interim `enqueue_inbound_facts(Vec<InboundFact>) -> Vec<bool>` over a new
+`Mailbox::insert_many` port method (one multi-row `INSERT … ON CONFLICT DO NOTHING RETURNING` per
+500-entry chunk). That interim form is UNTYPED — `InboundFact` carries `actor_type`/`event_type` as
+strings — which is exactly what the typed client exists to eliminate. The question is what the typed
+form of a batch looks like.
+
+What every option below preserves, non-negotiably: one aggregate per element (each element addresses
+its own `actor_id`, so a batch imposes NO cross-element ordering), per-element dedupe on the pk
+(`UUIDv5(source, external_id)`), and per-element isolation — one bad element must not sink the batch
+(#283 falls back row-by-row; the typed form must keep an equivalent).
+
+| Option | Pros | Cons |
+|---|---|---|
+| **(a) Homogeneous generic batch** — `RestaurantClient::send_many(Vec<(RestaurantIdentity, Envelope<M>)>) -> Vec<SendOutcome>` where `M` is one message type the actor `receives` ✅ recommended | Full compile-time check with ZERO new codegen surface (the same `M` bound the singular `send` already needs); the known bulk producers are naturally homogeneous (SIRENE = all `RestaurantRegistered`, HubRise enrich = all `ImportCatalog`); a mixed workload is just one call per type, and each call still batches its statements — N message types cost N round-trips, not N×rows | A genuinely interleaved mixed batch pays one call per type; order across types is not expressible in one call (irrelevant today: no producer needs cross-type ordering to one actor in bulk) |
+| (b) Heterogeneous batch over a generated per-actor message union — `send_many(Vec<(RestaurantIdentity, RestaurantInbound)>)` where `RestaurantInbound` is a generated enum of everything the actor `receives` | One call for any mix, still compile-checked (a foreign message cannot be constructed into the enum); the enum is derivable from `actors.yaml` | New generated type per actor whose ONLY consumer is the batch path; per-element payload serialization must dispatch on the variant, so the column-level "caller cannot fill a column wrong" guarantee now routes through a match the generator must keep exhaustive; more surface for a need no current producer has |
+| (c) No typed batch — singular typed `send` only; bulk producers keep an infrastructure-internal untyped door | Smallest client | Re-opens the exact hole §2.1 closes: the highest-volume producers (the ACLs) would be the ONE caller class outside the typed door — the directive inverted |
+
+**Result shape (sub-decision, applies to (a) and (b)):** the interim `Vec<bool>` (new vs
+already-present) is too thin for a typed client. Recommended: `Vec<SendOutcome>` where
+`SendOutcome = Accepted { message_id } | AlreadyEnqueued { message_id, status }` — positionally
+matched to the input, so every caller gets its acceptance handle (the `operationStatus` key) and the
+already-present arm carries the existing row's status, restoring the granularity the interim gave up.
+`ask_many` is deliberately NOT proposed: a bulk producer is fire-and-forget by design (the ledger owns
+the outcome — ADR-20260731-122500); a caller that wants a per-message answer has `ask`.
+
+**Atomicity (sub-decision):** per-element semantics, chunk-per-statement as an implementation detail
+(#283's shape). All-or-nothing is rejected: it couples unrelated aggregates' hand-overs — one
+malformed element would revert 199 sound ones that share nothing with it but a statement.
 
 ## 5. Sequence diagram — PostMessage through the mailbox
 
