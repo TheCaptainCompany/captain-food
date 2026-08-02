@@ -13,7 +13,8 @@ application = { path = "../application" }
 # newtypes + From conversions live here, `domain` stays GraphQL-free — ADR-0035).
 domain = { path = "../domain" }
 infrastructure = { path = "../infrastructure" }
-# stable_partition in the generated mutation resolvers + the mailbox worker spawn (#242 Runtime C3)
+# The mailbox worker spawn + partition seeding in the composition root (#242 Runtime C3). The
+# generated resolvers no longer touch it (#284 slice 2: the typed actor clients own partitioning).
 actor_runtime = { path = "../actor_runtime" }
 shared_types = { path = "../shared_types" }
 # OTel emission + structured logging (issue #191). The composition root installs the subscriber and owns
