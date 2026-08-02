@@ -6,7 +6,11 @@
 > ✅ **2026-08-02 — [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)
 > phase 1 MERGED ([PR #297](https://github.com/TheCaptainCompany/captain-food/pull/297);
 > [PROP-20260802-130500](proposals/PROP-20260802-130500-isolation-by-construction.md)
-> D1+D3+D4+D5, two independent review passes)**: the mailbox door is COMPILER-enforced now. New boundary crate
+> D1+D3+D4+D5, two independent review passes)**: the mailbox door is COMPILER-enforced now.
+> #290 and #284 are CLOSED (product owner, "close all the phases"); every remaining item is its
+> own backlog issue — #302 lint floor · #303 watch/bus · #304 Mailbox-port hole · #305 View_*
+> reads · #306 phase 2 · #307 phase 3 · #308 cancel lane-scoping · #309 C4 (full links in the
+> proposal header). New boundary crate
 > `crates/actor_client` (between `application` and `infrastructure`) owns the `Mailbox` port,
 > `MailboxEntry` with **pub(crate) fields + getters** (constructing one outside the crate does not
 > compile), `Envelope`, the shared entry constructors, `reminders::scheduled_entry`, the FROZEN
