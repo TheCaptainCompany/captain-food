@@ -496,11 +496,28 @@ pub fn router() -> Router {
                     },
                 });
 
+                // Push wake for the drain loops (ADR-20260802-200416): ONE dedicated LISTEN
+                // connection feeds both the projector and the saga runner, so each append reaches
+                // them on commit instead of being discovered by a 1.5 s poll — the polling was
+                // ~70,900 queries/hour on an idle platform, 95% of outbound bandwidth. Both loops
+                // keep a safety-net drain (NOTIFY has no replay) and revert to the fast poll
+                // whenever the listener is down, so losing push degrades to the previous behaviour,
+                // never past it. RUN_EVENT_PUSH=false forces the unassisted polling path (the
+                // escape hatch for a transaction-mode pooler, which cannot carry LISTEN).
+                let event_wake = if config.run_event_push {
+                    let wake = infrastructure::EventWake::new();
+                    infrastructure::spawn_event_listener(url.clone(), wake.clone());
+                    Some(wake)
+                } else {
+                    tracing::warn!(toggle = "RUN_EVENT_PUSH", "event push OFF -- drain loops poll unassisted at 1.5 s");
+                    None
+                };
+
                 // In-process projection worker (ADR-0040). RUN_PROJECTOR=false hands it to a dedicated worker.
                 if config.run_projector {
                     let worker = ProjectionWorker::new(pool.clone());
                     projector_status = Some(worker.status());
-                    tokio::spawn(worker.run_loop());
+                    tokio::spawn(worker.run_loop_with(event_wake.as_ref().map(|w| w.waiter())));
                     tracing::info!(worker = "projection", running = true, toggle = "RUN_PROJECTOR", "worker running in-process");
                 } else {
                     tracing::warn!(worker = "projection", running = false, toggle = "RUN_PROJECTOR", "worker NOT started -- no read model advances, queries serve stale data");
@@ -645,9 +662,10 @@ pub fn router() -> Router {
                     // The backfill runs INSIDE the runner's task, before its first tick — the
                     // ordering the re-verification demanded (see the pm_backfill comment above).
                     let backfill = pm_backfill.take().expect("pm_backfill consumed once");
+                    let saga_waiter = event_wake.as_ref().map(|w| w.waiter());
                     tokio::spawn(async move {
                         backfill.await;
-                        runner.run_loop().await;
+                        runner.run_loop_with(saga_waiter).await;
                     });
                     tracing::info!(worker = "saga_runner", running = true, toggle = "RUN_PROCESS_MANAGERS", "worker running in-process");
 
