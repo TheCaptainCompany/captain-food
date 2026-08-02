@@ -159,6 +159,7 @@ CREATE TABLE inbound_messages (
   scheduled_at TIMESTAMPTZ NULL,
   status TEXT NOT NULL,
   error JSONB NULL,
+  attempts SMALLINT NOT NULL,
   received_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ NULL,
   UNIQUE (source, external_id)

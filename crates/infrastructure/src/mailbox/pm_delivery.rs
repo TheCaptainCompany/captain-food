@@ -239,12 +239,20 @@ pub(super) async fn chain_pm_copy_in_tx(
         &actor_id,
         format!("{}:{}", message.message_type, message.message_id).as_bytes(),
     );
+    // The chained hop rides the COMPLETION transaction, and so does its pg_notify
+    // (PROP-20260802-223522 D1): the PM lane's worker — in this process or any other — wakes
+    // when the recording commits, never on a rolled-back delivery. The in-process nudge
+    // (post-commit, `with_nudges`) stays as the zero-latency local path.
     sqlx::query(
-        "INSERT INTO inbound_messages \
-           (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
-            payload_hash, channel, user_id, user_type, correlation_id, cause_id) \
-         VALUES ($1, 'EVENT', $2, $3, $4, $5, $6, $7, 'WORKER', $8, $9, $10, $11) \
-         ON CONFLICT (message_id) DO NOTHING",
+        "WITH ins AS ( \
+           INSERT INTO inbound_messages \
+             (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
+              payload_hash, channel, user_id, user_type, correlation_id, cause_id) \
+           VALUES ($1, 'EVENT', $2, $3, $4, $5, $6, $7, 'WORKER', $8, $9, $10, $11) \
+           ON CONFLICT (message_id) DO NOTHING \
+           RETURNING actor_type \
+         ) \
+         SELECT pg_notify('inbound_messages', actor_type) FROM ins",
     )
     .bind(chained_id)
     .bind(actor_type)

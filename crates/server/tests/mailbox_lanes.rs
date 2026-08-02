@@ -36,6 +36,10 @@ async fn reset_mailbox_tables(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the actor-mailbox migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox attempts migration");
 }
 
 /// A minimal seeded world: two Conversation lanes; lane 0 carries two RECEIVED commands (one old),

@@ -131,6 +131,10 @@ async fn setup(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("actor-mailbox migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260802230000_mailbox_attempts_column.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox attempts migration");
     sqlx::raw_sql(include_str!(
         "../../../migrations/20260719200000_process_manager_state_tables.sql"
     ))

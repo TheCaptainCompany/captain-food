@@ -57,6 +57,7 @@ inbound_messages:
     scheduled_at:   { type: timestamptz, nullable: true, note: "Reminders / scheduled operations: eligible only once due (promotion pass)." }
     status:         { type: { $ref: 'scalars.yaml#/InboundMessageStatus' }, index: true, note: "SCHEDULED -> (CANCELLED | RECEIVED); RECEIVED -> SUCCEEDED | REJECTED | FAILED | IGNORED | DUPLICATE." }
     error:          { type: jsonb, nullable: true, note: "{ code, context } on REJECTED/FAILED — surfaced as Operation.errorCode." }
+    attempts:       { type: smallint, note: "Delivery attempts whose completion TRANSACTION failed (infrastructure error — the row itself records nothing then, so this counter is incremented OUTSIDE the failed tx). At MAILBOX_MAX_DELIVERY_ATTEMPTS the row flips to FAILED with the error recorded, unblocking the lane (PROP-20260802-223522 D4). Default 0; handler verdicts never touch it." }
     received_at:    { type: timestamptz, index: true }
     completed_at:   { type: timestamptz, nullable: true }
   constraints:

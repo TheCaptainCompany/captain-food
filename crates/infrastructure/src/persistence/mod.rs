@@ -18,6 +18,7 @@ pub mod enum_sql;
 pub mod event_bus;
 pub mod event_store;
 pub mod event_wake;
+pub mod mailbox_wake;
 pub mod mailbox_lanes;
 pub mod mailbox_store;
 pub mod order;

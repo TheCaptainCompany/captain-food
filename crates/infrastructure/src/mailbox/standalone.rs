@@ -217,6 +217,40 @@ pub fn spawn_standalone_workers(
         std::future::pending::<()>().await;
     });
 
+    // MAILBOX PUSH (#313): the standalone fleet listens exactly like the monolith's — an
+    // adapter fleet that only wakes on ITS OWN inserts would still poll for hops chained by
+    // other processes. Env-read (an adapter binary has no Config reader), spec defaults.
+    let push = if std::env::var("RUN_MAILBOX_PUSH")
+        .map(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "0" | "no" | "off"))
+        .unwrap_or(true)
+    {
+        match std::env::var("DATABASE_URL") {
+            Ok(db_url) => {
+                let push = crate::persistence::mailbox_wake::MailboxPush::new();
+                crate::persistence::mailbox_wake::spawn_mailbox_listener(
+                    db_url,
+                    nudges.clone(),
+                    push.clone(),
+                );
+                Some(push)
+            }
+            Err(_) => {
+                tracing::warn!(adapter, "standalone mailbox: DATABASE_URL unset -- push listener not started");
+                None
+            }
+        }
+    } else {
+        tracing::warn!(adapter, toggle = "RUN_MAILBOX_PUSH", "mailbox push OFF -- workers poll at the heartbeat cadence");
+        None
+    };
+    let worker_config = actor_runtime::WorkerConfig {
+        max_delivery_attempts: std::env::var("MAILBOX_MAX_DELIVERY_ATTEMPTS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .map(|v| v.clamp(0, i16::MAX as i64) as i16)
+            .unwrap_or(actor_runtime::WorkerConfig::default().max_delivery_attempts),
+        ..actor_runtime::WorkerConfig::default()
+    };
     let worker_count = actor_types.len();
     for actor_type in actor_types {
         let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == actor_type) else {
@@ -228,12 +262,15 @@ pub fn spawn_standalone_workers(
                 pool.clone(),
                 worker_id.clone(),
                 actor_type,
-                actor_runtime::WorkerConfig::default(),
+                worker_config.clone(),
                 handler.clone(),
             )
             .with_observer(observer.clone());
             if let Some(nudge) = nudges.get(actor_type) {
                 w = w.with_nudge(nudge);
+            }
+            if let Some(push) = &push {
+                w = w.with_push_live(push.live_flag());
             }
             w
         });
