@@ -264,6 +264,23 @@ Three remain, and **D7 is not an engineering decision** — it needs whoever adv
 | **PROP-032306 D5** | Menu ownership across Captain / HubRise / Uber, and per-channel price parity | **HubRise authoritative when connected, else Captain**, one-way push. Parity is the sharp edge: restaurants mark Uber prices up to absorb Uber's commission, and ADR-0024's comparison coefficients are calibrated on that — pushing Captain prices unchanged undercuts the restaurant *and* invalidates `basis: REAL` |
 | **PROP-032306 D7** | Is the Provider entity on the signed Uber agreement (**Caring Hope Foundation**, RNA W372020229 — a loi-1901 association) the entity that will operate the platform? | **Needs legal input, not a recommendation.** An Uber API licence follows the entity; if the association holds it while another entity operates and earns commission, access sits outside the licence. Also interacts with the payout posture in §1 A |
 
+
+---
+
+## 12. The batched send's signature — PROP-20260728-152752 D8 (added 2026-08-02)
+
+[PROP-20260728-152752](PROP-20260728-152752-actor-mailbox-write-path.md) is `Approved`, but the
+product owner raised ONE new decision while reaffirming §2.1 (typed actor clients — realization
+tracked by [#284 "Typed actor clients (PROP-20260728-152752 §2.1): one generated client per actor"](https://github.com/TheCaptainCompany/captain-food/issues/284)):
+what the TYPED form of the batched send looks like. The interim untyped
+`enqueue_inbound_facts` ([#283 "batch the SIRENE drain"](https://github.com/TheCaptainCompany/captain-food/pull/283))
+fixed a 6x producer bottleneck and must be absorbed, not kept. Blocks only `send_many` — the
+singular typed client can land first.
+
+| # | Decision | Recommendation |
+|---|---|---|
+| **D8** | `send_many` signature + compile-time checks | **(a) Homogeneous generic batch** — `send_many(Vec<(Identity, Envelope<M>)>)`, one message type per call, zero new codegen surface; result `Vec<SendOutcome>` with per-element `message_id`; per-element atomicity, never all-or-nothing |
+
 ---
 
 ## Maintenance
