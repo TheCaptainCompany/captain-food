@@ -5,9 +5,11 @@
 // assembled by the shared crate-internal constructors in `crate::enqueue`, so a typed send and a
 // free-function enqueue can never drift on lane, partition, principal or channel; this file only
 // gathers typed inputs and delegates. `MailboxEntry` fields are pub(crate), so this crate is the
-// only place such a row can exist at all. The SCHEDULING surface (`schedule`/`cancel`) is emitted
-// only for actors whose spec declares reminders (product-owner directive, 2026-08-02): the spec
-// declaration is the permission — an undeclared actor has NO method, not an uncallable one.
+// only place such a row can exist at all. EVERY method is spec-gated (product-owner
+// directive, 2026-08-02 — the declaration is the permission): `send` + `{Actor}Command` exist
+// iff the actor receives >=1 COMMAND, `record` + `{Actor}Fact` iff it receives >=1 inbound
+// FACT, `schedule`/`cancel` iff it declares `reminders:`. An unjustified surface is ABSENT — a
+// compile error at any call site — never uncallable-but-present.
 
 use std::sync::Arc;
 
@@ -204,7 +206,6 @@ impl CartClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -220,7 +221,6 @@ impl CartClient {
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
-
     /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
     /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
     /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
@@ -356,7 +356,6 @@ impl CatalogClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -372,7 +371,6 @@ impl CatalogClient {
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
-
     /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
     /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
     /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
@@ -451,18 +449,6 @@ impl ConversationCommand for domain::generated::commands::UnmuteParticipant {
     const MESSAGE_TYPE: &'static str = "UnmuteParticipant";
 }
 
-/// GENERATED from actors.yaml `Conversation.receives`: marker for every inbound FACT (an
-/// `events.yaml#/…` ref — an external fact that already happened) the `Conversation` actor records.
-/// SEALED for the same reason as [`ConversationCommand`].
-pub trait ConversationFact: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
-    const EVENT_TYPE: &'static str;
-    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
-    /// from the domain enum's own serde representation, never from a hand-built literal that
-    /// could drift from it.
-    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
-}
-
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Conversation` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
@@ -477,7 +463,6 @@ impl ConversationClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -492,35 +477,6 @@ impl ConversationClient {
         let entry = command_entry("Conversation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
-    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
-    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
-    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
-    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is
-    /// the per-source system user, stamped by the shared `inbound_entry` constructor.
-    pub async fn record<F: ConversationFact>(
-        &self,
-        fact: F,
-        source: &str,
-        external_id: &str,
-        correlation_id: uuid::Uuid,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let tagged = serde_json::to_value(fact.into_domain_event())
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        enqueue_inbound_fact(
-            self.mailbox.as_ref(),
-            InboundFact {
-                source: source.to_owned(),
-                external_id: external_id.to_owned(),
-                event_type: F::EVENT_TYPE.to_owned(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "Conversation".to_owned(),
-                actor_id: self.actor_id,
-            },
-        )
-        .await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
@@ -604,18 +560,6 @@ impl CustomerCommand for domain::generated::commands::VerifyPhone {
     const MESSAGE_TYPE: &'static str = "VerifyPhone";
 }
 
-/// GENERATED from actors.yaml `Customer.receives`: marker for every inbound FACT (an
-/// `events.yaml#/…` ref — an external fact that already happened) the `Customer` actor records.
-/// SEALED for the same reason as [`CustomerCommand`].
-pub trait CustomerFact: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
-    const EVENT_TYPE: &'static str;
-    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
-    /// from the domain enum's own serde representation, never from a hand-built literal that
-    /// could drift from it.
-    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
-}
-
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Customer` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
@@ -630,7 +574,6 @@ impl CustomerClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -645,35 +588,6 @@ impl CustomerClient {
         let entry = command_entry("Customer", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
-    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
-    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
-    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
-    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is
-    /// the per-source system user, stamped by the shared `inbound_entry` constructor.
-    pub async fn record<F: CustomerFact>(
-        &self,
-        fact: F,
-        source: &str,
-        external_id: &str,
-        correlation_id: uuid::Uuid,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let tagged = serde_json::to_value(fact.into_domain_event())
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        enqueue_inbound_fact(
-            self.mailbox.as_ref(),
-            InboundFact {
-                source: source.to_owned(),
-                external_id: external_id.to_owned(),
-                event_type: F::EVENT_TYPE.to_owned(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "Customer".to_owned(),
-                actor_id: self.actor_id,
-            },
-        )
-        .await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
@@ -709,18 +623,6 @@ impl CustomerCreditCommand for domain::generated::commands::GrantCustomerCredit 
     const MESSAGE_TYPE: &'static str = "GrantCustomerCredit";
 }
 
-/// GENERATED from actors.yaml `CustomerCredit.receives`: marker for every inbound FACT (an
-/// `events.yaml#/…` ref — an external fact that already happened) the `CustomerCredit` actor records.
-/// SEALED for the same reason as [`CustomerCreditCommand`].
-pub trait CustomerCreditFact: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
-    const EVENT_TYPE: &'static str;
-    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
-    /// from the domain enum's own serde representation, never from a hand-built literal that
-    /// could drift from it.
-    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
-}
-
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `CustomerCredit` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
@@ -735,7 +637,6 @@ impl CustomerCreditClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -750,35 +651,6 @@ impl CustomerCreditClient {
         let entry = command_entry("CustomerCredit", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
-    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
-    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
-    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
-    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is
-    /// the per-source system user, stamped by the shared `inbound_entry` constructor.
-    pub async fn record<F: CustomerCreditFact>(
-        &self,
-        fact: F,
-        source: &str,
-        external_id: &str,
-        correlation_id: uuid::Uuid,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let tagged = serde_json::to_value(fact.into_domain_event())
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        enqueue_inbound_fact(
-            self.mailbox.as_ref(),
-            InboundFact {
-                source: source.to_owned(),
-                external_id: external_id.to_owned(),
-                event_type: F::EVENT_TYPE.to_owned(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "CustomerCredit".to_owned(),
-                actor_id: self.actor_id,
-            },
-        )
-        .await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
@@ -922,7 +794,6 @@ impl DeliveryJobClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -938,7 +809,6 @@ impl DeliveryJobClient {
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
-
     /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
     /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
     /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
@@ -1005,18 +875,6 @@ impl DeliveryPartnerRegistrationCommand for domain::generated::commands::RevokeD
     const MESSAGE_TYPE: &'static str = "RevokeDeliveryPartnerAvailability";
 }
 
-/// GENERATED from actors.yaml `DeliveryPartnerRegistration.receives`: marker for every inbound FACT (an
-/// `events.yaml#/…` ref — an external fact that already happened) the `DeliveryPartnerRegistration` actor records.
-/// SEALED for the same reason as [`DeliveryPartnerRegistrationCommand`].
-pub trait DeliveryPartnerRegistrationFact: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
-    const EVENT_TYPE: &'static str;
-    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
-    /// from the domain enum's own serde representation, never from a hand-built literal that
-    /// could drift from it.
-    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
-}
-
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `DeliveryPartnerRegistration` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
@@ -1031,7 +889,6 @@ impl DeliveryPartnerRegistrationClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -1046,35 +903,6 @@ impl DeliveryPartnerRegistrationClient {
         let entry = command_entry("DeliveryPartnerRegistration", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
-    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
-    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
-    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
-    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is
-    /// the per-source system user, stamped by the shared `inbound_entry` constructor.
-    pub async fn record<F: DeliveryPartnerRegistrationFact>(
-        &self,
-        fact: F,
-        source: &str,
-        external_id: &str,
-        correlation_id: uuid::Uuid,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let tagged = serde_json::to_value(fact.into_domain_event())
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        enqueue_inbound_fact(
-            self.mailbox.as_ref(),
-            InboundFact {
-                source: source.to_owned(),
-                external_id: external_id.to_owned(),
-                event_type: F::EVENT_TYPE.to_owned(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "DeliveryPartnerRegistration".to_owned(),
-                actor_id: self.actor_id,
-            },
-        )
-        .await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
@@ -1187,7 +1015,6 @@ impl OrderClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -1203,7 +1030,6 @@ impl OrderClient {
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
-
     /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
     /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
     /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
@@ -1273,14 +1099,6 @@ impl OrderClient {
 }
 
 // ─── Payment ───
-
-/// GENERATED from actors.yaml `Payment.receives`: marker for every COMMAND the `Payment` actor
-/// receives. SEALED (private supertrait) so no impl can exist outside the generated file —
-/// sending a command this actor does not `receive` is a COMPILE error, not a runtime rejection.
-pub trait PaymentCommand: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the commands.yaml key).
-    const MESSAGE_TYPE: &'static str;
-}
 
 /// GENERATED from actors.yaml `Payment.receives`: marker for every inbound FACT (an
 /// `events.yaml#/…` ref — an external fact that already happened) the `Payment` actor records.
@@ -1357,23 +1175,6 @@ impl PaymentClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
-    /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
-    /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
-    /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
-    pub async fn send<M: PaymentCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Payment", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
     /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
     /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
     /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
@@ -1401,22 +1202,7 @@ impl PaymentClient {
             },
         )
         .await
-    }
-    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
-    /// free-function door uses: when the command declares an identity property, its value MUST
-    /// equal this client's lane — a mismatch would park the command on one lane while the handler
-    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
-    /// actor declares no identity property is addressed by the lane the client was built with.
-    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
-        match declared_identity(message_type, payload)? {
-            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
-                "{message_type}: payload identity {id} does not match this PaymentClient lane {} — refusing a mis-addressed send",
-                self.actor_id
-            ))),
-            _ => Ok(()),
-        }
-    }
-}
+    }}
 
 // ─── PlaceOrderProcess ───
 
@@ -1472,7 +1258,6 @@ impl PlaceOrderProcessClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -1488,7 +1273,6 @@ impl PlaceOrderProcessClient {
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
-
     /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
     /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
     /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
@@ -1555,18 +1339,6 @@ impl ProspectCommand for domain::generated::commands::RecordProspectReply {
     const MESSAGE_TYPE: &'static str = "RecordProspectReply";
 }
 
-/// GENERATED from actors.yaml `Prospect.receives`: marker for every inbound FACT (an
-/// `events.yaml#/…` ref — an external fact that already happened) the `Prospect` actor records.
-/// SEALED for the same reason as [`ProspectCommand`].
-pub trait ProspectFact: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
-    const EVENT_TYPE: &'static str;
-    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
-    /// from the domain enum's own serde representation, never from a hand-built literal that
-    /// could drift from it.
-    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
-}
-
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Prospect` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
@@ -1581,7 +1353,6 @@ impl ProspectClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -1596,35 +1367,6 @@ impl ProspectClient {
         let entry = command_entry("Prospect", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
-    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
-    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
-    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
-    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is
-    /// the per-source system user, stamped by the shared `inbound_entry` constructor.
-    pub async fn record<F: ProspectFact>(
-        &self,
-        fact: F,
-        source: &str,
-        external_id: &str,
-        correlation_id: uuid::Uuid,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let tagged = serde_json::to_value(fact.into_domain_event())
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        enqueue_inbound_fact(
-            self.mailbox.as_ref(),
-            InboundFact {
-                source: source.to_owned(),
-                external_id: external_id.to_owned(),
-                event_type: F::EVENT_TYPE.to_owned(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "Prospect".to_owned(),
-                actor_id: self.actor_id,
-            },
-        )
-        .await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
@@ -1672,18 +1414,6 @@ impl ReclamationCommand for domain::generated::commands::ResolveReclamation {
     const MESSAGE_TYPE: &'static str = "ResolveReclamation";
 }
 
-/// GENERATED from actors.yaml `Reclamation.receives`: marker for every inbound FACT (an
-/// `events.yaml#/…` ref — an external fact that already happened) the `Reclamation` actor records.
-/// SEALED for the same reason as [`ReclamationCommand`].
-pub trait ReclamationFact: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
-    const EVENT_TYPE: &'static str;
-    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
-    /// from the domain enum's own serde representation, never from a hand-built literal that
-    /// could drift from it.
-    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
-}
-
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Reclamation` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
@@ -1698,7 +1428,6 @@ impl ReclamationClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -1713,35 +1442,6 @@ impl ReclamationClient {
         let entry = command_entry("Reclamation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
-    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
-    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
-    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
-    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is
-    /// the per-source system user, stamped by the shared `inbound_entry` constructor.
-    pub async fn record<F: ReclamationFact>(
-        &self,
-        fact: F,
-        source: &str,
-        external_id: &str,
-        correlation_id: uuid::Uuid,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let tagged = serde_json::to_value(fact.into_domain_event())
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        enqueue_inbound_fact(
-            self.mailbox.as_ref(),
-            InboundFact {
-                source: source.to_owned(),
-                external_id: external_id.to_owned(),
-                event_type: F::EVENT_TYPE.to_owned(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "Reclamation".to_owned(),
-                actor_id: self.actor_id,
-            },
-        )
-        .await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
@@ -1810,7 +1510,6 @@ impl RefundProcessClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -1826,7 +1525,6 @@ impl RefundProcessClient {
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
-
     /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
     /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
     /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
@@ -1970,7 +1668,6 @@ impl RestaurantClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -1986,7 +1683,6 @@ impl RestaurantClient {
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
-
     /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
     /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
     /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
@@ -2053,18 +1749,6 @@ impl RestaurantAccountCommand for domain::generated::commands::UpdateRestaurantA
     const MESSAGE_TYPE: &'static str = "UpdateRestaurantAccount";
 }
 
-/// GENERATED from actors.yaml `RestaurantAccount.receives`: marker for every inbound FACT (an
-/// `events.yaml#/…` ref — an external fact that already happened) the `RestaurantAccount` actor records.
-/// SEALED for the same reason as [`RestaurantAccountCommand`].
-pub trait RestaurantAccountFact: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
-    const EVENT_TYPE: &'static str;
-    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
-    /// from the domain enum's own serde representation, never from a hand-built literal that
-    /// could drift from it.
-    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
-}
-
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `RestaurantAccount` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
@@ -2079,7 +1763,6 @@ impl RestaurantAccountClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -2094,35 +1777,6 @@ impl RestaurantAccountClient {
         let entry = command_entry("RestaurantAccount", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
-    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
-    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
-    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
-    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is
-    /// the per-source system user, stamped by the shared `inbound_entry` constructor.
-    pub async fn record<F: RestaurantAccountFact>(
-        &self,
-        fact: F,
-        source: &str,
-        external_id: &str,
-        correlation_id: uuid::Uuid,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let tagged = serde_json::to_value(fact.into_domain_event())
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        enqueue_inbound_fact(
-            self.mailbox.as_ref(),
-            InboundFact {
-                source: source.to_owned(),
-                external_id: external_id.to_owned(),
-                event_type: F::EVENT_TYPE.to_owned(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "RestaurantAccount".to_owned(),
-                actor_id: self.actor_id,
-            },
-        )
-        .await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
@@ -2162,18 +1816,6 @@ impl RiderCommand for domain::generated::commands::UpdateRiderInfo {
     const MESSAGE_TYPE: &'static str = "UpdateRiderInfo";
 }
 
-/// GENERATED from actors.yaml `Rider.receives`: marker for every inbound FACT (an
-/// `events.yaml#/…` ref — an external fact that already happened) the `Rider` actor records.
-/// SEALED for the same reason as [`RiderCommand`].
-pub trait RiderFact: sealed::Sealed + serde::Serialize + Send {
-    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
-    const EVENT_TYPE: &'static str;
-    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
-    /// from the domain enum's own serde representation, never from a hand-built literal that
-    /// could drift from it.
-    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
-}
-
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Rider` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
 /// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
@@ -2188,7 +1830,6 @@ impl RiderClient {
     pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
         Self { mailbox, actor_id }
     }
-
     /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
     /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
     /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
@@ -2203,35 +1844,6 @@ impl RiderClient {
         let entry = command_entry("Rider", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
-    }
-
-    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
-    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
-    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the
-    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is
-    /// the per-source system user, stamped by the shared `inbound_entry` constructor.
-    pub async fn record<F: RiderFact>(
-        &self,
-        fact: F,
-        source: &str,
-        external_id: &str,
-        correlation_id: uuid::Uuid,
-    ) -> Result<EnqueueOutcome, DomainError> {
-        let tagged = serde_json::to_value(fact.into_domain_event())
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        enqueue_inbound_fact(
-            self.mailbox.as_ref(),
-            InboundFact {
-                source: source.to_owned(),
-                external_id: external_id.to_owned(),
-                event_type: F::EVENT_TYPE.to_owned(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "Rider".to_owned(),
-                actor_id: self.actor_id,
-            },
-        )
-        .await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST

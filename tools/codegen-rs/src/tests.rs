@@ -2488,13 +2488,15 @@ Catalog:
         assert!(issues.iter().all(|i| i.level == Level::Warning), "both stay WARN — the mailbox mints an addressing-only id (calibration, see §2d doc)");
     }
 
-    /// The SPEC-GATED scheduling surface (product-owner directive, 2026-08-02): a client exposes
-    /// `schedule`/`cancel` IFF its actor declares `reminders:` in actors.yaml — the declaration
-    /// is the permission, and an undeclared actor has NO method (a compile error at any call
-    /// site), never an uncallable-but-present one. Bidirectional over the real catalog: every
-    /// reminder-declaring actor's block carries both methods, every other block carries neither.
+    /// THE DECLARATION IS THE PERMISSION (product-owner directive, 2026-08-02, generalized to the
+    /// whole client surface): per actor, `send` + the sealed `{Actor}Command` trait exist IFF the
+    /// actor's `receives` declares ≥1 COMMAND; `record` + `{Actor}Fact` IFF it declares ≥1
+    /// inbound FACT; `schedule`/`cancel` IFF it declares `reminders:`. An unjustified surface is
+    /// ABSENT (a compile error at any call site), never uncallable-but-present. Bidirectional
+    /// over the real catalog, with the per-actor declaration sets re-derived HERE from the model
+    /// (an independent scan — the guard does not trust the emitter's own).
     #[test]
-    fn schedule_surface_exists_only_for_reminder_declaring_actors() {
+    fn client_surface_exists_only_with_a_spec_declaration() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
         let declaring: HashSet<String> =
@@ -2504,24 +2506,60 @@ Catalog:
             "no actor declares reminders — if the Order pilot left the spec, this guard needs a \
              new positive case, not silence"
         );
+        // Independent per-actor receives scan: ref path encodes the kind (§1b).
+        let mut has_commands: HashSet<String> = HashSet::new();
+        let mut has_facts: HashSet<String> = HashSet::new();
+        if let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") {
+            for (k, def) in actors {
+                let Some(name) = k.as_str().filter(|s| *s != "principals") else { continue };
+                let Some(receives) = def.get("receives").and_then(|r| r.as_sequence()) else {
+                    continue;
+                };
+                for entry in receives {
+                    let Some(r) =
+                        entry.get("message").and_then(|m| m.get("$ref")).and_then(|r| r.as_str())
+                    else {
+                        continue;
+                    };
+                    if r.starts_with("commands.yaml#/") {
+                        has_commands.insert(name.to_string());
+                    } else if r.starts_with("events.yaml#/") {
+                        has_facts.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        assert!(!has_commands.is_empty() && !has_facts.is_empty(), "the receives scan went blind");
+
         let clients = emit_actor_clients(&model);
         let mut seen_blocks = 0usize;
         for block in clients.split("\n// ─── ").skip(1) {
             let name = block.split(' ').next().expect("actor name heads the block");
             seen_blocks += 1;
-            let has_schedule = block.contains("pub async fn schedule");
-            let has_cancel = block.contains("pub async fn cancel");
-            assert_eq!(
-                has_schedule, has_cancel,
-                "{name}: schedule and cancel must travel together (cancel can only withdraw what \
-                 schedule/the reminder upsert could have parked)"
-            );
-            assert_eq!(
-                has_schedule,
-                declaring.contains(name),
-                "{name}: the scheduling surface must exist IFF the actor declares reminders in \
-                 actors.yaml — the spec declaration is the permission"
-            );
+            let surface = [
+                ("pub async fn send", has_commands.contains(name), "receives >=1 COMMAND"),
+                (
+                    &format!("pub trait {name}Command") as &str,
+                    has_commands.contains(name),
+                    "receives >=1 COMMAND",
+                ),
+                ("pub async fn record", has_facts.contains(name), "receives >=1 inbound FACT"),
+                (
+                    &format!("pub trait {name}Fact") as &str,
+                    has_facts.contains(name),
+                    "receives >=1 inbound FACT",
+                ),
+                ("pub async fn schedule", declaring.contains(name), "declares reminders:"),
+                ("pub async fn cancel", declaring.contains(name), "declares reminders:"),
+            ];
+            for (needle, justified, why) in surface {
+                assert_eq!(
+                    block.contains(needle),
+                    justified,
+                    "{name}: `{needle}` must exist IFF the actor {why} in actors.yaml — the spec \
+                     declaration is the permission (product-owner directive, 2026-08-02)"
+                );
+            }
         }
         assert!(seen_blocks > 1, "the per-actor block scan went blind — fix the separator parse");
     }
@@ -2805,13 +2843,11 @@ Catalog:
             .collect();
         assert!(!actors.is_empty(), "expected at least one mailbox actor in the emitted router");
         for actor in &actors {
-            for item in [
-                format!("pub struct {actor}Client"),
-                format!("pub trait {actor}Command"),
-                format!("pub trait {actor}Fact"),
-            ] {
-                assert!(clients.contains(&item), "generated actor_clients.rs lacks `{item}`");
-            }
+            // The CLIENT struct exists for every mailbox actor (it is the lane handle); the
+            // marker traits and methods are SPEC-GATED per declaration — asserted bidirectionally
+            // by `client_surface_exists_only_with_a_spec_declaration` below.
+            let item = format!("pub struct {actor}Client");
+            assert!(clients.contains(&item), "generated actor_clients.rs lacks `{item}`");
         }
         // The seal itself must be present — without the private supertrait module the whole
         // compile-time guarantee (no impls outside the generated file) evaporates.
