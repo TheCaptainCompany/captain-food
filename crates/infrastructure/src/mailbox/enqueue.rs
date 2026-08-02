@@ -114,6 +114,14 @@ pub async fn enqueue_inbound_fact(
     mailbox: &dyn Mailbox,
     fact: InboundFact,
 ) -> Result<EnqueueOutcome, DomainError> {
+    let entry = inbound_entry(fact)?;
+    let payload_hash = entry.payload_hash.clone();
+    insert_mapped(mailbox, entry, &payload_hash).await
+}
+
+/// The one place an [`InboundFact`] becomes a [`MailboxEntry`]. Shared by the singular and batched
+/// enqueue so they cannot drift on lane, principal or channel.
+fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainError> {
     let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == fact.actor_type) else {
         return Err(DomainError::Repository(format!(
             "'{}' is not a mailbox actor — inbound fact '{}' has no lane",
@@ -122,7 +130,7 @@ pub async fn enqueue_inbound_fact(
     };
     let message_id = inbound_message_id(&fact.source, &fact.external_id);
     let payload_hash = application::journal::payload_hash(&fact.payload);
-    let entry = MailboxEntry {
+    Ok(MailboxEntry {
         message_id,
         kind: "EVENT".into(),
         actor_type: fact.actor_type.clone(),
@@ -145,8 +153,33 @@ pub async fn enqueue_inbound_fact(
         trace_id: None,
         source: Some(fact.source),
         external_id: Some(fact.external_id),
-    };
-    insert_mapped(mailbox, entry, &payload_hash).await
+    })
+}
+
+/// Enqueue MANY inbound facts in one round-trip — the batched form of [`enqueue_inbound_fact`].
+///
+/// Returns, per input fact and in the SAME order, whether it was newly enqueued. `false` means the
+/// identity was already on the mailbox: either awaiting delivery or already decided. Both are
+/// terminal for the producer — it has handed the fact over either way — which is exactly why this
+/// does not distinguish `Deduplicated` from `PayloadConflict` the way the singular form does.
+/// A producer keyed on a content hash (`{siret}:{payload_hash}`) cannot produce a payload conflict
+/// for an identity it already wrote.
+///
+/// The entry construction is shared with [`enqueue_inbound_fact`] via [`inbound_entry`], so the two
+/// paths cannot drift on partition, principal or channel — a batched row and a singular row for the
+/// same fact are byte-identical.
+pub async fn enqueue_inbound_facts(
+    mailbox: &dyn Mailbox,
+    facts: Vec<InboundFact>,
+) -> Result<Vec<bool>, DomainError> {
+    if facts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let entries: Vec<MailboxEntry> =
+        facts.into_iter().map(inbound_entry).collect::<Result<_, _>>()?;
+    let inserted: std::collections::HashSet<uuid::Uuid> =
+        mailbox.insert_many(&entries).await?.into_iter().collect();
+    Ok(entries.iter().map(|e| inserted.contains(&e.message_id)).collect())
 }
 
 /// What one reminder declaration did. A separate enum from [`EnqueueOutcome`]: `Rescheduled` is a

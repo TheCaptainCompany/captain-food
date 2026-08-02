@@ -60,7 +60,8 @@ use domain::generated::scalars::{
 };
 
 use crate::mailbox::{
-    enqueue_inbound_fact, enqueue_worker_command, EnqueueOutcome, InboundFact,
+    enqueue_inbound_fact, enqueue_inbound_facts, enqueue_worker_command, EnqueueOutcome,
+    InboundFact,
 };
 use crate::persistence::mailbox_store::PgMailbox;
 use domain::shared::errors::DomainError;
@@ -255,6 +256,84 @@ pub struct SireneSyncStatus {
     pub last_summary: Option<SireneSyncSummary>,
 }
 
+/// What one staged row turned out to be, decided WITHOUT touching the database.
+///
+/// Separating the decision from the write is what lets the drain batch: the ACL is pure CPU, so a
+/// whole batch can be translated first and then written in two statements instead of 2N.
+enum Classified {
+    /// An explicit closure signal — handled row-by-row, because it executes a real command.
+    Closure,
+    /// A mappable active record, ready to hand to the mailbox.
+    Fact(Box<InboundFact>),
+    /// Nothing usable. The payload is KEPT as the evidence of why (#231 D3).
+    Unmappable { reason: String },
+}
+
+/// Translate one staged row into a [`Classified`] — the ACL leg, with no I/O of any kind.
+///
+/// Errors are reserved for genuine infrastructure faults (a payload that will not serialize); an
+/// unusable INSEE record is a `Unmappable` VALUE, not an error, because it is a normal outcome the
+/// sweep must record and move past rather than fail on.
+fn classify_row(
+    siret: &str,
+    payload: Option<serde_json::Value>,
+    etat: &str,
+    staged_hash: &str,
+) -> Result<Classified, DomainError> {
+    // A pending row with no payload cannot happen by design (the ingestion writes the payload for
+    // exactly the rows it pends, #231) — but if it ever does, leaving it pending would spin the
+    // worker on it forever.
+    let Some(payload) = payload else {
+        return Ok(Classified::Unmappable {
+            reason: "pending row has NO payload — nothing to translate (should be impossible; the \
+                     next ingestion refresh re-pends it with one)"
+                .to_string(),
+        });
+    };
+
+    let etablissement: Etablissement = match serde_json::from_value(payload) {
+        Ok(e) => e,
+        // A poison payload will not fix itself on retry — record it and wait for the ingestion to
+        // refresh it (which re-pends the row). The payload is the evidence of what would not parse.
+        Err(e) => return Ok(Classified::Unmappable { reason: format!("unparsable staged payload: {e}") }),
+    };
+
+    // Explicit closure signal — the staging `etat` column (stamped at ingestion) or the payload's
+    // own current period (`F` fermé / `C` cessation).
+    if etat == "F" || matches!(etablissement.etat(), Some("F") | Some("C")) {
+        return Ok(Classified::Closure);
+    }
+
+    // Active record → ACL → an inbound FACT (ADR-20260728-011344 D4). No command, no read-model
+    // lookup: INSEE cannot be told "no", so the AGGREGATE decides record / update / nothing.
+    match etablissement_to_registered_event(&etablissement) {
+        Ok(event) => {
+            // `external_id` is `{siret}:{payload_hash}` — a STABLE dedupe key across sweeps.
+            let external_id = format!("{siret}:{staged_hash}");
+            // The addressed lane: the Restaurant aggregate this fact belongs to, its id deterministic
+            // (UUIDv5 of the SIRET) and carried on the event itself.
+            let actor_id = event.restaurant_id.0;
+            Ok(Classified::Fact(Box::new(InboundFact {
+                source: SIRENE_SOURCE.to_string(),
+                external_id: external_id.clone(),
+                event_type: "RestaurantRegistered".to_string(),
+                // The ADJACENTLY-TAGGED union form (`{"eventType","payload"}`) — the EVENT route
+                // deserializes `DomainEvent`, so a bare payload here is undeliverable.
+                payload: serde_json::to_value(DomainEvent::RestaurantRegistered(event)).map_err(
+                    |e| DomainError::Repository(format!("serialize RestaurantRegistered: {e}")),
+                )?,
+                correlation_id: sirene_uuid(&format!("inbound:{external_id}")),
+                actor_type: "Restaurant".to_string(),
+                actor_id,
+            })))
+        }
+        // Unusable record (redacted, nameless, no address…). The payload is deliberately RETAINED:
+        // it is the only evidence of why INSEE's record was unusable, and a silent unmappable row
+        // with no evidence is how a systematic mapping bug hides.
+        Err(e) => Ok(Classified::Unmappable { reason: e.to_string() }),
+    }
+}
+
 /// The worker: owns the pool, guards against overlapping drains (the ping endpoint and the poll loop
 /// share one instance behind an `Arc`).
 pub struct SireneSyncWorker {
@@ -366,18 +445,106 @@ impl SireneSyncWorker {
             if rows.is_empty() {
                 break;
             }
+            // CLASSIFY the whole batch first — pure CPU, zero I/O — then do the I/O in two statements.
+            //
+            // The loop used to translate AND write per row: one mailbox INSERT plus one staging UPDATE
+            // each, strictly sequential. Measured in production that ran at ~628 rows/min against
+            // ~3,800/min of ingest, and ~99% of the wall-clock was round-trip latency (~48 ms each),
+            // not work — so the backlog grew 6x faster than it drained and national coverage was
+            // bounded by the drain rather than by INSEE's quota. This is the same finding, and the same
+            // fix, as #215/#216 on the ingestion side, whose `upsert_staging_batch` is the model.
+            //
+            // Every row in a batch is a DIFFERENT aggregate (`restaurantId = UUIDv5(SIRET)`), so there
+            // is no ordering constraint between them and batching cannot reorder anything that matters.
+            let mut facts: Vec<InboundFact> = Vec::new();
+            let mut staged: Vec<(String, DateTime<Utc>)> = Vec::new();
+            let mut unmappable: Vec<(String, DateTime<Utc>)> = Vec::new();
+            let mut closures: Vec<(String, DateTime<Utc>)> = Vec::new();
+
             for row in rows {
                 let siret: String = row.try_get("siret").map_err(db_err)?;
                 // Nullable since #231: the payload lives only while the row is pending, so a pending
-                // row normally HAS one — a NULL here is an anomaly, handled in `process_row`.
+                // row normally HAS one — a NULL here is an anomaly, handled in `classify_row`.
                 let payload: Option<serde_json::Value> = row.try_get("payload").map_err(db_err)?;
                 let etat: String = row.try_get("etat").map_err(db_err)?;
                 let last_seen_at: DateTime<Utc> = row.try_get("last_seen_at").map_err(db_err)?;
                 let staged_hash: String = row.try_get("payload_hash").map_err(db_err)?;
                 after = siret.clone();
-                self.process_row(&store, &restaurants, &mailbox, correlation_id, &siret, payload, &etat, last_seen_at, &staged_hash, &mut summary)
-                    .await?;
+                summary.processed += 1;
+                match classify_row(&siret, payload, &etat, &staged_hash)? {
+                    Classified::Closure => closures.push((siret, last_seen_at)),
+                    Classified::Fact(fact) => {
+                        facts.push(*fact);
+                        staged.push((siret, last_seen_at));
+                    }
+                    Classified::Unmappable { reason } => {
+                        summary.skipped += 1;
+                        tracing::warn!(worker = "sirene_sync", %siret, %reason, "row Unmappable — payload retained as evidence");
+                        unmappable.push((siret, last_seen_at));
+                    }
+                }
             }
+
+            // Closures stay ROW-BY-ROW on purpose: each one executes a real command against a
+            // rehydrated aggregate, and they are rare (bounded by actual INSEE closures) — so the
+            // round-trips they cost are not what the sweep is waiting on.
+            for (siret, last_seen_at) in &closures {
+                match self
+                    .close_if_prospect(&store, &restaurants, &mailbox, correlation_id, siret, *last_seen_at, "SIRENE: establishment administratively closed (etat=F)", &mut summary)
+                    .await
+                {
+                    Ok(()) => self.mark_processed(siret, *last_seen_at, RowOutcome::Synced).await?,
+                    Err(e) => {
+                        summary.failed += 1; // left pending → retried next pass
+                        tracing::error!(worker = "sirene_sync", %siret, error = %e, "close failed");
+                        self.mark_failed(siret).await;
+                    }
+                }
+            }
+
+            // Leg 1: hand every mappable record over in ONE round-trip.
+            if !facts.is_empty() {
+                match enqueue_inbound_facts(&mailbox, facts.clone()).await {
+                    Ok(newly) => {
+                        let fresh = newly.iter().filter(|b| **b).count() as u64;
+                        summary.registered += fresh;
+                        // Already on the mailbox: awaiting delivery or already decided. Either way the
+                        // producer is done with it, and the staging row is STAGED just the same.
+                        summary.skipped += newly.len() as u64 - fresh;
+                        self.mark_processed_batch(&staged, RowOutcome::Staged).await?;
+                    }
+                    Err(e) => {
+                        // One bad row must not sink the batch. Fall back to the per-row path, which
+                        // keeps the failure ISOLATED to the row that caused it and preserves the
+                        // FAILED/POISON accounting — the batch is a fast path, never a semantic change.
+                        tracing::warn!(
+                            worker = "sirene_sync", error = %e, rows = facts.len(),
+                            "batched mailbox enqueue failed — falling back to row-by-row"
+                        );
+                        for (fact, (siret, last_seen_at)) in facts.into_iter().zip(staged.iter()) {
+                            match enqueue_inbound_fact(&mailbox, fact).await {
+                                Ok(EnqueueOutcome::Enqueued) => {
+                                    summary.registered += 1;
+                                    self.mark_processed(siret, *last_seen_at, RowOutcome::Staged).await?;
+                                }
+                                Ok(EnqueueOutcome::Deduplicated(_)) | Ok(EnqueueOutcome::PayloadConflict(_)) => {
+                                    summary.skipped += 1;
+                                    self.mark_processed(siret, *last_seen_at, RowOutcome::Staged).await?;
+                                }
+                                Err(e) => {
+                                    summary.failed += 1; // left pending → retried next pass
+                                    tracing::error!(worker = "sirene_sync", %siret, error = %e, "mailbox enqueue failed");
+                                    self.mark_failed(siret).await;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Leg 2: the unmappable group, one statement. Their payload is RETAINED (#231 D3) —
+            // `RowOutcome::Unmappable` carries that, exactly as on the per-row path.
+            self.mark_processed_batch(&unmappable, RowOutcome::Unmappable).await?;
         }
 
         // 2) Resolve rows whose fact has since been decided by the aggregate.
@@ -387,138 +554,6 @@ impl SireneSyncWorker {
         self.reconcile_absent(&store, &restaurants, &mailbox, correlation_id, &mut summary).await?;
 
         Ok(summary)
-    }
-
-    /// Translate one pending staging row. Only mark-processed/SELECT/journal failures propagate; ACL
-    /// and write-path failures are counted (`skipped`/`failed`) so the pass keeps going.
-    #[allow(clippy::too_many_arguments)]
-    async fn process_row(
-        &self,
-        store: &PgEventStore,
-        restaurants: &PgRestaurantRepository,
-        mailbox: &PgMailbox,
-        correlation_id: uuid::Uuid,
-        siret: &str,
-        payload: Option<serde_json::Value>,
-        etat: &str,
-        last_seen_at: DateTime<Utc>,
-        staged_hash: &str,
-        summary: &mut SireneSyncSummary,
-    ) -> Result<(), DomainError> {
-        summary.processed += 1;
-
-        // A pending row with no payload cannot happen by design (the ingestion writes the payload for
-        // exactly the rows it pends, #231) — but if it ever does, leaving it pending would spin the
-        // worker on it forever. Mark it processed, keep nothing to clear, and say so loudly.
-        let Some(payload) = payload else {
-            summary.skipped += 1;
-            tracing::error!(
-                worker = "sirene_sync",
-                %siret,
-                "pending row has NO payload -- nothing to translate. This should be impossible; \
-                 the next ingestion refresh will re-pend it with one."
-            );
-            return self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await;
-        };
-
-        let etablissement: Etablissement = match serde_json::from_value(payload) {
-            Ok(e) => e,
-            Err(e) => {
-                // A poison payload will not fix itself on retry — skip until the ingestion
-                // refreshes it (which re-pends the row). The payload is KEPT: it is the evidence of
-                // what could not be parsed (#231 D3).
-                summary.skipped += 1;
-                tracing::error!(worker = "sirene_sync", %siret, error = %e, "unparsable staged payload -- row marked Unmappable");
-                return self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await;
-            }
-        };
-
-        // Explicit closure signal — the staging `etat` column (stamped at ingestion) or the payload's
-        // own current period (`F` fermé / `C` cessation).
-        let explicitly_closed = etat == "F" || matches!(etablissement.etat(), Some("F") | Some("C"));
-        if explicitly_closed {
-            match self
-                .close_if_prospect(store, restaurants, mailbox, correlation_id, siret, last_seen_at, "SIRENE: establishment administratively closed (etat=F)", summary)
-                .await
-            {
-                Ok(()) => return self.mark_processed(siret, last_seen_at, RowOutcome::Synced).await,
-                Err(e) => {
-                    summary.failed += 1; // left pending → retried next pass
-                    tracing::error!(worker = "sirene_sync", %siret, error = %e, "close failed");
-                    self.mark_failed(siret).await;
-                    return Ok(());
-                }
-            }
-        }
-
-        // Active record → ACL → STAGED as an inbound fact (ADR-20260728-011344 D4).
-        //
-        // No command, no command_journal, and no read-model lookup. What changed and why:
-        //
-        // * INSEE cannot be told "no", so a command was always the wrong shape — the old path's
-        //   rejections went to an eprintln! and nobody. This stages the fact and lets the AGGREGATE
-        //   decide: record / update / nothing (see `record_inbound_restaurant_registration`).
-        // * The legacy-id adoption lookup is GONE. It ran `external_identifiers @> $1` against the
-        //   `Restaurant` projection — a JSONB containment scan with no GIN index, once per staged SIRET,
-        //   which made it quadratic and very likely the single largest disk-IO consumer of a sweep. It
-        //   was also asking the eventually-consistent READ side to make a write decision. The aggregate
-        //   id is `UUIDv5(SIRET)`, deterministic, so no lookup is needed to find "the same restaurant".
-        // * `external_id` is `{siret}:{payload_hash}` — a STABLE dedupe key. `command_journal`'s
-        //   message_id was seeded on `last_seen_at`, so it could never dedupe across sweeps and every
-        //   SIRET produced a fresh journal row every week.
-        match etablissement_to_registered_event(&etablissement) {
-            Ok(event) => {
-                let external_id = format!("{siret}:{staged_hash}");
-                // The addressed lane: the Restaurant aggregate this fact belongs to — its id is
-                // deterministic (UUIDv5 of the SIRET), carried on the event itself.
-                let restaurant_uuid = event.restaurant_id.0;
-                let fact = InboundFact {
-                    source: SIRENE_SOURCE.to_string(),
-                    external_id: external_id.clone(),
-                    event_type: "RestaurantRegistered".to_string(),
-                    // The ADJACENTLY-TAGGED union form (`{"eventType", "payload"}`) — the EVENT
-                    // route deserializes `DomainEvent`, so a bare payload here is undeliverable.
-                    payload: serde_json::to_value(DomainEvent::RestaurantRegistered(event))
-                        .map_err(|e| {
-                            DomainError::Repository(format!("serialize RestaurantRegistered: {e}"))
-                        })?,
-                    // The established ACL convention: UUIDv5 of the external id, so the whole chain
-                    // (staging row → mailbox row → appended fact) shares one correlation.
-                    correlation_id: sirene_uuid(&format!("inbound:{external_id}")),
-                    actor_type: "Restaurant".to_string(),
-                    actor_id: restaurant_uuid,
-                };
-                match enqueue_inbound_fact(mailbox, fact).await {
-                    Ok(EnqueueOutcome::Enqueued) => {
-                        summary.registered += 1;
-                        self.mark_processed(siret, last_seen_at, RowOutcome::Staged).await
-                    }
-                    // Already on the mailbox — this exact (siret, payload_hash) is either awaiting
-                    // delivery or already decided. Reconciliation reads the verdict off the row
-                    // that is already there.
-                    Ok(EnqueueOutcome::Deduplicated(_)) | Ok(EnqueueOutcome::PayloadConflict(_)) => {
-                        summary.skipped += 1;
-                        self.mark_processed(siret, last_seen_at, RowOutcome::Staged).await
-                    }
-                    Err(e) => {
-                        summary.failed += 1; // left pending → retried next pass
-                        tracing::error!(worker = "sirene_sync", %siret, error = %e, "mailbox enqueue failed");
-                        self.mark_failed(siret).await;
-                        Ok(())
-                    }
-                }
-            }
-            Err(e) => {
-                // Unusable record (redacted, nameless, no address…) — log + mark processed; the next
-                // ingestion refresh re-pends it if INSEE's data improves.
-                // UNMAPPABLE — payload deliberately RETAINED (#231 D3): it is the only evidence of
-                // why INSEE's record was unusable, and a silent unmappable row with no evidence is
-                // how a systematic mapping bug hides.
-                summary.skipped += 1;
-                tracing::warn!(worker = "sirene_sync", error = %e, "row skipped");
-                self.mark_processed(siret, last_seen_at, RowOutcome::Unmappable).await
-            }
-        }
     }
 
     /// Advance the per-row checkpoint to the `last_seen_at` we READ (not `now()`): if an ingestion
@@ -557,6 +592,45 @@ impl SireneSyncWorker {
         )
         .bind(siret)
         .bind(last_seen_at)
+        .bind(outcome.status())
+        .bind(outcome.clears_payload())
+        .bind(outcome.stamps_synced_at())
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// [`Self::mark_processed`] for a whole group at once — same columns, same semantics, one
+    /// round-trip instead of N.
+    ///
+    /// Callers group by `outcome` so the three constant flags stay constant across the group; only
+    /// `siret` and its `last_seen_at` vary, and those ride in as parallel arrays. `last_seen_at` is
+    /// still the value READ per row, never `now()`: that is what makes a concurrent ingestion bump
+    /// re-pend the row instead of being swallowed, and batching must not quietly weaken it.
+    async fn mark_processed_batch(
+        &self,
+        rows: &[(String, DateTime<Utc>)],
+        outcome: RowOutcome,
+    ) -> Result<(), DomainError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let sirets: Vec<String> = rows.iter().map(|(s, _)| s.clone()).collect();
+        let seen: Vec<DateTime<Utc>> = rows.iter().map(|(_, t)| *t).collect();
+        sqlx::query(
+            "UPDATE external_sirene_restaurants s \
+                SET processed_at = t.last_seen_at, \
+                    status = $3, \
+                    payload = CASE WHEN $4 THEN NULL ELSE s.payload END, \
+                    synced_at = CASE WHEN $5 THEN now() ELSE s.synced_at END, \
+                    last_attempt_sync_at = now(), \
+                    attempt_sync_retry_count = 0 \
+               FROM UNNEST($1::text[], $2::timestamptz[]) AS t(siret, last_seen_at) \
+              WHERE s.siret = t.siret",
+        )
+        .bind(&sirets)
+        .bind(&seen)
         .bind(outcome.status())
         .bind(outcome.clears_payload())
         .bind(outcome.stamps_synced_at())

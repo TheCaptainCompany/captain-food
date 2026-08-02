@@ -86,6 +86,34 @@ pub trait Mailbox: Send + Sync {
     /// existing row's status + hash instead of inserting.
     async fn insert(&self, entry: &MailboxEntry) -> Result<MailboxInsertOutcome, DomainError>;
 
+    /// Persist MANY entries as RECEIVED in one round-trip, returning the `message_id`s that were
+    /// actually inserted; the rest collided on the pk and are already on the mailbox.
+    ///
+    /// Exists because a per-row `insert` makes a bulk producer latency-bound rather than
+    /// throughput-bound: the SIRENE sweep ran at ~628 rows/min against ~3,800/min of ingest, and
+    /// ~99% of that wall-clock was round-trips, not work (the same finding as #215/#216 on the
+    /// ingest side). Callers that hand over a whole batch at once should not pay per row for it.
+    ///
+    /// The dedupe contract is deliberately WEAKER than `insert`'s: this reports *whether* a row was
+    /// new, not the existing row's status and hash, because distinguishing `Deduplicated` from
+    /// `PayloadConflict` requires reading every collided row back. A caller that needs that
+    /// distinction must use `insert`. For an idempotent producer keyed on a content hash — where a
+    /// collision means "this exact version is already here" — it is not needed.
+    ///
+    /// Default: a correct row-by-row fallback, so an implementation only overrides it to go faster.
+    async fn insert_many(
+        &self,
+        entries: &[MailboxEntry],
+    ) -> Result<Vec<uuid::Uuid>, DomainError> {
+        let mut inserted = Vec::new();
+        for entry in entries {
+            if matches!(self.insert(entry).await?, MailboxInsertOutcome::Inserted) {
+                inserted.push(entry.message_id);
+            }
+        }
+        Ok(inserted)
+    }
+
     /// The row behind an acceptance handle (the `operationStatus` lookup).
     async fn by_message(
         &self,

@@ -891,3 +891,100 @@ async fn a_failed_verdict_keeps_the_payload() {
     assert!(payload.is_some(), "a failed delivery is precisely when the raw record is still needed");
     assert!(synced_at.is_none(), "and nothing may claim it reached the domain");
 }
+
+/// The drain must handle a MIXED batch in one pass and get every group right.
+///
+/// The per-row loop this replaced did one mailbox INSERT plus one staging UPDATE per row, strictly
+/// sequential — measured at ~628 rows/min in production against ~3,800/min of ingest, with ~99% of the
+/// wall-clock being round-trip latency rather than work. The batched form classifies the whole batch as
+/// pure CPU and then writes it in two statements.
+///
+/// Every other test in this file drains one or two rows, so none of them would notice a multi-row
+/// statement being wrong — a bad `UNNEST` join or a mis-zipped enqueue result would pass all of them.
+/// This one uses 25 rows across all three classifications at once, which is what actually exercises the
+/// batch: the mailbox insert, the `UNNEST` staging update, and the correspondence between them.
+#[tokio::test]
+async fn a_mixed_batch_drains_in_one_pass_with_every_group_marked_correctly() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("SKIP a_mixed_batch_drains_in_one_pass_with_every_group_marked_correctly: DATABASE_URL not set");
+        return;
+    };
+    let _guard = db_lock().lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    reset_schema(&pool).await;
+    let worker = SireneSyncWorker::new(pool.clone());
+
+    // 20 mappable active records, each a DIFFERENT SIRET — and therefore a different aggregate, which
+    // is what makes batching safe in the first place.
+    for i in 0..20u32 {
+        let siret = format!("8524210990{:04}", i);
+        let mut payload = sample_payload("A");
+        payload["siret"] = serde_json::json!(siret);
+        stage_row_with_payload(&pool, &siret, payload).await;
+    }
+    // 3 that parse but the ACL cannot map: no enseigne and no denomination anywhere ⇒ no usable name.
+    for i in 0..3u32 {
+        let siret = format!("8524210991{:04}", i);
+        stage_row_with_payload(
+            &pool,
+            &siret,
+            serde_json::json!({
+                "siret": siret,
+                "adresseEtablissement": { "codePostalEtablissement": "37000",
+                                          "libelleCommuneEtablissement": "TOURS" },
+                "periodesEtablissement": [ { "dateFin": null,
+                                             "etatAdministratifEtablissement": "A",
+                                             "activitePrincipaleEtablissement": "56.10A" } ]
+            }),
+        )
+        .await;
+    }
+    // 2 that do not deserialize at all — the payload is the only evidence of what arrived.
+    for i in 0..2u32 {
+        let siret = format!("8524210992{:04}", i);
+        stage_row_with_payload(&pool, &siret, serde_json::json!({ "unexpected": "shape" })).await;
+    }
+
+    let summary = worker.run_once().await.expect("batched drain");
+    assert_eq!(summary.processed, 25, "every staged row is accounted for exactly once");
+    assert_eq!(summary.registered, 20, "the mappable records were handed to the mailbox");
+    assert_eq!(summary.skipped, 5, "3 ACL-unmappable + 2 unparsable");
+    assert_eq!(summary.failed, 0);
+
+    let counts: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT status, count(*), count(payload) FROM external_sirene_restaurants GROUP BY status ORDER BY 1",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("status breakdown");
+    assert_eq!(
+        counts,
+        vec![
+            // Handed over, verdict not in yet — payload SURVIVES until the aggregate confirms (#240).
+            ("STAGED".to_string(), 20, 20),
+            // Evidence of why the record was unusable — never discarded (#231 D3).
+            ("UNMAPPABLE".to_string(), 5, 5),
+        ],
+        "each classification lands in its own group, with the right payload disposition"
+    );
+
+    // 20 mailbox rows, one per aggregate — the multi-row INSERT wrote them all, not just the first.
+    let staged: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM inbound_messages WHERE source = 'sirene' AND message_type = 'RestaurantRegistered'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("mailbox count");
+    assert_eq!(staged, 20);
+    let distinct_lanes: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT actor_id) FROM inbound_messages WHERE source = 'sirene'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("lane count");
+    assert_eq!(distinct_lanes, 20, "one lane per SIRET — no two rows collapsed onto the same aggregate");
+
+    // Re-draining is a no-op: every row is checkpointed, so the batch cannot double-stage.
+    let replay = worker.run_once().await.expect("replay");
+    assert_eq!(replay.processed, 0, "a batched drain checkpoints every row it touched");
+}
