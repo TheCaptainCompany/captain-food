@@ -428,6 +428,39 @@
 > (compact -> `VACUUM FULL` -> `bytea`) and dropping payloads is irreversible without a ~4h re-fetch, so
 > triggering it is a product-owner call.
 
+> ✅ **2026-08-02 — `main` DELIVERED to production, and the #231 lifecycle validated against live INSEE
+> data.** `becf202` is running; migrations applied through `20260731143000` (mailbox + enum-text). The
+> transient-payload design ran for the first time against real records, and the measured numbers match
+> the proposal almost exactly: **196 bytes per SYNCED row vs 1,730 per PENDING one** (PROP-20260728-120931
+> predicted ~200 B vs ~1.8 kB). Every state behaved as designed — `SYNCED` rows hold **zero** payloads,
+> `STAGED` rows **keep** theirs (the [#240](https://github.com/TheCaptainCompany/captain-food/pull/240)
+> correction: the aggregate has not decided yet, so nothing may be discarded), `UNMAPPABLE` rows keep
+> theirs as evidence, and **no row reached `FAILED` or `POISON`**. The mailbox split
+> `IGNORED 2,923 / SUCCEEDED 47` is ADR-20260728-011344 D6 paying off in production: the sweep can now
+> distinguish "registered 47" from "did nothing 2,923 times", which is precisely what it could not do
+> before. Coverage is rebuilding — 9 departments, 67k rows and climbing.
+>
+> ⚠️ **The delivery itself exposed two defects, both now fixed, plus one still open.**
+> (1) `REQUIRED_SCHEMA_VERSION` had gone **9 migrations stale**, making `/health`'s readiness gate inert
+> for exactly the migrations that needed it ([#279](https://github.com/TheCaptainCompany/captain-food/pull/279)).
+> (2) Generated config pattern literals were **double-escaped** — escaped for a normal Rust string and
+> emitted into a raw one — so the app rejected its own baked valid default
+> (`OTEL_TRACES_SAMPLE_RATIO=1.0`). Harmless on the `development` profile, but **production and staging
+> refuse the boot on an invalid key**, so this was a latent production-boot blocker that only stayed
+> hidden because production runs the development profile
+> ([#280](https://github.com/TheCaptainCompany/captain-food/pull/280)).
+> (3) **STILL OPEN — [#281](https://github.com/TheCaptainCompany/captain-food/issues/281):** `deploy` is
+> fire-and-forget, so `db-migrate` converted the schema underneath a binary that never arrived.
+> Production ran an **11-day-old build (222 commits behind) against a schema 9 migrations ahead** for
+> several minutes, workers erroring in a loop. Nothing was lost (0 unprocessed webhooks) only because
+> traffic was near zero.
+>
+> **Known production gaps, unchanged by this delivery:** the service runs the **development** profile
+> (which is why the config error above was survivable); `SUPABASE_URL`/`PUBLISHABLE_KEY`/`JWKS_URL` are
+> unset so identity fails closed and auth is anonymous-only; and startup shows connection-pool
+> contention (2-3.5 s acquires, a 1.1 s `MAX(position)` on `domain_events`) as 16 mailbox workers plus
+> the projector, saga runner, retention sweep and SIRENE worker all start at once.
+
 > ✅ **2026-07-28 — the SIRENE mirror now records whether a row actually SYNCED, and quarantines the ones
 > that cannot (ADR-20260728-143000 follow-up, [#231](https://github.com/TheCaptainCompany/captain-food/issues/231); PR #237).**
 > Follow-up to the transient-payload change below, from three product-owner observations, each of which
