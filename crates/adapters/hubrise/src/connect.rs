@@ -27,15 +27,16 @@
 
 use std::sync::Arc;
 
-use application::journal::{payload_hash, CommandJournalEntry};
-use application::mailbox::Mailbox;
-use infrastructure::mailbox::{enqueue_worker_command, EnqueueOutcome};
-use application::ports::{Actor, EventStore};
+use application::mailbox::{Envelope, Mailbox};
+use infrastructure::generated::actor_clients::{
+    CatalogClient, RestaurantAccountClient, RestaurantClient,
+};
+use infrastructure::mailbox::EnqueueOutcome;
 use application::queries::RestaurantReadRepository;
 use domain::generated::commands::{CreateCatalog, RegisterRestaurant, RegisterRestaurantAccount};
 use domain::generated::entities::{Address, TaxRate};
 use domain::generated::scalars::{
-    AddressLine, CatalogName, CityName, CommandChannel, CountryCode,
+    AddressLine, CatalogName, CityName, CountryCode,
     CurrencyCode, ExternalReference, PostalCode, RestaurantDisplayName, RestaurantLegalName,
     RestaurantListingStatus, TaxRatePercent, TimeZone,
 };
@@ -229,16 +230,13 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
         Self { mailbox, restaurants, connections, gateway }
     }
 
-    /// One journaled WORKER send. `message_id` is scoped to THIS attempt (a re-connect re-sends with
-    /// fresher data under new ids; the aggregates' own idempotency absorbs replays), `correlation_id`
-    /// groups the attempt's whole fan-out.
-    fn entry(
-        attempt: uuid::Uuid,
-        command_type: &str,
-        entity: &str,
-        payload: serde_json::Value,
-    ) -> CommandJournalEntry {
-        CommandJournalEntry {
+    /// The WORKER envelope for one provisioning send through a typed actor client (#284 slice 3).
+    /// `message_id` is scoped to THIS attempt (a re-connect re-sends with fresher data under new
+    /// ids; the aggregates' own idempotency absorbs replays), `correlation_id` groups the
+    /// attempt's whole fan-out, and `cause_id` is the PARENT (the connect attempt) — the delivery
+    /// side chains appended events to the message itself.
+    fn envelope(attempt: uuid::Uuid, command_type: &str, entity: &str) -> Envelope {
+        Envelope {
             message_id: derive("connect-command", &format!("{attempt}:{command_type}:{entity}")),
             correlation_id: attempt,
             cause_id: Some(attempt),
@@ -246,56 +244,28 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
             trace_id: None,
             user_id: Some(hubrise_system_user_id()),
             user_type: EXTERNAL_USER_TYPE.to_string(),
-            channel: CommandChannel::WORKER,
-            command_type: command_type.to_string(),
-            payload_hash: payload_hash(&payload),
-            payload,
+            channel: "WORKER".into(),
         }
     }
 
-    fn actor(entry: &CommandJournalEntry) -> Actor {
-        Actor {
-            user_id: hubrise_system_user_id(),
-            user_type: EXTERNAL_USER_TYPE.to_string(),
-            domain_id: None,
-            correlation_id: entry.correlation_id,
-            // The row's cause is the PARENT (the connect attempt); the delivery side chains
-            // appended events to the message itself.
-            cause_id: entry.cause_id,
-        }
-    }
-
-    /// Enqueue one provisioning command — fire-and-forget (ADR-20260731-122500): the mailbox
-    /// worker delivers; rejections live on the mailbox row and the supervision lanes, not here.
-    /// Returns `Ok(Some(message_id))` when the command is durably handed off (fresh or an
-    /// idempotent replay), `Ok(None)` on a payload conflict (warned — never enqueued); an infra
-    /// failure aborts.
-    async fn send(
-        &self,
-        attempt: uuid::Uuid,
+    /// Interpret one fire-and-forget hand-off (ADR-20260731-122500): the mailbox worker delivers;
+    /// rejections live on the mailbox row and the supervision lanes, not here. `Some(message_id)`
+    /// = durably handed off (fresh or an idempotent replay); `None` = payload conflict (warned —
+    /// never enqueued).
+    fn handoff(
         command_type: &str,
         entity: &str,
-        payload: serde_json::Value,
+        message_id: uuid::Uuid,
+        outcome: EnqueueOutcome,
         warnings: &mut Vec<String>,
-    ) -> Result<Option<uuid::Uuid>, ConnectError> {
-        let entry = Self::entry(attempt, command_type, entity, payload);
-        let actor = Self::actor(&entry);
-        match enqueue_worker_command(
-            self.mailbox.as_ref(),
-            entry.message_id,
-            command_type,
-            entry.payload,
-            &actor,
-        )
-        .await
-        .map_err(ConnectError::Infra)?
-        {
-            EnqueueOutcome::Enqueued | EnqueueOutcome::Deduplicated(_) => Ok(Some(entry.message_id)),
+    ) -> Option<uuid::Uuid> {
+        match outcome {
+            EnqueueOutcome::Enqueued | EnqueueOutcome::Deduplicated(_) => Some(message_id),
             EnqueueOutcome::PayloadConflict(status) => {
                 warnings.push(format!(
                     "{command_type} {entity}: payload conflict under a replayed id (mailbox row {status:?}) -- not re-sent"
                 ));
-                Ok(None)
+                None
             }
         }
     }
@@ -395,11 +365,19 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
             timezone: locations.first().and_then(|l| l.timezone_name()).map(TimeZone),
             r#ref: Some(ExternalReference(hubrise_account_id.clone())),
         };
-        let payload = serde_json::to_value(&cmd)
-            .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
-        let account_msg = self
-            .send(attempt, "RegisterRestaurantAccount", &hubrise_account_id, payload, &mut warnings)
-            .await?;
+        let env = Self::envelope(attempt, "RegisterRestaurantAccount", &hubrise_account_id);
+        let message_id = env.message_id;
+        let outcome = RestaurantAccountClient::new(self.mailbox.clone(), restaurant_account_id)
+            .send(cmd, env)
+            .await
+            .map_err(ConnectError::Infra)?;
+        let account_msg = Self::handoff(
+            "RegisterRestaurantAccount",
+            &hubrise_account_id,
+            message_id,
+            outcome,
+            &mut warnings,
+        );
         // The dependents fold the ACCOUNT stream on other lanes — deliver the account first
         // (cross-lane enqueue order guarantees nothing). A rejection/timeout degrades to a
         // warning the operator sees synchronously, the property the old inline dispatch had.
@@ -465,9 +443,13 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
                 external_identifiers: vec![],
                 r#ref: Some(ExternalReference(loc.id.clone())),
             };
-            let payload = serde_json::to_value(&cmd)
-                .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
-            let _ = self.send(attempt, "RegisterRestaurant", &loc.id, payload, &mut warnings).await?;
+            let env = Self::envelope(attempt, "RegisterRestaurant", &loc.id);
+            let message_id = env.message_id;
+            let outcome = RestaurantClient::new(self.mailbox.clone(), restaurant_id.0)
+                .send(cmd, env)
+                .await
+                .map_err(ConnectError::Infra)?;
+            let _ = Self::handoff("RegisterRestaurant", &loc.id, message_id, outcome, &mut warnings);
             connected_locations.push(ConnectedLocation {
                 hubrise_location_id: loc.id.clone(),
                 restaurant_account_id,
@@ -528,12 +510,14 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
                 name: CatalogName(cat.name.clone().unwrap_or_else(|| "Menu".to_string())),
                 r#ref: Some(ExternalReference(cat.id.clone())),
             };
-            let payload = serde_json::to_value(&cmd)
-                .map_err(|e| ConnectError::Infra(DomainError::Repository(e.to_string())))?;
-            let ok = self
-                .send(attempt, "CreateCatalog", &cat.id, payload, &mut warnings)
-                .await?
-                .is_some();
+            let env = Self::envelope(attempt, "CreateCatalog", &cat.id);
+            let message_id = env.message_id;
+            let outcome = CatalogClient::new(self.mailbox.clone(), catalog_id.0)
+                .send(cmd, env)
+                .await
+                .map_err(ConnectError::Infra)?;
+            let ok =
+                Self::handoff("CreateCatalog", &cat.id, message_id, outcome, &mut warnings).is_some();
             if !ok {
                 continue;
             }
@@ -543,13 +527,17 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
             match self.gateway.pull_catalog(&token.access_token, &cat.id).await {
                 Ok(json) => match map_catalog(&json, &cat.id, &location_id) {
                     Ok(cmd) => {
-                        let payload = serde_json::to_value(&cmd).map_err(|e| {
-                            ConnectError::Infra(DomainError::Repository(e.to_string()))
-                        })?;
-                        let ok = self
-                            .send(attempt, "ImportCatalog", &cat.id, payload, &mut warnings)
-                            .await?
-                            .is_some();
+                        let env = Self::envelope(attempt, "ImportCatalog", &cat.id);
+                        let message_id = env.message_id;
+                        // Same Catalog lane as CreateCatalog above — head-of-line order
+                        // delivers the creation before the import.
+                        let outcome = CatalogClient::new(self.mailbox.clone(), catalog_id.0)
+                            .send(cmd, env)
+                            .await
+                            .map_err(ConnectError::Infra)?;
+                        let ok =
+                            Self::handoff("ImportCatalog", &cat.id, message_id, outcome, &mut warnings)
+                                .is_some();
                         if ok {
                             imported += 1;
                         }

@@ -1571,7 +1571,6 @@ keys:
         );
     }
 
-    #[test]
     /// The generated config reader must enforce the pattern the SPEC declares -- byte for byte.
     ///
     /// It did not. The emitter escaped each pattern for a normal Rust string literal
@@ -1641,6 +1640,10 @@ keys:
         }
     }
 
+    // NOTE (#284 slice 3): this fn had LOST its `#[test]` attribute — a stray duplicate sat on
+    // `generated_config_patterns_match_the_spec_byte_for_byte` above, so the guard silently never
+    // ran (rustc accepts a duplicate `#[test]`, and dead test-module fns only warn). Restored.
+    #[test]
     fn makefile_recipe_lines_are_ascii() {
         // CARGO_MANIFEST_DIR (= tools/codegen-rs) is the one anchor that holds both locally and
         // in CI; the repo Makefile is two levels up. A guard that silently no-ops when it cannot
@@ -1671,6 +1674,121 @@ keys:
              unrelated to what it does (an em dash in the `check-drift` message once broke \
              `make rust` while there was zero drift). Non-recipe lines (comments, variable \
              assignments) may keep non-ASCII; only tab-indented command text is affected.",
+            offenders.join("\n")
+        );
+    }
+
+    /// The mailbox door stays CLOSED (#284 slice 3, PROP-20260728-152752 §2.1): a `MailboxEntry`
+    /// may be assembled only behind the typed actor clients — i.e. by the shared constructors in
+    /// `infrastructure::mailbox::enqueue`, by the reminders constructor feeding the in-tx upsert,
+    /// by the type's own module (definition + mem-double seeding), or by integration tests that
+    /// seed rows directly. Any other construction site is a NEW door the typed clients cannot
+    /// guard, exactly the drift #284 exists to make impossible.
+    ///
+    /// Style of `makefile_recipe_lines_are_ascii`: executable, loud, never skips — every
+    /// allowlisted path is asserted to exist AND to still contain the construction it excuses, so
+    /// the guard fails loudly if its targets move instead of silently no-oping. The scan matches
+    /// Whitespace-tolerant detector for `MailboxEntry {` — `MailboxEntry{`, a line break before the
+    /// brace, or extra spaces must not slip past the guard (the #292 review's evasion NIT). A `use
+    /// … as` alias still would; the belt-and-braces answer to that is #290's compiler enforcement.
+    fn mentions_entry_construction(text: &str) -> bool {
+        let mut rest = text;
+        while let Some(i) = rest.find("MailboxEntry") {
+            let after = &rest[i + "MailboxEntry".len()..];
+            if after.trim_start().starts_with('{') {
+                return true;
+            }
+            rest = after;
+        }
+        false
+    }
+
+    /// `MailboxEntry {` (construction OR destructuring); a destructuring in a new src file trips
+    /// it too, on purpose — naming the file in the allowlist is a conscious decision, not noise.
+    #[test]
+    fn mailbox_entry_is_constructed_only_behind_the_typed_doors() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = root.canonicalize().expect("repo root resolves");
+
+        // The sanctioned constructor sites, relative to the repo root.
+        const ALLOWED: &[(&str, &str)] = &[
+            // The type itself + the in-memory double's test seeding helper.
+            ("crates/application/src/mailbox.rs", "the MailboxEntry definition + mem double"),
+            // `scheduled_entry`: the generated-reminders row constructor the in-tx `schedules:`
+            // upsert (`apply_schedules_in_tx`) binds from (ADR-20260731-214500).
+            ("crates/application/src/reminders.rs", "the reminders scheduled_entry constructor"),
+            // The shared pub(crate) constructors every door (typed client or bulk path) delegates to.
+            ("crates/infrastructure/src/mailbox/enqueue.rs", "the shared enqueue constructors"),
+        ];
+        for (rel, why) in ALLOWED {
+            let path = root.join(rel);
+            let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "allowlisted constructor file {rel} ({why}) cannot be read ({e}) — if it \
+                     moved, move this allowlist WITH it; do NOT let this guard silently no-op"
+                )
+            });
+            assert!(
+                mentions_entry_construction(&src),
+                "allowlisted file {rel} ({why}) no longer constructs MailboxEntry — the \
+                 constructor moved; move this allowlist entry with it so the guard stays real"
+            );
+        }
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("crates"), &mut files);
+        files.sort();
+        assert!(!files.is_empty(), "found no crate sources to scan");
+
+        let mut offenders: Vec<String> = Vec::new();
+        let mut hits = 0usize;
+        for f in &files {
+            let rel = f.strip_prefix(&root).unwrap_or(f);
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            let Ok(src) = std::fs::read_to_string(f) else {
+                panic!("cannot read {rel_str} — a partially-scanned tree is a silent no-op");
+            };
+            for (idx, line) in src.lines().enumerate() {
+                if !mentions_entry_construction(line) {
+                    continue;
+                }
+                hits += 1;
+                let allowed = ALLOWED.iter().any(|(a, _)| rel_str == *a)
+                    // Integration tests seed rows directly (they ARE the thing behind the door).
+                    || rel.components().any(|c| c.as_os_str() == "tests");
+                if !allowed {
+                    offenders.push(format!("  {rel_str}:{}: {}", idx + 1, line.trim()));
+                }
+            }
+        }
+        assert!(
+            hits >= ALLOWED.len(),
+            "the scan found fewer `MailboxEntry {{` sites ({hits}) than the allowlist excuses — \
+             the pattern or the type was renamed and this guard went blind; fix the scan"
+        );
+        assert!(
+            offenders.is_empty(),
+            "`MailboxEntry {{` is constructed outside the sanctioned doors:\n{}\n\n\
+             Fix: go through a generated typed actor client \
+             (infrastructure::generated::actor_clients — send/record/schedule), or, for \
+             crate-internal machinery, the shared constructors in \
+             infrastructure::mailbox::enqueue. If this is genuinely a new sanctioned constructor, \
+             add it to this test's allowlist WITH its justification. Why: a hand-assembled row \
+             bypasses the one derivation every door shares (lane, partition, principal, channel, \
+             deterministic identity) — the exact drift #284's typed clients exist to prevent.",
             offenders.join("\n")
         );
     }

@@ -49,20 +49,18 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use application::journal::{payload_hash, CommandJournalEntry};
-use application::ports::Actor;
+use application::mailbox::{Envelope, Mailbox};
 use application::repository::Repository;
 use domain::restaurant::RestaurantState;
 use chrono::{DateTime, Utc};
 use domain::generated::commands::MarkRestaurantClosed;
-use domain::generated::events::DomainEvent;
+use domain::generated::events::{DomainEvent, RestaurantRegistered};
 use domain::generated::scalars::{
     CommandChannel, RestaurantListingStatus, RestaurantStatus,
 };
 
-use crate::mailbox::{
-    enqueue_inbound_fact, enqueue_inbound_facts, enqueue_worker_command, EnqueueOutcome,
-    InboundFact,
-};
+use crate::generated::actor_clients::RestaurantClient;
+use crate::mailbox::{enqueue_inbound_facts, EnqueueOutcome, InboundFact};
 use crate::persistence::mailbox_store::PgMailbox;
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
@@ -133,16 +131,21 @@ fn journal_entry(
     }
 }
 
-/// Envelope → `Actor` (ADR-0041) for the ENQUEUE: the mailbox row's `cause_id` is the PARENT
-/// (the staging-mirror row's identity) — the delivery side rebuilds the event-append actor with
-/// `cause_id = message_id` itself, exactly like the GraphQL dispatch.
-fn send_actor(entry: &CommandJournalEntry) -> Actor {
-    Actor {
-        user_id: sirene_system_user_id(),
-        user_type: EXTERNAL_USER_TYPE.to_string(),
-        domain_id: None,
+/// Journal-entry values → the typed client's [`Envelope`] (ADR-0041): the mailbox row's
+/// `cause_id` is the PARENT (the staging-mirror row's identity) — the delivery side rebuilds the
+/// event-append actor with `cause_id = message_id` itself, exactly like the GraphQL dispatch.
+/// Field-for-field what the retired `enqueue_worker_command` door stamped for this worker
+/// (deterministic message_id, per-source system principal, WORKER channel).
+fn send_envelope(entry: &CommandJournalEntry) -> Envelope {
+    Envelope {
+        message_id: entry.message_id,
         correlation_id: entry.correlation_id,
         cause_id: entry.cause_id,
+        session_id: None,
+        trace_id: None,
+        user_id: entry.user_id,
+        user_type: entry.user_type.clone(),
+        channel: "WORKER".into(),
     }
 }
 
@@ -264,9 +267,47 @@ enum Classified {
     /// An explicit closure signal — handled row-by-row, because it executes a real command.
     Closure,
     /// A mappable active record, ready to hand to the mailbox.
-    Fact(Box<InboundFact>),
+    Fact(Box<StagedRegistration>),
     /// Nothing usable. The payload is KEPT as the evidence of why (#231 D3).
     Unmappable { reason: String },
+}
+
+/// One classified registry fact: the TYPED `RestaurantRegistered` plus its stable dedupe identity.
+/// The typed event is kept (never a pre-serialized mailbox row) so the row-by-row fallback goes
+/// through `RestaurantClient::record` — the typed door (#284 slice 3) — while the batched fast
+/// path derives its [`InboundFact`]s from the very same values ([`Self::to_inbound`], the
+/// D8-deferred bulk door), so the two legs cannot drift on payload, lane or identity.
+struct StagedRegistration {
+    event: RestaurantRegistered,
+    /// `{siret}:{payload_hash}` — the STABLE dedupe key across sweeps (ADR-20260728-011344).
+    external_id: String,
+    correlation_id: uuid::Uuid,
+}
+
+impl StagedRegistration {
+    /// The addressed Restaurant lane — deterministic (UUIDv5 of the SIRET), carried on the event.
+    fn lane(&self) -> uuid::Uuid {
+        self.event.restaurant_id.0
+    }
+
+    /// The [`InboundFact`] form for the batched fast path — same tagged `DomainEvent` payload the
+    /// typed `record` serializes, so a batched row and a fallback row are byte-identical.
+    fn to_inbound(&self) -> Result<InboundFact, DomainError> {
+        Ok(InboundFact {
+            source: SIRENE_SOURCE.to_string(),
+            external_id: self.external_id.clone(),
+            event_type: "RestaurantRegistered".to_string(),
+            // The ADJACENTLY-TAGGED union form (`{"eventType","payload"}`) — the EVENT route
+            // deserializes `DomainEvent`, so a bare payload here is undeliverable.
+            payload: serde_json::to_value(DomainEvent::RestaurantRegistered(self.event.clone()))
+                .map_err(|e| {
+                    DomainError::Repository(format!("serialize RestaurantRegistered: {e}"))
+                })?,
+            correlation_id: self.correlation_id,
+            actor_type: "Restaurant".to_string(),
+            actor_id: self.lane(),
+        })
+    }
 }
 
 /// Translate one staged row into a [`Classified`] — the ACL leg, with no I/O of any kind.
@@ -310,21 +351,10 @@ fn classify_row(
         Ok(event) => {
             // `external_id` is `{siret}:{payload_hash}` — a STABLE dedupe key across sweeps.
             let external_id = format!("{siret}:{staged_hash}");
-            // The addressed lane: the Restaurant aggregate this fact belongs to, its id deterministic
-            // (UUIDv5 of the SIRET) and carried on the event itself.
-            let actor_id = event.restaurant_id.0;
-            Ok(Classified::Fact(Box::new(InboundFact {
-                source: SIRENE_SOURCE.to_string(),
-                external_id: external_id.clone(),
-                event_type: "RestaurantRegistered".to_string(),
-                // The ADJACENTLY-TAGGED union form (`{"eventType","payload"}`) — the EVENT route
-                // deserializes `DomainEvent`, so a bare payload here is undeliverable.
-                payload: serde_json::to_value(DomainEvent::RestaurantRegistered(event)).map_err(
-                    |e| DomainError::Repository(format!("serialize RestaurantRegistered: {e}")),
-                )?,
+            Ok(Classified::Fact(Box::new(StagedRegistration {
+                event,
                 correlation_id: sirene_uuid(&format!("inbound:{external_id}")),
-                actor_type: "Restaurant".to_string(),
-                actor_id,
+                external_id,
             })))
         }
         // Unusable record (redacted, nameless, no address…). The payload is deliberately RETAINED:
@@ -417,8 +447,11 @@ impl SireneSyncWorker {
         let restaurants = PgRestaurantRepository::new(self.pool.clone());
         // THE MAILBOX IS THE ONLY DOOR (ADR-20260731-122500): closures enqueue a WORKER-channel
         // command, registrations enqueue an inbound FACT (ADR-20260728-011344 D4) — both
-        // fire-and-forget; the mailbox worker delivers and the ledger owns the outcome.
-        let mailbox = PgMailbox::new(self.pool.clone());
+        // fire-and-forget; the mailbox worker delivers and the ledger owns the outcome. Behind an
+        // `Arc<dyn Mailbox>` because the singular sends go through the typed `RestaurantClient`
+        // (#284 slice 3); only the batched fast path still takes the infrastructure-internal
+        // bulk door (`enqueue_inbound_facts`, D8 deferred).
+        let mailbox: Arc<dyn Mailbox> = Arc::new(PgMailbox::new(self.pool.clone()));
         // Fresh correlation id per pass so all mailbox rows + events of one drain are traceable
         // together; each send derives its own message_id/cause_id ([`journal_entry`]).
         let correlation_id = uuid::Uuid::new_v4();
@@ -456,7 +489,7 @@ impl SireneSyncWorker {
             //
             // Every row in a batch is a DIFFERENT aggregate (`restaurantId = UUIDv5(SIRET)`), so there
             // is no ordering constraint between them and batching cannot reorder anything that matters.
-            let mut facts: Vec<InboundFact> = Vec::new();
+            let mut regs: Vec<StagedRegistration> = Vec::new();
             let mut staged: Vec<(String, DateTime<Utc>)> = Vec::new();
             let mut unmappable: Vec<(String, DateTime<Utc>)> = Vec::new();
             let mut closures: Vec<(String, DateTime<Utc>)> = Vec::new();
@@ -473,8 +506,8 @@ impl SireneSyncWorker {
                 summary.processed += 1;
                 match classify_row(&siret, payload, &etat, &staged_hash)? {
                     Classified::Closure => closures.push((siret, last_seen_at)),
-                    Classified::Fact(fact) => {
-                        facts.push(*fact);
+                    Classified::Fact(reg) => {
+                        regs.push(*reg);
                         staged.push((siret, last_seen_at));
                     }
                     Classified::Unmappable { reason } => {
@@ -503,8 +536,10 @@ impl SireneSyncWorker {
             }
 
             // Leg 1: hand every mappable record over in ONE round-trip.
-            if !facts.is_empty() {
-                match enqueue_inbound_facts(&mailbox, facts.clone()).await {
+            if !regs.is_empty() {
+                let facts: Vec<InboundFact> =
+                    regs.iter().map(StagedRegistration::to_inbound).collect::<Result<_, _>>()?;
+                match enqueue_inbound_facts(mailbox.as_ref(), facts).await {
                     Ok(newly) => {
                         let fresh = newly.iter().filter(|b| **b).count() as u64;
                         summary.registered += fresh;
@@ -514,15 +549,21 @@ impl SireneSyncWorker {
                         self.mark_processed_batch(&staged, RowOutcome::Staged).await?;
                     }
                     Err(e) => {
-                        // One bad row must not sink the batch. Fall back to the per-row path, which
-                        // keeps the failure ISOLATED to the row that caused it and preserves the
+                        // One bad row must not sink the batch. Fall back to the per-row path — the
+                        // typed `RestaurantClient::record` door, byte-identical rows — which keeps
+                        // the failure ISOLATED to the row that caused it and preserves the
                         // FAILED/POISON accounting — the batch is a fast path, never a semantic change.
                         tracing::warn!(
-                            worker = "sirene_sync", error = %e, rows = facts.len(),
+                            worker = "sirene_sync", error = %e, rows = regs.len(),
                             "batched mailbox enqueue failed — falling back to row-by-row"
                         );
-                        for (fact, (siret, last_seen_at)) in facts.into_iter().zip(staged.iter()) {
-                            match enqueue_inbound_fact(&mailbox, fact).await {
+                        for (reg, (siret, last_seen_at)) in regs.into_iter().zip(staged.iter()) {
+                            let StagedRegistration { event, external_id, correlation_id } = reg;
+                            let lane = event.restaurant_id.0;
+                            let recorded = RestaurantClient::new(mailbox.clone(), lane)
+                                .record(event, SIRENE_SOURCE, &external_id, correlation_id)
+                                .await;
+                            match recorded {
                                 Ok(EnqueueOutcome::Enqueued) => {
                                     summary.registered += 1;
                                     self.mark_processed(siret, *last_seen_at, RowOutcome::Staged).await?;
@@ -756,7 +797,7 @@ impl SireneSyncWorker {
         &self,
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
-        mailbox: &PgMailbox,
+        mailbox: &Arc<dyn Mailbox>,
         correlation_id: uuid::Uuid,
         summary: &mut SireneSyncSummary,
     ) -> Result<(), DomainError> {
@@ -825,7 +866,7 @@ impl SireneSyncWorker {
         &self,
         store: &PgEventStore,
         restaurants: &PgRestaurantRepository,
-        mailbox: &PgMailbox,
+        mailbox: &Arc<dyn Mailbox>,
         correlation_id: uuid::Uuid,
         siret: &str,
         last_seen_at: DateTime<Utc>,
@@ -860,9 +901,10 @@ impl SireneSyncWorker {
                 let cmd = MarkRestaurantClosed { restaurant_id, reason: Some(reason.to_string()) };
                 let payload = serialize_command("MarkRestaurantClosed", &cmd)?;
                 // The deterministic identity is unchanged (the compaction parity below pins it);
-                // only the DOOR moved: fire-and-forget enqueue, the mailbox worker delivers
-                // (ADR-20260731-122500). `closed` now counts HAND-OFFS; the delivered outcome
-                // lives on the mailbox row and the supervision lanes.
+                // only the DOOR moved: fire-and-forget through the typed `RestaurantClient`
+                // (#284 slice 3), the mailbox worker delivers (ADR-20260731-122500). `closed`
+                // still counts HAND-OFFS; the delivered outcome lives on the mailbox row and the
+                // supervision lanes.
                 let entry = journal_entry(
                     "MarkRestaurantClosed",
                     siret,
@@ -870,8 +912,8 @@ impl SireneSyncWorker {
                     correlation_id,
                     payload,
                 );
-                let actor = send_actor(&entry);
-                match enqueue_worker_command(mailbox, entry.message_id, "MarkRestaurantClosed", entry.payload, &actor).await? {
+                let env = send_envelope(&entry);
+                match RestaurantClient::new(mailbox.clone(), restaurant_id.0).send(cmd, env).await? {
                     EnqueueOutcome::Enqueued => {
                         summary.closed += 1;
                         tracing::info!(worker = "sirene_sync", %siret, prospect = %state.display_name.0, "close signal handed to the mailbox");

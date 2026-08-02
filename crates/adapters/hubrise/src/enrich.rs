@@ -54,15 +54,14 @@
 
 use std::sync::Arc;
 
-use application::journal::{payload_hash, CommandJournalEntry};
-use application::mailbox::Mailbox;
-use infrastructure::mailbox::{enqueue_worker_command, EnqueueOutcome};
-use application::ports::{Actor, EventStore};
+use application::mailbox::{Envelope, Mailbox};
+use infrastructure::generated::actor_clients::CatalogClient;
+use infrastructure::mailbox::EnqueueOutcome;
 use domain::generated::commands::{ImportCatalog, UpdateOfferStock};
 use domain::shared::errors::DomainError;
 use domain::generated::entities::{CatalogCategory, Money, Offer, OptionList, Product, ProductItemOption, TaxRate};
 use domain::generated::scalars::{
-    CatalogCategoryName, CatalogId, CatalogItemAvailability, CommandChannel,
+    CatalogCategoryName, CatalogId, CatalogItemAvailability,
     CurrencyCode, ExternalReference, MoneyCents,
     OfferId, OfferName, OptionId, OptionListId, OptionListName, OptionName, ProductCategoryId,
     ProductDescription, ProductId, ProductName, Quantity, RestaurantAccountId, RestaurantId, Tag,
@@ -566,23 +565,21 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
         self.connections.token_for_location(location_id).await
     }
 
-    /// The WORKER-channel journal entry for one command a callback caused (#15): `message_id` =
-    /// UUIDv5(callback id, command type[, discriminator]) — deterministic, so a HubRise redelivery
-    /// replays the same id and dedupes; the per-SKU discriminator keeps one inventory callback's many
-    /// `UpdateOfferStock` sends distinct. `cause_id` = `correlation_id` = UUIDv5(callback id), the
-    /// identity `external_hubrise_callbacks` mirrors — closing the mirror → journal → events chain.
-    fn journal_entry(
-        callback_id: &str,
-        command_type: &str,
-        discriminator: Option<&str>,
-        payload: serde_json::Value,
-    ) -> CommandJournalEntry {
+    /// The WORKER envelope for one command a callback caused, sent through the typed
+    /// `CatalogClient` (#284 slice 3): `message_id` = UUIDv5(callback id, command
+    /// type[, discriminator]) — deterministic, so a HubRise redelivery replays the same id and
+    /// dedupes; the per-SKU discriminator keeps one inventory callback's many `UpdateOfferStock`
+    /// sends distinct. `cause_id` = `correlation_id` = UUIDv5(callback id), the identity
+    /// `external_hubrise_callbacks` mirrors — closing the mirror → mailbox → events chain
+    /// (ADR-0041: the delivery side rebuilds the event-append actor with `cause_id = message_id`
+    /// itself).
+    fn envelope(callback_id: &str, command_type: &str, discriminator: Option<&str>) -> Envelope {
         let seed = match discriminator {
             Some(d) => format!("{callback_id}:{command_type}:{d}"),
             None => format!("{callback_id}:{command_type}"),
         };
         let callback_uuid = derive("callback", callback_id);
-        CommandJournalEntry {
+        Envelope {
             message_id: derive("command", &seed),
             correlation_id: callback_uuid,
             cause_id: Some(callback_uuid),
@@ -590,23 +587,7 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
             trace_id: None,
             user_id: Some(hubrise_system_user_id()),
             user_type: EXTERNAL_USER_TYPE.to_string(),
-            channel: CommandChannel::WORKER,
-            command_type: command_type.to_string(),
-            payload_hash: payload_hash(&payload),
-            payload,
-        }
-    }
-
-    /// Envelope → `Actor` (ADR-0041): events appended by this journaled send carry
-    /// The enqueue-side principal: the row's `cause_id` is the PARENT (the mirrored callback) —
-    /// the delivery side rebuilds the event-append actor with `cause_id = message_id` itself.
-    fn actor_for(entry: &CommandJournalEntry) -> Actor {
-        Actor {
-            user_id: hubrise_system_user_id(),
-            user_type: EXTERNAL_USER_TYPE.to_string(),
-            domain_id: None,
-            correlation_id: entry.correlation_id,
-            cause_id: entry.cause_id,
+            channel: "WORKER".into(),
         }
     }
 
@@ -652,22 +633,12 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
             Ok(c) => c,
             Err(e) => return Ok(EnrichOutcome::MapFailed { reason: e.to_string() }),
         };
-        let payload = serde_json::to_value(&cmd)
-            .map_err(|e| DomainError::Repository(format!("serialize ImportCatalog: {e}")))?;
-        let entry = Self::journal_entry(&callback.id, "ImportCatalog", None, payload);
-        let actor = Self::actor_for(&entry);
+        let env = Self::envelope(&callback.id, "ImportCatalog", None);
         let derived = cmd.catalog_id;
-        // Fire-and-forget (ADR-20260731-122500): the mailbox worker delivers; a rejection
-        // (CatalogNotFound / MissingRef) lands on the mailbox row, not here.
-        match enqueue_worker_command(
-            self.mailbox.as_ref(),
-            entry.message_id,
-            "ImportCatalog",
-            entry.payload,
-            &actor,
-        )
-        .await?
-        {
+        // Fire-and-forget (ADR-20260731-122500) through the typed CatalogClient: the mailbox
+        // worker delivers; a rejection (CatalogNotFound / MissingRef) lands on the mailbox row,
+        // not here.
+        match CatalogClient::new(self.mailbox.clone(), derived.0).send(cmd, env).await? {
             EnqueueOutcome::Enqueued => {
                 Ok(EnrichOutcome::CatalogImported { catalog_id: derived })
             }
@@ -718,21 +689,10 @@ impl<P: HubRisePuller> HubRiseEnricher<P> {
         };
         let (mut applied, mut skipped) = (0usize, 0usize);
         for cmd in updates {
-            let payload = serde_json::to_value(&cmd)
-                .map_err(|e| DomainError::Repository(format!("serialize UpdateOfferStock: {e}")))?;
             let offer = cmd.offer_id.0.to_string();
-            let entry =
-                Self::journal_entry(&callback.id, "UpdateOfferStock", Some(&offer), payload);
-            let actor = Self::actor_for(&entry);
-            match enqueue_worker_command(
-                self.mailbox.as_ref(),
-                entry.message_id,
-                "UpdateOfferStock",
-                entry.payload,
-                &actor,
-            )
-            .await?
-            {
+            let env = Self::envelope(&callback.id, "UpdateOfferStock", Some(&offer));
+            let lane = cmd.catalog_id.0;
+            match CatalogClient::new(self.mailbox.clone(), lane).send(cmd, env).await? {
                 // `applied` now counts HAND-OFFS; a per-SKU rejection (OfferNotFound) lands on
                 // its mailbox row. Dedup/conflict on a redelivered callback: skipped, never
                 // double-applied.
@@ -772,7 +732,7 @@ impl<P: HubRisePuller> Enricher for HubRiseEnricher<P> {
 mod tests {
     use super::*;
     use application::journal::mem::MemCommandJournal;
-    use application::ports::version_conflict;
+    use application::ports::{version_conflict, Actor, EventStore};
     use domain::generated::events::{CatalogCreated, DomainEvent};
     use domain::generated::scalars::CatalogName;
 
