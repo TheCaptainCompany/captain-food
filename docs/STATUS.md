@@ -33,7 +33,23 @@
 > the domain command's own serde form (absent optionals as explicit `null`, defaulted arrays as
 > `[]`), not the null-stripped GraphQL input — dedupe is self-consistent post-deploy, but a
 > same-`messageId` retry straddling the deploy for a command with absent optional fields maps to
-> Conflict instead of replay. Slice 3 (SIRENE/HubRise adapters) follows.
+> Conflict instead of replay. **Slice 3 built (branch `typed-clients-slice3`, final)**: every
+> adapter is on the typed clients — SIRENE (`MarkRestaurantClosed` via `RestaurantClient::send`
+> with the journal-derived envelope, the row-by-row fallback via typed `record`; the BATCHED
+> `enqueue_inbound_facts` fast path stays as the crate-internal bulk door, D8 deferred), HubRise
+> connect/enrich (`RestaurantAccountClient`/`RestaurantClient`/`CatalogClient`), and the four
+> webhook ACLs (Stripe → `PaymentClient`, Uber Direct/Avelo37/CoopCycle → `DeliveryJobClient` —
+> `inbound_fact_for`'s runtime family→lane switch is DELETED; the sealed Fact traits check it at
+> compile time). The free-function surface is CLOSED: `enqueue_inbound_fact(s)`/`InboundFact` are
+> `pub(crate)`, `enqueue_worker_command`/`schedule_reminder`/`cancel_reminder` are `#[cfg(test)]`
+> reference implementations for the drift guards (moved in-crate to
+> `mailbox/enqueue.rs::{drift_guard, schedule_pg}` so the guard compares against the real
+> reference while the door stays shut); the public surface is the clients (re-exported as
+> `mailbox::actor_clients`) + outcome enums + id derivations. Codegen guard
+> `mailbox_entry_is_constructed_only_behind_the_typed_doors` fails the build on any new
+> `MailboxEntry` construction site (allowlist asserted-to-exist; verified red on a planted
+> violation). Same change also restored the LOST `#[test]` on `makefile_recipe_lines_are_ascii`
+> (a stray duplicate attribute had orphaned it — the guard silently never ran).
 
 > 🚧 **2026-07-30 — the actor-runtime redesign is APPROVED and in build (ADR-20260730-231500).**
 > Three proposals approved in-session by the product owner (*"we can build it now"*):
