@@ -27,13 +27,15 @@ use std::sync::Arc;
 
 use actor_runtime::{MailboxWorker, WorkerConfig};
 use application::generated::services::{IdentityService, PaymentService};
-use domain::generated::events::{DomainEvent, RestaurantRegistered};
+use application::mailbox::Mailbox;
+use domain::generated::events::RestaurantRegistered;
 use domain::generated::scalars::{
     AddressLine, CityName, CountryCode, PostalCode, RestaurantDisplayName, RestaurantId,
     RestaurantListingStatus,
 };
+use infrastructure::generated::actor_clients::RestaurantClient;
 use infrastructure::generated::command_router::CommandDeps;
-use infrastructure::mailbox::{enqueue_inbound_fact, inbound_fact_for, EnqueueOutcome, MailboxCommandHandler};
+use infrastructure::mailbox::{EnqueueOutcome, MailboxCommandHandler};
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
     PgCatalogRepository, PgCustomerRepository, PgEventStore, PgProspectionRepository,
@@ -145,9 +147,9 @@ fn restaurant_uuid(i: usize) -> uuid::Uuid {
     uuid::Uuid::from_u128(0xFEED_0000 + i as u128)
 }
 
-fn revision_fact(i: usize, k: usize) -> serde_json::Value {
+fn revision_fact(i: usize, k: usize) -> RestaurantRegistered {
     use domain::generated::entities::Address;
-    let event = DomainEvent::RestaurantRegistered(RestaurantRegistered {
+    RestaurantRegistered {
         mode: None,
         restaurant_id: RestaurantId(restaurant_uuid(i)),
         account_id: None,
@@ -172,8 +174,7 @@ fn revision_fact(i: usize, k: usize) -> serde_json::Value {
         timezone: None,
         preparation_time_minutes: None,
         opening_hours: vec![],
-    });
-    serde_json::to_value(&event).expect("tagged event")
+    }
 }
 
 #[tokio::test]
@@ -189,22 +190,25 @@ async fn actors_and_batching_projector_converge_concurrently() {
     let pool = PgPool::connect(&url).await.expect("connect");
     reset_schema(&pool).await;
 
-    let mailbox =
-        infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone());
+    // The typed clients are the only public door to the mailbox (#284 slice 3) — this suite
+    // records through them, exactly as the SIRENE producer does.
+    let mailbox: Arc<dyn Mailbox> =
+        Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone()));
 
     // Enqueue N×K revision facts BEFORE and DURING the workers' lifetime. Per restaurant the
     // revisions are enqueued sequentially (per-lane position order = revision order); across
     // restaurants they interleave.
     for k in 0..K_REVISIONS / 2 {
         for i in 0..N_RESTAURANTS {
-            let fact = inbound_fact_for(
-                "sirene",
-                &format!("r{i}-rev{k}"),
-                uuid::Uuid::new_v4(),
-                revision_fact(i, k),
-            )
-            .expect("addressable fact");
-            let outcome = enqueue_inbound_fact(&mailbox, fact).await.expect("enqueue");
+            let outcome = RestaurantClient::new(mailbox.clone(), restaurant_uuid(i))
+                .record(
+                    revision_fact(i, k),
+                    "sirene",
+                    &format!("r{i}-rev{k}"),
+                    uuid::Uuid::new_v4(),
+                )
+                .await
+                .expect("enqueue");
             assert_eq!(outcome, EnqueueOutcome::Enqueued);
         }
     }
@@ -251,14 +255,15 @@ async fn actors_and_batching_projector_converge_concurrently() {
     // The remaining revisions arrive WHILE workers drain and the projector folds.
     for k in K_REVISIONS / 2..K_REVISIONS {
         for i in 0..N_RESTAURANTS {
-            let fact = inbound_fact_for(
-                "sirene",
-                &format!("r{i}-rev{k}"),
-                uuid::Uuid::new_v4(),
-                revision_fact(i, k),
-            )
-            .expect("addressable fact");
-            enqueue_inbound_fact(&mailbox, fact).await.expect("enqueue");
+            RestaurantClient::new(mailbox.clone(), restaurant_uuid(i))
+                .record(
+                    revision_fact(i, k),
+                    "sirene",
+                    &format!("r{i}-rev{k}"),
+                    uuid::Uuid::new_v4(),
+                )
+                .await
+                .expect("enqueue");
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }

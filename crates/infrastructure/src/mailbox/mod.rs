@@ -16,11 +16,21 @@ pub use activation::{ActivationLaneEvents, ActivationSettings, CachedStream, Str
 pub use standalone::{
     shutdown_signal, spawn_standalone_workers, standalone_deps, standalone_workers_enabled,
 };
+// The PUBLIC surface after #284 slice 3: outcome enums (returned by the typed clients) and the
+// deterministic id derivations (adapters key lanes and look rows up with them) — NOT the singular
+// free-function enqueues, which are crate-internal plumbing behind the generated clients.
 pub use enqueue::{
-    cancel_reminder, enqueue_inbound_fact, enqueue_inbound_facts, enqueue_worker_command, inbound_fact_for,
-    inbound_message_id, inbound_namespace, reminder_message_id, schedule_reminder,
-    surrogate_actor_id, EnqueueOutcome, InboundFact, ScheduleOutcome,
+    inbound_message_id, inbound_namespace, reminder_message_id, surrogate_actor_id,
+    EnqueueOutcome, ScheduleOutcome,
 };
+// In-crate machinery: the generated clients delegate to `enqueue_inbound_fact`; the SIRENE sweep
+// batches through `enqueue_inbound_facts` (the D8-deferred bulk door) and builds `InboundFact`s.
+// (The retired reference implementations — `enqueue_worker_command`, `schedule_reminder`,
+// `cancel_reminder` — are `#[cfg(test)]` inside `enqueue` now, alive only for its drift guards.)
+pub(crate) use enqueue::{enqueue_inbound_fact, enqueue_inbound_facts, InboundFact};
+// The one typed door, re-exported here so `infrastructure::mailbox` names everything a producer
+// needs: `mailbox::actor_clients::{RestaurantClient, …}` next to the outcome enums above.
+pub use crate::generated::actor_clients;
 pub use handler::{MailboxCommandHandler, StatusBusObserver};
 pub use pm_delivery::backfill_stripe_facts_to_pm_lanes;
 
