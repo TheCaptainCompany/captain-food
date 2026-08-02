@@ -41,46 +41,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::AddCartLine = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::AddCartLine = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AddCartLine: identity property 'cartId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CartClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CartClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Cart".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "AddCartLine".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("AddCartLine");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("AddCartLine");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -89,7 +85,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -118,46 +114,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RemoveCartLine = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RemoveCartLine = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveCartLine: identity property 'cartId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CartClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CartClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Cart".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RemoveCartLine".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RemoveCartLine");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RemoveCartLine");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -166,7 +158,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -195,46 +187,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ChangeCartLineQuantity = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ChangeCartLineQuantity = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("cartId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeCartLineQuantity: identity property 'cartId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CartClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CartClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Cart".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ChangeCartLineQuantity".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ChangeCartLineQuantity");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ChangeCartLineQuantity");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -243,7 +231,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -272,46 +260,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RegisterRestaurantAccount = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RegisterRestaurantAccount = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RegisterRestaurantAccount: identity property 'restaurantAccountId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantAccountClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantAccountClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "RestaurantAccount".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RegisterRestaurantAccount".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RegisterRestaurantAccount");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RegisterRestaurantAccount");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -320,7 +304,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -349,46 +333,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UpdateRestaurantAccount = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UpdateRestaurantAccount = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateRestaurantAccount: identity property 'restaurantAccountId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantAccountClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantAccountClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "RestaurantAccount".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UpdateRestaurantAccount".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UpdateRestaurantAccount");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UpdateRestaurantAccount");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -397,7 +377,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -426,46 +406,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::DeleteRestaurantAccount = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::DeleteRestaurantAccount = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantAccountId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("DeleteRestaurantAccount: identity property 'restaurantAccountId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantAccountClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantAccountClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "RestaurantAccount".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "DeleteRestaurantAccount".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("DeleteRestaurantAccount");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("DeleteRestaurantAccount");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -474,7 +450,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -503,46 +479,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RegisterRestaurant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RegisterRestaurant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RegisterRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RegisterRestaurant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RegisterRestaurant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RegisterRestaurant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -551,7 +523,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -581,46 +553,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ConfigureRestaurantSlug = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ConfigureRestaurantSlug = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfigureRestaurantSlug: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ConfigureRestaurantSlug".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ConfigureRestaurantSlug");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ConfigureRestaurantSlug");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -629,7 +597,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -658,46 +626,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ActivateRestaurant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ActivateRestaurant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ActivateRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ActivateRestaurant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ActivateRestaurant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ActivateRestaurant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -706,7 +670,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -735,46 +699,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UpdateRestaurant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UpdateRestaurant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UpdateRestaurant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UpdateRestaurant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UpdateRestaurant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -783,7 +743,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -812,46 +772,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::DeactivateRestaurant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::DeactivateRestaurant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("DeactivateRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "DeactivateRestaurant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("DeactivateRestaurant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("DeactivateRestaurant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -860,7 +816,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -889,46 +845,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RemoveRestaurant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RemoveRestaurant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveRestaurant: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RemoveRestaurant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RemoveRestaurant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RemoveRestaurant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -937,7 +889,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -966,46 +918,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ChangeOrderAcceptanceMode = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ChangeOrderAcceptanceMode = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeOrderAcceptanceMode: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ChangeOrderAcceptanceMode".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ChangeOrderAcceptanceMode");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ChangeOrderAcceptanceMode");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1014,7 +962,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1043,46 +991,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UpdateRestaurantGoogleBusinessProfile = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UpdateRestaurantGoogleBusinessProfile = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateRestaurantGoogleBusinessProfile: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UpdateRestaurantGoogleBusinessProfile".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UpdateRestaurantGoogleBusinessProfile");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UpdateRestaurantGoogleBusinessProfile");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1091,7 +1035,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1120,46 +1064,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::MarkRestaurantClosed = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::MarkRestaurantClosed = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkRestaurantClosed: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "MarkRestaurantClosed".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("MarkRestaurantClosed");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("MarkRestaurantClosed");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1168,7 +1108,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1197,46 +1137,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ClaimRestaurantListing = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ClaimRestaurantListing = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ClaimRestaurantListing: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ClaimRestaurantListing".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ClaimRestaurantListing");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ClaimRestaurantListing");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1245,7 +1181,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1274,46 +1210,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::OptOutRestaurantListing = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::OptOutRestaurantListing = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("OptOutRestaurantListing: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "OptOutRestaurantListing".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("OptOutRestaurantListing");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("OptOutRestaurantListing");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1322,7 +1254,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1351,46 +1283,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ChangeRestaurantListingStatus = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ChangeRestaurantListingStatus = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeRestaurantListingStatus: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ChangeRestaurantListingStatus".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ChangeRestaurantListingStatus");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ChangeRestaurantListingStatus");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1399,7 +1327,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1428,46 +1356,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ConfigureGoogleBusinessProfileOrderLink = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ConfigureGoogleBusinessProfileOrderLink = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfigureGoogleBusinessProfileOrderLink: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ConfigureGoogleBusinessProfileOrderLink".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ConfigureGoogleBusinessProfileOrderLink");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ConfigureGoogleBusinessProfileOrderLink");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1476,7 +1400,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1505,46 +1429,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::VerifyGoogleBusinessProfileOrderLink = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::VerifyGoogleBusinessProfileOrderLink = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("VerifyGoogleBusinessProfileOrderLink: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RestaurantClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RestaurantClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Restaurant".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "VerifyGoogleBusinessProfileOrderLink".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("VerifyGoogleBusinessProfileOrderLink");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("VerifyGoogleBusinessProfileOrderLink");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1553,7 +1473,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1582,46 +1502,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RecordProspectContact = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RecordProspectContact = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RecordProspectContact: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ProspectClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ProspectClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Prospect".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RecordProspectContact".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RecordProspectContact");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RecordProspectContact");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1630,7 +1546,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1659,46 +1575,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::MarkProspectCold = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::MarkProspectCold = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkProspectCold: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ProspectClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ProspectClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Prospect".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "MarkProspectCold".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("MarkProspectCold");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("MarkProspectCold");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1707,7 +1619,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1736,46 +1648,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RecordProspectReply = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RecordProspectReply = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("restaurantId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RecordProspectReply: identity property 'restaurantId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ProspectClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ProspectClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Prospect".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RecordProspectReply".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RecordProspectReply");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RecordProspectReply");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1784,7 +1692,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1813,46 +1721,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::CreateCatalog = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::CreateCatalog = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CreateCatalog: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "CreateCatalog".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("CreateCatalog");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("CreateCatalog");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1861,7 +1765,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1890,46 +1794,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::AddProduct = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::AddProduct = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AddProduct: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "AddProduct".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("AddProduct");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("AddProduct");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -1938,7 +1838,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -1967,46 +1867,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UpdateProduct = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UpdateProduct = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateProduct: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UpdateProduct".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UpdateProduct");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UpdateProduct");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2015,7 +1911,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2044,46 +1940,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RemoveProduct = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RemoveProduct = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveProduct: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RemoveProduct".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RemoveProduct");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RemoveProduct");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2092,7 +1984,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2121,46 +2013,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::AddCatalogCategory = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::AddCatalogCategory = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AddCatalogCategory: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "AddCatalogCategory".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("AddCatalogCategory");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("AddCatalogCategory");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2169,7 +2057,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2198,46 +2086,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UpdateCatalogCategory = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UpdateCatalogCategory = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateCatalogCategory: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UpdateCatalogCategory".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UpdateCatalogCategory");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UpdateCatalogCategory");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2246,7 +2130,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2275,46 +2159,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RemoveCatalogCategory = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RemoveCatalogCategory = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveCatalogCategory: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RemoveCatalogCategory".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RemoveCatalogCategory");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RemoveCatalogCategory");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2323,7 +2203,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2352,46 +2232,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::AddOptionList = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::AddOptionList = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AddOptionList: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "AddOptionList".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("AddOptionList");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("AddOptionList");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2400,7 +2276,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2429,46 +2305,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UpdateOptionList = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UpdateOptionList = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateOptionList: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UpdateOptionList".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UpdateOptionList");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UpdateOptionList");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2477,7 +2349,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2506,46 +2378,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RemoveOptionList = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RemoveOptionList = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveOptionList: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RemoveOptionList".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RemoveOptionList");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RemoveOptionList");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2554,7 +2422,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2583,46 +2451,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UpdateOfferStock = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UpdateOfferStock = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateOfferStock: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UpdateOfferStock".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UpdateOfferStock");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UpdateOfferStock");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2631,7 +2495,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2660,46 +2524,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ImportCatalog = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ImportCatalog = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("catalogId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ImportCatalog: identity property 'catalogId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CatalogClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CatalogClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Catalog".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ImportCatalog".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ImportCatalog");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ImportCatalog");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2708,7 +2568,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2737,47 +2597,43 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RequestPhoneVerification = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RequestPhoneVerification = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         // Birth command: the handler mints the aggregate id; this one only routes the mailbox lane.
         let actor_id = uuid::Uuid::now_v7();
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RequestPhoneVerification".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RequestPhoneVerification");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RequestPhoneVerification");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2786,7 +2642,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2815,46 +2671,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::VerifyPhone = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::VerifyPhone = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("VerifyPhone: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "VerifyPhone".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("VerifyPhone");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("VerifyPhone");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2863,7 +2715,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2892,46 +2744,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RequestEmailVerification = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RequestEmailVerification = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RequestEmailVerification: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RequestEmailVerification".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RequestEmailVerification");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RequestEmailVerification");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -2940,7 +2788,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -2969,46 +2817,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ConfirmEmailVerification = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ConfirmEmailVerification = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfirmEmailVerification: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ConfirmEmailVerification".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ConfirmEmailVerification");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ConfirmEmailVerification");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3017,7 +2861,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3046,46 +2890,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RequestPhoneChange = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RequestPhoneChange = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RequestPhoneChange: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RequestPhoneChange".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RequestPhoneChange");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RequestPhoneChange");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3094,7 +2934,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3123,46 +2963,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ConfirmPhoneChange = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ConfirmPhoneChange = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfirmPhoneChange: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ConfirmPhoneChange".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ConfirmPhoneChange");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ConfirmPhoneChange");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3171,7 +3007,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3200,46 +3036,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ChangeLanguage = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ChangeLanguage = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeLanguage: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ChangeLanguage".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ChangeLanguage");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ChangeLanguage");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3248,7 +3080,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3277,46 +3109,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::MarkRestaurantAsFavorite = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::MarkRestaurantAsFavorite = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkRestaurantAsFavorite: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "MarkRestaurantAsFavorite".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("MarkRestaurantAsFavorite");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("MarkRestaurantAsFavorite");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3325,7 +3153,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3354,46 +3182,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UnmarkRestaurantAsFavorite = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UnmarkRestaurantAsFavorite = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UnmarkRestaurantAsFavorite: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UnmarkRestaurantAsFavorite".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UnmarkRestaurantAsFavorite");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UnmarkRestaurantAsFavorite");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3402,7 +3226,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3431,46 +3255,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UpdateCustomerInfo = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UpdateCustomerInfo = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UpdateCustomerInfo: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UpdateCustomerInfo".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UpdateCustomerInfo");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UpdateCustomerInfo");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3479,7 +3299,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3508,46 +3328,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::SetCustomerPreferences = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::SetCustomerPreferences = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("SetCustomerPreferences: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "SetCustomerPreferences".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("SetCustomerPreferences");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("SetCustomerPreferences");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3556,7 +3372,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3585,46 +3401,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::SetCustomerAddress = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::SetCustomerAddress = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("SetCustomerAddress: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "SetCustomerAddress".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("SetCustomerAddress");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("SetCustomerAddress");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3633,7 +3445,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3662,46 +3474,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RemoveCustomerAddress = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RemoveCustomerAddress = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RemoveCustomerAddress: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RemoveCustomerAddress".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RemoveCustomerAddress");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RemoveCustomerAddress");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3710,7 +3518,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3739,46 +3547,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::SetCustomerPaymentMethod = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::SetCustomerPaymentMethod = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("SetCustomerPaymentMethod: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::CustomerClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Customer".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "SetCustomerPaymentMethod".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("SetCustomerPaymentMethod");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("SetCustomerPaymentMethod");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3787,7 +3591,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -3822,9 +3626,9 @@ impl MutationRoot {
         if ctx.data::<crate::graphql::PmMailboxDelivery>().map(|f| f.0).unwrap_or(false) {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::PlaceOrder = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::PlaceOrder = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
@@ -3843,38 +3647,34 @@ impl MutationRoot {
             return Ok(acceptance(&env, journal_status_api(prior.status), true));
         }
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("PlaceOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated PlaceOrderProcessClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::PlaceOrderProcessClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "PlaceOrderProcess".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "PlaceOrder".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("PlaceOrder");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("PlaceOrder");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -3883,7 +3683,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4012,46 +3812,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::AcceptOrder = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::AcceptOrder = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AcceptOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "AcceptOrder".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("AcceptOrder");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("AcceptOrder");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4060,7 +3856,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4089,46 +3885,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RejectOrder = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RejectOrder = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RejectOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RejectOrder".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RejectOrder");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RejectOrder");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4137,7 +3929,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4166,46 +3958,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::StartPreparation = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::StartPreparation = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("StartPreparation: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "StartPreparation".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("StartPreparation");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("StartPreparation");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4214,7 +4002,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4243,46 +4031,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::MarkOrderReady = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::MarkOrderReady = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkOrderReady: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "MarkOrderReady".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("MarkOrderReady");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("MarkOrderReady");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4291,7 +4075,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4320,46 +4104,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::MarkOrderDelivered = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::MarkOrderDelivered = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MarkOrderDelivered: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "MarkOrderDelivered".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("MarkOrderDelivered");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("MarkOrderDelivered");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4368,7 +4148,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4397,46 +4177,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::CancelOrderByCustomer = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::CancelOrderByCustomer = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CancelOrderByCustomer: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "CancelOrderByCustomer".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("CancelOrderByCustomer");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("CancelOrderByCustomer");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4445,7 +4221,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4474,46 +4250,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::CancelOrderByRestaurant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::CancelOrderByRestaurant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CancelOrderByRestaurant: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "CancelOrderByRestaurant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("CancelOrderByRestaurant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("CancelOrderByRestaurant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4522,7 +4294,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4551,46 +4323,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RateOrder = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RateOrder = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RateOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RateOrder".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RateOrder");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RateOrder");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4599,7 +4367,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4628,46 +4396,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RateRestaurant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RateRestaurant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RateRestaurant: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RateRestaurant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RateRestaurant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RateRestaurant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4676,7 +4440,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4709,46 +4473,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::TipOrder = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::TipOrder = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("TipOrder: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "TipOrder".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("TipOrder");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("TipOrder");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4757,7 +4517,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4786,46 +4546,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RequestRefund = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RequestRefund = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RequestRefund: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated OrderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::OrderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Order".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RequestRefund".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RequestRefund");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RequestRefund");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4834,7 +4590,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -4869,9 +4625,9 @@ impl MutationRoot {
         if ctx.data::<crate::graphql::PmMailboxDelivery>().map(|f| f.0).unwrap_or(false) {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ApproveRefund = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ApproveRefund = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
@@ -4890,38 +4646,34 @@ impl MutationRoot {
             return Ok(acceptance(&env, journal_status_api(prior.status), true));
         }
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ApproveRefund: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RefundProcessClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RefundProcessClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "RefundProcess".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ApproveRefund".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ApproveRefund");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ApproveRefund");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -4930,7 +4682,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5064,9 +4816,9 @@ impl MutationRoot {
         if ctx.data::<crate::graphql::PmMailboxDelivery>().map(|f| f.0).unwrap_or(false) {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::DenyRefund = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::DenyRefund = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
@@ -5085,38 +4837,34 @@ impl MutationRoot {
             return Ok(acceptance(&env, journal_status_api(prior.status), true));
         }
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("DenyRefund: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RefundProcessClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RefundProcessClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "RefundProcess".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "DenyRefund".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("DenyRefund");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("DenyRefund");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5125,7 +4873,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5252,46 +5000,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ChangeRiderStatus = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ChangeRiderStatus = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("riderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ChangeRiderStatus: identity property 'riderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RiderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::RiderClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Rider".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ChangeRiderStatus".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ChangeRiderStatus");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ChangeRiderStatus");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5300,7 +5044,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5329,46 +5073,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::AcceptDelivery = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::AcceptDelivery = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AcceptDelivery: identity property 'deliveryJobId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated DeliveryJobClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::DeliveryJobClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "DeliveryJob".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "AcceptDelivery".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("AcceptDelivery");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("AcceptDelivery");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5377,7 +5117,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5406,46 +5146,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ConfirmPickup = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ConfirmPickup = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfirmPickup: identity property 'deliveryJobId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated DeliveryJobClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::DeliveryJobClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "DeliveryJob".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ConfirmPickup".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ConfirmPickup");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ConfirmPickup");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5454,7 +5190,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5483,46 +5219,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::CompleteDelivery = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::CompleteDelivery = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CompleteDelivery: identity property 'deliveryJobId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated DeliveryJobClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::DeliveryJobClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "DeliveryJob".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "CompleteDelivery".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("CompleteDelivery");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("CompleteDelivery");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5531,7 +5263,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5560,46 +5292,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::CancelDelivery = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::CancelDelivery = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("deliveryJobId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CancelDelivery: identity property 'deliveryJobId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated DeliveryJobClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::DeliveryJobClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "DeliveryJob".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "CancelDelivery".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("CancelDelivery");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("CancelDelivery");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5608,7 +5336,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5641,46 +5369,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RegisterDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RegisterDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RegisterDeliveryPartnerAvailability: identity property 'registrationId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated DeliveryPartnerRegistrationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "DeliveryPartnerRegistration".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RegisterDeliveryPartnerAvailability".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RegisterDeliveryPartnerAvailability");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RegisterDeliveryPartnerAvailability");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5689,7 +5413,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5718,46 +5442,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ApproveDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ApproveDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ApproveDeliveryPartnerAvailability: identity property 'registrationId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated DeliveryPartnerRegistrationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "DeliveryPartnerRegistration".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ApproveDeliveryPartnerAvailability".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ApproveDeliveryPartnerAvailability");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ApproveDeliveryPartnerAvailability");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5766,7 +5486,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5795,46 +5515,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RevokeDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RevokeDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("registrationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RevokeDeliveryPartnerAvailability: identity property 'registrationId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated DeliveryPartnerRegistrationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::DeliveryPartnerRegistrationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "DeliveryPartnerRegistration".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RevokeDeliveryPartnerAvailability".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RevokeDeliveryPartnerAvailability");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RevokeDeliveryPartnerAvailability");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5843,7 +5559,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5872,46 +5588,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::OpenConversation = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::OpenConversation = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("OpenConversation: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ConversationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Conversation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "OpenConversation".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("OpenConversation");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("OpenConversation");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5920,7 +5632,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -5949,46 +5661,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::PostMessage = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::PostMessage = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("PostMessage: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ConversationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Conversation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "PostMessage".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("PostMessage");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("PostMessage");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -5997,7 +5705,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6026,46 +5734,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RecordMessageTranslation = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RecordMessageTranslation = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RecordMessageTranslation: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ConversationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Conversation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RecordMessageTranslation".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RecordMessageTranslation");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RecordMessageTranslation");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6074,7 +5778,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6103,46 +5807,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::EscalateToAdmin = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::EscalateToAdmin = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("EscalateToAdmin: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ConversationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Conversation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "EscalateToAdmin".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("EscalateToAdmin");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("EscalateToAdmin");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6151,7 +5851,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6180,46 +5880,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::MuteParticipant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::MuteParticipant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("MuteParticipant: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ConversationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Conversation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "MuteParticipant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("MuteParticipant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("MuteParticipant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6228,7 +5924,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6257,46 +5953,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::UnmuteParticipant = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::UnmuteParticipant = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("orderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("UnmuteParticipant: identity property 'orderId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ConversationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ConversationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Conversation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "UnmuteParticipant".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("UnmuteParticipant");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("UnmuteParticipant");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6305,7 +5997,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6334,46 +6026,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::OpenReclamation = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::OpenReclamation = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("OpenReclamation: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ReclamationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Reclamation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "OpenReclamation".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("OpenReclamation");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("OpenReclamation");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6382,7 +6070,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6411,46 +6099,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ResolveReclamation = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ResolveReclamation = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ResolveReclamation: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ReclamationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Reclamation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ResolveReclamation".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ResolveReclamation");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ResolveReclamation");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6459,7 +6143,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6488,46 +6172,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::RejectReclamation = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RejectReclamation = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RejectReclamation: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ReclamationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Reclamation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "RejectReclamation".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("RejectReclamation");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RejectReclamation");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6536,7 +6216,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6565,46 +6245,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::ReopenReclamation = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ReopenReclamation = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ReopenReclamation: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ReclamationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Reclamation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "ReopenReclamation".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("ReopenReclamation");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ReopenReclamation");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6613,7 +6289,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
@@ -6642,46 +6318,42 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn application::mailbox::Mailbox>>()?.clone();
         let payload_json = command_payload(&input)?;
-        // SYNC input validation (fail fast as a GraphQL error): the async path never sees a
-        // payload the domain command cannot deserialize.
-        let _cmd: domain::generated::commands::AttachReclamationEvidence = serde_json::from_value(payload_json.clone())
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::AttachReclamationEvidence = serde_json::from_value(payload_json.clone())
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let env = request_envelope(ctx, &metadata);
         // run_identity: both ids are mandatory in every contract and both may be server-generated.
         telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
         let actor_id = payload_json.get("reclamationId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("AttachReclamationEvidence: identity property 'reclamationId' missing or not a uuid -- unaddressable"))?;
-        let entry = application::mailbox::MailboxEntry {
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated ReclamationClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = infrastructure::generated::actor_clients::ReclamationClient::new(mailbox, actor_id);
+        let __envelope = application::mailbox::Envelope {
             message_id: env.message_id,
-            kind: "COMMAND".into(),
-            actor_type: "Reclamation".into(),
-            actor_id,
-            partition: actor_runtime::stable_partition(&actor_id, 100),
-            message_type: "AttachReclamationEvidence".into(),
-            payload: payload_json.clone(),
-            payload_hash: application::journal::payload_hash(&payload_json),
-            channel: "GRAPHQL".into(),
-            user_id: env.user_id,
-            user_type: env.user_type.clone(),
             correlation_id: env.correlation_id,
             cause_id: env.cause_id,
             session_id: env.session_id,
             trace_id: env.trace_id.clone(),
-            source: None,
-            external_id: None,
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
         };
-        // command.journal (INTERNAL) — the mailbox insert IS the durable acceptance now; the
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
         // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
         let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
-        let __inserted = mailbox.insert(&entry).instrument(__journal.clone()).await.map_err(domain_error)?;
-        match __inserted {
-            application::mailbox::MailboxInsertOutcome::Duplicate { status, payload_hash } => {
-                if payload_hash != entry.payload_hash {
-                    // A reused messageId with a DIFFERENT payload is a client bug, and the only
-                    // acceptance outcome the contract does NOT count as success.
-                    telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
-                    telemetry::meters::acceptance::sync_conflict("AttachReclamationEvidence");
-                    return Err(conflict_error(env.message_id));
-                }
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            infrastructure::mailbox::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("AttachReclamationEvidence");
+                return Err(conflict_error(env.message_id));
+            }
+            infrastructure::mailbox::EnqueueOutcome::Deduplicated(status) => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
                 let _ = telemetry::spans::command_dispatch(
                     &env.message_id.to_string(),
@@ -6690,7 +6362,7 @@ impl MutationRoot {
                 telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
                 return Ok(acceptance(&env, mailbox_status_api(status), true));
             }
-            application::mailbox::MailboxInsertOutcome::Inserted => {
+            infrastructure::mailbox::EnqueueOutcome::Enqueued => {
                 telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
             }
         }
