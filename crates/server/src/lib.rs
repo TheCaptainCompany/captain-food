@@ -890,6 +890,9 @@ pub fn router() -> Router {
                         max_delivery_attempts: config
                             .mailbox_max_delivery_attempts
                             .clamp(0, i16::MAX as i64) as i16,
+                        // The spec prose says "retry spacing default = the heartbeat" — wire it
+                        // so that stays true when MAILBOX_HEARTBEAT_SECONDS is tuned.
+                        retry_spacing_seconds: config.mailbox_heartbeat_seconds.max(1) as u64,
                         ..actor_runtime::WorkerConfig::default()
                     };
                     for (actor_type, width) in

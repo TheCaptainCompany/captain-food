@@ -252,6 +252,8 @@ async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writ
         pool.clone(),
         "w-A",
         "Conversation",
+        // Pacing off: these tests redeliver after induced failures on the very next pass;
+        // the spacing window (#313 D4) has its own poison tests.
         WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     )
@@ -370,6 +372,8 @@ async fn stale_hold_cannot_commit_a_wrong_rejection() {
         pool.clone(),
         "w-A",
         "Conversation",
+        // Pacing off: these tests redeliver after induced failures on the very next pass;
+        // the spacing window (#313 D4) has its own poison tests.
         WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     );
@@ -468,6 +472,8 @@ async fn per_actor_opt_out_caches_nothing() {
         pool.clone(),
         "w-A",
         "Conversation",
+        // Pacing off: these tests redeliver after induced failures on the very next pass;
+        // the spacing window (#313 D4) has its own poison tests.
         WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     );
