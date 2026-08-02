@@ -18,6 +18,15 @@
 > `OperationStatusBus` still lives in infrastructure keyed to the legacy journal status — its
 > relocation is a recorded follow-up, not improvised). `infrastructure` keeps ONLY the SQL side
 > (`PgMailbox` binds via getters; `apply_schedules_in_tx` binds the actor_client constructor).
+> **Review hardening (independent pass, 2026-08-02)**: (1) the D8-deferred UNTYPED bulk fact door
+> (`enqueue_inbound_facts`/`InboundFact`) is exported only under the `bulk-door` cargo feature —
+> `infrastructure` (the SIRENE sweep) is the ONE manifest allowed to enable it (guard
+> `bulk_door_feature_is_granted_only_to_infrastructure`, bidirectional, verified red) — and every
+> bulk fact's `event_type` is validated at the door against the generated `ACTOR_INBOUND_FACTS`
+> table (the same actors.yaml `receives` scan the sealed `{Actor}Fact` traits come from): the
+> runtime re-proof, for the one untyped path, of the typed path's compile check. (2) the generated
+> `ReminderSchedule` is `#[non_exhaustive]`, so an out-of-crate spec literal — the forgery route
+> into `scheduled_entry` — is a compile error (E0639); specs come from the generated table only.
 > **D3**: codegen guard `capability_dependencies_are_allowlisted` — `sqlx`/`reqwest` only in an
 > explicit per-crate allowlist with WHYs (server keeps both exceptions: PgPool construction +
 > /health probe; Supabase JWKS fetch), bidirectional (stale entries fail), verified red on a
@@ -52,16 +61,19 @@
 > to its own change after phase 1 (against the recommendation).
 
 > 🚧 **2026-08-02 — [#284 "Typed actor clients (PROP-20260728-152752 §2.1)"](https://github.com/TheCaptainCompany/captain-food/issues/284)
-> slice 1 built (branch `claude/situation-explanation-cj06o2`)**: new emitter generates
-> `crates/infrastructure/src/generated/actor_clients.rs` — one `{Actor}Client` per mailbox actor
+> slice 1 built (branch `claude/situation-explanation-cj06o2`)**. *(Path/visibility claims in this
+> entry describe the pre-#290 layout; the 2026-08-02 #290 phase-1 entry above supersedes them —
+> the clients, constructors and door now live in the `actor_client` boundary crate.)* New emitter
+> generates the actor clients (then `crates/infrastructure/src/generated/actor_clients.rs`; now
+> `crates/actor_client/src/generated/actor_clients.rs`) — one `{Actor}Client` per mailbox actor
 > (`send`/`record`/`schedule`/`cancel`) with SEALED per-actor `{Actor}Command`/`{Actor}Fact` marker
 > traits, so sending a message the actor does not `receive` is a COMPILE error. Clients delegate to
-> the shared `pub(crate)` constructors extracted in `mailbox::enqueue` (`command_entry`,
+> the shared crate-internal constructors extracted in `enqueue` (`command_entry`,
 > `insert_mapped`, `schedule_mapped`) — MemMailbox drift guards prove typed `send`/`record` rows are
 > field-for-field identical to the free-function enqueue; `record` always keys on
 > `inbound_message_id(source, external_id)`. The caller-side `Envelope` (transport metadata only, no
-> payload/addressing) is hand-written in `application::mailbox`. **No batched send — D8 is answered:
-> not for now.** **Slice 2 built (PR #289)**: the GraphQL resolver emitter no
+> payload/addressing) was hand-written in `application::mailbox` (now `actor_client::mailbox`,
+> #290). **No batched send — D8 is answered: not for now.** **Slice 2 built (PR #289)**: the GraphQL resolver emitter no
 > longer constructs `MailboxEntry` inline — both the aggregate-routed template and the gated PM
 > template's mailbox arm deserialize the typed command and `send` through the generated
 > `{Actor}Client` (identity extraction + the birth-command `now_v7` mint stay in the resolver; the
@@ -73,16 +85,17 @@
 > Conflict instead of replay. **Slice 3 built (PR #292, final)**: every
 > adapter is on the typed clients — SIRENE (`MarkRestaurantClosed` via `RestaurantClient::send`
 > with the journal-derived envelope, the row-by-row fallback via typed `record`; the BATCHED
-> `enqueue_inbound_facts` fast path stays as the crate-internal bulk door, D8 deferred), HubRise
-> connect/enrich (`RestaurantAccountClient`/`RestaurantClient`/`CatalogClient`), and the four
-> webhook ACLs (Stripe → `PaymentClient`, Uber Direct/Avelo37/CoopCycle → `DeliveryJobClient` —
-> `inbound_fact_for`'s runtime family→lane switch is DELETED; the sealed Fact traits check it at
-> compile time). The free-function surface is CLOSED: `enqueue_inbound_fact(s)`/`InboundFact` are
-> `pub(crate)`, `enqueue_worker_command`/`schedule_reminder`/`cancel_reminder` are `#[cfg(test)]`
-> reference implementations for the drift guards (moved in-crate to
-> `mailbox/enqueue.rs::{drift_guard, schedule_pg}` so the guard compares against the real
-> reference while the door stays shut); the public surface is the clients (re-exported as
-> `mailbox::actor_clients`) + outcome enums + id derivations. Codegen guard
+> `enqueue_inbound_facts` fast path stayed as the then-crate-internal bulk door, D8 deferred —
+> since #290 it is the `bulk-door`-feature-gated, receives-validated door in `actor_client`),
+> HubRise connect/enrich (`RestaurantAccountClient`/`RestaurantClient`/`CatalogClient`), and the
+> four webhook ACLs (Stripe → `PaymentClient`, Uber Direct/Avelo37/CoopCycle → `DeliveryJobClient`
+> — `inbound_fact_for`'s runtime family→lane switch is DELETED; the sealed Fact traits check it at
+> compile time). The free-function surface was CLOSED at the then-crate boundary
+> (`enqueue_inbound_fact(s)`/`InboundFact` crate-internal; `enqueue_worker_command`/
+> `schedule_reminder`/`cancel_reminder` test-only reference implementations for the drift guards —
+> all superseded by #290's actor_client crate, where the same closure is compiler-enforced and the
+> reference impls ride the `test-fixtures` feature); the public surface is the clients + outcome
+> enums + id derivations. Codegen guard
 > `mailbox_entry_is_constructed_only_behind_the_typed_doors` fails the build on any new
 > `MailboxEntry` construction site (allowlist asserted-to-exist; verified red on a planted
 > violation). Same change also restored the LOST `#[test]` on `makefile_recipe_lines_are_ascii`
