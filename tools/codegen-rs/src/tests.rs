@@ -2488,6 +2488,44 @@ Catalog:
         assert!(issues.iter().all(|i| i.level == Level::Warning), "both stay WARN — the mailbox mints an addressing-only id (calibration, see §2d doc)");
     }
 
+    /// The SPEC-GATED scheduling surface (product-owner directive, 2026-08-02): a client exposes
+    /// `schedule`/`cancel` IFF its actor declares `reminders:` in actors.yaml — the declaration
+    /// is the permission, and an undeclared actor has NO method (a compile error at any call
+    /// site), never an uncallable-but-present one. Bidirectional over the real catalog: every
+    /// reminder-declaring actor's block carries both methods, every other block carries neither.
+    #[test]
+    fn schedule_surface_exists_only_for_reminder_declaring_actors() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let declaring: HashSet<String> =
+            parse_reminders(&model).into_iter().map(|r| r.actor).collect();
+        assert!(
+            !declaring.is_empty(),
+            "no actor declares reminders — if the Order pilot left the spec, this guard needs a \
+             new positive case, not silence"
+        );
+        let clients = emit_actor_clients(&model);
+        let mut seen_blocks = 0usize;
+        for block in clients.split("\n// ─── ").skip(1) {
+            let name = block.split(' ').next().expect("actor name heads the block");
+            seen_blocks += 1;
+            let has_schedule = block.contains("pub async fn schedule");
+            let has_cancel = block.contains("pub async fn cancel");
+            assert_eq!(
+                has_schedule, has_cancel,
+                "{name}: schedule and cancel must travel together (cancel can only withdraw what \
+                 schedule/the reminder upsert could have parked)"
+            );
+            assert_eq!(
+                has_schedule,
+                declaring.contains(name),
+                "{name}: the scheduling surface must exist IFF the actor declares reminders in \
+                 actors.yaml — the spec declaration is the permission"
+            );
+        }
+        assert!(seen_blocks > 1, "the per-actor block scan went blind — fix the separator parse");
+    }
+
     /// The §2e fixture: a declared state field with clean lineage, a typed acting ref over it.
     const REQ_SCALARS: &str = "CustomerId: { type: string }\nOrderId: { type: string }\n";
     const REQ_EVENTS: &str = "ConversationOpened:\n  type: object\n  properties:\n    customerId: { $ref: 'scalars.yaml#/CustomerId' }\n";

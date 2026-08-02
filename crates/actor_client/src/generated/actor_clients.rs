@@ -5,7 +5,9 @@
 // assembled by the shared crate-internal constructors in `crate::enqueue`, so a typed send and a
 // free-function enqueue can never drift on lane, partition, principal or channel; this file only
 // gathers typed inputs and delegates. `MailboxEntry` fields are pub(crate), so this crate is the
-// only place such a row can exist at all.
+// only place such a row can exist at all. The SCHEDULING surface (`schedule`/`cancel`) is emitted
+// only for actors whose spec declares reminders (product-owner directive, 2026-08-02): the spec
+// declaration is the permission — an undeclared actor has NO method, not an uncallable one.
 
 use std::sync::Arc;
 
@@ -247,32 +249,6 @@ impl CartClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: CartCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Cart", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -425,32 +401,6 @@ impl CatalogClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: CatalogCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Catalog", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -572,32 +522,6 @@ impl ConversationClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: ConversationCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Conversation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -751,32 +675,6 @@ impl CustomerClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: CustomerCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Customer", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -882,32 +780,6 @@ impl CustomerCreditClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: CustomerCreditCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("CustomerCredit", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -1095,32 +967,6 @@ impl DeliveryJobClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: DeliveryJobCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("DeliveryJob", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -1230,32 +1076,6 @@ impl DeliveryPartnerRegistrationClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: DeliveryPartnerRegistrationCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("DeliveryPartnerRegistration", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -1412,7 +1232,6 @@ impl OrderClient {
         )
         .await
     }
-
     /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
     /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
     /// reschedules IN PLACE (ADR-20260731-150500).
@@ -1437,7 +1256,6 @@ impl OrderClient {
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
     }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -1584,32 +1402,6 @@ impl PaymentClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: PaymentCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Payment", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -1725,32 +1517,6 @@ impl PlaceOrderProcessClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: PlaceOrderProcessCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("PlaceOrderProcess", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -1860,32 +1626,6 @@ impl ProspectClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: ProspectCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Prospect", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -2003,32 +1743,6 @@ impl ReclamationClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: ReclamationCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Reclamation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -2141,32 +1855,6 @@ impl RefundProcessClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: RefundProcessCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("RefundProcess", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -2327,32 +2015,6 @@ impl RestaurantClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: RestaurantCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Restaurant", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -2462,32 +2124,6 @@ impl RestaurantAccountClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: RestaurantAccountCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("RestaurantAccount", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler
@@ -2597,32 +2233,6 @@ impl RiderClient {
         )
         .await
     }
-
-    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row
-    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity
-    /// reschedules IN PLACE (ADR-20260731-150500).
-    pub async fn schedule<M: RiderCommand>(
-        &self,
-        msg: M,
-        env: Envelope,
-        at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<ScheduleOutcome, DomainError> {
-        let payload = serde_json::to_value(&msg)
-            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
-        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Rider", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
-        let payload_hash = entry.payload_hash.clone();
-        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
-    }
-
-    /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
-    /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
-    /// cancellation is a slice-2 question, recorded on #284.
-    pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
-    }
-
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST
     /// equal this client's lane — a mismatch would park the command on one lane while the handler

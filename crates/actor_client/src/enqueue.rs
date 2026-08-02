@@ -686,12 +686,18 @@ mod drift_guard {
     /// SCHEDULED rows), so its guard is ABSOLUTE assertions instead of a drift comparison: the row
     /// must carry the same `command_entry` columns as an immediate send plus the `scheduled_at`
     /// the caller gave — and `cancel` must withdraw it exactly once.
+    ///
+    /// Exercises the ORDER client on purpose: the scheduling surface is SPEC-GATED (product-owner
+    /// directive, 2026-08-02 — no `schedule`/`cancel` without a `reminders:` declaration), and
+    /// Order is the one declaring actor today. A `RestaurantClient` (no declaration) has no
+    /// `schedule` method at all — that absence is a compile fact, not something a runtime test
+    /// can assert.
     #[tokio::test]
     async fn typed_schedule_parks_a_command_row_and_cancel_withdraws_it_once() {
-        let restaurant_id = uuid::Uuid::from_u128(0xF00D);
-        let cmd = MarkRestaurantClosed {
-            restaurant_id: RestaurantId(restaurant_id),
-            reason: Some("scheduled closure".into()),
+        let order_id = uuid::Uuid::from_u128(0x0DE7);
+        let cmd = domain::generated::commands::MarkOrderDelivered {
+            order_id: domain::generated::scalars::OrderId(order_id),
+            restaurant_id: RestaurantId(uuid::Uuid::from_u128(0xF00D)),
         };
         let message_id = uuid::Uuid::from_u128(0x5C);
         let at = chrono::DateTime::parse_from_rfc3339("2026-08-03T06:00:00Z")
@@ -699,15 +705,15 @@ mod drift_guard {
             .with_timezone(&chrono::Utc);
 
         let mailbox = Arc::new(MemMailbox::default());
-        let client = RestaurantClient::new(mailbox.clone(), restaurant_id);
+        let client = crate::generated::actor_clients::OrderClient::new(mailbox.clone(), order_id);
         client.schedule(cmd, test_envelope(message_id), at).await.expect("typed schedule");
 
         let row = mailbox.entry(message_id).expect("scheduled row");
         assert_eq!(row.kind(), "COMMAND");
-        assert_eq!(row.actor_type(), "Restaurant");
-        assert_eq!(row.actor_id(), restaurant_id);
-        assert_eq!(row.message_type(), "MarkRestaurantClosed");
-        assert_eq!(row.partition(), crate::partition::stable_partition(&restaurant_id, 100));
+        assert_eq!(row.actor_type(), "Order");
+        assert_eq!(row.actor_id(), order_id);
+        assert_eq!(row.message_type(), "MarkOrderDelivered");
+        assert_eq!(row.partition(), crate::partition::stable_partition(&order_id, 100));
         assert_eq!(mailbox.scheduled_at(message_id), Some(at), "parked until due, not delivered now");
 
         assert!(client.cancel(message_id).await.expect("cancel"), "a SCHEDULED row cancels");
