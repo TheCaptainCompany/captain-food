@@ -2093,6 +2093,73 @@ keys:
              allowlist WITH the reason.",
             offenders.join("\n")
         );
+
+        // THE NAMING SCAN — what the feature gate provably cannot close (#290 re-review):
+        // cargo features UNIFY, so once infrastructure lights `bulk-door` the export resolves for
+        // EVERY crate in the graph — a manifest-less scratch crate compiling
+        // `pub use actor_client::{enqueue_inbound_facts, InboundFact}` was demonstrated. The
+        // manifest grant above is the loud reviewable act; THIS scan is the enforcement: any
+        // source reference to the bulk-door symbols outside `crates/infrastructure` (the one
+        // sanctioned producer) and `crates/actor_client` (the definition) fails, door-guard
+        // style. Allowlist-asserted-alive: infrastructure must still NAME both symbols, or the
+        // producer moved and this scan went stale.
+        fn walk_rs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk_rs(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut sources = Vec::new();
+        walk_rs(&root.join("crates"), &mut sources);
+        sources.sort();
+        assert!(!sources.is_empty(), "found no crate sources to scan");
+
+        const SYMBOLS: &[&str] = &["enqueue_inbound_facts", "InboundFact"];
+        let mut named_offenders: Vec<String> = Vec::new();
+        let mut infra_names: HashSet<&str> = HashSet::new();
+        for f in &sources {
+            let rel = f.strip_prefix(&root).unwrap_or(f).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(f).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned tree is a silent no-op")
+            });
+            let inside_the_door = rel.starts_with("crates/actor_client/")
+                || rel.starts_with("crates/infrastructure/");
+            for (idx, line) in src.lines().enumerate() {
+                for sym in SYMBOLS {
+                    if !line.contains(sym) {
+                        continue;
+                    }
+                    if rel.starts_with("crates/infrastructure/") {
+                        infra_names.insert(sym);
+                    }
+                    if !inside_the_door {
+                        named_offenders.push(format!("  {rel}:{}: {}", idx + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            infra_names.len(),
+            SYMBOLS.len(),
+            "crates/infrastructure no longer names {SYMBOLS:?} — the SIRENE bulk producer moved; \
+             move this scan's allowlist with it so the guard stays real"
+        );
+        assert!(
+            named_offenders.is_empty(),
+            "the bulk-door symbols are NAMED outside crates/infrastructure — feature \
+             unification makes the export resolve graph-wide, so the reference itself is the \
+             violation:\n{}\n\nFix: record facts through a typed client's `record`; a new bulk \
+             producer is a scope decision recorded on the issue, then added to this scan's \
+             allowlist WITH the reason.",
+            named_offenders.join("\n")
+        );
     }
 
     // ─── §2f — reminders + declarative deletion (ADR-20260731-214500) ───────────────────────────

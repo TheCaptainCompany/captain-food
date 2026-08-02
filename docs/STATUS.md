@@ -19,12 +19,17 @@
 > relocation is a recorded follow-up, not improvised). `infrastructure` keeps ONLY the SQL side
 > (`PgMailbox` binds via getters; `apply_schedules_in_tx` binds the actor_client constructor).
 > **Review hardening (independent pass, 2026-08-02)**: (1) the D8-deferred UNTYPED bulk fact door
-> (`enqueue_inbound_facts`/`InboundFact`) is exported only under the `bulk-door` cargo feature —
-> `infrastructure` (the SIRENE sweep) is the ONE manifest allowed to enable it (guard
-> `bulk_door_feature_is_granted_only_to_infrastructure`, bidirectional, verified red) — and every
-> bulk fact's `event_type` is validated at the door against the generated `ACTOR_INBOUND_FACTS`
-> table (the same actors.yaml `receives` scan the sealed `{Actor}Fact` traits come from): the
-> runtime re-proof, for the one untyped path, of the typed path's compile check. (2) the generated
+> (`enqueue_inbound_facts`/`InboundFact`) sits behind the `bulk-door` cargo feature, with
+> `infrastructure` (the SIRENE sweep) the ONE manifest allowed to enable it. Honest limits of the
+> gate: cargo features UNIFY, so once infrastructure lights it the symbols RESOLVE graph-wide —
+> the manifest grant is the loud reviewable act, and the enforcement is the guard
+> `bulk_door_feature_is_granted_only_to_infrastructure` (bidirectional, verified red), which also
+> SOURCE-SCANS every crate: naming either symbol outside `infrastructure`/`actor_client` is
+> CI-red, closing the demonstrated manifest-less evasion. Every bulk fact is validated at the
+> door: `event_type` against the generated `ACTOR_INBOUND_FACTS` table (the same actors.yaml
+> `receives` scan the sealed `{Actor}Fact` traits come from — the runtime re-proof of the typed
+> path's compile check) AND payload-tag coherence (the adjacent `eventType` must equal the row's
+> `message_type`, or delivery would route on a lie). (2) the generated
 > `ReminderSchedule` is `#[non_exhaustive]`, so an out-of-crate spec literal — the forgery route
 > into `scheduled_entry` — is a compile error (E0639); specs come from the generated table only.
 > **D3**: codegen guard `capability_dependencies_are_allowlisted` — `sqlx`/`reqwest` only in an

@@ -112,6 +112,18 @@ pub(crate) fn emit_actor_clients(model: &Model) -> String {
     for a in &actors {
         let actor = &a.name;
         let width = a.width;
+        // Latent edge, failed LOUDLY at generation (#290 re-review NOTE): `schedule`'s bound is
+        // the `{Actor}Command` trait, which only exists with >=1 received command — a facts-only
+        // actor declaring `reminders:` would emit non-compiling code. Impossible in today's
+        // catalog (Order receives 13 commands); if a spec ever gets here, the fix is a spec
+        // decision, not a silent drop of the scheduling surface.
+        assert!(
+            !(a.reminders && a.commands.is_empty()),
+            "actors.yaml: `{actor}` declares `reminders:` but receives no COMMAND — the generated \
+             `schedule` method needs the `{actor}Command` trait, which only exists with >=1 \
+             received command, so the generated crate would not compile. Declare a received \
+             command or move the reminder."
+        );
         out.push_str(&format!("\n// ─── {actor} ───\n"));
         // THE DECLARATION IS THE PERMISSION (product-owner directive, 2026-08-02, generalized):
         // every client method — and its sealed marker trait — is emitted only when the actor's

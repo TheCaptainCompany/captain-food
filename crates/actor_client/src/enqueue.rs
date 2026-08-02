@@ -215,6 +215,19 @@ pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainErr
             fact.actor_type, fact.event_type
         )));
     }
+    // TAG COHERENCE (#290 re-review): delivery routes on the payload's adjacent `eventType` tag,
+    // while the row's `message_type` column comes from `fact.event_type` — if they disagree, the
+    // row lies about what it carries and the receives check above proved the wrong thing. The
+    // typed `record` path cannot diverge (the tag is serialized FROM `into_domain_event`); the
+    // untyped bulk path must prove it here.
+    let tag = fact.payload.get("eventType").and_then(|t| t.as_str());
+    if tag != Some(fact.event_type.as_str()) {
+        return Err(DomainError::Repository(format!(
+            "inbound fact '{}' carries payload tag {:?} — the row's message_type and the \
+             delivery route would disagree; refusing the incoherent fact at the mailbox door",
+            fact.event_type, tag
+        )));
+    }
     let message_id = inbound_message_id(&fact.source, &fact.external_id);
     let payload_hash = application::journal::payload_hash(&fact.payload);
     Ok(MailboxEntry {
@@ -660,6 +673,17 @@ mod drift_guard {
         .expect_err("a batch carrying one undeclared fact must refuse");
         assert!(err.to_string().contains("does not receive"), "{err}");
         assert!(mailbox.entries().is_empty(), "a refused batch enqueues nothing");
+
+        // TAG COHERENCE (#290 re-review): a RECEIVED event_type whose payload carries a DIFFERENT
+        // adjacent tag must refuse too — delivery routes on the tag, so accepting it would land a
+        // row whose message_type lies about what the worker will actually deserialize.
+        let mut incoherent = bad("PaymentCaptured", "Payment");
+        incoherent.payload = serde_json::json!({ "eventType": "PaymentFailed", "payload": {} });
+        let err = enqueue_inbound_fact(&mailbox, incoherent)
+            .await
+            .expect_err("a tag/event_type mismatch must refuse");
+        assert!(err.to_string().contains("payload tag"), "the error names the mismatch: {err}");
+        assert!(mailbox.entries().is_empty(), "nothing reaches the mailbox on a refusal");
     }
 
     /// Fix-1 invariant (#288 review): a payload whose DECLARED identity names a DIFFERENT
