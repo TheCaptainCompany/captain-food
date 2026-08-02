@@ -208,6 +208,17 @@ scratchpad directory (session-specific paths), so a resumed branch reuses it by 
 don't initdb a fresh cluster when yesterday's is one `pg_ctl start` away. Diagnose "tests
 suddenly failing" with `pg_isready`/`psql` FIRST, before reading a single line of code.
 
+**A DB-gated suite that is green in CI can still be order-dependent** — CI runs the whole
+workspace against ONE shared database, so a suite can silently depend on a table a SIBLING suite
+leaves behind (`graphql_write_path` needed `catalog`, created only by other suites' resets; alone
+on a fresh database it hung forever). The failure shape is nasty: a mailbox delivery whose repo
+query hits a missing relation aborts the completion TRANSACTION, so the status flip fails too and
+the lane retries forever — row stuck RECEIVED, no error column, no panic, poll timeout with zero
+evidence (cost: a 2-hour width-change bisect that ended in "fails at width 100 too", 2026-08-02).
+Two rules: every suite's `reset_schema` must create EVERY table its delivery path touches, and
+when a suite fails locally but CI is green, suspect suite-order leakage BEFORE code — prove it by
+running the one suite against a fresh database.
+
 **While a background agent owns the branch checkout, edit `main` through a git WORKTREE**
 (`git worktree add <scratchpad>/main-wt origin/main -b <tmp>` → edit → push `<tmp>:main` →
 `git worktree remove`): switching branches under a running agent yanks its files; and when the

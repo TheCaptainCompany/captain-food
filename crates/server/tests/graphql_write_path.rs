@@ -37,7 +37,7 @@ use sqlx::PgPool;
 async fn reset_schema(pool: &PgPool) {
     sqlx::raw_sql(
         r#"
-        DROP TABLE IF EXISTS domain_events, restaurant, prospectionpipeline, projection_checkpoint, command_journal, inbound_messages, mailbox_partitions CASCADE;
+        DROP TABLE IF EXISTS domain_events, restaurant, catalog, prospectionpipeline, projection_checkpoint, command_journal, inbound_messages, mailbox_partitions CASCADE;
         DROP SEQUENCE IF EXISTS inbound_messages_position_seq;
         CREATE TABLE domain_events (
           position BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -101,6 +101,20 @@ async fn reset_schema(pool: &PgPool) {
           preparation_time_minutes INTEGER,
           created_at TIMESTAMPTZ NOT NULL,
           updated_at TIMESTAMPTZ NOT NULL
+        );
+        -- The AddCartLine delivery reads it (require_orderable_line -> offer_by_id). Without it the
+        -- failed SELECT aborts the completion transaction, the status flip fails with it, and the
+        -- lane retries forever -- the suite then only passes when a sibling suite in the same
+        -- database happens to leave a catalog table behind (CI), a test-order dependency this
+        -- CREATE removes. Columns mirror persistence/catalog_store.rs COLUMNS.
+        CREATE TABLE catalog (
+          catalog_id UUID PRIMARY KEY,
+          restaurant_id UUID NOT NULL,
+          slug TEXT,
+          name TEXT,
+          tree JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         "#,
     )

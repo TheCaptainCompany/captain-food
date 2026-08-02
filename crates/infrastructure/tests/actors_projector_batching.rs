@@ -232,7 +232,7 @@ async fn actors_and_batching_projector_converge_concurrently() {
             },
             handler.clone(),
         ));
-        worker.seed(100).await.expect("seed");
+        worker.seed(5).await.expect("seed");
         let rx = shutdown_rx.clone();
         let w = worker.clone();
         worker_tasks.push((worker, tokio::spawn(async move { w.run(rx).await })));

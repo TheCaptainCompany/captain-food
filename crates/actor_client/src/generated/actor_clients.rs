@@ -194,7 +194,7 @@ impl CartFact for domain::generated::events::CartCheckedOut {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Cart` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct CartClient {
     mailbox: Arc<dyn Mailbox>,
@@ -217,7 +217,7 @@ impl CartClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Cart", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Cart", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -344,7 +344,7 @@ impl CatalogFact for domain::generated::events::OfferStockUpdated {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Catalog` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct CatalogClient {
     mailbox: Arc<dyn Mailbox>,
@@ -367,7 +367,7 @@ impl CatalogClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Catalog", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Catalog", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -451,7 +451,7 @@ impl ConversationCommand for domain::generated::commands::UnmuteParticipant {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Conversation` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct ConversationClient {
     mailbox: Arc<dyn Mailbox>,
@@ -474,7 +474,7 @@ impl ConversationClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Conversation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Conversation", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -562,7 +562,7 @@ impl CustomerCommand for domain::generated::commands::VerifyPhone {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Customer` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct CustomerClient {
     mailbox: Arc<dyn Mailbox>,
@@ -585,7 +585,7 @@ impl CustomerClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Customer", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Customer", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -625,7 +625,7 @@ impl CustomerCreditCommand for domain::generated::commands::GrantCustomerCredit 
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `CustomerCredit` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct CustomerCreditClient {
     mailbox: Arc<dyn Mailbox>,
@@ -648,7 +648,7 @@ impl CustomerCreditClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("CustomerCredit", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("CustomerCredit", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -782,7 +782,7 @@ impl DeliveryJobFact for domain::generated::events::DeliveryStatusUpdated {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `DeliveryJob` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct DeliveryJobClient {
     mailbox: Arc<dyn Mailbox>,
@@ -805,7 +805,7 @@ impl DeliveryJobClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("DeliveryJob", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("DeliveryJob", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -877,7 +877,7 @@ impl DeliveryPartnerRegistrationCommand for domain::generated::commands::RevokeD
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `DeliveryPartnerRegistration` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct DeliveryPartnerRegistrationClient {
     mailbox: Arc<dyn Mailbox>,
@@ -900,7 +900,7 @@ impl DeliveryPartnerRegistrationClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("DeliveryPartnerRegistration", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("DeliveryPartnerRegistration", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -1003,7 +1003,7 @@ impl OrderFact for domain::generated::events::OrderPlaced {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Order` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct OrderClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1026,7 +1026,7 @@ impl OrderClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Order", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Order", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -1070,7 +1070,7 @@ impl OrderClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Order", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Order", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
     }
@@ -1165,7 +1165,7 @@ impl PaymentFact for domain::generated::events::RefundOpened {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Payment` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct PaymentClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1248,7 +1248,7 @@ impl PlaceOrderProcessFact for domain::generated::events::PaymentFailed {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `PlaceOrderProcess` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct PlaceOrderProcessClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1271,7 +1271,7 @@ impl PlaceOrderProcessClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("PlaceOrderProcess", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("PlaceOrderProcess", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -1343,7 +1343,7 @@ impl ProspectCommand for domain::generated::commands::RecordProspectReply {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Prospect` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct ProspectClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1366,7 +1366,7 @@ impl ProspectClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Prospect", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Prospect", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -1418,7 +1418,7 @@ impl ReclamationCommand for domain::generated::commands::ResolveReclamation {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Reclamation` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct ReclamationClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1441,7 +1441,7 @@ impl ReclamationClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Reclamation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Reclamation", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -1500,7 +1500,7 @@ impl RefundProcessFact for domain::generated::events::PaymentRefunded {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `RefundProcess` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct RefundProcessClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1523,7 +1523,7 @@ impl RefundProcessClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("RefundProcess", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("RefundProcess", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -1658,7 +1658,7 @@ impl RestaurantFact for domain::generated::events::RestaurantRegistered {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Restaurant` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct RestaurantClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1681,7 +1681,7 @@ impl RestaurantClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Restaurant", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Restaurant", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -1753,7 +1753,7 @@ impl RestaurantAccountCommand for domain::generated::commands::UpdateRestaurantA
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `RestaurantAccount` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct RestaurantAccountClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1776,7 +1776,7 @@ impl RestaurantAccountClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("RestaurantAccount", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("RestaurantAccount", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }
@@ -1820,7 +1820,7 @@ impl RiderCommand for domain::generated::commands::UpdateRiderInfo {
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Rider` mailbox lane —
 /// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
-/// width 100 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// width 5 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
 /// actor (PROP-20260728-152752 §2.1).
 pub struct RiderClient {
     mailbox: Arc<dyn Mailbox>,
@@ -1843,7 +1843,7 @@ impl RiderClient {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
         self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
-        let entry = command_entry("Rider", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let entry = command_entry("Rider", 5, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
     }

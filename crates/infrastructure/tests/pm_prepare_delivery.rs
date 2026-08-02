@@ -315,7 +315,7 @@ async fn enqueue_pm(
     .bind(id)
     .bind(actor_type)
     .bind(actor_id)
-    .bind(actor_client::stable_partition(&actor_id, 100))
+    .bind(actor_client::stable_partition(&actor_id, 5))
     .bind(message_type)
     .bind(&payload)
     .bind(format!("h{n}"))
@@ -352,7 +352,7 @@ async fn worker_over(pool: &PgPool, actor_type: &str, deps: CommandDeps) -> Mail
         WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
         Arc::new(MailboxCommandHandler::new(deps)),
     );
-    w.seed(100).await.expect("seed");
+    w.seed(5).await.expect("seed");
     w.claim().await.expect("claim");
     w
 }
@@ -642,7 +642,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
     )
     .bind(fact_id)
     .bind(payment_actor)
-    .bind(actor_client::stable_partition(&payment_actor, 100))
+    .bind(actor_client::stable_partition(&payment_actor, 5))
     .bind(&captured)
     .execute(&pool)
     .await
@@ -659,7 +659,7 @@ async fn payment_captured_chains_to_the_pm_lane_and_materializes_the_order() {
         WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
         chaining_handler,
     );
-    chained_worker.seed(100).await.expect("seed payment lanes");
+    chained_worker.seed(5).await.expect("seed payment lanes");
     chained_worker.claim().await.expect("claim payment lanes");
     assert_eq!(drain_all(&chained_worker).await, 1, "the payment fact delivers");
 

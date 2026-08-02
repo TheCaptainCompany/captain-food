@@ -155,7 +155,7 @@ async fn terminal_delivery_schedules_expiry_and_the_promoted_reminder_records_it
 
     let order = uuid::Uuid::from_u128(0x0AD1);
     let restaurant = uuid::Uuid::from_u128(0x0E57);
-    let partition = stable_partition(&order, 100);
+    let partition = stable_partition(&order, 5);
     let stream = format!("Order-{order}");
 
     // The order's life up to READY (camelCase payloads matching domain::generated::events).
@@ -232,7 +232,7 @@ async fn terminal_delivery_schedules_expiry_and_the_promoted_reminder_records_it
         WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
         Arc::new(MailboxCommandHandler::new(deps_over(&pool)).with_reminder_windows(windows)),
     );
-    worker.seed(100).await.expect("seed");
+    worker.seed(5).await.expect("seed");
     worker.claim().await.expect("claim");
     assert_eq!(worker.drain().await.expect("drain"), 1, "the terminal command delivered");
 
@@ -332,7 +332,7 @@ async fn terminal_delivery_schedules_expiry_and_the_promoted_reminder_records_it
 
     // An expiry for a stream that does not exist (already erased): IGNORED, never Rejected.
     let ghost = uuid::Uuid::from_u128(0xDEAD);
-    let ghost_partition = stable_partition(&ghost, 100);
+    let ghost_partition = stable_partition(&ghost, 5);
     let ghost_msg = enqueue_message(
         &pool,
         0x33,

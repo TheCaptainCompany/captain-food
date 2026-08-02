@@ -161,7 +161,7 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
     // The three deliveries, in mailbox order on ONE lane (head-of-line = stream order).
     let open_id = enqueue(
         &pool,
-        7,
+        2, // any lane < the width-5 keyspace (ADR-20260802-220402); all four rows share it so head-of-line order holds
         0x11,
         order,
         "OpenConversation",
@@ -177,7 +177,7 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
     .await;
     let post_id = enqueue(
         &pool,
-        7,
+        2, // any lane < the width-5 keyspace (ADR-20260802-220402); all four rows share it so head-of-line order holds
         0x22,
         order,
         "PostMessage",
@@ -197,7 +197,7 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
     // (#235) must reject it INSIDE the worker path — and append nothing.
     let stranger_id = enqueue(
         &pool,
-        7,
+        2, // any lane < the width-5 keyspace (ADR-20260802-220402); all four rows share it so head-of-line order holds
         0x33,
         order,
         "PostMessage",
@@ -224,7 +224,7 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
         Arc::new(MailboxCommandHandler::new(deps_over(&pool))),
     )
     .with_observer(Arc::new(StatusBusObserver::new(bus.clone())));
-    worker.seed(100).await.expect("seed");
+    worker.seed(5).await.expect("seed");
     worker.claim().await.expect("claim");
     let delivered = worker.drain().await.expect("drain");
     assert_eq!(delivered, 3, "all three commands delivered in one pass");
@@ -266,7 +266,7 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
 
     // The checkpoint bounds the drain at the last delivered position.
     let checkpoint: i64 = sqlx::query(
-        "SELECT checkpoint FROM mailbox_partitions WHERE actor_type = 'Conversation' AND partition = 7",
+        "SELECT checkpoint FROM mailbox_partitions WHERE actor_type = 'Conversation' AND partition = 2",
     )
     .fetch_one(&pool)
     .await
@@ -303,7 +303,7 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
     // MessageAlreadyPosted guard — the fold-based dedupe stayed authoritative.
     let replay_id = enqueue(
         &pool,
-        7,
+        2, // any lane < the width-5 keyspace (ADR-20260802-220402); all four rows share it so head-of-line order holds
         0x44,
         order,
         "PostMessage",

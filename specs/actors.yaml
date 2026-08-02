@@ -81,7 +81,7 @@ RestaurantAccount:
   type: aggregate
   identity: { $ref: '#/RestaurantAccount/state/restaurantAccountId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A restaurant account (HubRise: restaurant) that owns one or more Restaurant locations."
   receives:
     - message: { $ref: 'commands.yaml#/RegisterRestaurantAccount' }
@@ -103,7 +103,7 @@ Restaurant:
   type: aggregate
   identity: { $ref: '#/Restaurant/state/restaurantId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
     A single restaurant location: profile, operational status (DRAFT/ACTIVE/INACTIVE), live acceptance
     mode, and the partnership LISTING funnel (NON_PARTNER → PASSIVE_PARTNER → ACTIVE_PARTNER). The
@@ -227,7 +227,7 @@ Prospect:
   type: aggregate
   identity: { $ref: '#/Prospect/state/restaurantId' }   # a prospect row IS the restaurant listing (stream Prospect-{restaurantId})
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
     Sales/CRM state of a NON_PARTNER restaurant listing worked as a B2B prospect (ADR-0020); id = restaurantId.
     The `prospection-acl` worker (EXTERNAL) reads the COMPUTED score from ProspectionPipeline + the
@@ -252,7 +252,7 @@ DeliveryPartnerRegistration:
   type: aggregate
   identity: { $ref: '#/DeliveryPartnerRegistration/state/registrationId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
     A delivery partner's self-registration of availability to serve one city on one catalog channel (#61);
     id = registrationId. RegisterDeliveryPartnerAvailability is its birth (lands PENDING); an admin
@@ -278,7 +278,7 @@ Catalog:
   type: aggregate
   identity: { $ref: '#/Catalog/state/catalogId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A restaurant catalog: catalog, category tree, products, offers (SKUs), option lists and per-offer stock."
   receives:
     - message: { $ref: 'commands.yaml#/CreateCatalog' }
@@ -354,7 +354,7 @@ Customer:
   type: aggregate
   identity: { $ref: '#/Customer/state/customerId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A customer identity, keyed by phone number and linked to the auth provider user (authRef)."
   receives:
     # Identity via phone OTP / email magic link — WRAPPED Supabase Auth (ADR-0015). The handler calls
@@ -429,7 +429,7 @@ Cart:
   type: aggregate
   identity: { $ref: '#/Cart/state/cartId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A visitor's in-progress selection for one restaurant, built (possibly as a guest) before checkout. Validated incrementally; converted to an Order by PlaceOrderProcess."
   # Line edits and the customer bind do not touch the status — only checkout closes the cart
   # (carts never expire, so there is no abandonment state).
@@ -482,7 +482,7 @@ Order:
   type: aggregate
   identity: { $ref: '#/Order/state/orderId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A single order through its lifecycle. Born from OrderPlaced (delivered by PlaceOrderProcess and recorded here), then driven to a terminal state."
   # OUT_FOR_DELIVERY is deliberately absent: no Order event enters it — it is a read-side
   # presentation status derived by the OrderTracking projection from delivery facts (ADR-20260720-004419).
@@ -617,7 +617,7 @@ Payment:
   type: aggregate
   identity: { $ref: '#/Payment/state/paymentIntentId' }   # the stream is Payment-{paymentIntentId} (crates/domain/src/payment.rs)
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A payment for an order, driven to a terminal state. Born from PaymentIntentCreated (emitted by PlaceOrderProcess), then driven to a terminal state."
   # The refund decision facts (RefundOpened/Approved/Denied) do not move the payment status —
   # only the settled Stripe fact (PaymentRefunded) does.
@@ -657,7 +657,7 @@ DeliveryJob:
   type: aggregate
   identity: { $ref: '#/DeliveryJob/state/deliveryJobId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
     One delivery of an order (bounded context: delivery). Born from DeliveryRequested (emitted by
     DeliveryDispatchProcess), then fulfilled by EITHER an independent Captain rider (these commands) OR a
@@ -786,7 +786,7 @@ Rider:
   type: aggregate
   identity: { $ref: '#/Rider/state/riderId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: "A rider identity, linked to the auth provider user (authRef)."
   # Availability machine. RiderRegistered carries the birth status in its payload (`via: status`,
   # ADR-20260721-093027) — canonically OFFLINE (rules.yaml#/RiderLifecycle); RiderStatusChanged
@@ -825,7 +825,7 @@ Conversation:
   type: aggregate
   identity: { $ref: '#/Conversation/state/orderId' }   # a conversation's identity IS its order (ADR-20260725-015921)
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   # PILOT of the declared-state DSL (PROP-20260728-135632 §2.1, Approved — validation-only in
   # #242 slice 1; generation of apply/fold + requires enforcement is slice 2). Each field mirrors
   # the hand-written ConversationState in crates/domain/src/conversation.rs; parity is asserted
@@ -919,7 +919,7 @@ Reclamation:
   type: aggregate
   identity: { $ref: '#/Reclamation/state/reclamationId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
     Customer claim/dispute over a delivered order; id = reclamationId (its own identity, correlated to an
     orderId — MULTIPLE reclamations may exist per order, #153). OpenReclamation is its birth; it then moves
@@ -979,7 +979,7 @@ CustomerCredit:
   type: aggregate
   identity: { $ref: '#/CustomerCredit/state/customerId' }   # one credit ledger per customer (stream CustomerCredit-{customerId})
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
   description: >
     A per-customer store-credit ledger; id = customerId (the aggregate identity IS the customer, like a
     Prospect is keyed by its RestaurantId). Credits (goodwill, from a resolved claim) and debits (spent at
@@ -1006,7 +1006,7 @@ PlaceOrderProcess:
   type: process-manager
   identity: { $ref: '#/PlaceOrderProcess/state/orderId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
   description: >
     The checkout saga (ADR-0004, acceptance-first ADR-20260720-015500): PlaceOrder validates the
     cart against the live catalog, prices server-side, creates the Stripe PaymentIntent and
@@ -1043,7 +1043,7 @@ RefundProcess:
   type: process-manager
   identity: { $ref: '#/RefundProcess/state/orderId' }
   mailbox:
-    partitions: 100          # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) -- PROP-20260728-152752 s2
   description: >
     The refund saga: records the staff decision on an OPEN refund (RefundOpened is emitted by the
     order-lifecycle commands -- RejectOrder, CancelOrder -- not by this saga's receives), drives

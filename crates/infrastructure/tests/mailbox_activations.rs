@@ -234,7 +234,7 @@ async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writ
     let order = uuid::Uuid::from_u128(0xAC71);
     let restaurant = uuid::Uuid::from_u128(0x0E57);
     let stream = format!("Conversation-{order}");
-    let partition = actor_client::stable_partition(&order, 100);
+    let partition = actor_client::stable_partition(&order, 5);
 
     let counting = Arc::new(CountingStore::new(Arc::new(PgEventStore::new(pool.clone()))));
     let settings = settings(true);
@@ -252,7 +252,7 @@ async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writ
         Arc::new(handler),
     )
     .with_lane_events(Arc::new(ActivationLaneEvents(settings.cache.clone())));
-    worker.seed(100).await.expect("seed");
+    worker.seed(5).await.expect("seed");
     worker.claim().await.expect("claim");
 
     // ── Fold-on-first-message: three deliveries, ONE rehydration load. ──
@@ -353,7 +353,7 @@ async fn stale_hold_cannot_commit_a_wrong_rejection() {
     let order = uuid::Uuid::from_u128(0xAC73);
     let restaurant = uuid::Uuid::from_u128(0x0E59);
     let stream = format!("Conversation-{order}");
-    let partition = actor_client::stable_partition(&order, 100);
+    let partition = actor_client::stable_partition(&order, 5);
 
     let counting = Arc::new(CountingStore::new(Arc::new(PgEventStore::new(pool.clone()))));
     let settings = settings(true);
@@ -369,7 +369,7 @@ async fn stale_hold_cannot_commit_a_wrong_rejection() {
         WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
         Arc::new(handler),
     );
-    worker.seed(100).await.expect("seed");
+    worker.seed(5).await.expect("seed");
     worker.claim().await.expect("claim");
 
     // 1. A PostMessage against the not-yet-existing conversation: correctly REJECTED
@@ -450,7 +450,7 @@ async fn per_actor_opt_out_caches_nothing() {
     let order = uuid::Uuid::from_u128(0xAC72);
     let restaurant = uuid::Uuid::from_u128(0x0E58);
     let stream = format!("Conversation-{order}");
-    let partition = actor_client::stable_partition(&order, 100);
+    let partition = actor_client::stable_partition(&order, 5);
 
     let counting = Arc::new(CountingStore::new(Arc::new(PgEventStore::new(pool.clone()))));
     let settings = settings(false); // Conversation opted out (mailbox.activations: false)
@@ -467,7 +467,7 @@ async fn per_actor_opt_out_caches_nothing() {
         WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
         Arc::new(handler),
     );
-    worker.seed(100).await.expect("seed");
+    worker.seed(5).await.expect("seed");
     worker.claim().await.expect("claim");
 
     enqueue(&pool, partition, 0x11, order, "OpenConversation", open_payload(order, restaurant)).await;

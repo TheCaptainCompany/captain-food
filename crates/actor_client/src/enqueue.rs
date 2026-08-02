@@ -737,7 +737,7 @@ mod drift_guard {
         assert_eq!(row.actor_type(), "Order");
         assert_eq!(row.actor_id(), order_id);
         assert_eq!(row.message_type(), "MarkOrderDelivered");
-        assert_eq!(row.partition(), crate::partition::stable_partition(&order_id, 100));
+        assert_eq!(row.partition(), crate::partition::stable_partition(&order_id, 5));
         assert_eq!(mailbox.scheduled_at(message_id), Some(at), "parked until due, not delivered now");
 
         assert!(client.cancel_scheduling(message_id).await.expect("cancel"), "a SCHEDULED row cancels");
