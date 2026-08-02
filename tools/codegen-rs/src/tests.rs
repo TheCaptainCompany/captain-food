@@ -2313,3 +2313,38 @@ Catalog:
             .collect();
         assert!(errors.is_empty(), "proposal hygiene must be 0-error on the committed corpus:\n{}", errors.join("\n"));
     }
+
+    #[test]
+    fn actor_clients_cover_every_mailbox_actor() {
+        // #284 slice 1 (PROP-20260728-152752 §2.1): the typed-client surface must span the SAME
+        // actor set the composition root spawns workers for — one client + sealed Command/Fact
+        // marker traits per ACTOR_MAILBOXES entry. The actor list is parsed out of the EMITTED
+        // router (not re-derived from the spec), so the two artifacts cannot diverge silently.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let clients = emit_infra_actor_clients(&model);
+        let router = emit_infra_command_router(&model);
+        let block = router
+            .split("pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[")
+            .nth(1)
+            .and_then(|rest| rest.split("];").next())
+            .expect("ACTOR_MAILBOXES block in the emitted router");
+        let actors: Vec<&str> = block
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("(\""))
+            .filter_map(|l| l.split('"').next())
+            .collect();
+        assert!(!actors.is_empty(), "expected at least one mailbox actor in the emitted router");
+        for actor in &actors {
+            for item in [
+                format!("pub struct {actor}Client"),
+                format!("pub trait {actor}Command"),
+                format!("pub trait {actor}Fact"),
+            ] {
+                assert!(clients.contains(&item), "generated actor_clients.rs lacks `{item}`");
+            }
+        }
+        // The seal itself must be present — without the private supertrait module the whole
+        // compile-time guarantee (no impls outside the generated file) evaporates.
+        assert!(clients.contains("mod sealed {"), "the privacy seal module is missing");
+    }

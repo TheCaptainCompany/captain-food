@@ -252,7 +252,7 @@ fn main() {
     // (ADR-20260731-214500) — absent, neither the file nor its mod.rs line is emitted (zero drift).
     let deletion_policy = emit_infra_deletion_policy(&model);
     let infra_mod = format!(
-        "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\npub mod command_router;\n{}",
+        "// GENERATED module index — do not edit by hand.\npub mod pm_state;\npub mod service_clients;\npub mod service_bindings;\npub mod command_router;\npub mod actor_clients;\n{}",
         if deletion_policy.is_some() { "pub mod deletion_policy;\n" } else { "" }
     );
     let mut infra_files: Vec<(&str, String)> = vec![
@@ -260,6 +260,7 @@ fn main() {
         ("service_clients.rs", emit_services_http_clients(&model)),
         ("service_bindings.rs", emit_service_bindings(&model)),
         ("command_router.rs", emit_infra_command_router(&model)),
+        ("actor_clients.rs", emit_infra_actor_clients(&model)),
         ("mod.rs", infra_mod),
     ];
     if let Some(dp) = deletion_policy {

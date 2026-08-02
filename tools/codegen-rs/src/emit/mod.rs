@@ -1,5 +1,6 @@
 //! Generated-artifact emitters, one module per artifact family (#277 split).
 
+pub(crate) mod actor_clients; // infrastructure actor_clients.rs — typed per-actor mailbox clients (#284)
 pub(crate) mod behaviour_tests; // application behaviour_tests.rs from tests.yaml (§7 corpus)
 pub(crate) mod docs; // documentation.generated.{md,html} + context map + story parsing
 pub(crate) mod pm_orchestrators; // application process_managers.rs (typed-step PM legs)
@@ -12,6 +13,7 @@ pub(crate) mod sql; // views/schema SQL, projection DDL, database.md §2 injecti
 pub(crate) mod translations; // merged translations.generated.json
 pub(crate) mod web; // web crate: tokens CSS, SDUI registry, data layer, screens
 
+pub(crate) use actor_clients::*;
 pub(crate) use behaviour_tests::*;
 pub(crate) use docs::*;
 pub(crate) use pm_orchestrators::*;

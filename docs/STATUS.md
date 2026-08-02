@@ -1,7 +1,7 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-01. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-02. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
 > 🐛 **2026-08-01 — prod-smoke hotfix: authenticated GraphQL was fully down in production
 > (`503 "auth unavailable"` on every non-`/public` role path).** Root cause: `AuthContext::from_env`
@@ -13,6 +13,18 @@
 > server. Decision recorded in
 > [ADR-20260801-080339](adr/ADR-20260801-080339-auth-verifier-reads-resolved-config-not-env.md).
 > `cargo build -p server` + `cargo test -p server` green; recovers on next deploy.
+
+> 🚧 **2026-08-02 — [#284 "Typed actor clients (PROP-20260728-152752 §2.1)"](https://github.com/TheCaptainCompany/captain-food/issues/284)
+> slice 1 built (branch `claude/situation-explanation-cj06o2`)**: new emitter generates
+> `crates/infrastructure/src/generated/actor_clients.rs` — one `{Actor}Client` per mailbox actor
+> (`send`/`record`/`schedule`/`cancel`) with SEALED per-actor `{Actor}Command`/`{Actor}Fact` marker
+> traits, so sending a message the actor does not `receive` is a COMPILE error. Clients delegate to
+> the shared `pub(crate)` constructors extracted in `mailbox::enqueue` (`command_entry`,
+> `insert_mapped`, `schedule_mapped`) — MemMailbox drift guards prove typed `send`/`record` rows are
+> field-for-field identical to the free-function enqueue; `record` always keys on
+> `inbound_message_id(source, external_id)`. The caller-side `Envelope` (transport metadata only, no
+> payload/addressing) is hand-written in `application::mailbox`. **No batched send — D8 is OPEN.**
+> Slices 2 (GraphQL emitter flip) and 3 (SIRENE/HubRise adapters) follow.
 
 > 🚧 **2026-07-30 — the actor-runtime redesign is APPROVED and in build (ADR-20260730-231500).**
 > Three proposals approved in-session by the product owner (*"we can build it now"*):

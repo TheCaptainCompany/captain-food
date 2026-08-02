@@ -4,7 +4,10 @@
 //! into the fenced completion transaction, and the post-commit status-bus fan-out.
 
 mod activation;
-mod enqueue;
+// `pub(crate)`: the GENERATED typed actor clients (`crate::generated::actor_clients`) delegate to
+// the shared entry constructors in here (`command_entry`, `insert_mapped`, `schedule_mapped`) so
+// the typed door and the free-function door cannot drift; the module stays crate-private.
+pub(crate) mod enqueue;
 mod handler;
 mod pm_delivery;
 mod standalone;

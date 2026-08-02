@@ -36,6 +36,28 @@ pub struct MailboxEntry {
     pub external_id: Option<String>,
 }
 
+/// The transport ENVELOPE a caller supplies with one typed message (#284 slice 1,
+/// PROP-20260728-152752 §2.1) — identity, causation and provenance of the REQUEST, nothing else.
+///
+/// The split is deliberate: the envelope carries what only the CALLER knows (which request this
+/// is, what caused it, who is acting, over which channel), while the typed actor client owns
+/// everything the SPEC knows — the payload (a typed command/fact), the actor addressing
+/// (`actor_type`, `actor_id`, the frozen partition) and the message kind. An envelope can
+/// therefore never mis-address a message, and a client can never forge a caller identity.
+#[derive(Debug, Clone)]
+pub struct Envelope {
+    pub message_id: uuid::Uuid,
+    pub correlation_id: uuid::Uuid,
+    pub cause_id: Option<uuid::Uuid>,
+    pub session_id: Option<uuid::Uuid>,
+    pub trace_id: Option<String>,
+    pub user_id: Option<uuid::Uuid>,
+    /// `UserType` TEXT value, stored verbatim (ADR-20260728).
+    pub user_type: String,
+    /// GRAPHQL | WORKER | EXTERNAL.
+    pub channel: String,
+}
+
 /// What an insert did — mirrors `journal::JournalInsertOutcome` so the acceptance contract
 /// (ADR-20260720-015500) carries over unchanged.
 #[derive(Debug, Clone, PartialEq)]

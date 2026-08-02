@@ -3,7 +3,9 @@
 //! HAND-OFF, not the outcome — deterministic `message_id`s keep redelivery idempotent (a
 //! re-enqueue dedupes on the mailbox pk), and the mailbox ledger owns what happens next.
 
-use application::mailbox::{Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome};
+use application::mailbox::{
+    Envelope, Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
+};
 use application::ports::Actor;
 use domain::generated::scalars::InboundMessageStatus;
 use domain::shared::errors::DomainError;
@@ -28,23 +30,25 @@ pub enum EnqueueOutcome {
 /// which actor, which payload key carries its id, how many partitions — comes from the SAME
 /// generated map the GraphQL resolvers were built from, so no channel can address differently
 /// than another. `Err` only on infrastructure failure or an unroutable command type.
-pub async fn enqueue_worker_command(
-    mailbox: &dyn Mailbox,
-    message_id: uuid::Uuid,
+/// The payload's DECLARED identity, per the actor's `identity` in actors.yaml — the ONE derivation
+/// every door shares, free-function and typed client alike, so no channel can address a command
+/// differently than another.
+///
+/// `Ok(Some(id))` = the declared property was present and parsed; `Ok(None)` = this actor declares
+/// NO identity property (the lane id is minted by the caller); `Err` = the property is DECLARED but
+/// missing or unparsable — a keying bug that must fail at the door, because minting a random id
+/// would park the command on an arbitrary lane and silently break the per-aggregate serialization
+/// the mailbox exists to give.
+pub(crate) fn declared_identity(
     command_type: &str,
-    payload: serde_json::Value,
-    actor: &Actor,
-) -> Result<EnqueueOutcome, DomainError> {
-    let Some((actor_type, identity_prop, width)) = mailbox_address(command_type) else {
+    payload: &serde_json::Value,
+) -> Result<Option<uuid::Uuid>, DomainError> {
+    let Some((_, identity_prop, _)) = mailbox_address(command_type) else {
         return Err(DomainError::Repository(format!(
             "command '{command_type}' has no mailbox address (not received by any mailbox actor)"
         )));
     };
-    // A DECLARED identity property that is missing or unparsable is a keying bug and must fail
-    // at the door: minting a random id would park the command on an arbitrary lane, silently
-    // breaking the per-aggregate serialization the mailbox exists to give. Only a command whose
-    // actor declares NO identity property (id minted at delivery) gets a fresh lane id.
-    let actor_id = match identity_prop {
+    match identity_prop {
         Some(prop) => payload
             .get(prop)
             .and_then(|v| v.as_str())
@@ -53,30 +57,78 @@ pub async fn enqueue_worker_command(
                 DomainError::Repository(format!(
                     "command '{command_type}': identity property '{prop}' missing or not a uuid — unaddressable"
                 ))
-            })?,
-        None => uuid::Uuid::now_v7(),
+            })
+            .map(Some),
+        None => Ok(None),
+    }
+}
+
+pub async fn enqueue_worker_command(
+    mailbox: &dyn Mailbox,
+    message_id: uuid::Uuid,
+    command_type: &str,
+    payload: serde_json::Value,
+    actor: &Actor,
+) -> Result<EnqueueOutcome, DomainError> {
+    let Some((actor_type, _, width)) = mailbox_address(command_type) else {
+        return Err(DomainError::Repository(format!(
+            "command '{command_type}' has no mailbox address (not received by any mailbox actor)"
+        )));
     };
+    let actor_id = declared_identity(command_type, &payload)?.unwrap_or_else(uuid::Uuid::now_v7);
+    let entry = command_entry(
+        actor_type,
+        width,
+        actor_id,
+        command_type,
+        payload,
+        Envelope {
+            message_id,
+            correlation_id: actor.correlation_id,
+            cause_id: actor.cause_id,
+            session_id: None,
+            trace_id: None,
+            user_id: Some(actor.user_id),
+            user_type: actor.user_type.clone(),
+            channel: "WORKER".into(),
+        },
+    );
+    let payload_hash = entry.payload_hash.clone();
+    insert_mapped(mailbox, entry, &payload_hash).await
+}
+
+/// The one place a typed COMMAND becomes a [`MailboxEntry`] (kind COMMAND). Shared by
+/// [`enqueue_worker_command`] and the generated typed actor clients
+/// (`crate::generated::actor_clients`), so the two doors cannot drift on lane, partition or
+/// envelope columns — the clients only assemble typed inputs and delegate here.
+pub(crate) fn command_entry(
+    actor_type: &str,
+    width: u16,
+    actor_id: uuid::Uuid,
+    command_type: &str,
+    payload: serde_json::Value,
+    env: Envelope,
+) -> MailboxEntry {
     let payload_hash = application::journal::payload_hash(&payload);
-    let entry = MailboxEntry {
-        message_id,
+    MailboxEntry {
+        message_id: env.message_id,
         kind: "COMMAND".into(),
         actor_type: actor_type.into(),
         actor_id,
         partition: actor_runtime::stable_partition(&actor_id, width),
         message_type: command_type.into(),
         payload,
-        payload_hash: payload_hash.clone(),
-        channel: "WORKER".into(),
-        user_id: Some(actor.user_id),
-        user_type: actor.user_type.clone(),
-        correlation_id: actor.correlation_id,
-        cause_id: actor.cause_id,
-        session_id: None,
-        trace_id: None,
+        payload_hash,
+        channel: env.channel,
+        user_id: env.user_id,
+        user_type: env.user_type,
+        correlation_id: env.correlation_id,
+        cause_id: env.cause_id,
+        session_id: env.session_id,
+        trace_id: env.trace_id,
         source: None,
         external_id: None,
-    };
-    insert_mapped(mailbox, entry, &payload_hash).await
+    }
 }
 
 /// One adapted inbound BUSINESS fact, ready for the mailbox (kind EVENT). The producer names the
@@ -121,7 +173,7 @@ pub async fn enqueue_inbound_fact(
 
 /// The one place an [`InboundFact`] becomes a [`MailboxEntry`]. Shared by the singular and batched
 /// enqueue so they cannot drift on lane, principal or channel.
-fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainError> {
+pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainError> {
     let Some((_, width)) = ACTOR_MAILBOXES.iter().find(|(a, _)| *a == fact.actor_type) else {
         return Err(DomainError::Repository(format!(
             "'{}' is not a mailbox actor — inbound fact '{}' has no lane",
@@ -255,6 +307,18 @@ pub async fn schedule_reminder(
         source: None,
         external_id: None,
     };
+    schedule_mapped(mailbox, entry, scheduled_at, &payload_hash).await
+}
+
+/// Schedule one entry and map the port outcome onto [`ScheduleOutcome`] — shared by
+/// [`schedule_reminder`] and the generated typed actor clients, so both scheduling doors carry the
+/// same replay-vs-conflict contract.
+pub(crate) async fn schedule_mapped(
+    mailbox: &dyn Mailbox,
+    entry: MailboxEntry,
+    scheduled_at: chrono::DateTime<chrono::Utc>,
+    payload_hash: &str,
+) -> Result<ScheduleOutcome, DomainError> {
     match mailbox.schedule(&entry, scheduled_at).await? {
         MailboxScheduleOutcome::Scheduled => Ok(ScheduleOutcome::Scheduled),
         MailboxScheduleOutcome::Rescheduled => Ok(ScheduleOutcome::Rescheduled),
@@ -279,7 +343,9 @@ pub async fn cancel_reminder(
     mailbox.cancel_scheduled(reminder_message_id(actor_id, reminder_name)).await
 }
 
-async fn insert_mapped(
+/// Insert one entry and map the port outcome onto [`EnqueueOutcome`] — shared by the free-function
+/// enqueue helpers and the generated typed actor clients.
+pub(crate) async fn insert_mapped(
     mailbox: &dyn Mailbox,
     entry: MailboxEntry,
     payload_hash: &str,
