@@ -15,7 +15,7 @@
 > `cargo build -p server` + `cargo test -p server` green; recovers on next deploy.
 
 > 🚧 **2026-08-02 — [#284 "Typed actor clients (PROP-20260728-152752 §2.1)"](https://github.com/TheCaptainCompany/captain-food/issues/284)
-> slice 1 built (branch `typed-clients-slice1`)**: new emitter generates
+> slice 1 built (branch `claude/situation-explanation-cj06o2`)**: new emitter generates
 > `crates/infrastructure/src/generated/actor_clients.rs` — one `{Actor}Client` per mailbox actor
 > (`send`/`record`/`schedule`/`cancel`) with SEALED per-actor `{Actor}Command`/`{Actor}Fact` marker
 > traits, so sending a message the actor does not `receive` is a COMPILE error. Clients delegate to

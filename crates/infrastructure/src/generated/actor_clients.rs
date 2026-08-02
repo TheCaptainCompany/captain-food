@@ -10,7 +10,7 @@ use std::sync::Arc;
 use application::mailbox::{Envelope, Mailbox};
 use domain::shared::errors::DomainError;
 
-use crate::mailbox::enqueue::{command_entry, insert_mapped, schedule_mapped};
+use crate::mailbox::enqueue::{command_entry, declared_identity, insert_mapped, schedule_mapped};
 use crate::mailbox::{enqueue_inbound_fact, EnqueueOutcome, InboundFact, ScheduleOutcome};
 
 /// The privacy SEAL: `Sealed` lives in a private module, so it cannot be named — let alone
@@ -170,10 +170,17 @@ impl CartCommand for domain::generated::commands::RemoveCartLine {
 pub trait CartFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 impl CartFact for domain::generated::events::CartCheckedOut {
     const EVENT_TYPE: &'static str = "CartCheckedOut";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::CartCheckedOut(self)
+    }
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Cart` mailbox lane —
@@ -201,6 +208,7 @@ impl CartClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Cart", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -218,9 +226,8 @@ impl CartClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -247,6 +254,7 @@ impl CartClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Cart", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -254,9 +262,25 @@ impl CartClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this CartClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -324,10 +348,17 @@ impl CatalogCommand for domain::generated::commands::UpdateProduct {
 pub trait CatalogFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 impl CatalogFact for domain::generated::events::OfferStockUpdated {
     const EVENT_TYPE: &'static str = "OfferStockUpdated";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::OfferStockUpdated(self)
+    }
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Catalog` mailbox lane —
@@ -355,6 +386,7 @@ impl CatalogClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Catalog", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -372,9 +404,8 @@ impl CatalogClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -401,6 +432,7 @@ impl CatalogClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Catalog", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -408,9 +440,25 @@ impl CatalogClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this CatalogClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -454,6 +502,10 @@ impl ConversationCommand for domain::generated::commands::UnmuteParticipant {
 pub trait ConversationFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Conversation` mailbox lane —
@@ -481,6 +533,7 @@ impl ConversationClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Conversation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -498,9 +551,8 @@ impl ConversationClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -527,6 +579,7 @@ impl ConversationClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Conversation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -534,9 +587,25 @@ impl ConversationClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this ConversationClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -612,6 +681,10 @@ impl CustomerCommand for domain::generated::commands::VerifyPhone {
 pub trait CustomerFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Customer` mailbox lane —
@@ -639,6 +712,7 @@ impl CustomerClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Customer", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -656,9 +730,8 @@ impl CustomerClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -685,6 +758,7 @@ impl CustomerClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Customer", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -692,9 +766,25 @@ impl CustomerClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this CustomerClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -722,6 +812,10 @@ impl CustomerCreditCommand for domain::generated::commands::GrantCustomerCredit 
 pub trait CustomerCreditFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `CustomerCredit` mailbox lane —
@@ -749,6 +843,7 @@ impl CustomerCreditClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("CustomerCredit", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -766,9 +861,8 @@ impl CustomerCreditClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -795,6 +889,7 @@ impl CustomerCreditClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("CustomerCredit", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -802,9 +897,25 @@ impl CustomerCreditClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this CustomerCreditClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -872,30 +983,52 @@ impl DeliveryJobCommand for domain::generated::commands::UpdateDeliveryStatus {
 pub trait DeliveryJobFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 impl DeliveryJobFact for domain::generated::events::DeliveryAcceptedByPartner {
     const EVENT_TYPE: &'static str = "DeliveryAcceptedByPartner";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::DeliveryAcceptedByPartner(self)
+    }
 }
 
 impl DeliveryJobFact for domain::generated::events::DeliveryDispatchFailed {
     const EVENT_TYPE: &'static str = "DeliveryDispatchFailed";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::DeliveryDispatchFailed(self)
+    }
 }
 
 impl DeliveryJobFact for domain::generated::events::DeliveryOfferTimedOut {
     const EVENT_TYPE: &'static str = "DeliveryOfferTimedOut";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::DeliveryOfferTimedOut(self)
+    }
 }
 
 impl DeliveryJobFact for domain::generated::events::DeliveryRejectedByPartner {
     const EVENT_TYPE: &'static str = "DeliveryRejectedByPartner";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::DeliveryRejectedByPartner(self)
+    }
 }
 
 impl DeliveryJobFact for domain::generated::events::DeliveryRequested {
     const EVENT_TYPE: &'static str = "DeliveryRequested";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::DeliveryRequested(self)
+    }
 }
 
 impl DeliveryJobFact for domain::generated::events::DeliveryStatusUpdated {
     const EVENT_TYPE: &'static str = "DeliveryStatusUpdated";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::DeliveryStatusUpdated(self)
+    }
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `DeliveryJob` mailbox lane —
@@ -923,6 +1056,7 @@ impl DeliveryJobClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("DeliveryJob", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -940,9 +1074,8 @@ impl DeliveryJobClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -969,6 +1102,7 @@ impl DeliveryJobClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("DeliveryJob", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -976,9 +1110,25 @@ impl DeliveryJobClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this DeliveryJobClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1010,6 +1160,10 @@ impl DeliveryPartnerRegistrationCommand for domain::generated::commands::RevokeD
 pub trait DeliveryPartnerRegistrationFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `DeliveryPartnerRegistration` mailbox lane —
@@ -1037,6 +1191,7 @@ impl DeliveryPartnerRegistrationClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("DeliveryPartnerRegistration", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -1054,9 +1209,8 @@ impl DeliveryPartnerRegistrationClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -1083,6 +1237,7 @@ impl DeliveryPartnerRegistrationClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("DeliveryPartnerRegistration", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -1090,9 +1245,25 @@ impl DeliveryPartnerRegistrationClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this DeliveryPartnerRegistrationClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1164,10 +1335,17 @@ impl OrderCommand for domain::generated::commands::TipOrder {
 pub trait OrderFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 impl OrderFact for domain::generated::events::OrderPlaced {
     const EVENT_TYPE: &'static str = "OrderPlaced";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::OrderPlaced(self)
+    }
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Order` mailbox lane —
@@ -1195,6 +1373,7 @@ impl OrderClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Order", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -1212,9 +1391,8 @@ impl OrderClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -1241,6 +1419,7 @@ impl OrderClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Order", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -1248,9 +1427,25 @@ impl OrderClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this OrderClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1270,34 +1465,59 @@ pub trait PaymentCommand: sealed::Sealed + serde::Serialize + Send {
 pub trait PaymentFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 impl PaymentFact for domain::generated::events::PaymentCaptured {
     const EVENT_TYPE: &'static str = "PaymentCaptured";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentCaptured(self)
+    }
 }
 
 impl PaymentFact for domain::generated::events::PaymentFailed {
     const EVENT_TYPE: &'static str = "PaymentFailed";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentFailed(self)
+    }
 }
 
 impl PaymentFact for domain::generated::events::PaymentIntentCreated {
     const EVENT_TYPE: &'static str = "PaymentIntentCreated";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentIntentCreated(self)
+    }
 }
 
 impl PaymentFact for domain::generated::events::PaymentRefunded {
     const EVENT_TYPE: &'static str = "PaymentRefunded";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentRefunded(self)
+    }
 }
 
 impl PaymentFact for domain::generated::events::RefundApproved {
     const EVENT_TYPE: &'static str = "RefundApproved";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::RefundApproved(self)
+    }
 }
 
 impl PaymentFact for domain::generated::events::RefundDenied {
     const EVENT_TYPE: &'static str = "RefundDenied";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::RefundDenied(self)
+    }
 }
 
 impl PaymentFact for domain::generated::events::RefundOpened {
     const EVENT_TYPE: &'static str = "RefundOpened";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::RefundOpened(self)
+    }
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Payment` mailbox lane —
@@ -1325,6 +1545,7 @@ impl PaymentClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Payment", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -1342,9 +1563,8 @@ impl PaymentClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -1371,6 +1591,7 @@ impl PaymentClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Payment", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -1378,9 +1599,25 @@ impl PaymentClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this PaymentClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1404,14 +1641,24 @@ impl PlaceOrderProcessCommand for domain::generated::commands::PlaceOrder {
 pub trait PlaceOrderProcessFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 impl PlaceOrderProcessFact for domain::generated::events::PaymentCaptured {
     const EVENT_TYPE: &'static str = "PaymentCaptured";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentCaptured(self)
+    }
 }
 
 impl PlaceOrderProcessFact for domain::generated::events::PaymentFailed {
     const EVENT_TYPE: &'static str = "PaymentFailed";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentFailed(self)
+    }
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `PlaceOrderProcess` mailbox lane —
@@ -1439,6 +1686,7 @@ impl PlaceOrderProcessClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("PlaceOrderProcess", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -1456,9 +1704,8 @@ impl PlaceOrderProcessClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -1485,6 +1732,7 @@ impl PlaceOrderProcessClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("PlaceOrderProcess", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -1492,9 +1740,25 @@ impl PlaceOrderProcessClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this PlaceOrderProcessClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1526,6 +1790,10 @@ impl ProspectCommand for domain::generated::commands::RecordProspectReply {
 pub trait ProspectFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Prospect` mailbox lane —
@@ -1553,6 +1821,7 @@ impl ProspectClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Prospect", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -1570,9 +1839,8 @@ impl ProspectClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -1599,6 +1867,7 @@ impl ProspectClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Prospect", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -1606,9 +1875,25 @@ impl ProspectClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this ProspectClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1648,6 +1933,10 @@ impl ReclamationCommand for domain::generated::commands::ResolveReclamation {
 pub trait ReclamationFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Reclamation` mailbox lane —
@@ -1675,6 +1964,7 @@ impl ReclamationClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Reclamation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -1692,9 +1982,8 @@ impl ReclamationClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -1721,6 +2010,7 @@ impl ReclamationClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Reclamation", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -1728,9 +2018,25 @@ impl ReclamationClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this ReclamationClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1758,10 +2064,17 @@ impl RefundProcessCommand for domain::generated::commands::DenyRefund {
 pub trait RefundProcessFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 impl RefundProcessFact for domain::generated::events::PaymentRefunded {
     const EVENT_TYPE: &'static str = "PaymentRefunded";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::PaymentRefunded(self)
+    }
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `RefundProcess` mailbox lane —
@@ -1789,6 +2102,7 @@ impl RefundProcessClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("RefundProcess", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -1806,9 +2120,8 @@ impl RefundProcessClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -1835,6 +2148,7 @@ impl RefundProcessClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("RefundProcess", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -1842,9 +2156,25 @@ impl RefundProcessClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this RefundProcessClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1920,10 +2250,17 @@ impl RestaurantCommand for domain::generated::commands::VerifyGoogleBusinessProf
 pub trait RestaurantFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 impl RestaurantFact for domain::generated::events::RestaurantRegistered {
     const EVENT_TYPE: &'static str = "RestaurantRegistered";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::RestaurantRegistered(self)
+    }
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Restaurant` mailbox lane —
@@ -1951,6 +2288,7 @@ impl RestaurantClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Restaurant", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -1968,9 +2306,8 @@ impl RestaurantClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -1997,6 +2334,7 @@ impl RestaurantClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Restaurant", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -2004,9 +2342,25 @@ impl RestaurantClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this RestaurantClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -2038,6 +2392,10 @@ impl RestaurantAccountCommand for domain::generated::commands::UpdateRestaurantA
 pub trait RestaurantAccountFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `RestaurantAccount` mailbox lane —
@@ -2065,6 +2423,7 @@ impl RestaurantAccountClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("RestaurantAccount", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -2082,9 +2441,8 @@ impl RestaurantAccountClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -2111,6 +2469,7 @@ impl RestaurantAccountClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("RestaurantAccount", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -2118,9 +2477,25 @@ impl RestaurantAccountClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this RestaurantAccountClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -2152,6 +2527,10 @@ impl RiderCommand for domain::generated::commands::UpdateRiderInfo {
 pub trait RiderFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
 }
 
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Rider` mailbox lane —
@@ -2179,6 +2558,7 @@ impl RiderClient {
     ) -> Result<EnqueueOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Rider", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
@@ -2196,9 +2576,8 @@ impl RiderClient {
         external_id: &str,
         correlation_id: uuid::Uuid,
     ) -> Result<EnqueueOutcome, DomainError> {
-        let payload = serde_json::to_value(&fact)
+        let tagged = serde_json::to_value(fact.into_domain_event())
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
-        let tagged = serde_json::json!({ "eventType": F::EVENT_TYPE, "payload": payload });
         enqueue_inbound_fact(
             self.mailbox.as_ref(),
             InboundFact {
@@ -2225,6 +2604,7 @@ impl RiderClient {
     ) -> Result<ScheduleOutcome, DomainError> {
         let payload = serde_json::to_value(&msg)
             .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
         let entry = command_entry("Rider", 100, self.actor_id, M::MESSAGE_TYPE, payload, env);
         let payload_hash = entry.payload_hash.clone();
         schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await
@@ -2232,8 +2612,24 @@ impl RiderClient {
 
     /// Withdraw a scheduled message (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =
     /// absent, delivered or already cancelled — the caller decides whether losing that race
-    /// matters.
+    /// matters. NOTE: unscoped by message_id today, like the port beneath it — lane-scoped
+    /// cancellation is a slice-2 question, recorded on #284.
     pub async fn cancel(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
         self.mailbox.cancel_scheduled(message_id).await
+    }
+
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this RiderClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
     }
 }

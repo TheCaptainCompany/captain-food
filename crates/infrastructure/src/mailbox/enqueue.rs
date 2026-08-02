@@ -30,23 +30,25 @@ pub enum EnqueueOutcome {
 /// which actor, which payload key carries its id, how many partitions — comes from the SAME
 /// generated map the GraphQL resolvers were built from, so no channel can address differently
 /// than another. `Err` only on infrastructure failure or an unroutable command type.
-pub async fn enqueue_worker_command(
-    mailbox: &dyn Mailbox,
-    message_id: uuid::Uuid,
+/// The payload's DECLARED identity, per the actor's `identity` in actors.yaml — the ONE derivation
+/// every door shares, free-function and typed client alike, so no channel can address a command
+/// differently than another.
+///
+/// `Ok(Some(id))` = the declared property was present and parsed; `Ok(None)` = this actor declares
+/// NO identity property (the lane id is minted by the caller); `Err` = the property is DECLARED but
+/// missing or unparsable — a keying bug that must fail at the door, because minting a random id
+/// would park the command on an arbitrary lane and silently break the per-aggregate serialization
+/// the mailbox exists to give.
+pub(crate) fn declared_identity(
     command_type: &str,
-    payload: serde_json::Value,
-    actor: &Actor,
-) -> Result<EnqueueOutcome, DomainError> {
-    let Some((actor_type, identity_prop, width)) = mailbox_address(command_type) else {
+    payload: &serde_json::Value,
+) -> Result<Option<uuid::Uuid>, DomainError> {
+    let Some((_, identity_prop, _)) = mailbox_address(command_type) else {
         return Err(DomainError::Repository(format!(
             "command '{command_type}' has no mailbox address (not received by any mailbox actor)"
         )));
     };
-    // A DECLARED identity property that is missing or unparsable is a keying bug and must fail
-    // at the door: minting a random id would park the command on an arbitrary lane, silently
-    // breaking the per-aggregate serialization the mailbox exists to give. Only a command whose
-    // actor declares NO identity property (id minted at delivery) gets a fresh lane id.
-    let actor_id = match identity_prop {
+    match identity_prop {
         Some(prop) => payload
             .get(prop)
             .and_then(|v| v.as_str())
@@ -55,9 +57,25 @@ pub async fn enqueue_worker_command(
                 DomainError::Repository(format!(
                     "command '{command_type}': identity property '{prop}' missing or not a uuid — unaddressable"
                 ))
-            })?,
-        None => uuid::Uuid::now_v7(),
+            })
+            .map(Some),
+        None => Ok(None),
+    }
+}
+
+pub async fn enqueue_worker_command(
+    mailbox: &dyn Mailbox,
+    message_id: uuid::Uuid,
+    command_type: &str,
+    payload: serde_json::Value,
+    actor: &Actor,
+) -> Result<EnqueueOutcome, DomainError> {
+    let Some((actor_type, _, width)) = mailbox_address(command_type) else {
+        return Err(DomainError::Repository(format!(
+            "command '{command_type}' has no mailbox address (not received by any mailbox actor)"
+        )));
     };
+    let actor_id = declared_identity(command_type, &payload)?.unwrap_or_else(uuid::Uuid::now_v7);
     let entry = command_entry(
         actor_type,
         width,
