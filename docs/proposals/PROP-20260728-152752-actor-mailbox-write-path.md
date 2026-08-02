@@ -1,6 +1,6 @@
 # PROP-20260728-152752 — The write path becomes an actor mailbox: `inbound_messages` replaces both journals, partitioned workers deliver to the actors
 
-- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D8 (batched-send signature) answered 2026-08-02: deferred — no `send_many` for now; the singular client comes first and parallelisation is discussed after.** §2.1 realization tracked by [#284](https://github.com/TheCaptainCompany/captain-food/issues/284)
+- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D9 (client isolation) answered 2026-08-02: a dedicated actor-client crate, then per-actor crates — [#290](https://github.com/TheCaptainCompany/captain-food/issues/290). D8 (batched-send signature) answered 2026-08-02: deferred — no `send_many` for now; the singular client comes first and parallelisation is discussed after.** §2.1 realization tracked by [#284](https://github.com/TheCaptainCompany/captain-food/issues/284)
 - **Date**: 2026-07-28
 - **Tracking issue**: [#242 "Write path: command_journal becomes the consumed queue — a worker executes commands in position order, and journal completion commits in the SAME transaction as the event append"](https://github.com/TheCaptainCompany/captain-food/issues/242)
 - **Supersedes**: the union-view mechanism recorded on #242 (2026-07-28) — the product owner unified
@@ -900,6 +900,45 @@ the outcome — ADR-20260731-122500); a caller that wants a per-message answer h
 **Atomicity (sub-decision):** per-element semantics, chunk-per-statement as an implementation detail
 (#283's shape). All-or-nothing is rejected: it couples unrelated aggregates' hand-overs — one
 malformed element would revert 199 sound ones that share nothing with it but a statement.
+
+### D9 — Compiler-enforced client isolation: the crate IS the boundary (ANSWERED 2026-08-02)
+
+**Status: ANSWERED — product owner, 2026-08-02: Option B, and further — per-actor crates as the
+target ("improve the isolation with crates everywhere").** Precedent stated by the product owner:
+their C# DDD + actor-model practice used one assembly per actor client and one per actor
+implementation; the crate is Rust's assembly, and the boundary should be enforced by the compiler,
+not by delegation discipline plus a grep guard.
+
+The mechanism, in one sentence: **only the defining crate can construct a struct with private
+fields** — so putting `MailboxEntry` (fields private, getters public for port implementors), its
+`pub(crate)` constructors, and the generated clients in ONE crate makes "obtain an entry outside a
+typed client" a compile error, everywhere, forever. What the sealed `receives` traits did for WHAT
+may be sent, this does for HOW.
+
+Preconditions verified against the code (2026-08-02): `mailbox::enqueue` contains zero SQL — it is
+pure port-level assembly and never belonged to the adapter layer; its only infrastructure import is
+the generated router constants, which codegen can emit anywhere; the only `Mailbox` implementors
+are `PgMailbox` and the mem double, both served by getters.
+
+| Option | Pros | Cons |
+|---|---|---|
+| A. Home the door in `application` (entry + constructors + generated clients move there) | No new workspace member; follows the existing `application::generated` precedent; improves layering (use-case assembly leaves the adapter crate) | The boundary is a module inside a big crate — isolation by location, not by dependency arrow; "who may address which actor" stays invisible in Cargo.toml |
+| **B. A dedicated crate between `application` and `infrastructure`** ✅ **chosen** | The dependency arrow IS the permission: a crate that does not declare the client crate cannot reach the mailbox at all; faster incremental builds when codegen churns; exactly the product owner's proven assembly topology | One more workspace member; codegen learns to emit into it; import migration across server/adapters |
+| B+. One crate PER actor client (phase 2 of B) | An adapter's manifest names exactly the actors it may address — `hubrise` depending on `client-catalog` cannot even NAME `CartClient`; per-actor churn rebuilds one small crate | ~16 generated crates: codegen must emit manifests; workspace graph noise; the seal must be per-crate (it already is per-actor, so it splits cleanly) |
+
+**Phasing (decided direction, staged delivery — tracked by
+[#290 "Actor-client crate isolation (PROP-20260728-152752 D9)"](https://github.com/TheCaptainCompany/captain-food/issues/290)):**
+phase 1 extracts ONE `actor-client` crate (the compiler-sealed door — the payoff-bearing step),
+behavior frozen by the existing drift guards; phase 2 splits per-actor client crates with
+codegen-emitted manifests; phase 3 (per-actor IMPLEMENTATION crates, the aggregate/handler side) is
+directionally decided but individually gated — it reshapes domain/application codegen and is a
+program, not a slice. One design wrinkle recorded: `stable_partition` (the FROZEN hash) must be
+re-homed so the client crate does not depend on `actor_runtime` for one pure function — single
+definition preserved, wherever it lands.
+
+The slice-3 source guard ("nothing outside the client layer constructs a `MailboxEntry`") remains
+as belt-and-braces; after phase 1 the compiler is the enforcement and the guard is a tripwire for
+regressions in the crate boundary itself.
 
 ## 5. Sequence diagram — PostMessage through the mailbox
 

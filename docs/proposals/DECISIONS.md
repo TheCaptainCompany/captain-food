@@ -281,6 +281,20 @@ singular typed client can land first.
 |---|---|---|---|
 | **D8** | `send_many` signature + compile-time checks | (a) Homogeneous generic batch | ⚠️ **Deferred — no `send_many` for now** (product owner, 2026-08-02). Build the client as §2.1 always specified it first — per-actor, `send` + `schedule`, compile-time checked — then discuss parallelisation separately. The #283 batching stays infrastructure-internal (`enqueue_inbound_facts`), outside the client's public surface, until that discussion |
 
+
+---
+
+## 13. Client isolation by crate — ✅ DECIDED 2026-08-02
+
+[PROP-20260728-152752 D9](PROP-20260728-152752-actor-mailbox-write-path.md): make the typed-client
+door COMPILER-enforced. Product owner: **Option B** — a dedicated `actor-client` crate between
+`application` and `infrastructure` (private-field `MailboxEntry` + constructors + generated clients
+in one crate, so bypassing the client does not compile), with **per-actor crates as the target
+topology** ("improve the isolation with crates everywhere" — the C# assembly-per-client /
+assembly-per-actor practice, crate as the boundary). Phased: one client crate first (the payoff),
+per-actor client crates second, per-actor implementation crates gated separately. Tracked by
+[#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290).
+
 ---
 
 ## Maintenance
