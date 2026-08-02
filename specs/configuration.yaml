@@ -552,6 +552,22 @@ keys:
       production: "true"
       staging: "true"
 
+  RUN_EVENT_PUSH:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: true
+    gates: >
+      Push wake for the drain loops (ADR-20260802-200416): one dedicated LISTEN connection turns
+      each committed append's pg_notify into an immediate drain of the projector AND the saga
+      runner, replacing the 1.5 s poll as the primary signal (~70,900 idle queries/hour -> ~120).
+      OFF, both loops fall back to unassisted 1.5 s polling — correct but bandwidth-expensive; the
+      escape hatch for a deployment behind a TRANSACTION-mode pooler, which silently cannot carry
+      LISTEN (session pooler required, e.g. Supabase port 5432).
+    deploy:
+      production: "true"
+      staging: "true"
+
   RUN_DELETION_ENGINE:
     type: bool
     scalar:

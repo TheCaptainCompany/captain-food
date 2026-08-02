@@ -35,7 +35,14 @@ use crate::persistence::{
 };
 use crate::process_manager::ProcessManagerStatus;
 
+/// Unassisted cadence: how often the runner drains with no push (`event_wake` listener down, or a
+/// deployment that never wired one). Unchanged from the original always-poll behaviour.
 const POLL_INTERVAL: Duration = Duration::from_millis(1500);
+/// Safety-net cadence while push IS live — `NOTIFY` has no replay, so the runner still drains on its
+/// own in case a signal was missed. Slow, because the listener normally beats it: a saga that only
+/// woke on this interval would be adding a minute to the money path, which is why
+/// [`EventWaiter::safety_interval`] reverts to [`POLL_INTERVAL`] the moment push is not confirmed.
+const PUSH_SAFETY_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The registered process managers (`specs/processmanager.yaml`).
 #[derive(Clone, Copy, Debug)]
@@ -134,6 +141,9 @@ pub struct ProcessManagerRunner {
     /// D-B's scope). The runner retires fully at the gate's default flip.
     pm_mailboxes: bool,
     status: Arc<Mutex<ProcessManagerStatus>>,
+    /// Idle gate: `MAX(position)` as observed at the end of the last pass that drained EVERY PM.
+    /// `-1` means nothing observed yet, so the first tick after start always drains.
+    last_head: Arc<std::sync::atomic::AtomicI64>,
 }
 
 impl ProcessManagerRunner {
@@ -152,6 +162,7 @@ impl ProcessManagerRunner {
             pm_mailboxes: false,
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
+            last_head: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
         }
     }
 
@@ -208,15 +219,28 @@ impl ProcessManagerRunner {
     /// Each tick runs in its own task so a PANIC escaping a drain (poison event, legacy payload in a
     /// fold) kills only that tick, never the loop — a dead saga runner silently stops the money path.
     pub async fn run_loop(self) {
+        self.run_loop_with(None).await
+    }
+
+    /// Drain forever, woken by `wake` when the log moves and by the safety net otherwise. `None`
+    /// keeps the unassisted 1.5 s cadence; with a waiter the fallback interval tracks whether the
+    /// listener is actually up, so losing push restores fast polling instead of delaying sagas.
+    pub async fn run_loop_with(self, mut wake: Option<crate::persistence::event_wake::EventWaiter>) {
         self.status_mut().running = true;
         let runner = std::sync::Arc::new(self);
         loop {
-            // Errors are recorded on the status snapshot by run_once; the loop keeps polling.
+            // Errors are recorded on the status snapshot by run_once; the loop keeps going.
             let r = std::sync::Arc::clone(&runner);
             if let Err(join) = tokio::spawn(async move { let _ = r.run_once().await; }).await {
                 tracing::error!(worker = "saga_runner", error = %join, "tick panicked -- resuming next tick");
             }
-            tokio::time::sleep(POLL_INTERVAL).await;
+            match wake.as_mut() {
+                Some(waiter) => {
+                    let timeout = waiter.safety_interval(PUSH_SAFETY_INTERVAL, POLL_INTERVAL);
+                    waiter.wait(timeout).await;
+                }
+                None => tokio::time::sleep(POLL_INTERVAL).await,
+            }
         }
     }
 
@@ -227,10 +251,19 @@ impl ProcessManagerRunner {
             .fetch_one(&self.pool)
             .await
             .map_err(db_err)?;
+        // Idle gate: the log has not moved since the last pass that drained every PM, so no PM can
+        // have a pending trigger and the per-PM queries would all come back empty. A gated tick is
+        // indistinguishable from a clean one (nothing surfaced), which is exactly what it is.
+        if self.last_head.load(std::sync::atomic::Ordering::Relaxed) == head {
+            return Ok(TickOutcome { checkpoint: head, head, surfaced: Vec::new() });
+        }
         let mut surfaced = Vec::new();
         for group in REGISTRY {
             self.drain_group(group, &mut surfaced).await?;
         }
+        // Only a pass that drained EVERY PM may arm the gate — an aborted leg returns above with the
+        // gate untouched, so it re-runs on the next tick over fresh state.
+        self.last_head.store(head, std::sync::atomic::Ordering::Relaxed);
         Ok(TickOutcome { checkpoint: head, head, surfaced })
     }
 

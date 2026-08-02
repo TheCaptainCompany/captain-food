@@ -13,6 +13,7 @@ use tracing::Instrument as _;
 
 use crate::persistence::db_err;
 use crate::persistence::event_bus::{AppendedEvent, EventBus};
+use crate::persistence::event_wake::EVENT_CHANNEL;
 
 pub struct PgEventStore {
     pool: PgPool,
@@ -123,6 +124,22 @@ impl PgEventStore {
                 return Err(db_err(e));
             }
         }
+
+        // Cross-process wake signal (`event_wake`): raised INSIDE the transaction so Postgres
+        // delivers it at COMMIT — a rolled-back append notifies nobody, with no post-commit window
+        // in which we could crash having written events that no listener ever heard about. The
+        // payload is EMPTY on purpose: Postgres coalesces identical notifications within a
+        // transaction, so a multi-event append wakes the drains exactly once, and the drains
+        // re-read from their own checkpoint anyway, so there is nothing to carry.
+        //
+        // A failure here fails the append. The statement has already poisoned the transaction, so
+        // there is no "ignore and carry on"; and the realistic cause (a full async queue behind a
+        // wedged listener) is precisely when a silent stall would be most expensive.
+        sqlx::query("SELECT pg_notify($1, '')")
+            .bind(EVENT_CHANNEL)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
 
         tx.commit().await.map_err(db_err)?;
         // Publish AFTER the commit: subscribers only ever hear about durable facts. Best effort —

@@ -37,8 +37,14 @@ async fn main() {
         }
         telemetry_guard.shutdown();
     } else {
-        tracing::info!(worker = "projection", mode = "loop", "polling loop started -- Ctrl-C to stop");
-        worker.run_loop().await;
+        // Push wake (`infrastructure::persistence::event_wake`): the point of doing this at the
+        // database rather than over the in-process EventBus is precisely this binary — a projector
+        // in its OWN process still hears every append, which an in-process fan-out could never do.
+        // The loop keeps its safety-net drain and reverts to fast polling if the listener drops.
+        let wake = infrastructure::EventWake::new();
+        infrastructure::spawn_event_listener(url.clone(), wake.clone());
+        tracing::info!(worker = "projection", mode = "loop", "push-driven loop started -- Ctrl-C to stop");
+        worker.run_loop_with(Some(wake.waiter())).await;
         telemetry_guard.shutdown();
     }
 }

@@ -235,6 +235,8 @@ pub struct Config {
     pub run_projector: bool,
     /// In-process saga runner (actors.yaml process managers). OFF, no cross-aggregate reaction fires. Readiness at GET /saga.
     pub run_process_managers: bool,
+    /// Push wake for the drain loops (ADR-20260802-200416): one dedicated LISTEN connection turns each committed append's pg_notify into an immediate drain of the projector AND the saga runner, replacing the 1.5 s poll as the primary signal (~70,900 idle queries/hour -> ~120). OFF, both loops fall back to unassisted 1.5 s polling — correct but bandwidth-expensive; the escape hatch for a deployment behind a TRANSACTION-mode pooler, which silently cannot carry LISTEN (session pooler required, e.g. Supabase port 5432).
+    pub run_event_push: bool,
     /// The generic deletion engine (ADR-20260731-214500 §4): runs the declared deletion journeys (tombstone -> stream deletion -> ledger receipt) for every actors.yaml `deletion:` block. OFF, recorded expiry facts accumulate and no stream is ever erased — GDPR deletion pauses, data is never lost. DEFAULT OFF (gate-then-stabilize): this worker DELETES event streams; the default flips by its own one-line ADR after the gated form is smoked in staging. Readiness at GET /deletion.
     pub run_deletion_engine: bool,
     /// The Runtime D1 flip (#272, ADR-20260801-023000): ON, the three process-manager mutations (placeOrder / approveRefund / denyRefund) deliver through the PM mailboxes via the PREPARE phase (Stripe call with no transaction open, one fenced commit), the Payment lane chains the inbound Stripe facts to the PM lanes in the recording transaction (B2), and the saga runner's Stripe-fact triggers retire. OFF, the legacy journal+spawn path and the runner handle everything exactly as before -- the client contract is byte-identical on both arms (each arm replays the OTHER acceptance store's messageIds as duplicates, so a retry never re-executes across a flip), and every startup with the gate ON backfills un-reacted Stripe facts past the runner checkpoints onto the PM lanes (idempotent), so flipping in EITHER direction loses no saga hop. DEFAULT OFF (gate-then-stabilize): this flips the MONEY PATH; the default flips by its own one-line ADR after the gated form is smoked in staging, and command_journal DROPs only at that deploy.
@@ -403,6 +405,10 @@ impl Config {
             .or_else(|| baked("RUN_PROCESS_MANAGERS", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_PROCESS_MANAGERS", &v, true))
             .unwrap_or(true);
+        let run_event_push = raw("RUN_EVENT_PUSH")
+            .or_else(|| baked("RUN_EVENT_PUSH", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_EVENT_PUSH", &v, true))
+            .unwrap_or(true);
         let run_deletion_engine = raw("RUN_DELETION_ENGINE")
             .or_else(|| baked("RUN_DELETION_ENGINE", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_DELETION_ENGINE", &v, false))
@@ -554,6 +560,7 @@ impl Config {
                 projection_partitions,
                 run_projector,
                 run_process_managers,
+                run_event_push,
                 run_deletion_engine,
                 pm_mailbox_delivery,
                 run_retention_sweep,
@@ -632,6 +639,7 @@ impl Config {
         out.push_str(&format!("  PROJECTION_PARTITIONS      = {}\n", self.projection_partitions));
         out.push_str(&format!("  RUN_PROJECTOR              = {}\n", self.run_projector));
         out.push_str(&format!("  RUN_PROCESS_MANAGERS       = {}\n", self.run_process_managers));
+        out.push_str(&format!("  RUN_EVENT_PUSH             = {}\n", self.run_event_push));
         out.push_str(&format!("  RUN_DELETION_ENGINE        = {}\n", self.run_deletion_engine));
         out.push_str(&format!("  PM_MAILBOX_DELIVERY        = {}\n", self.pm_mailbox_delivery));
         out.push_str(&format!("  RUN_RETENTION_SWEEP        = {}\n", self.run_retention_sweep));
@@ -665,7 +673,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 57;
+pub const KEY_COUNT: usize = 58;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -699,6 +707,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "PROJECTION_PARTITIONS",
     "RUN_PROJECTOR",
     "RUN_PROCESS_MANAGERS",
+    "RUN_EVENT_PUSH",
     "RUN_DELETION_ENGINE",
     "PM_MAILBOX_DELIVERY",
     "RUN_RETENTION_SWEEP",
@@ -750,6 +759,8 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_PROJECTOR", "staging", "true"),
     ("RUN_PROCESS_MANAGERS", "production", "true"),
     ("RUN_PROCESS_MANAGERS", "staging", "true"),
+    ("RUN_EVENT_PUSH", "production", "true"),
+    ("RUN_EVENT_PUSH", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),
     ("RUN_RETENTION_SWEEP", "staging", "true"),
     ("RUN_SIRENE_WORKER", "production", "true"),

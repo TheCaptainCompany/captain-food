@@ -16,6 +16,7 @@
 //! fed by `Prospect-%` streams, and `Cart.customer_id` from `CustomerIdentified` (Customer stream,
 //! keyed by authRef) — exactly the TODO(runtime) notes in `application::projectors::*`.
 
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -40,6 +41,7 @@ use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 use tracing::Instrument as _;
 
+use crate::persistence::event_wake::EventWaiter;
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
     order_conversation_store, order_tracking_store, prospection_store, restaurant_store,
@@ -47,7 +49,13 @@ use crate::persistence::{
 };
 use crate::projection::ProjectionStatus;
 
+/// Unassisted cadence: how often the loop drains when there is no push (`event_wake` listener down,
+/// or a deployment that never wired one). Unchanged from the original always-poll behaviour, so
+/// losing push degrades to what this worker always did.
 const POLL_INTERVAL: Duration = Duration::from_millis(1500);
+/// Safety-net cadence while push IS live. `NOTIFY` has no replay, so the loop still drains on its
+/// own in case a signal was missed; it can be slow because the listener normally beats it.
+const PUSH_SAFETY_INTERVAL: Duration = Duration::from_secs(60);
 /// Events folded per BATCH TRANSACTION (PROP-20260730-230803: "process a group of messages in
 /// memory then commit the changes to the database in one transaction for the batch"). Overridable
 /// via `PROJECTION_BATCH_SIZE` (specs/configuration.yaml) and per-instance for tests.
@@ -299,6 +307,9 @@ pub struct ProjectionWorker {
     status: Arc<Mutex<ProjectionStatus>>,
     /// Events per batch transaction — `PROJECTION_BATCH_SIZE` (declared, specs/configuration.yaml).
     batch_size: i64,
+    /// Idle gate: `MAX(position)` as observed at the end of the last pass that drained EVERY group.
+    /// `-1` means nothing observed yet, so the first tick after start always drains.
+    last_head: Arc<AtomicI64>,
 }
 
 impl ProjectionWorker {
@@ -308,7 +319,12 @@ impl ProjectionWorker {
             .and_then(|v| v.parse().ok())
             .filter(|n| *n > 0)
             .unwrap_or(DEFAULT_BATCH_SIZE);
-        Self { pool, status: Arc::new(Mutex::new(ProjectionStatus::default())), batch_size }
+        Self {
+            pool,
+            status: Arc::new(Mutex::new(ProjectionStatus::default())),
+            batch_size,
+            last_head: Arc::new(AtomicI64::new(-1)),
+        }
     }
 
     /// Test/tuning override of the per-transaction batch bound.
@@ -344,20 +360,38 @@ impl ProjectionWorker {
         outcome.map(|_| ())
     }
 
-    /// Poll forever: `run_once` then sleep ~1.5s. Consumes the worker (spawn it as a task); the shared
-    /// [`ProjectionStatus`] handle stays readable through [`Self::status`] clones taken before spawning.
-    /// Each tick runs in its own task so a PANIC escaping a drain (poison event) kills only that tick,
-    /// never the loop — the production alternative was a projector frozen until the next deploy.
+    /// Poll forever with no push assistance: `run_once` then sleep [`POLL_INTERVAL`].
     pub async fn run_loop(self) {
+        self.run_loop_with(None).await
+    }
+
+    /// Drain forever, woken by `wake` when the log moves and by the safety net otherwise.
+    ///
+    /// Consumes the worker (spawn it as a task); the shared [`ProjectionStatus`] handle stays
+    /// readable through [`Self::status`] clones taken before spawning. Each tick runs in its own
+    /// task so a PANIC escaping a drain (poison event) kills only that tick, never the loop — the
+    /// production alternative was a projector frozen until the next deploy.
+    ///
+    /// `None` keeps the unassisted 1.5 s cadence. With a waiter the loop parks on the wake signal
+    /// instead, and the interval it falls back to tracks whether the listener is actually up
+    /// ([`EventWaiter::safety_interval`]) — so a dropped listener restores fast polling rather than
+    /// leaving read models a minute stale.
+    pub async fn run_loop_with(self, mut wake: Option<EventWaiter>) {
         self.status_mut().running = true;
         let worker = Arc::new(self);
         loop {
-            // Errors are recorded on the status snapshot by run_once; the loop keeps polling.
+            // Errors are recorded on the status snapshot by run_once; the loop keeps going.
             let w = Arc::clone(&worker);
             if let Err(join) = tokio::spawn(async move { let _ = w.run_once().await; }).await {
                 tracing::error!(worker = "projection", error = %join, "tick panicked -- resuming next tick");
             }
-            tokio::time::sleep(POLL_INTERVAL).await;
+            match wake.as_mut() {
+                Some(waiter) => {
+                    let timeout = waiter.safety_interval(PUSH_SAFETY_INTERVAL, POLL_INTERVAL);
+                    waiter.wait(timeout).await;
+                }
+                None => tokio::time::sleep(POLL_INTERVAL).await,
+            }
         }
     }
 
@@ -370,9 +404,20 @@ impl ProjectionWorker {
             .fetch_one(&self.pool)
             .await
             .map_err(db_err)?;
+        // Idle gate: the log has not moved since the last pass that drained every group, so no group
+        // can have anything pending and the per-group queries would all come back empty. Skipping
+        // them turns an idle tick from `1 + 2 x REGISTRY.len()` queries into 1 — the difference
+        // between ~41k and ~2.4k queries an hour at the unassisted cadence, and the reason a
+        // completely idle platform was the single largest consumer of outbound bandwidth.
+        if self.last_head.load(Ordering::Relaxed) == head {
+            return Ok((head, head));
+        }
         for group in REGISTRY {
             self.drain_group(group).await?;
         }
+        // Only a pass that drained EVERY group may arm the gate — a group that errored returns above
+        // with the gate untouched, so it is retried on the next tick rather than skipped away.
+        self.last_head.store(head, Ordering::Relaxed);
         Ok((head, head))
     }
 
