@@ -85,6 +85,15 @@ command-acceptance:
     # by the mailbox delivery's post-commit observer (the row's received_at as t0) — the metric
     # never goes dark when a command flips arms (#272 D1).
     - { name: "command_completion_ms", type: histogram, attributes: ["status"] }
+    # PROP-20260802-223522 D4: a delivery terminally FAILED by the attempts cap is an OPERATOR
+    # EVENT — the paid-order failure mode ("who gets told?") made countable. Emitted by the
+    # mailbox delivery observer at the poison flip; the row itself carries the error evidence.
+    - { name: "mailbox_poison_failed_total", type: counter, attributes: ["actor_type"] }
+    # The push listener's health: incremented on every DOWN transition (connection lost, or the
+    # liveness canary timed out — the transaction-pooler failure mode where LISTEN goes silently
+    # deaf). While down, workers run the pre-push heartbeat cadence; a RISING rate here means the
+    # deployment is fighting its pooler, not that deliveries are failing.
+    - { name: "mailbox_push_down_total", type: counter, attributes: ["reason"] }
 
   status_rules:
     success:

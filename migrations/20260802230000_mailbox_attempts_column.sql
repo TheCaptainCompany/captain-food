@@ -8,3 +8,15 @@
 -- recorded, unblocking the lane's head-of-line. Handler verdicts (SUCCEEDED/REJECTED/...) are
 -- terminal on their first attempt and never read or write it.
 ALTER TABLE inbound_messages ADD COLUMN attempts SMALLINT NOT NULL DEFAULT 0;
+
+-- Attempt pacing (review #314 MAJOR-3): push-driven retries have no natural cadence — a nudge
+-- storm at peak could burn the whole cap in seconds on a transient blip. The worker refuses to
+-- re-attempt a row before `last_attempt_at + retry spacing`, restoring the approved
+-- cap x cadence arithmetic (>= ~50 s to poison at the defaults).
+ALTER TABLE inbound_messages ADD COLUMN last_attempt_at TIMESTAMPTZ NULL;
+
+-- The supervision surface (`mailboxLanes.poisoned`) counts terminally-FAILED-by-cap rows per
+-- lane; this partial index keeps that count an indexed probe (poison rows are rare by design).
+CREATE INDEX idx_inbound_messages_poisoned
+    ON inbound_messages (actor_type, partition)
+    WHERE status = 'FAILED' AND (error->>'code') = 'DeliveryInfrastructureError';

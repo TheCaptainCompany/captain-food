@@ -262,7 +262,7 @@ impl ResolverKey {
             ResolverKey::RewardsBalance => None,
             ResolverKey::DeliveriesMine => Some("{ id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt }"),
             ResolverKey::DeliveryByOrder => Some("{ id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt }"),
-            ResolverKey::MailboxLanes => Some("{ actorType partition ownershipVersion claimedBy leaseUntil checkpoint pending scheduled oldestPendingAt }"),
+            ResolverKey::MailboxLanes => Some("{ actorType partition ownershipVersion claimedBy leaseUntil checkpoint pending scheduled oldestPendingAt retryingAttempts poisoned }"),
         }
     }
 

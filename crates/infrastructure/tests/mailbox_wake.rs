@@ -25,7 +25,7 @@ use domain::generated::commands::{AddCartLine, CartLine};
 use domain::generated::scalars::{CartId, CartLineId, OfferId, RestaurantId, SessionId};
 use infrastructure::persistence::mailbox_store::{MailboxNudges, PgMailbox};
 use infrastructure::persistence::mailbox_wake::{
-    spawn_mailbox_listener, MailboxPush, MAILBOX_CHANNEL,
+    spawn_mailbox_listener, spawn_mailbox_listener_with, MailboxPush, MAILBOX_CHANNEL,
 };
 use sqlx::postgres::PgListener;
 use sqlx::{PgPool, Postgres, Row, Transaction};
@@ -200,7 +200,7 @@ async fn a_foreign_process_enqueue_is_delivered_by_push_not_the_heartbeat() {
         Arc::new(n)
     };
     let push = MailboxPush::new();
-    spawn_mailbox_listener(url.clone(), nudges.clone(), push.clone());
+    spawn_mailbox_listener(url.clone(), pool.clone(), nudges.clone(), push.clone());
     for _ in 0..100 {
         if push.is_live() {
             break;
@@ -255,4 +255,117 @@ async fn a_foreign_process_enqueue_is_delivered_by_push_not_the_heartbeat() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(delivered, "push must deliver within ~10s while the heartbeat is 300s");
+}
+
+/// 5. The liveness canary round-trips on a healthy connection: `live` holds `true` across many
+/// canary intervals (no flapping), proving the self-notify loop works — the guard that catches
+/// a silently-deaf LISTEN (#314 review MAJOR-1) must not itself take a healthy listener down.
+#[tokio::test]
+async fn the_canary_holds_a_healthy_listener_live() {
+    let Some(url) = database_url() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    let nudges = Arc::new(MailboxNudges::default());
+    let push = MailboxPush::new();
+    spawn_mailbox_listener_with(
+        url.clone(),
+        pool.clone(),
+        nudges,
+        push.clone(),
+        Duration::from_millis(150),
+    );
+    for _ in 0..100 {
+        if push.is_live() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(push.is_live(), "listener must establish");
+    // ~10 canary rounds; a broken echo path would flap `live` to false within two intervals.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(push.is_live(), "a healthy connection must stay live across many canary rounds");
+}
+
+/// 6. Kill-and-recover: sqlx heals a terminated LISTEN backend IN PLACE (`try_recv` surfaces it
+/// as `Ok(None)`, `live` need never flap), and the healed listener's catch-up nudge-all delivers
+/// a row enqueued DURING the gap — the no-replay window is closed by the catch-up, not luck.
+#[tokio::test]
+async fn a_killed_listener_recovers_and_catches_up() {
+    let Some(url) = database_url() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    let nudges = {
+        let mut n = MailboxNudges::default();
+        n.register("Cart");
+        Arc::new(n)
+    };
+    let push = MailboxPush::new();
+    spawn_mailbox_listener(url.clone(), pool.clone(), nudges.clone(), push.clone());
+    for _ in 0..100 {
+        if push.is_live() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(push.is_live(), "listener must establish");
+
+    let worker = Arc::new(
+        MailboxWorker::new(
+            pool.clone(),
+            "w-kill",
+            "Cart",
+            WorkerConfig { heartbeat_seconds: 300, ..WorkerConfig::default() },
+            Arc::new(AckHandler),
+        )
+        .with_nudge(nudges.get("Cart").expect("registered"))
+        .with_push_live(push.live_flag()),
+    );
+    worker.seed(5).await.expect("seed");
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+    std::mem::forget(_tx);
+    tokio::spawn({
+        let worker = worker.clone();
+        async move {
+            let _ = worker.run(rx).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Kill the LISTEN backend from outside — the crash/pooler-failover shape.
+    sqlx::query(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+         WHERE query ILIKE 'LISTEN%' AND pid <> pg_backend_pid()",
+    )
+    .execute(&pool)
+    .await
+    .expect("terminate listener backend");
+    // Enqueue IMMEDIATELY after the kill: the NOTIFY races the heal and may land in the gap —
+    // exactly the no-replay window; only the healed listener's catch-up nudge-all covers it.
+    let cart = uuid::Uuid::new_v4();
+    let client = CartClient::new(Arc::new(PgMailbox::new(pool.clone())), cart);
+    let message_id = uuid::Uuid::new_v4();
+    client.send(cart_command(cart), envelope(message_id)).await.expect("enqueue during the gap");
+
+    // The heal + catch-up must deliver it long before the 300 s heartbeat could.
+    let mut delivered = false;
+    for _ in 0..200 {
+        let status: String =
+            sqlx::query("SELECT status FROM inbound_messages WHERE message_id = $1")
+                .bind(message_id)
+                .fetch_one(&pool)
+                .await
+                .expect("row")
+                .get("status");
+        if status == "SUCCEEDED" {
+            delivered = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(push.is_live(), "the healed listener stays live");
+    assert!(delivered, "the heal's catch-up nudge-all must deliver what landed in the gap");
 }

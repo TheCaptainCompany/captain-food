@@ -116,7 +116,14 @@ fn worker(pool: &PgPool, cap: i16, poison_id: uuid::Uuid) -> MailboxWorker {
         pool.clone(),
         "w-poison",
         ACTOR_TYPE,
-        WorkerConfig { lease_seconds: 300, max_delivery_attempts: cap, ..WorkerConfig::default() },
+        // Pacing off: these tests drive drain() back-to-back to count attempts deterministically;
+        // the spacing window has its own test below.
+        WorkerConfig {
+            lease_seconds: 300,
+            max_delivery_attempts: cap,
+            retry_spacing_seconds: 0,
+            ..WorkerConfig::default()
+        },
         Arc::new(PoisonedHeadHandler { poison_id }),
     )
 }
@@ -202,4 +209,48 @@ async fn cap_zero_keeps_the_pre_313_infinite_retry() {
         assert_eq!(attempts, pass, "attempts stay a visible diagnostic");
         assert!(error.is_none());
     }
+}
+
+/// 4. Attempt pacing (#314 review MAJOR-3): inside the spacing window a nudge-storm of drains
+/// consumes NO further attempts — the lane waits, so the cap arithmetic is time-bounded
+/// (>= cap x spacing to poison), not wake-bounded.
+#[tokio::test]
+async fn inside_the_spacing_window_drains_consume_no_attempts() {
+    let Some(url) = database_url() else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect");
+    setup(&pool).await;
+
+    let poison = enqueue(&pool, 0x31).await;
+
+    let w = MailboxWorker::new(
+        pool.clone(),
+        "w-poison",
+        ACTOR_TYPE,
+        WorkerConfig {
+            lease_seconds: 300,
+            max_delivery_attempts: 2,
+            retry_spacing_seconds: 300,
+            ..WorkerConfig::default()
+        },
+        Arc::new(PoisonedHeadHandler { poison_id: poison }),
+    );
+    w.seed(5).await.expect("seed");
+    w.claim().await.expect("claim");
+
+    let first = w.drain().await.expect("pass 1");
+    assert_eq!(first, 0);
+    let (status, attempts, _) = row_state(&pool, poison).await;
+    assert_eq!((status.as_str(), attempts), ("RECEIVED", 1), "first attempt counted");
+
+    // A storm of immediate re-drains (what a peak nudge burst looks like): all inside the
+    // 300 s window — none may consume attempt 2 of 2, none may flip the row.
+    for _ in 0..5 {
+        let delivered = w.drain().await.expect("in-window drain");
+        assert_eq!(delivered, 0);
+    }
+    let (status, attempts, error) = row_state(&pool, poison).await;
+    assert_eq!(status, "RECEIVED", "still retrying -- the window protected the cap");
+    assert_eq!(attempts, 1, "no attempt consumed inside the spacing window");
+    assert!(error.is_none());
 }

@@ -252,7 +252,7 @@ async fn activation_folds_once_promotes_after_commit_and_survives_a_foreign_writ
         pool.clone(),
         "w-A",
         "Conversation",
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     )
     .with_lane_events(Arc::new(ActivationLaneEvents(settings.cache.clone())));
@@ -370,7 +370,7 @@ async fn stale_hold_cannot_commit_a_wrong_rejection() {
         pool.clone(),
         "w-A",
         "Conversation",
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     );
     worker.seed(5).await.expect("seed");
@@ -468,7 +468,7 @@ async fn per_actor_opt_out_caches_nothing() {
         pool.clone(),
         "w-A",
         "Conversation",
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         Arc::new(handler),
     );
     worker.seed(5).await.expect("seed");

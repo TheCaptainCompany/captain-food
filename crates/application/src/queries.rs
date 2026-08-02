@@ -635,6 +635,11 @@ pub struct MailboxLaneRow {
     pub scheduled: i64,
     /// `received_at` of the oldest RECEIVED row — the lane's staleness signal.
     pub oldest_pending_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Largest `attempts` among the lane's RECEIVED rows — > 0 means a head row is failing its
+    /// completion transaction and being re-paced toward the cap (PROP-20260802-223522 D4).
+    pub retrying_attempts: i64,
+    /// Rows terminally FAILED by the delivery-attempts cap — each one is an operator event.
+    pub poisoned: i64,
 }
 
 /// Read port over the mailbox registry + backlog. Backs the ADMIN `mailboxLanes` supervision query;

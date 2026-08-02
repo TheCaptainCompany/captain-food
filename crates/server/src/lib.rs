@@ -873,6 +873,7 @@ pub fn router() -> Router {
                         let push = infrastructure::persistence::mailbox_wake::MailboxPush::new();
                         infrastructure::persistence::mailbox_wake::spawn_mailbox_listener(
                             url.clone(),
+                            pool.clone(),
                             mailbox_nudges.clone(),
                             push.clone(),
                         );

@@ -221,7 +221,14 @@ pub fn spawn_standalone_workers(
     // adapter fleet that only wakes on ITS OWN inserts would still poll for hops chained by
     // other processes. Env-read (an adapter binary has no Config reader), spec defaults.
     let push = if std::env::var("RUN_MAILBOX_PUSH")
-        .map(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "0" | "no" | "off"))
+        .map(|v| match v.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => true,
+            "false" | "0" | "no" | "off" => false,
+            other => {
+                tracing::warn!(adapter, value = other, "RUN_MAILBOX_PUSH unparsable -- using the default (true)");
+                true
+            }
+        })
         .unwrap_or(true)
     {
         match std::env::var("DATABASE_URL") {
@@ -229,6 +236,7 @@ pub fn spawn_standalone_workers(
                 let push = crate::persistence::mailbox_wake::MailboxPush::new();
                 crate::persistence::mailbox_wake::spawn_mailbox_listener(
                     db_url,
+                    pool.clone(),
                     nudges.clone(),
                     push.clone(),
                 );

@@ -583,8 +583,11 @@ keys:
       pass stretches to the 60 s safety net; lease renewal (beat) stays on
       MAILBOX_HEARTBEAT_SECONDS unconditionally. OFF — or whenever the listener is down — workers
       fall back to full passes at the heartbeat cadence: exactly the pre-push behaviour, never
-      worse. Same TRANSACTION-mode-pooler escape hatch as RUN_EVENT_PUSH (session pooler
-      required, e.g. Supabase port 5432).
+      worse. Liveness is CANARY-VERIFIED, not assumed: the listener notifies itself on the same
+      channel every canary interval and drops to down (mailbox_push_down_total{reason}) when the
+      echo does not come back within the next interval — this catches the transaction-mode
+      pooler's failure mode, where LISTEN registers but silently delivers nothing (session
+      pooler required, e.g. Supabase port 5432 — same constraint as RUN_EVENT_PUSH).
     deploy:
       production: "true"
       staging: "true"
@@ -597,9 +600,14 @@ keys:
       an infrastructure error (the status flip aborts with it, so nothing is recorded on the row)
       increments inbound_messages.attempts OUTSIDE the failed transaction; at this cap the row
       flips to terminal FAILED with the error recorded and the lane's head-of-line unblocks.
-      Counts only actual delivery attempts — a lane that cannot be claimed consumes none. 0 = no
+      Counts only actual delivery attempts — a lane that cannot be claimed consumes none, and
+      re-attempts are PACED at least a retry-spacing apart (default = the heartbeat), because
+      push-driven retries have no natural cadence: without spacing, a nudge storm at Friday peak
+      could burn the whole cap on a seconds-long transient blip (review #314 MAJOR-3). 0 = no
       cap: the pre-#313 infinite-retry behaviour, kept as the rollback lever. Handler
       REJECTED/FAILED verdicts are terminal on the first attempt and never involve this cap.
+      A poison flip is an OPERATOR EVENT: counted (mailbox_poison_failed_total{actor_type}) and
+      surfaced per lane on the ADMIN mailboxLanes supervision query (retryingAttempts/poisoned).
 
   RUN_DELETION_ENGINE:
     type: bool

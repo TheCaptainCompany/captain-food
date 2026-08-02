@@ -783,6 +783,8 @@ type MailboxLane {
   pending: Int!
   scheduled: Int!
   oldestPendingAt: DateTime
+  retryingAttempts: Int!
+  poisoned: Int!
 }
 
 type Operation {

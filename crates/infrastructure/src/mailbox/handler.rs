@@ -733,4 +733,24 @@ impl DeliveryObserver for StatusBusObserver {
             message: message_text,
         });
     }
+
+    /// The poison flip (PROP-20260802-223522 D4): no handler verdict exists — the completion
+    /// transaction kept failing — so this seam carries the operator event: the contract counter
+    /// (`mailbox_poison_failed_total{actor_type}`) and, for COMMAND rows, the terminal FAILED on
+    /// the status bus so a waiting client's `operationStatus` resolves instead of pending until
+    /// its poll gives up.
+    fn poisoned(&self, message: &InboundMessage, _error: &str) {
+        telemetry::meters::mailbox::poison_failed(&message.actor_type);
+        if message.kind != "COMMAND" {
+            return;
+        }
+        use domain::generated::scalars::CommandJournalStatus as J;
+        self.bus.publish(OperationUpdate {
+            message_id: message.message_id,
+            correlation_id: message.correlation_id,
+            status: J::FAILED,
+            error_code: Some("DeliveryInfrastructureError".to_owned()),
+            message: None,
+        });
+    }
 }

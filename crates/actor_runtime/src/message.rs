@@ -155,4 +155,10 @@ pub trait MessageHandler: Send + Sync {
 /// rolled-back one. Must be cheap and non-blocking: it runs on the drain path.
 pub trait DeliveryObserver: Send + Sync {
     fn committed(&self, message: &InboundMessage, verdict: &HandlerVerdict);
+
+    /// A row terminally FAILED by the delivery-attempts cap (PROP-20260802-223522 D4) — there is
+    /// no handler verdict (the completion transaction kept failing), so this is a separate seam:
+    /// the host emits the operator-event telemetry and surfaces the terminal status. Default
+    /// no-op so existing observers compile unchanged.
+    fn poisoned(&self, _message: &InboundMessage, _error: &str) {}
 }

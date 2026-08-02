@@ -274,7 +274,9 @@ async fn failing_head_suspends_exactly_its_lane_and_resumes_in_order() {
         pool.clone(),
         "w-A",
         ACTOR_TYPE,
-        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        // Pacing off: this test resumes the suspended lane on the VERY next pass; the spacing
+        // window (#313 D4) would otherwise hold it and is covered by its own poison tests.
+        WorkerConfig { lease_seconds: 300, retry_spacing_seconds: 0, ..WorkerConfig::default() },
         handler.clone(),
     );
     w.seed(4).await.expect("seed");

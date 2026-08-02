@@ -38,6 +38,12 @@ pub struct WorkerConfig {
     /// promotion + claim + drain stretch to this safety net, because enqueues wake the worker
     /// directly. Lease renewal never stretches — `beat` stays on `heartbeat_seconds`.
     pub pushed_pass_seconds: u64,
+    /// Minimum spacing between delivery ATTEMPTS of the same failing row (#314 review MAJOR-3):
+    /// push-driven retries have no natural cadence — a nudge storm at peak would burn the whole
+    /// attempts cap on a seconds-long transient blip. A head row inside its spacing window makes
+    /// the lane WAIT (head-of-line, never skip past); the default restores the approved
+    /// cap x cadence arithmetic (>= ~50 s to poison at cap 5). `0` disables the pacing.
+    pub retry_spacing_seconds: u64,
 }
 
 impl Default for WorkerConfig {
@@ -49,6 +55,7 @@ impl Default for WorkerConfig {
             max_claims_per_pass: 100,
             max_delivery_attempts: 5,
             pushed_pass_seconds: 60,
+            retry_spacing_seconds: 10,
         }
     }
 }
@@ -126,9 +133,12 @@ impl MailboxWorker {
         self
     }
 
-    /// Attach the listener-liveness flag (PROP-20260802-223522 D5): while it reads `true` the
-    /// full pass stretches to `pushed_pass_seconds`; the moment it reads `false` the worker is
-    /// back on the heartbeat cadence — losing push degrades to exactly the previous behaviour.
+    /// Attach the listener-liveness flag (PROP-20260802-223522 D5; canary-verified by the
+    /// listener, so a silently-deaf LISTEN also drops it): while it reads `true` the full pass
+    /// stretches to `pushed_pass_seconds`. When it drops, the NEXT full pass reschedules on the
+    /// heartbeat cadence — one already-scheduled stretched gap may stand, bounded by
+    /// `pushed_pass_seconds` and covered by the listener's down-transition nudge-all (pending
+    /// work drains immediately; only promotion waits out that one gap).
     pub fn with_push_live(mut self, live: Arc<std::sync::atomic::AtomicBool>) -> Self {
         self.push_live = Some(live);
         self
@@ -326,7 +336,7 @@ impl MailboxWorker {
             let rows = sqlx::query(
                 "SELECT message_id, position, kind, actor_type, actor_id, partition, message_type, \
                         payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
-                        session_id, received_at \
+                        session_id, received_at, attempts, last_attempt_at \
                  FROM inbound_messages \
                  WHERE actor_type = $1 AND partition = $2 AND status = 'RECEIVED' \
                  ORDER BY position \
@@ -342,7 +352,38 @@ impl MailboxWorker {
                 return Ok(delivered);
             }
             for row in &rows {
-                let message = InboundMessage::decode(row).map_err(CompletionError::Db)?;
+                // ATTEMPT PACING (#314 review MAJOR-3): a previously-failed row inside its
+                // spacing window makes the whole lane WAIT — head-of-line means never skipping
+                // past an undelivered row, and pacing means never burning the cap in a nudge
+                // storm. The next wake or safety pass re-checks.
+                if self.config.retry_spacing_seconds > 0 {
+                    let attempts: i16 = row.try_get("attempts").map_err(CompletionError::Db)?;
+                    if attempts > 0 {
+                        let last: Option<chrono::DateTime<chrono::Utc>> =
+                            row.try_get("last_attempt_at").map_err(CompletionError::Db)?;
+                        if let Some(last) = last {
+                            let spacing =
+                                chrono::Duration::seconds(self.config.retry_spacing_seconds as i64);
+                            if chrono::Utc::now() - last < spacing {
+                                return Ok(delivered);
+                            }
+                        }
+                    }
+                }
+                let message = match InboundMessage::decode(row) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        // An undecodable head row is the poison class too (#314 review MINOR-6):
+                        // it can never deliver, so without the cap it wedges its lane forever.
+                        // No observer callback — there is no decoded message to hand it.
+                        let message_id: uuid::Uuid =
+                            row.try_get("message_id").map_err(CompletionError::Db)?;
+                        if self.poison_raw(message_id, &e.to_string()).await? {
+                            continue;
+                        }
+                        return Err(CompletionError::Db(e));
+                    }
+                };
                 let verdict = match complete_fenced(
                     &self.pool,
                     lane,
@@ -359,11 +400,25 @@ impl MailboxWorker {
                         // own statement (outside the aborted tx); at the cap, flip the row to
                         // terminal FAILED and keep draining — the lane's head-of-line unblocks.
                         // Below the cap, stop THIS lane's pass (head-of-line: never deliver
-                        // past an undelivered row) and retry on the next wake.
-                        if self.poison(&message, &e).await? {
-                            continue;
+                        // past an undelivered row) and retry after the spacing window.
+                        match self.poison(&message, &e).await {
+                            Ok(true) => continue,
+                            Ok(false) => return Err(CompletionError::Db(e)),
+                            Err(pe) => {
+                                // Keep BOTH errors visible (#314 review MINOR-7): the poison
+                                // bookkeeping failing (DB fully down) must not swallow the
+                                // completion error that evidences the original failure.
+                                tracing::warn!(
+                                    worker = %self.worker_id,
+                                    actor_type = %message.actor_type,
+                                    partition = message.partition,
+                                    completion_error = %e,
+                                    bookkeeping_error = %pe,
+                                    "mailbox: delivery failed AND its attempt could not be recorded"
+                                );
+                                return Err(CompletionError::Db(e));
+                            }
                         }
-                        return Err(CompletionError::Db(e));
                     }
                     Err(other) => return Err(other),
                 };
@@ -396,21 +451,22 @@ impl MailboxWorker {
         }
     }
 
-    /// Record one failed delivery ATTEMPT and, at the configured cap, flip the row to terminal
-    /// FAILED with the error recorded (its only evidence — the aborted completion transaction
-    /// wrote nothing). Returns `true` when the row was flipped (the lane may continue past it).
-    /// `max_delivery_attempts == 0` disables the cap: attempts are still counted (diagnostic),
-    /// the row never flips — the pre-#313 behaviour. The status predicate keeps both statements
-    /// no-ops if a concurrent owner completed the row meanwhile. No observer callback on the
-    /// flip: there is no handler verdict, and the status bus is best-effort — the row is the
-    /// record.
-    async fn poison(&self, message: &InboundMessage, err: &sqlx::Error) -> Result<bool, CompletionError> {
+    /// Record one failed delivery ATTEMPT (stamping `last_attempt_at` — the pacing clock) and,
+    /// at the configured cap, flip the row to terminal FAILED with the error recorded (its only
+    /// evidence — the aborted completion transaction wrote nothing). Returns `true` when the row
+    /// was flipped (the lane may continue past it). `max_delivery_attempts == 0` disables the
+    /// cap: attempts are still counted (diagnostic), the row never flips — the pre-#313
+    /// behaviour. The status predicate keeps both statements no-ops if a concurrent owner
+    /// completed the row meanwhile; under a dual-belief window (a stolen lane, both owners
+    /// failing) the counter can advance faster — the cap is a bound, not an exact count.
+    async fn poison_raw(&self, message_id: uuid::Uuid, err: &str) -> Result<bool, CompletionError> {
         let attempts: i16 = sqlx::query_scalar(
-            "UPDATE inbound_messages SET attempts = attempts + 1 \
+            "UPDATE inbound_messages \
+             SET attempts = attempts + 1, last_attempt_at = now() \
              WHERE message_id = $1 AND status = 'RECEIVED' \
              RETURNING attempts",
         )
-        .bind(message.message_id)
+        .bind(message_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(CompletionError::Db)?
@@ -419,13 +475,12 @@ impl MailboxWorker {
         if cap <= 0 || attempts < cap {
             tracing::warn!(
                 worker = %self.worker_id,
-                actor_type = %message.actor_type,
-                partition = message.partition,
-                message_type = %message.message_type,
+                actor_type = %self.actor_type,
+                message_id = %message_id,
                 attempts,
                 cap,
                 error = %err,
-                "mailbox: delivery attempt failed -- will retry"
+                "mailbox: delivery attempt failed -- will retry after the spacing window"
             );
             return Ok(false);
         }
@@ -434,10 +489,10 @@ impl MailboxWorker {
              SET status = 'FAILED', error = $2, completed_at = now() \
              WHERE message_id = $1 AND status = 'RECEIVED'",
         )
-        .bind(message.message_id)
+        .bind(message_id)
         .bind(serde_json::json!({
             "code": "DeliveryInfrastructureError",
-            "context": { "detail": err.to_string(), "attempts": attempts },
+            "context": { "detail": err, "attempts": attempts },
         }))
         .execute(&self.pool)
         .await
@@ -447,14 +502,26 @@ impl MailboxWorker {
         if flipped {
             tracing::error!(
                 worker = %self.worker_id,
-                actor_type = %message.actor_type,
-                partition = message.partition,
-                message_type = %message.message_type,
-                message_id = %message.message_id,
+                actor_type = %self.actor_type,
+                message_id = %message_id,
                 attempts,
                 error = %err,
                 "mailbox: delivery attempts exhausted -- row FAILED, lane unblocked (operator attention needed)"
             );
+        }
+        Ok(flipped)
+    }
+
+    /// [`Self::poison_raw`] plus the operator-event seam: on the flip, the observer emits the
+    /// contract counter (`mailbox_poison_failed_total{actor_type}`) and publishes the terminal
+    /// FAILED so a waiting client's status poll resolves (PROP-20260802-223522 D4).
+    async fn poison(&self, message: &InboundMessage, err: &sqlx::Error) -> Result<bool, CompletionError> {
+        let text = err.to_string();
+        let flipped = self.poison_raw(message.message_id, &text).await?;
+        if flipped {
+            if let Some(obs) = &self.observer {
+                obs.poisoned(message, &text);
+            }
         }
         Ok(flipped)
     }
