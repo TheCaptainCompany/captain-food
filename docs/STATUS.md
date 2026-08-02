@@ -23,8 +23,17 @@
 > `insert_mapped`, `schedule_mapped`) — MemMailbox drift guards prove typed `send`/`record` rows are
 > field-for-field identical to the free-function enqueue; `record` always keys on
 > `inbound_message_id(source, external_id)`. The caller-side `Envelope` (transport metadata only, no
-> payload/addressing) is hand-written in `application::mailbox`. **No batched send — D8 is OPEN.**
-> Slices 2 (GraphQL emitter flip) and 3 (SIRENE/HubRise adapters) follow.
+> payload/addressing) is hand-written in `application::mailbox`. **No batched send — D8 is answered:
+> not for now.** **Slice 2 built (branch `typed-clients-slice2`)**: the GraphQL resolver emitter no
+> longer constructs `MailboxEntry` inline — both the aggregate-routed template and the gated PM
+> template's mailbox arm deserialize the typed command and `send` through the generated
+> `{Actor}Client` (identity extraction + the birth-command `now_v7` mint stay in the resolver; the
+> acceptance / dedupe / Conflict / telemetry contract is unchanged, frozen by the new no-DB
+> `crates/server/tests/graphql_typed_send.rs`). One recorded delta: the mailbox row payload is now
+> the domain command's own serde form (absent optionals as explicit `null`, defaulted arrays as
+> `[]`), not the null-stripped GraphQL input — dedupe is self-consistent post-deploy, but a
+> same-`messageId` retry straddling the deploy for a command with absent optional fields maps to
+> Conflict instead of replay. Slice 3 (SIRENE/HubRise adapters) follows.
 
 > 🚧 **2026-07-30 — the actor-runtime redesign is APPROVED and in build (ADR-20260730-231500).**
 > Three proposals approved in-session by the product owner (*"we can build it now"*):
