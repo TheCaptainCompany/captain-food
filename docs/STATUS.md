@@ -39,7 +39,13 @@
 > double, `EntryFixture` full-field mirror keeping out-of-crate freeze tests exhaustive, reference
 > impls), dev-dependencies only — guard `test_fixtures_feature_never_reaches_a_release_artifact`
 > fails any release-graph grant (verified red). The textual door guard stays as belt-and-braces,
-> allowlist moved to the actor_client paths. Behavior frozen: drift guards, `graphql_typed_send`,
+> allowlist moved to the actor_client paths. **Surface directive
+> ([ADR-20260802-170059](adr/ADR-20260802-170059-client-surface-is-spec-gated.md), product owner
+> 2026-08-02): no client method without a usage declaration in the spec** — `send` ⇔ ≥1 declared
+> command, `record` ⇔ ≥1 declared inbound fact, `schedule`/`cancel` ⇔ a `reminders:` declaration;
+> unjustified methods are ABSENT, not uncallable (`PaymentClient` is record-only, only
+> `OrderClient` schedules); guard `client_surface_exists_only_with_a_spec_declaration` re-derives
+> the rule from actors.yaml. Behavior frozen: drift guards, `graphql_typed_send`,
 > byte-identity codegen tests all green; validator 0 errors. **D6 (lint floor) deliberately NOT
 > here** — its own change per the product-owner decision; phase 2 (per-actor client crates) and
 > the C4 update follow on #290's checklist.

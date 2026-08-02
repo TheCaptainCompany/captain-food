@@ -209,6 +209,26 @@ open door someone WILL use), `unsafe_code = forbid` outside FFI crates, plus `ca
 was to adopt with phase 1; the product owner decided it lands **as its own change after phase 1** —
 tracked on #290's checklist so it does not silently drop.
 
+### Directive — no method exposed without a usage declaration in the spec *(product owner, 2026-08-02)*
+
+Raised on the client surface ("no schedule method without a reminders declaration"), then
+generalized: *"we should do the same for every method of the system, because it's a hole."* The
+declaration in the spec IS the permission; dead surface is an open door with no declared owner.
+Recorded as [ADR-20260802-170059](../adr/ADR-20260802-170059-client-surface-is-spec-gated.md);
+realized for the generated clients in phase 1 (send ⇔ command, record ⇔ inbound fact,
+schedule/cancel ⇔ reminders — guard re-derives the rule from actors.yaml). The system-wide audit:
+
+| surface | declaration that gates it | state |
+|---|---|---|
+| GraphQL operations | story step (stories.yaml) — `op-uncovered-by-story`, bidirectional | ✅ validator |
+| SDUI screens | `resolvers`/`actions` allowlists into api.yaml | ✅ validator |
+| actor inboxes | `receives` → sealed traits | ✅ compiler |
+| client methods | `receives`/`reminders` → conditional emission | ✅ compiler (phase 1) |
+| `Mailbox` port (`insert`/`by_message` pub to any holder) | none — convention only | ❌ hole (#290 checklist) |
+| `View_*` repository read methods | none — no spec declares which surface reads what | ❌ hole (#290 checklist) |
+| `PgEventStore` append | none (level-1 row in §2) | ❌ hole (phase-3 territory) |
+| unused Rust `pub` items generally | `unreachable_pub = deny` — the mechanical form of this directive | D6, deferred by PO decision |
+
 ## 6. Phasing (extends #290's checklist; each phase gates independently)
 
 1. **Phase 1**: `actor-client` crate (D1) + the generic `ActorClient` read door (D4) + capability allowlist (D3)
