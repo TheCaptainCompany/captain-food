@@ -1,6 +1,6 @@
 # PROP-20260728-152752 — The write path becomes an actor mailbox: `inbound_messages` replaces both journals, partitioned workers deliver to the actors
 
-- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D9 (client isolation) answered 2026-08-02: a dedicated actor-client crate, then per-actor crates — [#290](https://github.com/TheCaptainCompany/captain-food/issues/290). D8 (batched-send signature) answered 2026-08-02: deferred — no `send_many` for now; the singular client comes first and parallelisation is discussed after.** §2.1 realization tracked by [#284](https://github.com/TheCaptainCompany/captain-food/issues/284)
+- **Status**: Approved — 2026-07-30, product owner in-session ("we are at the same page, we can build it now"); all D1–D7 recommended options stand; MESSAGE payloads in a new `messages.yaml` per the §3.4 recommendation (flagged for veto); ADR-20260730-231500. **D9 (client isolation) answered 2026-08-02: a dedicated actor-client crate, then per-actor crates. D8 (batched-send signature) answered 2026-08-02: deferred — no `send_many` for now; the singular client comes first and parallelisation is discussed after.** §2.1 is REALIZED (see Realized-by); its tails live in [#303 "ActorClient::watch — relocate OperationStatusBus behind the actor-client boundary"](https://github.com/TheCaptainCompany/captain-food/issues/303) and [#308 "Decide cancel lane-scoping (from the #288 review) — now OrderClient-only"](https://github.com/TheCaptainCompany/captain-food/issues/308)
 - **Date**: 2026-07-28
 - **Tracking issue**: [#242 "Write path: command_journal becomes the consumed queue — a worker executes commands in position order, and journal completion commits in the SAME transaction as the event append"](https://github.com/TheCaptainCompany/captain-food/issues/242)
 - **Supersedes**: the union-view mechanism recorded on #242 (2026-07-28) — the product owner unified
@@ -8,7 +8,11 @@
 - **Companion**: [PROP-20260728-135632 "Aggregate state as spec"](PROP-20260728-135632-aggregate-state-as-spec.md)
   — the actor's *inside* (declared state, generated `apply`/`fold`, `requires`); this proposal is the
   actor's *outside* (how messages reach it, durably and in order).
-- **Realized by**: _(filled at completion)_
+- **Realized by**: §2.1 (typed clients, the only door) — [#288](https://github.com/TheCaptainCompany/captain-food/pull/288) ·
+  [#289](https://github.com/TheCaptainCompany/captain-food/pull/289) · [#292](https://github.com/TheCaptainCompany/captain-food/pull/292) ·
+  [#297 "refactor(#290): the actor-client crate is the compiler-enforced mailbox door (phase 1)"](https://github.com/TheCaptainCompany/captain-food/pull/297)
+  (issues [#284](https://github.com/TheCaptainCompany/captain-food/issues/284)/[#290](https://github.com/TheCaptainCompany/captain-food/issues/290)
+  closed 2026-08-02). Rest of the proposal: _(filled at completion)_
 
 ---
 

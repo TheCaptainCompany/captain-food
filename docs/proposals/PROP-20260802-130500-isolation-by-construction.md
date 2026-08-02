@@ -3,7 +3,15 @@
 - **Status**: Approved — D1–D6 all decided (product owner, 2026-08-02; D6 deferred to its own
   change, against the recommendation). Phases deliver under #290, each gated independently.
 - **Date**: 2026-08-02
-- **Tracking issue**: [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)
+- **Tracking issues**: [#290](https://github.com/TheCaptainCompany/captain-food/issues/290) (phase 1, CLOSED 2026-08-02 — product owner: "close all the phases", one issue per remaining item). Successors:
+  [#302 "Lint floor (D6)"](https://github.com/TheCaptainCompany/captain-food/issues/302) ·
+  [#303 "ActorClient::watch — relocate OperationStatusBus"](https://github.com/TheCaptainCompany/captain-food/issues/303) ·
+  [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304) ·
+  [#305 "View_* read declarations"](https://github.com/TheCaptainCompany/captain-food/issues/305) ·
+  [#306 "Isolation phase 2: one crate per actor client"](https://github.com/TheCaptainCompany/captain-food/issues/306) ·
+  [#307 "Isolation phase 3: per-actor implementation crates"](https://github.com/TheCaptainCompany/captain-food/issues/307) ·
+  [#308 "Decide cancel lane-scoping"](https://github.com/TheCaptainCompany/captain-food/issues/308) ·
+  [#309 "C4 update for the actor_client boundary crate"](https://github.com/TheCaptainCompany/captain-food/issues/309)
 - **Origin**: product-owner directive, 2026-08-02 — *"I want to have the more isolation as possible to
   strongly boundary everything and protect bad AI behavior that could use easy path instead of the
   right one."* Precedent: the product owner's C# DDD + actor-model practice — one assembly per actor
