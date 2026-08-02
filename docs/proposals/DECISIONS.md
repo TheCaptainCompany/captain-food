@@ -315,7 +315,7 @@ are open:
 |---|---|---|
 | D2 | Per-actor IMPLEMENTATION crates (phase-3 endpoint) | (a) handler crates per actor — aggregates AND process managers; domain types stay one crate |
 | **D3** | **`Cargo.toml` as capability allowlist (cargo-deny: who may hold `sqlx`/`reqwest`)** | **Adopt in phase 1 — the biggest win available; closes the raw-SQL side door the typed clients cannot see** |
-| D4 | The read door | `OperationStatusClient` in the client crate, phase 1 (absorbs the #284 tail once, not twice) |
+| D4 | The read door — **shape decided 2026-08-02**: one generic `ActorClient` with `get_operation_status(message_id)` — status is generic to all operations, so neither a per-actor client nor a separate `OperationStatusClient` type | In the client crate, phase 1 (absorbs the #284 tail once, not twice) |
 | D5 | Cross-crate test fixtures | `test-fixtures` cargo feature + CI check no release artifact enables it |
 | D6 | Lint floor | `unreachable_pub = deny` in boundary crates, `unsafe_code = forbid`, `cargo-machete` in CI — adopt with phase 1 |
 

@@ -83,7 +83,7 @@ graph TD
     end
     subgraph "ports + doors"
         application --> domain
-        AC["actor-client crate<br/>port + Entry (private) + Envelope<br/>+ generated typed clients<br/>+ OperationStatusClient"] --> domain
+        AC["actor-client crate<br/>port + Entry (private) + Envelope<br/>+ generated typed clients (write)<br/>+ generic ActorClient.get_operation_status (read)"] --> domain
         AC --> application
     end
     subgraph "phase 2: per-actor permission — aggregates AND process managers"
@@ -102,7 +102,7 @@ graph TD
     stripe -. "manifest names ONLY the clients it may address" .-> CP
 ```
 
-<a href="https://mermaid.live/view#pako:eNqNU8tu2zAQ_JUFT3YTxW3QU1AEMJTe8hDSXgqrhw25lghIJLOk3BpB_r0ryUJlJDXKg2Fx9jGzO3xR2htSV6AqxlDD95vSgZzYPY0XpbLOEcMidEzLUo1wf4xv0brxm5x5kxc8pwhnEuc5zhMxhMZqTNY7yLLro0L9WeebUqFOnjPdWHIJNGOiL0-8uu6LSs2vLvFeOLHdCbIcbnbU-DBGnUFFQlogA2kf5HcsFA_oQ-hB6f8tYepiPoCl-vkPOsP1jPUJzTVGgssrkAbZIKH_19oYe7Fld_nx02fAqmKqhFyE9f0NBPaaYoQWHVZ0PKr8cTMyz5hiwo7RJWF5EYVLuhBW63wWnE_BGvlEWDGFBdy3dKJgUcgiptgGNWWejQibGC-Ku-UwtffTH2fpTNvOmf_JfG-saDAkGQ0sUk3wcH_7A-Jz83vF9PxL5gK1b4RXPAdCXUPU4gNz5FXrtowxcaeT2HjY55ypIDbQ5m-j1YfJDW9pEe_kPcyx2dVxowM8VBetokSWbLc9ZYet7H-Q0ms6-BNsEh_sAY2RhYsVoB9NXqhzUK0YCa2Rt_qiJKUdXq2hLXZNUq-vfwAzxjKW" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+<a href="https://mermaid.live/view#pako:eNqNU8Fu2zAM_RVCp3Stk67YqRgKBO5ua2cUvQzxULASYwuwJZWS0wVF_720PWMO2gXTIYjF98j3SOpFaW9IXYKqGEMN99elAzmxexwvSmWdI4ZF6JhOSjWG-2N8i9aN3-TMO17wnCKcCs5znBMxhMZqTNY7yLKrg0T9WeebUqFOnjPdWHIJNGOir4-8uuqTSs5vLvFeNLHdSeRkuNlR48OIOoWKRLSEDKR9kN8xUYTFM1shzFFWw7ovlg-QZUXpQfLwoO8hJkyd0JjQiPtf_xA8XM98HelKjZHg4hKkRDaY7P-1Nsa-HWV3cf75C2BVMVUiP8L69hoCe00xQosOKzpsZn63Gb1lTCK2Y3RJVC6jaElLUbXOZ-B8AmvkI7BiggXct3QkYVHIqCZsg5oyz0aMTYoXxc3YtY_pdzM607Zz5n-YH7UVDYYkrYFFqgl-3H7_CfGp-b1ienqWvkDtG9EVz4BQ1xC1TNgcbLN1W8aYuNNJFn2Y51ypRGygzd9Cq0_TNryXRbyTFzOPza4OC_0JD9nFqziRIdttL9lhK_MfrPSepg22SfZgD2iMDFxWAfrW5IU6A9XKIqE18ppflFDa4V0b2mLXJPX6-gaMLz6h" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 One sequence, the whole contract:
 
@@ -170,16 +170,25 @@ Every entry carries a WHY comment; CI-gated.
 | Adopt only after phase 2 | Less churn now | Months during which every crate can still bypass every door with one query |
 | Rely on review | Nothing to build | Level 2. The threat model is precisely that this fails silently |
 
-### D4 — The read door: `OperationStatusClient` + no raw reads
+### D4 — The read door: the generic `ActorClient` with `get_operation_status` *(shape DECIDED — product-owner directive, 2026-08-02)*
 
-The #284 tail, resequenced into phase 1 (it lands in the new crate once, not twice): a generated
-`OperationStatusClient` (`status(message_id)` / `watch`) as the ONLY reader of `inbound_messages`,
-same private-type mechanics as the write door; the door guard grows a read arm (SELECTs of the table
-outside `infrastructure`) until D3 makes it moot.
+The #284 tail, resequenced into phase 1 (it lands in the new crate once, not twice): one generic,
+actor-agnostic **`ActorClient`** exposing **`get_operation_status(message_id)`** (and `watch`) —
+the ONLY read path over `inbound_messages`, same private-type mechanics as the write door; the door
+guard grows a read arm (SELECTs of the table outside `infrastructure`) until D3 makes it moot.
+
+The shape follows the data (product-owner directive, 2026-08-02): **operation status is generic to
+all operations** — `message_id` is globally unique and the status is an envelope-level outcome
+(PENDING/SUCCEEDED/REJECTED/…), carrying nothing actor-specific — so reading it through a per-actor
+client like `RestaurantClient` would be inappropriate, and a name like `OperationStatusClient`
+overstates it into a second concept. The split is: **per-actor typed clients = the write side**
+(send/record/schedule/cancel — where WHICH actor matters at compile time); **the one generic
+`ActorClient` = the read side** (where it does not).
 
 | Option | Pros | Cons |
 |---|---|---|
-| **Typed read client in the actor-client crate, phase 1** ✅ | Symmetric with §2.1 ("nobody SELECTs the table either"); one migration | Slightly bigger phase 1 |
+| **One generic `ActorClient.get_operation_status`, in the actor-client crate, phase 1** ✅ decided shape | Symmetric with §2.1 ("nobody SELECTs the table either"); matches the data — status is actor-agnostic, keyed by `message_id` alone; one type to hold the read capability | Slightly bigger phase 1 |
+| `get_operation_status` on each per-actor typed client | Send door and status in one object | Inappropriate per the directive: pretends a generic read is actor-specific; 16 copies of one capability |
 | Keep repo traits as today | No work | The read side stays level 1 while the write side is level 4 — the asymmetry invites the shortcut |
 
 ### D5 — Cross-crate test fixtures without reopening the door
@@ -201,7 +210,7 @@ easy-path silent-drift loud immediately.
 
 ## 6. Phasing (extends #290's checklist; each phase gates independently)
 
-1. **Phase 1**: `actor-client` crate (D1) + `OperationStatusClient` (D4) + capability allowlist (D3)
+1. **Phase 1**: `actor-client` crate (D1) + the generic `ActorClient` read door (D4) + capability allowlist (D3)
    + lint floor (D6) + `test-fixtures` mechanism (D5). Behavior frozen by the existing drift guards;
    the textual door guard stays as the tripwire on the boundary itself.
 2. **Phase 2**: per-actor client crates — one per aggregate AND one per process manager (16 today),
