@@ -40,7 +40,7 @@ impl sealed::Sealed for domain::generated::events::RefundOpened {}
 
 /// GENERATED from actors.yaml `Payment.receives`: marker for every inbound FACT (an
 /// `events.yaml#/...` ref -- an external fact that already happened) the `Payment` actor records.
-/// SEALED for the same reason as [`PaymentCommand`].
+/// SEALED for the same reason: the private supertrait cannot be implemented downstream.
 pub trait PaymentFact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) -- also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;

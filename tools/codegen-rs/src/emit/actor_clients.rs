@@ -225,7 +225,15 @@ fn client_lib(a: &ClientActor) -> String {
         }
     }
     if !a.facts.is_empty() {
-        out.push_str(&FACT_TRAIT.replace("{ACTOR}", actor));
+        // The "same reason as [`{Actor}Command`]" cross-reference only resolves when that trait
+        // was actually emitted — a facts-only actor (Payment) has no command trait, and a rustdoc
+        // link to a type that does not exist in this crate is a broken link in generated code.
+        let seal_why = if a.commands.is_empty() {
+            "SEALED for the same reason: the private supertrait cannot be implemented downstream."
+        } else {
+            "SEALED for the same reason as [`{ACTOR}Command`]."
+        };
+        out.push_str(&FACT_TRAIT.replace("{SEAL_WHY}", seal_why).replace("{ACTOR}", actor));
         for f in &a.facts {
             out.push_str(&format!(
                 "\nimpl {actor}Fact for domain::generated::events::{f} {{\n    const EVENT_TYPE: &'static str = \"{f}\";\n    fn into_domain_event(self) -> domain::generated::events::DomainEvent {{\n        domain::generated::events::DomainEvent::{f}(self)\n    }}\n}}\n"
@@ -293,7 +301,7 @@ pub trait {ACTOR}Command: sealed::Sealed + serde::Serialize + Send {
 const FACT_TRAIT: &str = r#"
 /// GENERATED from actors.yaml `{ACTOR}.receives`: marker for every inbound FACT (an
 /// `events.yaml#/...` ref -- an external fact that already happened) the `{ACTOR}` actor records.
-/// SEALED for the same reason as [`{ACTOR}Command`].
+/// {SEAL_WHY}
 pub trait {ACTOR}Fact: sealed::Sealed + serde::Serialize + Send {
     /// The mailbox `message_type` (the events.yaml key) -- also the `DomainEvent` adjacent tag.
     const EVENT_TYPE: &'static str;
