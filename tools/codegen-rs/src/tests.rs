@@ -1857,20 +1857,16 @@ keys:
 
     /// Does this syntax node mention `name` anywhere in its token stream? Path-spelling agnostic,
     /// so `MailboxAccess`, `mailbox::MailboxAccess` and `crate::mailbox::MailboxAccess` all match.
-    ///
-    /// Correct for OUTPUT and FIELD positions, where any mention yields a witness — `-> Option<W>`,
-    /// `-> Vec<W>` and a `PhantomData<W>` field all hand one over eventually. Deliberately NOT used
-    /// for parameter positions; see [`is_exact_witness`].
     fn mentions(node: &impl quote::ToTokens, name: &str) -> bool {
         node.to_token_stream().to_string().contains(name)
     }
 
     /// Is this type EXACTLY the witness — not a wrapper around it?
     ///
-    /// The distinction is the whole port rule. `access: Option<MailboxAccess>` *mentions* the
-    /// witness, so a substring check accepts it, and then the caller writes
-    /// `mb.cancel_scheduled(id, None)` and needs no witness at all. Review pass 4 defeated the
-    /// guard's own primary assertion that way, on the very method the ADR calls the widest hole.
+    /// Used ONLY for the port trait's parameters, where a wrapper weakens the demand:
+    /// `access: Option<MailboxAccess>` *mentions* the witness, so a substring check accepts it,
+    /// and then the caller writes `mb.cancel_scheduled(id, None)` and needs no witness at all.
+    /// Review pass 4 defeated the guard's own primary assertion that way.
     fn is_exact_witness(ty: &syn::Type) -> bool {
         let syn::Type::Path(p) = ty else { return false };
         p.qself.is_none()
@@ -1879,28 +1875,31 @@ keys:
             })
     }
 
-    /// Is this a `#[cfg(..)]` that is satisfied ONLY when the D5 `test-fixtures` feature is on?
+    /// Is this `#[cfg(..)]` satisfied ONLY in a test build — `test`, the `test-fixtures` feature,
+    /// or both? Such an item is never compiled for a dependent crate, so it cannot leak.
     ///
-    /// A plain "does it mention the feature" test is not that, and the difference is a door:
-    /// `#[cfg(not(feature = "test-fixtures"))]` mentions it while compiling in exactly the builds
-    /// where the feature is OFF — every release build. Pass 4 used that to make the guard's own
-    /// excuse mechanism grant the mint, so an inverted cfg is rejected rather than honoured.
-    fn is_test_fixtures_cfg(attrs: &[syn::Attribute]) -> bool {
+    /// An INVERTED cfg is not a gate and must not be read as one: `#[cfg(not(feature =
+    /// "test-fixtures"))]` names the feature while compiling in exactly the builds where it is
+    /// OFF — every release build. Pass 4 used that to make the guard's own excuse mechanism grant
+    /// the mint.
+    fn is_test_only_cfg(attrs: &[syn::Attribute]) -> bool {
         attrs.iter().any(|a| {
             if !a.path().is_ident("cfg") {
                 return false;
             }
-            let toks = { let m = &a.meta; quote::quote!(#m).to_string() };
-            toks.contains("test-fixtures") && !toks.contains("not (")
+            let m = &a.meta;
+            let toks = quote::quote!(#m).to_string();
+            (toks.contains("test-fixtures") || toks.contains("test")) && !toks.contains("not (")
         })
     }
 
-    /// A `#[cfg(..)]` that names the feature but inverts it — never a gate, always suspicious.
-    fn is_inverted_fixtures_cfg(attrs: &[syn::Attribute]) -> bool {
+    /// Specifically a POSITIVE `test-fixtures` gate — what makes the one public mint legitimate.
+    fn is_fixtures_gate(attrs: &[syn::Attribute]) -> bool {
         attrs.iter().any(|a| {
             a.path().is_ident("cfg") && {
-                let t = { let m = &a.meta; quote::quote!(#m).to_string() };
-                t.contains("test-fixtures") && t.contains("not (")
+                let m = &a.meta;
+                let t = quote::quote!(#m).to_string();
+                t.contains("test-fixtures") && !t.contains("not (")
             }
         })
     }
@@ -1908,7 +1907,6 @@ keys:
     /// Everything the #304 scan needs to say about one `actor_client` source.
     #[derive(Default)]
     struct WitnessScan {
-        /// Every route by which the witness could be obtained, with the file that grants it.
         leaks: Vec<String>,
         /// Methods of the `Mailbox` port trait: (name, takes the witness EXACTLY).
         port_methods: Vec<(String, bool)>,
@@ -1918,16 +1916,22 @@ keys:
     const WITNESS: &str = "MailboxAccess";
 
     impl WitnessScan {
-        /// THE ONE REACHABILITY RULE. Any publicly-reachable OUTPUT or FIELD position whose type
-        /// yields the witness is a mint, whatever item kind it happens to live in.
+        /// THE RULE, and it is a CLOSED one: the witness may not appear in ANY release-reachable
+        /// public signature, anywhere in the crate, except on the closed exemption list (the
+        /// `Mailbox` trait's own items, `impl Mailbox for _` blocks, and the cfg-gated
+        /// `MailboxAccess::for_tests`).
         ///
-        /// Enumerating item KINDS is what four review passes defeated: free fn, then const, then
-        /// static, then alias, then associated fn, then associated const, then struct field, then
-        /// enum variant, then a trait's provided method. They are one rule — "a public thing that
-        /// hands you a witness" — and only Rust's grammar made them look like nine.
-        fn check_yield(&mut self, rel: &str, what: &str, public: bool, ty: &syn::Type) {
-            if public && mentions(ty, WITNESS) {
-                self.leaks.push(format!("  {rel}: {what} yields the witness"));
+        /// Five review passes killed every version of this guard that asked WHERE the witness
+        /// appears. Text forms, then item kinds, then output-and-field positions — each framing
+        /// left a slot uninspected, and the last one left two: a generic BOUND
+        /// (`pub fn mint<T: From<MailboxAccess>>() -> T`) and a PARAMETER on a non-port item
+        /// (`pub fn with_access(f: impl FnOnce(MailboxAccess) -> R) -> R`, a scoped-capability
+        /// helper written `pub` by accident — the most plausible real mistake of the whole set).
+        /// So this asks nothing about position: the whole signature — generics, where-clause,
+        /// inputs, output, field and variant types — is one token stream, and any mention fails.
+        fn check_sig(&mut self, rel: &str, what: &str, public: bool, sig: &impl quote::ToTokens) {
+            if public && mentions(sig, WITNESS) {
+                self.leaks.push(format!("  {rel}: {what} names the witness in a public signature"));
             }
         }
     }
@@ -1936,11 +1940,13 @@ keys:
         matches!(vis, syn::Visibility::Public(_))
     }
 
-    /// Walk one module's items, recursing into inline `mod`s and tracking whether we are under a
-    /// `#[cfg(.. test-fixtures ..)]` ancestor — which is what makes the ONE public mint legitimate.
-    fn scan_items(items: &[syn::Item], rel: &str, gated: bool, is_port: bool, out: &mut WitnessScan) {
+    /// Walk one module's items. `test_only` tracks whether an ancestor cfg makes everything here
+    /// invisible to dependent crates (so it cannot leak); `is_port` whether this is the port
+    /// module, the one place the witness's own declaration and impls may live.
+    fn scan_items(items: &[syn::Item], rel: &str, test_only: bool, is_port: bool, out: &mut WitnessScan) {
         use syn::Item;
         for item in items {
+            let item_test_only = test_only || is_test_only_cfg(item_attrs(item));
             match item {
                 Item::Mod(m) => {
                     if m.attrs.iter().any(|a| a.path().is_ident("path")) {
@@ -1950,15 +1956,8 @@ keys:
                             m.ident
                         ));
                     }
-                    if is_inverted_fixtures_cfg(&m.attrs) {
-                        out.leaks.push(format!(
-                            "  {rel}: `mod {}` is `#[cfg(not(feature = \"test-fixtures\"))]` — an \
-                             INVERTED cfg compiles in release builds; it is not a test gate",
-                            m.ident
-                        ));
-                    }
                     if let Some((_, inner)) = &m.content {
-                        scan_items(inner, rel, gated || is_test_fixtures_cfg(&m.attrs), is_port, out);
+                        scan_items(inner, rel, item_test_only, is_port, out);
                     }
                 }
 
@@ -1974,27 +1973,22 @@ keys:
                                     syn::FnArg::Receiver(_) => false,
                                 }),
                             )),
-                            // A macro INVOCATION expands to items this walk can never see — the one
-                            // escape an AST scan shares with a textual one, so it is refused.
+                            // A macro INVOCATION expands to items this walk can never see.
                             syn::TraitItem::Macro(m) => out.leaks.push(format!(
                                 "  {rel}: `Mailbox` contains a macro invocation (`{}!`) — trait \
                                  items must be written out, or this guard cannot see them",
                                 m.mac.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default()
                             )),
-                            syn::TraitItem::Const(c) => {
-                                out.check_yield(rel, &format!("`Mailbox::{}`", c.ident), true, &c.ty)
-                            }
                             _ => {}
                         }
                     }
                 }
 
-                // ANY OTHER public trait: (a) `Mailbox` as a supertrait — in the bound list OR in a
-                // `where` clause, which pass 4 used to restore the #304 hole verbatim — lets a
-                // provided method mint internally and hand every port holder an ungated door;
-                // (b) its own items are output positions like any other.
-                Item::Trait(t) if is_pub(&t.vis) => {
-                    let supers = { let st = &t.supertraits; quote::quote!(#st).to_string() };
+                // Every OTHER public trait: `Mailbox` as a supertrait (bounds OR where-clause) is
+                // an ungated door for any port holder; and each item's WHOLE signature is checked.
+                Item::Trait(t) if is_pub(&t.vis) && !item_test_only => {
+                    let st = &t.supertraits;
+                    let supers = quote::quote!(#st).to_string();
                     let wheres = t
                         .generics
                         .where_clause
@@ -2012,37 +2006,44 @@ keys:
                     }
                     for ti in &t.items {
                         match ti {
-                            syn::TraitItem::Fn(f) => {
-                                if let syn::ReturnType::Type(_, ty) = &f.sig.output {
-                                    out.check_yield(
-                                        rel,
-                                        &format!("`{}::{}`", t.ident, f.sig.ident),
-                                        true,
-                                        ty,
-                                    );
-                                }
-                            }
-                            syn::TraitItem::Const(c) => out.check_yield(
+                            syn::TraitItem::Fn(f) => out.check_sig(
+                                rel,
+                                &format!("`{}::{}`", t.ident, f.sig.ident),
+                                true,
+                                &f.sig,
+                            ),
+                            syn::TraitItem::Const(c) => out.check_sig(
                                 rel,
                                 &format!("`{}::{}`", t.ident, c.ident),
                                 true,
                                 &c.ty,
                             ),
+                            // An associated TYPE's bounds are a signature slot too:
+                            // `type Out: From<MailboxAccess>` hands one over.
+                            syn::TraitItem::Type(ty) => {
+                                let b = &ty.bounds;
+                                out.check_sig(
+                                    rel,
+                                    &format!("`{}::{}` bounds", t.ident, ty.ident),
+                                    true,
+                                    &quote::quote!(#b),
+                                )
+                            }
                             _ => {}
                         }
                     }
                 }
 
-                // IMPLS. A TRAIT impl on the witness is always a mint route (`Default::default()`,
-                // `().into()`); an INHERENT impl on it may only live in the port module with a
-                // cfg-gated `for_tests` as its one public item. And EVERY impl — on any type at
-                // all — is scanned for items that yield the witness, because `impl ActorClient {
-                // pub fn access(&self) -> MailboxAccess }` is a mint that names no witness in its
-                // self type.
                 Item::Impl(i) => {
                     let on_witness = mentions(&i.self_ty, WITNESS);
-                    // Items of a TRAIT impl are as public as the trait itself.
                     let trait_impl = i.trait_.is_some();
+                    // EXEMPTION: an `impl Mailbox for _` legitimately names the witness in every
+                    // method — that IS the port contract.
+                    let is_port_impl = i
+                        .trait_
+                        .as_ref()
+                        .and_then(|(_, p, _)| p.segments.last())
+                        .is_some_and(|s| s.ident == "Mailbox");
                     if on_witness && trait_impl {
                         out.leaks.push(format!(
                             "  {rel}: a trait impl on the witness (`{}`) — `Default`, `From`, \
@@ -2052,45 +2053,47 @@ keys:
                     } else if on_witness && !is_port {
                         out.leaks.push(format!(
                             "  {rel}: an inherent impl on the witness outside the port module. \
-                             (The witness's impls must stay in crates/actor_client/src/mailbox.rs — \
-                             this guard does not resolve out-of-line modules, so moving them costs \
-                             the gate.)"
+                             (Keep them in crates/actor_client/src/mailbox.rs — this guard does \
+                             not resolve out-of-line modules, so moving them costs the gate.)"
                         ));
                     }
+                    if is_port_impl {
+                        continue;
+                    }
                     for ii in &i.items {
+                        let ii_test_only = item_test_only || is_test_only_cfg(impl_item_attrs(ii));
                         match ii {
                             syn::ImplItem::Fn(f) => {
                                 let public = trait_impl || is_pub(&f.vis);
-                                let exempt = on_witness
-                                    && is_port
-                                    && f.sig.ident == "for_tests"
-                                    && (gated || is_test_fixtures_cfg(&f.attrs));
-                                if on_witness && public && !exempt {
-                                    out.leaks.push(format!(
-                                        "  {rel}: `MailboxAccess::{}` is public outside the \
-                                         cfg-gated fixtures module",
-                                        f.sig.ident
-                                    ));
-                                } else if !exempt {
-                                    if let syn::ReturnType::Type(_, ty) = &f.sig.output {
-                                        out.check_yield(
-                                            rel,
-                                            &format!("associated fn `{}`", f.sig.ident),
-                                            public,
-                                            ty,
-                                        );
+                                if on_witness && public {
+                                    // The ONE sanctioned public mint: `for_tests`, under a
+                                    // POSITIVE test-fixtures gate.
+                                    let sanctioned = is_port
+                                        && f.sig.ident == "for_tests"
+                                        && (is_fixtures_gate(&f.attrs) || fixtures_gated(rel, item_test_only));
+                                    if !sanctioned {
+                                        out.leaks.push(format!(
+                                            "  {rel}: `MailboxAccess::{}` is public outside the \
+                                             cfg-gated fixtures module",
+                                            f.sig.ident
+                                        ));
                                     }
+                                } else if !ii_test_only {
+                                    out.check_sig(
+                                        rel,
+                                        &format!("associated fn `{}`", f.sig.ident),
+                                        public,
+                                        &f.sig,
+                                    );
                                 }
                             }
-                            // Associated consts and types were unchecked and were both proven
-                            // exploitable: `impl MailboxAccess { pub const GRANTED: MailboxAccess }`.
-                            syn::ImplItem::Const(c) => out.check_yield(
+                            syn::ImplItem::Const(c) if !ii_test_only => out.check_sig(
                                 rel,
                                 &format!("associated const `{}`", c.ident),
                                 trait_impl || is_pub(&c.vis),
                                 &c.ty,
                             ),
-                            syn::ImplItem::Type(t) => out.check_yield(
+                            syn::ImplItem::Type(t) if !ii_test_only => out.check_sig(
                                 rel,
                                 &format!("associated type `{}`", t.ident),
                                 trait_impl || is_pub(&t.vis),
@@ -2101,17 +2104,16 @@ keys:
                     }
                 }
 
-                // Free items in every yielding position.
-                Item::Fn(f) if is_pub(&f.vis) => {
-                    if let syn::ReturnType::Type(_, ty) = &f.sig.output {
-                        out.check_yield(rel, &format!("`pub fn {}`", f.sig.ident), true, ty);
-                    }
+                // Free items — the WHOLE signature, so a generic bound or a callback parameter is
+                // as visible as a return type.
+                Item::Fn(f) if !item_test_only => {
+                    out.check_sig(rel, &format!("`pub fn {}`", f.sig.ident), is_pub(&f.vis), &f.sig)
                 }
-                Item::Const(c) => {
-                    out.check_yield(rel, &format!("`const {}`", c.ident), is_pub(&c.vis), &c.ty)
+                Item::Const(c) if !item_test_only => {
+                    out.check_sig(rel, &format!("`const {}`", c.ident), is_pub(&c.vis), &c.ty)
                 }
-                Item::Static(s) => {
-                    out.check_yield(rel, &format!("`static {}`", s.ident), is_pub(&s.vis), &s.ty)
+                Item::Static(s) if !item_test_only => {
+                    out.check_sig(rel, &format!("`static {}`", s.ident), is_pub(&s.vis), &s.ty)
                 }
                 Item::Type(t) if mentions(&t.ty, WITNESS) => {
                     out.leaks.push(format!(
@@ -2121,7 +2123,6 @@ keys:
                     ));
                 }
 
-                // The witness struct itself, and any OTHER public struct carrying one in a field.
                 Item::Struct(s) => {
                     for (n, f) in s.fields.iter().enumerate() {
                         if s.ident == WITNESS {
@@ -2132,13 +2133,9 @@ keys:
                                      re-opens"
                                 ));
                             }
-                        } else {
-                            let name = f
-                                .ident
-                                .as_ref()
-                                .map(|i| i.to_string())
-                                .unwrap_or_else(|| n.to_string());
-                            out.check_yield(
+                        } else if !item_test_only {
+                            let name = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_else(|| n.to_string());
+                            out.check_sig(
                                 rel,
                                 &format!("field `{}.{name}`", s.ident),
                                 is_pub(&s.vis) && is_pub(&f.vis),
@@ -2147,16 +2144,11 @@ keys:
                         }
                     }
                 }
-                // Enum variant fields are ALWAYS public when the enum is.
-                Item::Enum(e) if is_pub(&e.vis) => {
+                Item::Enum(e) if is_pub(&e.vis) && !item_test_only => {
                     for v in &e.variants {
                         for (n, f) in v.fields.iter().enumerate() {
-                            let name = f
-                                .ident
-                                .as_ref()
-                                .map(|i| i.to_string())
-                                .unwrap_or_else(|| n.to_string());
-                            out.check_yield(
+                            let name = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_else(|| n.to_string());
+                            out.check_sig(
                                 rel,
                                 &format!("variant field `{}::{}.{name}`", e.ident, v.ident),
                                 true,
@@ -2165,9 +2157,24 @@ keys:
                         }
                     }
                 }
+                Item::Union(u) if is_pub(&u.vis) && !item_test_only => {
+                    for f in &u.fields.named {
+                        out.check_sig(
+                            rel,
+                            &format!("union field `{}`", u.ident),
+                            is_pub(&f.vis),
+                            &f.ty,
+                        );
+                    }
+                }
+                Item::ForeignMod(fm) if !item_test_only => out.check_sig(
+                    rel,
+                    "an `extern` block",
+                    true,
+                    &quote::quote!(#fm),
+                ),
 
-                // Expansion this walk cannot follow: a `macro_rules!` naming the witness, and
-                // `include!`, which splices a file the directory walk never visits.
+                // Expansion this walk cannot follow.
                 Item::Macro(m) if m.mac.path.is_ident("macro_rules") && mentions(&m.mac.tokens, WITNESS) => {
                     out.leaks.push(format!(
                         "  {rel}: a `macro_rules!` mentioning the witness — expansion is invisible \
@@ -2182,6 +2189,29 @@ keys:
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// `mailbox.rs`'s `fixtures` module is the sanctioned home of the public mint; an item is
+    /// inside it when an ancestor carried the positive gate.
+    fn fixtures_gated(rel: &str, ancestor_test_only: bool) -> bool {
+        rel.ends_with("mailbox.rs") && ancestor_test_only
+    }
+
+    fn item_attrs(i: &syn::Item) -> &[syn::Attribute] {
+        use syn::Item::*;
+        match i {
+            Const(x) => &x.attrs, Enum(x) => &x.attrs, ExternCrate(x) => &x.attrs, Fn(x) => &x.attrs,
+            ForeignMod(x) => &x.attrs, Impl(x) => &x.attrs, Macro(x) => &x.attrs, Mod(x) => &x.attrs,
+            Static(x) => &x.attrs, Struct(x) => &x.attrs, Trait(x) => &x.attrs, TraitAlias(x) => &x.attrs,
+            Type(x) => &x.attrs, Union(x) => &x.attrs, Use(x) => &x.attrs, _ => &[],
+        }
+    }
+
+    fn impl_item_attrs(i: &syn::ImplItem) -> &[syn::Attribute] {
+        use syn::ImplItem::*;
+        match i {
+            Const(x) => &x.attrs, Fn(x) => &x.attrs, Type(x) => &x.attrs, Macro(x) => &x.attrs, _ => &[],
         }
     }
 
@@ -2249,7 +2279,7 @@ keys:
             // comment mentioning either must not fail the build.
             let file = syn::parse_file(&text)
                 .unwrap_or_else(|e| panic!("{rel} does not parse ({e}) — this guard reads the AST"));
-            let gated = is_test_fixtures_cfg(&file.attrs);
+            let gated = is_test_only_cfg(&file.attrs);
             scan_items(&file.items, &rel, gated, rel == port_rel, &mut scan);
         }
 

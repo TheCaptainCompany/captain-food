@@ -68,42 +68,38 @@ is a loud, reviewable diff, not a silent shortcut.
   explicitly NOT contained by D3 — a decorator needs no `sqlx` — and saying so would be worse than
   saying nothing, because a wrong justification stops the next reviewer looking. Dropping `Copy`
   would stop retention but not decoration, so it buys nothing real.
-- **The guard parses the AST, and enumerates POSITIONS rather than item kinds.** The compiler makes
-  the rule unbreakable from outside `actor_client`; every remaining way to reopen the door is an
-  edit INSIDE that crate, and `every_mailbox_port_method_demands_the_access_witness`
-  (tools/codegen-rs, using syn) catches those. **Four independent review passes each defeated an
-  earlier version**, and the shape of the failure never changed: the guard enumerated *forms* —
-  first text forms (`pub  fn` with two spaces, a split signature, an attribute before `async fn`),
-  then AST item kinds (free fn, const, static, alias… then associated fn, associated const, struct
-  field, enum variant, a trait's provided method). Each fix bought one form. What finally converged
-  was to stop enumerating forms and enumerate **positions**:
-  - **Parameter position** (the port rule): every method of `trait Mailbox` must take the witness
-    as its EXACT type. Not a substring match — `access: Option<MailboxAccess>` *mentions* the
-    witness and lets the caller pass `None`, which defeated the guard's own primary assertion on
-    the very method this ADR calls the widest hole.
-  - **Output and field positions** (the leak rule): ONE rule over every publicly-reachable place a
-    value can come out — free fn returns, associated fns, associated consts and types, trait items
-    including provided methods, public struct fields, enum variant fields, consts, statics,
-    aliases. Any of them whose type mentions the witness is a mint. That single rule subsumes every
-    shape all four passes found, because they were one rule wearing nine grammars.
-  - Plus: no public trait anywhere in the crate takes `Mailbox` as a supertrait — in its bound list
-    **or its `where` clause** — since a provided method there mints internally and hands every port
-    holder an ungated door; no trait impl on the witness (`Default`, `From`, `FromStr` are each a
-    public mint); and inherent impls only in the port module, with `for_tests` as their one public
-    item under a genuinely positive `#[cfg(.. test-fixtures ..)]` ancestor — an INVERTED
-    `#[cfg(not(feature = "test-fixtures"))]` was accepted as a gate by an earlier version and
-    compiles in exactly the release builds it claimed to exclude.
-  Thirty-four mutation shapes are verified red against a green baseline, and the legitimate
-  refactors that must stay green (a doc comment naming a banned construct, an added supertrait on
-  `Mailbox`) are checked too.
-- **What the guard still cannot see, stated rather than implied**: macro EXPANSION. A `macro_rules!`
-  can expand to any of the items above, and no AST walk of unexpanded source will know. So the
-  constructs that hide expansion are refused outright rather than analysed — a `macro_rules!`
-  naming the witness, a macro invocation inside the port trait, `include!`, and `#[path]` modules
-  (both of which splice files the directory walk never visits). Those refusals are blunt, and
-  deliberately so: "this construct is banned in this crate" is honest; "this construct is analysed"
-  would not be. One further limit worth naming: the walk does not resolve out-of-line modules, so
-  moving the witness's impls out of `mailbox.rs` fails the guard rather than following them.
+- **The guard asserts a CLOSED rule: the witness appears in no public signature.** The compiler
+  makes the rule unbreakable from outside `actor_client`; every remaining way to reopen the door is
+  an edit INSIDE that crate, and `every_mailbox_port_method_demands_the_access_witness`
+  (tools/codegen-rs, using syn) catches those. **Five independent review passes each defeated an
+  earlier version**, and the failure never changed shape: every version asked *where* the witness
+  appears, and each answer left a slot uninspected. Text forms first (`pub  fn` with two spaces, a
+  split signature, an attribute before `async fn`); then AST item kinds (free fn, const, static,
+  alias… then associated fn, associated const, struct field, enum variant, a provided method); then
+  output-and-field positions, which still missed a generic BOUND
+  (`pub fn mint<T: From<MailboxAccess>>() -> T`) and a PARAMETER on a non-port item
+  (`pub fn with_access(f: impl FnOnce(MailboxAccess) -> R) -> R` — a scoped-capability helper
+  written `pub` by accident, the most plausible real mistake of the whole set).
+  What converged was to stop asking where. For every release-reachable public item, the **whole
+  signature** — generics, where-clause, inputs, output, field and variant types — is one token
+  stream, and any mention of the witness fails, against a **closed exemption list**: the `Mailbox`
+  trait's own items, `impl Mailbox for _` blocks, and the cfg-gated `MailboxAccess::for_tests`.
+  One place keeps an exact-type check instead: the port trait's own parameters, because there a
+  wrapper WEAKENS the demand — `access: Option<MailboxAccess>` mentions the witness while letting
+  the caller pass `None`, which is how pass 4 defeated the guard's primary assertion on the very
+  method this ADR calls the widest hole. Parameter and output positions are opposite problems.
+  Twenty-three bypass shapes are verified red against a green baseline, and so are the legitimate
+  refactors that must stay green (a doc comment naming a banned construct, a `#[cfg(test)]` helper,
+  a `pub(crate)` helper, an added supertrait on `Mailbox`).
+- **What the guard still cannot see, stated rather than implied.** Macro EXPANSION: no AST walk of
+  unexpanded source can follow it, so the constructs that hide it are refused outright rather than
+  analysed — a `macro_rules!` naming the witness, a macro invocation inside the port trait,
+  `include!`, and `#[path]` modules (both of which splice files the directory walk never visits).
+  "Banned in this crate" is honest; "analysed" would not be. The walk also does not resolve
+  out-of-line modules, so moving the witness's impls out of `mailbox.rs` fails the guard rather
+  than following them. And the threat model is **safe Rust**: `mem::zeroed::<MailboxAccess>()`
+  would defeat the whole scheme identically, which is why the workspace-wide
+  `unsafe_code = "forbid"` (itself codegen-guarded) is load-bearing here and not incidental.
   The definitive form is a check over the POST-EXPANSION public API — rustdoc JSON lists exactly
   the public items mentioning a type, immune to macros, `#[path]` and formatting alike. It needs
   nightly, so it is recorded as the direction rather than built.

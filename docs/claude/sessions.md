@@ -177,28 +177,35 @@ public item returns — parse it.** `syn` (+`quote`) as a dev-dependency of `too
 text scanning for rules that genuinely are textual (`makefile_recipe_lines_are_ascii` is about bytes,
 so text is right).
 
-**But parsing alone does not converge — a fourth pass beat the first AST version too, because it
-enumerated ITEM KINDS instead of text forms.** Free fn, const, static, alias… then associated fn,
-associated const, struct field, enum variant, a trait's provided method: nine grammars for one idea.
-What converged was enumerating **positions**:
+**But parsing alone does not converge.** Four further passes beat the AST versions too, because
+each one asked *where* the guarded type appears, and every answer left a slot uninspected: item
+kinds first (free fn, const, static, alias… then associated fn, associated const, struct field, enum
+variant, a trait's provided method), then output-and-field positions — which still missed a generic
+BOUND (`pub fn mint<T: From<Witness>>() -> T`) and a PARAMETER on a non-port item
+(`pub fn with_access(f: impl FnOnce(Witness) -> R) -> R`, a scoped-capability helper written `pub`
+by accident — the most plausible real mistake of the set).
 
-- *Output and field positions* — every publicly-reachable place a value can come OUT — get one rule:
-  "does this type mention the guarded type?" Substring matching is correct here and conservative,
-  because `-> Option<T>` and a `PhantomData<T>` field both hand one over eventually.
-- *Parameter positions* need the OPPOSITE: compare the exact parsed type. A substring check accepted
-  `access: Option<Witness>` as taking the witness, and the caller then passed `None` — that single
-  defect defeated the primary rule the whole guard existed for.
-- Anything that HIDES expansion (`macro_rules!` naming the type, a macro invocation inside the
-  guarded trait, `include!`, `#[path]` modules) must be refused outright and documented as banned,
-  never described as analysed.
-- Watch the ESCAPE HATCH as hard as the rule: an inverted `#[cfg(not(feature = "..."))]` was honoured
-  as a test-gate while compiling in exactly the release builds it claimed to exclude.
+**Stop asking where. Assert the guarded type appears in NO release-reachable public signature, with
+a CLOSED exemption list.** For each public item take the whole signature — generics, where-clause,
+inputs, output, field and variant types — as one token stream and fail on any mention; then name the
+handful of legitimate sites explicitly. An open rule ("these positions are bad") loses to the next
+grammar; a closed one ("nothing but these") does not.
 
+Three riders, all learned the same way:
+
+- **Parameter and output positions are OPPOSITE problems.** In output/field position a substring is
+  correct and conservative (`-> Option<T>` still hands one over). In parameter position it is
+  exactly wrong: `access: Option<Witness>` mentions the type while letting the caller pass `None`.
+  Compare the exact parsed type there. That single defect defeated the primary rule the guard
+  existed for.
+- **Watch the ESCAPE HATCH as hard as the rule.** An inverted `#[cfg(not(feature = "..."))]` was
+  honoured as a test-gate while compiling in exactly the release builds it claimed to exclude — the
+  guard's own exemption granting the thing it guarded.
 Two riders, both learned the same way:
 
-- **Macro expansion stays invisible** to an AST walk of unexpanded source, and so does a `#[path]`
-  module if you walk a directory. Refuse those constructs outright in the guarded crate and SAY that
-  is what you are doing — "banned here" is honest; "analysed" is not. (The definitive form is a check
+- **Macro expansion stays invisible** to an AST walk of unexpanded source, and so do `include!` and
+  a `#[path]` module if you walk a directory. Refuse those constructs outright in the guarded crate
+  and SAY that is what you are doing — "banned here" is honest; "analysed" is not. (The definitive form is a check
   over the post-expansion public API, e.g. rustdoc JSON; it needs nightly, so it is not available on
   this stable CI.)
 - **Mutation-test every arm, and re-run the whole battery after each rewrite.** A fix that closes one
