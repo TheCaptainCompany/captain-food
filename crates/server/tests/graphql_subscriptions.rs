@@ -486,7 +486,7 @@ async fn operation_status_changed_streams_the_journal_lifecycle() {
     // (the legacy PM-leg path), and the arm falls back to it when the mailbox has no row.
     let mailbox: Arc<dyn actor_client::mailbox::Mailbox> =
         Arc::new(actor_client::mailbox::mem::MemMailbox::default());
-    let status_bus = infrastructure::OperationStatusBus::default();
+    let status_bus = actor_client::OperationStatusBus::default();
 
     let message_id = uuid::Uuid::new_v4();
     let session = uuid::Uuid::new_v4();
@@ -522,10 +522,10 @@ async fn operation_status_changed_streams_the_journal_lifecycle() {
     let bus = status_bus.clone();
     tokio::spawn(async move {
         for _ in 0..50 {
-            bus.publish(infrastructure::OperationUpdate {
+            bus.publish(actor_client::OperationUpdate {
                 message_id,
                 correlation_id: message_id,
-                status: ds::CommandJournalStatus::REJECTED,
+                status: ds::InboundMessageStatus::REJECTED,
                 error_code: Some("OfferNotFound".into()),
                 message: Some("Offer not found.".into()),
             });
@@ -554,7 +554,7 @@ async fn operation_status_changed_hides_non_owned_operations() {
     // (the legacy PM-leg path), and the arm falls back to it when the mailbox has no row.
     let mailbox: Arc<dyn actor_client::mailbox::Mailbox> =
         Arc::new(actor_client::mailbox::mem::MemMailbox::default());
-    let status_bus = infrastructure::OperationStatusBus::default();
+    let status_bus = actor_client::OperationStatusBus::default();
 
     let message_id = uuid::Uuid::new_v4();
     journal.insert(&journal_entry(message_id, uuid::Uuid::new_v4())).await.unwrap();

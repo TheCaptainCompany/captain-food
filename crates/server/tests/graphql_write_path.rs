@@ -139,7 +139,7 @@ async fn reset_schema(pool: &PgPool) {
 
 /// Spawn the production delivery side for the test schema: one MailboxWorker per actor type over
 /// the same CommandDeps the composition root builds, on a fast heartbeat so the poll budget holds.
-fn spawn_mailbox_workers(pool: &PgPool, bus: infrastructure::OperationStatusBus) {
+fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
     let deps = infrastructure::generated::command_router::CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
@@ -179,12 +179,12 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: infrastructure::OperationStatusBus)
 
 /// The composition-root wiring, materialized for the test (what `server::router()` builds from
 /// `DATABASE_URL`): read repos + write ports (incl. the command journal + status bus) over the pool.
-fn schema_over(pool: &PgPool, status_bus: infrastructure::OperationStatusBus) -> server::graphql_schema::CaptainSchema {
+fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> server::graphql_schema::CaptainSchema {
     schema_over_with_gate(pool, status_bus, false)
 }
 
 /// Same wiring with the Runtime D1 gate chosen by the test (#272 review MAJOR-3).
-fn schema_over_with_gate(pool: &PgPool, status_bus: infrastructure::OperationStatusBus, pm_mailbox_delivery: bool) -> server::graphql_schema::CaptainSchema {
+fn schema_over_with_gate(pool: &PgPool, status_bus: actor_client::OperationStatusBus, pm_mailbox_delivery: bool) -> server::graphql_schema::CaptainSchema {
     let restaurants: Arc<dyn RestaurantReadRepository> =
         Arc::new(PgRestaurantRepository::new(pool.clone()));
     let prospection: Arc<dyn ProspectionReadRepository> =
@@ -342,7 +342,7 @@ async fn acceptance_first_write_path_journals_dispatches_and_serves_status() {
     reset_schema(&pool).await;
     // One shared status bus: the workers publish terminal transitions on it, the schema's
     // operationStatusChanged streams from it.
-    let status_bus = infrastructure::OperationStatusBus::default();
+    let status_bus = actor_client::OperationStatusBus::default();
     spawn_mailbox_workers(&pool, status_bus.clone());
     let schema = schema_over(&pool, status_bus);
 
@@ -543,7 +543,7 @@ async fn pm_gate_cross_arm_duplicate_replays_instead_of_reexecuting() {
     let _guard = DB_LOCK.lock().await;
     let pool = PgPool::connect(&url).await.expect("connect Postgres");
     reset_schema(&pool).await;
-    let status_bus = infrastructure::OperationStatusBus::default();
+    let status_bus = actor_client::OperationStatusBus::default();
 
     // --- Direction 1: accepted on the LEGACY arm (command_journal), retried on the MAILBOX arm.
     use application::journal::CommandJournal as _;

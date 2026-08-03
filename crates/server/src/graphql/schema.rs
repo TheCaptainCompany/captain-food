@@ -23,7 +23,8 @@ use application::queries::{
     UberSplitPolicyReadRepository,
 };
 
-use infrastructure::{EventBus, OperationStatusBus};
+use actor_client::OperationStatusBus;
+use infrastructure::EventBus;
 
 use super::generated::mutation::MutationRoot;
 use super::generated::query::QueryRoot;
@@ -81,7 +82,8 @@ pub struct WriteDeps {
     /// `inbound_messages` insert the partitioned worker delivers; also the mailbox-first
     /// `operationStatus` read.
     pub mailbox: Arc<dyn Mailbox>,
-    /// The in-process journal-transition broadcast feeding `operationStatusChanged`.
+    /// The in-process operation-response broadcast (behind the actor_client boundary, #303)
+    /// feeding `operationStatusChanged` through `ActorClient::watch`.
     pub status_bus: OperationStatusBus,
     /// Cookie-pickup parking (#112): VerifyPhone/verify-email park the provider session here for
     /// `POST /auth/session` to claim. Fail-closed stand-in (refuses) until AUTH_SESSION_KEY + DB.

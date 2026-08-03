@@ -3,8 +3,9 @@
 //! acting principal (the SAME #235 by_auth_ref bridge the GraphQL edge applies), run the handler
 //! against a per-delivery [`StagingEventStore`], flush the staged events into the completion
 //! transaction, and map the outcome onto the row's terminal verdict. [`StatusBusObserver`]
-//! publishes each COMMITTED command verdict on the [`crate::OperationStatusBus`] — after the
-//! commit, never before, so `operationStatusChanged` subscribers only ever hear durable facts.
+//! publishes each COMMITTED command verdict on the [`actor_client::OperationStatusBus`] (the
+//! §2.1 response bus, behind the boundary crate since #303) — after the commit, never before, so
+//! `ActorClient::watch` consumers only ever hear durable facts.
 
 use std::sync::Arc;
 
@@ -16,9 +17,10 @@ use sqlx::{Postgres, Transaction};
 
 use application::payments::RecordOutcome;
 
+use actor_client::status_bus::{OperationStatusBus, OperationUpdate};
+
 use crate::generated::command_router::{dispatch_command, CommandDeps};
 use crate::persistence::event_bus::{AppendedEvent, EventBus};
-use crate::persistence::status_bus::{OperationStatusBus, OperationUpdate};
 
 use super::activation::{ActivationSettings, DeliveryActivation};
 use super::{flush_staged_in_tx, pm_delivery};
@@ -708,13 +710,16 @@ impl DeliveryObserver for StatusBusObserver {
             .num_milliseconds()
             .max(0) as f64;
         telemetry::meters::acceptance::completed(status_label, elapsed_ms);
-        use domain::generated::scalars::CommandJournalStatus as J;
+        // The bus speaks the mailbox-native enum (#303) and carries the HONEST verdict —
+        // IGNORED/DUPLICATE stay themselves on the wire (the API mapping folds them into
+        // SUCCEEDED at the edge, where that flattening is a presentation choice, not a fact).
+        use domain::generated::scalars::InboundMessageStatus as M;
         let status = match verdict {
-            HandlerVerdict::Succeeded | HandlerVerdict::Ignored | HandlerVerdict::Duplicate => {
-                J::SUCCEEDED
-            }
-            HandlerVerdict::Rejected(_) => J::REJECTED,
-            HandlerVerdict::Failed(_) => J::FAILED,
+            HandlerVerdict::Succeeded => M::SUCCEEDED,
+            HandlerVerdict::Ignored => M::IGNORED,
+            HandlerVerdict::Duplicate => M::DUPLICATE,
+            HandlerVerdict::Rejected(_) => M::REJECTED,
+            HandlerVerdict::Failed(_) => M::FAILED,
         };
         let error_code = verdict
             .error()
@@ -744,11 +749,11 @@ impl DeliveryObserver for StatusBusObserver {
         if message.kind != "COMMAND" {
             return;
         }
-        use domain::generated::scalars::CommandJournalStatus as J;
+        use domain::generated::scalars::InboundMessageStatus as M;
         self.bus.publish(OperationUpdate {
             message_id: message.message_id,
             correlation_id: message.correlation_id,
-            status: J::FAILED,
+            status: M::FAILED,
             error_code: Some("DeliveryInfrastructureError".to_owned()),
             message: None,
         });

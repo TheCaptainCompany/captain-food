@@ -22,9 +22,10 @@ use application::generated::services::{IdentityService, PaymentService};
 
 use infrastructure::generated::command_router::CommandDeps;
 use infrastructure::mailbox::{MailboxCommandHandler, StatusBusObserver};
+use actor_client::{ActorClient, OperationStatusBus, OperationWatchEvent};
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
-    OperationStatusBus, PgCatalogRepository, PgCustomerRepository, PgEventStore,
+    PgCatalogRepository, PgCustomerRepository, PgEventStore,
     PgProspectionRepository, PgRestaurantRepository, PgSlugReservationRepository,
     UnverifiedGbpOrderLinkProbe,
 };
@@ -224,7 +225,14 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
     .await;
 
     let bus = OperationStatusBus::default();
-    let mut updates = bus.subscribe();
+    // The typed §2.1 watch is the only consumer surface of the bus (#303): one watch per
+    // acceptance handle, all subscribed BEFORE the drain so no transition is missed.
+    let reader = ActorClient::new(
+        Arc::new(infrastructure::persistence::mailbox_store::PgMailbox::new(pool.clone())),
+        bus.clone(),
+    );
+    let mut watches =
+        [open_id, post_id, stranger_id].map(|message_id| (message_id, reader.watch(message_id)));
     let worker = MailboxWorker::new(
         pool.clone(),
         "w-A",
@@ -289,20 +297,41 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
             .get("p");
     assert_eq!(checkpoint, last_pos);
 
-    // The post-commit status fan-out: one update per command, statuses matching the verdicts.
-    use domain::generated::scalars::CommandJournalStatus as J;
+    // The post-commit status fan-out, consumed through the typed watch (#303): one update per
+    // command — already buffered, each watch filtered to its handle — statuses matching the
+    // verdicts in the mailbox-native enum.
+    use domain::generated::scalars::InboundMessageStatus as M;
     let mut seen = Vec::new();
-    while let Ok(u) = updates.try_recv() {
-        seen.push((u.message_id, u.status, u.error_code));
+    for (message_id, watch) in &mut watches {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), watch.next())
+            .await
+            .expect("the committed verdict was published");
+        match event {
+            Some(OperationWatchEvent::Update(u)) => {
+                assert_eq!(u.message_id, *message_id, "the watch never leaks another handle");
+                seen.push((u.message_id, u.status, u.error_code));
+            }
+            other => panic!("expected an update for {message_id}, got {other:?}"),
+        }
     }
     assert_eq!(
         seen,
         vec![
-            (open_id, J::SUCCEEDED, None),
-            (post_id, J::SUCCEEDED, None),
-            (stranger_id, J::REJECTED, Some("NotAParticipant".into())),
+            (open_id, M::SUCCEEDED, None),
+            (post_id, M::SUCCEEDED, None),
+            (stranger_id, M::REJECTED, Some("NotAParticipant".into())),
         ]
     );
+    // …and EXACTLY one: a second next() on any watch must starve (every other update on the
+    // shared bus is filtered out), so a double-publish for one command cannot pass unnoticed.
+    for (message_id, watch) in &mut watches {
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), watch.next())
+                .await
+                .is_err(),
+            "a second update was published for {message_id}"
+        );
+    }
 
     // Atomicity spot-check: re-draining delivers nothing (all rows terminal).
     assert_eq!(worker.drain().await.expect("re-drain"), 0);

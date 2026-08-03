@@ -3,6 +3,22 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-03 — [#303 "ActorClient::watch — relocate OperationStatusBus behind the actor-client boundary"](https://github.com/TheCaptainCompany/captain-food/issues/303)
+> (PROP-20260802-130500 D4 tail, PROP-20260728-152752 §2.1)**: the operation-response bus is
+> behind the boundary now. `OperationStatusBus`/`OperationUpdate` moved from
+> `infrastructure::persistence::status_bus` to `actor_client::status_bus`, re-keyed from the
+> legacy `CommandJournalStatus` to the mailbox-native `InboundMessageStatus` — the mailbox
+> workers' `StatusBusObserver` publishes the HONEST verdicts (IGNORED/DUPLICATE stay themselves;
+> the API mapping folds them into SUCCEEDED at the edge), and the legacy journal+spawn path maps
+> in losslessly (`journal_status_mailbox`). The generic read door gained the push half:
+> `ActorClient::watch(message_id)` returns a per-operation stream (filtered to the handle, lag
+> explicit as a re-read cue, ends when the bus closes); `OperationStatusBus::subscribe` is
+> `pub(crate)` so the typed watch is the ONLY consumer surface (ADR-20260802-170059 posture).
+> The generated `operationStatusChanged` resolver now subscribes through `watch` before the
+> snapshot read (race still closed) and maps updates via `mailbox_status_api`; the generated
+> `operationStatus`/snapshot reads are unchanged. `actor_client` gains `tokio` (`sync`) as its
+> bus dependency — still no sqlx/reqwest (D3 allowlist untouched).
+
 > ✅ **2026-08-03 — [#315 "Admin requeue mutation for poisoned mailbox rows (ADR-20260803-002712 Q1)"](https://github.com/TheCaptainCompany/captain-food/issues/315)
 > ([ADR-20260803-143216](adr/20260803-143216-admin-requeue-rides-the-mailbox.md))**: operator
 > recovery of a cap-poisoned row is a first-class ADMIN mutation riding the mailbox it
@@ -74,9 +90,9 @@
 > `generated/addresses.rs`, re-exported by the infra `command_router` — one definition), and the
 > **D4 read door**: one generic `ActorClient.get_operation_status(message_id)` — the only
 > sanctioned read over `inbound_messages` status; the generated `operationStatus` query and the
-> `operationStatusChanged` snapshot both resolve through it (`watch` deferred: the
-> `OperationStatusBus` still lives in infrastructure keyed to the legacy journal status — its
-> relocation is a recorded follow-up, not improvised). `infrastructure` keeps ONLY the SQL side
+> `operationStatusChanged` snapshot both resolve through it (`watch` was deferred to #303 —
+> done 2026-08-03, see the entry above: the bus lives in `actor_client` now, mailbox-keyed).
+> `infrastructure` keeps ONLY the SQL side
 > (`PgMailbox` binds via getters; `apply_schedules_in_tx` binds the actor_client constructor).
 > **Review hardening (independent pass, 2026-08-02)**: (1) the D8-deferred UNTYPED bulk fact door
 > (`enqueue_inbound_facts`/`InboundFact`) sits behind the `bulk-door` cargo feature, with

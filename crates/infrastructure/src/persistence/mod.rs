@@ -33,7 +33,6 @@ pub mod refund_queue;
 pub mod restaurant;
 pub mod restaurant_store;
 pub mod runtime_posture;
-pub mod status_bus;
 pub mod slug_alias_store;
 pub mod slug_reservation;
 
@@ -56,7 +55,6 @@ pub use order_conversation::PgOrderConversationRepository;
 pub use crate::generated::pm_state::{
     PgCartBindingState, PgDeliveryDispatchState, PgPaymentProcessState, PgRefundProcessState,
 };
-pub use status_bus::{OperationStatusBus, OperationUpdate};
 pub use prospection::PgProspectionRepository;
 pub use referential::PgDispatchStrategy;
 pub use referential::{

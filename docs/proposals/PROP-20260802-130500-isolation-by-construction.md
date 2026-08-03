@@ -4,8 +4,8 @@
   change, against the recommendation). Phases deliver under #290, each gated independently.
 - **Date**: 2026-08-02
 - **Tracking issues**: [#290](https://github.com/TheCaptainCompany/captain-food/issues/290) (phase 1, CLOSED 2026-08-02 — product owner: "close all the phases", one issue per remaining item). Successors:
-  [#302 "Lint floor (D6)"](https://github.com/TheCaptainCompany/captain-food/issues/302) ·
-  [#303 "ActorClient::watch — relocate OperationStatusBus"](https://github.com/TheCaptainCompany/captain-food/issues/303) ·
+  [#302 "Lint floor (D6)"](https://github.com/TheCaptainCompany/captain-food/issues/302) (done 2026-08-03) ·
+  [#303 "ActorClient::watch — relocate OperationStatusBus"](https://github.com/TheCaptainCompany/captain-food/issues/303) (done 2026-08-03) ·
   [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304) ·
   [#305 "View_* read declarations"](https://github.com/TheCaptainCompany/captain-food/issues/305) ·
   [#306 "Isolation phase 2: one crate per actor client"](https://github.com/TheCaptainCompany/captain-food/issues/306) ·

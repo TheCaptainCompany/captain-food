@@ -3697,7 +3697,7 @@ impl MutationRoot {
         Ok(acceptance(&env, OperationStatus::PENDING, false))
         } else {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
-        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
+        let status_bus = ctx.data::<actor_client::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
         let catalogs = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?.clone();
         let payments = ctx.data::<std::sync::Arc<dyn application::generated::services::PaymentService>>()?.clone();
@@ -4702,7 +4702,7 @@ impl MutationRoot {
         Ok(acceptance(&env, OperationStatus::PENDING, false))
         } else {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
-        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
+        let status_bus = ctx.data::<actor_client::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
         let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?.clone();
         let payments = ctx.data::<std::sync::Arc<dyn application::generated::services::PaymentService>>()?.clone();
@@ -4899,7 +4899,7 @@ impl MutationRoot {
         Ok(acceptance(&env, OperationStatus::PENDING, false))
         } else {
         let journal = ctx.data::<std::sync::Arc<dyn application::journal::CommandJournal>>()?.clone();
-        let status_bus = ctx.data::<infrastructure::OperationStatusBus>()?.clone();
+        let status_bus = ctx.data::<actor_client::OperationStatusBus>()?.clone();
         let store = ctx.data::<std::sync::Arc<dyn application::ports::EventStore>>()?.clone();
         let refund_state = ctx.data::<std::sync::Arc<dyn application::pm_state::RefundProcessStateStore>>()?.clone();
         let payload_json = command_payload(&input)?;
@@ -6676,7 +6676,7 @@ pub(crate) fn mailbox_operation_owned(
 /// catalogued generic Internal (adapter detail never leaks).
 async fn complete_operation(
     journal: std::sync::Arc<dyn application::journal::CommandJournal>,
-    bus: infrastructure::OperationStatusBus,
+    bus: actor_client::OperationStatusBus,
     message_id: uuid::Uuid,
     correlation_id: uuid::Uuid,
     outcome: Result<(), domain::shared::errors::DomainError>,
@@ -6717,7 +6717,7 @@ async fn complete_operation(
         // something rather than waiting forever -- but it is a real inconsistency and must be loud.
         tracing::error!(error = %e, %message_id, %correlation_id, "command journal: complete() failed -- terminal status not persisted");
     }
-    bus.publish(infrastructure::OperationUpdate { message_id, correlation_id, status, error_code, message });
+    bus.publish(actor_client::OperationUpdate { message_id, correlation_id, status: journal_status_mailbox(status), error_code, message });
 }
 
 /// `CommandJournalStatus` → the `command_completion_ms{status}` label the contract names
@@ -6729,6 +6729,22 @@ fn journal_status_label(s: domain::generated::scalars::CommandJournalStatus) -> 
         J::SUCCEEDED => "SUCCEEDED",
         J::REJECTED => "REJECTED",
         J::FAILED => "FAILED",
+    }
+}
+
+/// `CommandJournalStatus` → the mailbox-native status the relocated response bus speaks (#303):
+/// the legacy journal+spawn path publishes on the SAME generalized bus as the mailbox workers,
+/// so a watcher never cares which arm completed the operation. Lossless — the journal enum is a
+/// subset of the mailbox one.
+fn journal_status_mailbox(
+    s: domain::generated::scalars::CommandJournalStatus,
+) -> domain::generated::scalars::InboundMessageStatus {
+    use domain::generated::scalars::{CommandJournalStatus as J, InboundMessageStatus as M};
+    match s {
+        J::RECEIVED => M::RECEIVED,
+        J::SUCCEEDED => M::SUCCEEDED,
+        J::REJECTED => M::REJECTED,
+        J::FAILED => M::FAILED,
     }
 }
 
