@@ -1889,8 +1889,19 @@ keys:
             }
             let m = &a.meta;
             let toks = quote::quote!(#m).to_string();
-            (toks.contains("test-fixtures") || toks.contains("test")) && !toks.contains("not (")
+            // WHOLE tokens: a substring match honours `#[cfg(feature = "fastest")]` as a test
+            // gate and stops scanning everything under it, in release.
+            cfg_tokens(&toks).iter().any(|t| *t == "test" || *t == "test-fixtures")
+                && !toks.contains("not (")
         })
+    }
+
+    /// A cfg attribute's token stream split into whole words (keeping `-`/`_` so feature names
+    /// stay intact).
+    fn cfg_tokens(toks: &str) -> Vec<&str> {
+        toks.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))
+            .filter(|t| !t.is_empty())
+            .collect()
     }
 
     /// Specifically a POSITIVE `test-fixtures` gate — what makes the one public mint legitimate.
@@ -1899,7 +1910,7 @@ keys:
             a.path().is_ident("cfg") && {
                 let m = &a.meta;
                 let t = quote::quote!(#m).to_string();
-                t.contains("test-fixtures") && !t.contains("not (")
+                cfg_tokens(&t).contains(&"test-fixtures") && !t.contains("not (")
             }
         })
     }
@@ -1949,7 +1960,17 @@ keys:
             let item_test_only = test_only || is_test_only_cfg(item_attrs(item));
             match item {
                 Item::Mod(m) => {
-                    if m.attrs.iter().any(|a| a.path().is_ident("path")) {
+                    let pathy = m.attrs.iter().any(|a| {
+                        a.path().is_ident("path") || {
+                            // `#[cfg_attr(<cond>, path = "..")]` is a `#[path]` in disguise, and
+                            // the condition can be arranged to fire in release. The escape hatch
+                            // needs the same scrutiny as the rule it guards.
+                            let mm = &a.meta;
+                            a.path().is_ident("cfg_attr")
+                                && quote::quote!(#mm).to_string().contains("path =")
+                        }
+                    });
+                    if pathy {
                         out.leaks.push(format!(
                             "  {rel}: `mod {}` carries `#[path]` — this guard walks the directory, \
                              so a file outside `crates/actor_client/src` is invisible to it",
@@ -1973,6 +1994,22 @@ keys:
                                     syn::FnArg::Receiver(_) => false,
                                 }),
                             )),
+                            // Associated items on the port trait. Not exploitable today only
+                            // because `Mailbox` is used as `dyn` and such a const makes it
+                            // dyn-incompatible (E0038) — safety borrowed from a usage pattern
+                            // elsewhere, so it is owned here instead.
+                            syn::TraitItem::Const(c) => {
+                                out.check_sig(rel, &format!("`Mailbox::{}`", c.ident), true, &c.ty)
+                            }
+                            syn::TraitItem::Type(ty) => {
+                                let b = &ty.bounds;
+                                out.check_sig(
+                                    rel,
+                                    &format!("`Mailbox::{}` bounds", ty.ident),
+                                    true,
+                                    &quote::quote!(#b),
+                                )
+                            }
                             // A macro INVOCATION expands to items this walk can never see.
                             syn::TraitItem::Macro(m) => out.leaks.push(format!(
                                 "  {rel}: `Mailbox` contains a macro invocation (`{}!`) — trait \
@@ -2056,6 +2093,19 @@ keys:
                              (Keep them in crates/actor_client/src/mailbox.rs — this guard does \
                              not resolve out-of-line modules, so moving them costs the gate.)"
                         ));
+                    }
+                    // The supertrait rule's TWIN SPELLING: `impl<T: Mailbox> Ext for T` is at
+                    // least as idiomatic as `trait Ext: Mailbox`, and reaches the port exactly the
+                    // same way. Blocking one and waving the other through is not a rule.
+                    if !is_port_impl {
+                        let g = &i.generics;
+                        if quote::quote!(#g).to_string().contains("Mailbox") {
+                            out.leaks.push(format!(
+                                "  {rel}: a blanket `impl<T: Mailbox>` — a method on it reaches \
+                                 `cancel_scheduled`/`by_message` with a witness it mints itself, \
+                                 for any port holder (same door as a `Mailbox` supertrait)"
+                            ));
+                        }
                     }
                     if is_port_impl {
                         continue;
@@ -2174,18 +2224,29 @@ keys:
                     &quote::quote!(#fm),
                 ),
 
-                // Expansion this walk cannot follow.
-                Item::Macro(m) if m.mac.path.is_ident("macro_rules") && mentions(&m.mac.tokens, WITNESS) => {
-                    out.leaks.push(format!(
-                        "  {rel}: a `macro_rules!` mentioning the witness — expansion is invisible \
-                         to this guard; write the item out instead"
-                    ));
-                }
-                Item::Macro(m) if m.mac.path.is_ident("include") => {
-                    out.leaks.push(format!(
-                        "  {rel}: `include!` splices a file this guard never walks — keep every \
-                         module a real file under `crates/actor_client/src`"
-                    ));
+                // EXPANSION this walk cannot follow. Matched on the path's LAST SEGMENT and on
+                // the invocation as well as the definition: `std::include!` walked past an
+                // `is_ident("include")` check, and `forge!(crate::mailbox::MailboxAccess)` forged
+                // a public mint while only the `macro_rules!` DEFINITION was being inspected.
+                Item::Macro(m) => {
+                    let name = m
+                        .mac
+                        .path
+                        .segments
+                        .last()
+                        .map(|s| s.ident.to_string())
+                        .unwrap_or_default();
+                    if name == "include" {
+                        out.leaks.push(format!(
+                            "  {rel}: `include!` splices a file this guard never walks — keep \
+                             every module a real file under `crates/actor_client/src`"
+                        ));
+                    } else if mentions(&m.mac.tokens, WITNESS) {
+                        out.leaks.push(format!(
+                            "  {rel}: an item-position macro (`{name}!`) carries the witness as a \
+                             token — expansion is invisible to this guard, so write the item out"
+                        ));
+                    }
                 }
                 _ => {}
             }

@@ -68,41 +68,46 @@ is a loud, reviewable diff, not a silent shortcut.
   explicitly NOT contained by D3 — a decorator needs no `sqlx` — and saying so would be worse than
   saying nothing, because a wrong justification stops the next reviewer looking. Dropping `Copy`
   would stop retention but not decoration, so it buys nothing real.
-- **The guard asserts a CLOSED rule: the witness appears in no public signature.** The compiler
-  makes the rule unbreakable from outside `actor_client`; every remaining way to reopen the door is
-  an edit INSIDE that crate, and `every_mailbox_port_method_demands_the_access_witness`
-  (tools/codegen-rs, using syn) catches those. **Five independent review passes each defeated an
-  earlier version**, and the failure never changed shape: every version asked *where* the witness
-  appears, and each answer left a slot uninspected. Text forms first (`pub  fn` with two spaces, a
-  split signature, an attribute before `async fn`); then AST item kinds (free fn, const, static,
-  alias… then associated fn, associated const, struct field, enum variant, a provided method); then
-  output-and-field positions, which still missed a generic BOUND
-  (`pub fn mint<T: From<MailboxAccess>>() -> T`) and a PARAMETER on a non-port item
-  (`pub fn with_access(f: impl FnOnce(MailboxAccess) -> R) -> R` — a scoped-capability helper
-  written `pub` by accident, the most plausible real mistake of the whole set).
-  What converged was to stop asking where. For every release-reachable public item, the **whole
-  signature** — generics, where-clause, inputs, output, field and variant types — is one token
-  stream, and any mention of the witness fails, against a **closed exemption list**: the `Mailbox`
-  trait's own items, `impl Mailbox for _` blocks, and the cfg-gated `MailboxAccess::for_tests`.
-  One place keeps an exact-type check instead: the port trait's own parameters, because there a
-  wrapper WEAKENS the demand — `access: Option<MailboxAccess>` mentions the witness while letting
-  the caller pass `None`, which is how pass 4 defeated the guard's primary assertion on the very
-  method this ADR calls the widest hole. Parameter and output positions are opposite problems.
-  Twenty-three bypass shapes are verified red against a green baseline, and so are the legitimate
-  refactors that must stay green (a doc comment naming a banned construct, a `#[cfg(test)]` helper,
-  a `pub(crate)` helper, an added supertrait on `Mailbox`).
-- **What the guard still cannot see, stated rather than implied.** Macro EXPANSION: no AST walk of
-  unexpanded source can follow it, so the constructs that hide it are refused outright rather than
-  analysed — a `macro_rules!` naming the witness, a macro invocation inside the port trait,
-  `include!`, and `#[path]` modules (both of which splice files the directory walk never visits).
-  "Banned in this crate" is honest; "analysed" would not be. The walk also does not resolve
-  out-of-line modules, so moving the witness's impls out of `mailbox.rs` fails the guard rather
-  than following them. And the threat model is **safe Rust**: `mem::zeroed::<MailboxAccess>()`
-  would defeat the whole scheme identically, which is why the workspace-wide
-  `unsafe_code = "forbid"` (itself codegen-guarded) is load-bearing here and not incidental.
-  The definitive form is a check over the POST-EXPANSION public API — rustdoc JSON lists exactly
-  the public items mentioning a type, immune to macros, `#[path]` and formatting alike. It needs
-  nightly, so it is recorded as the direction rather than built.
+- **The guard covers SIGNATURE-LEVEL leaks, and that is a bounded claim, not a closed one.** The
+  compiler makes the rule unbreakable from outside `actor_client`; every remaining way to reopen the
+  door is an edit INSIDE that crate, and `every_mailbox_port_method_demands_the_access_witness`
+  (tools/codegen-rs, using syn) catches the ones a signature can express. For every
+  release-reachable public item it takes the WHOLE signature — generics, where-clause, inputs,
+  output, field and variant types — as one token stream and fails on any mention of the witness,
+  against an explicit exemption list (the `Mailbox` trait's own items, `impl Mailbox for _`, and the
+  cfg-gated `MailboxAccess::for_tests`). The port trait's own parameters keep an EXACT parsed-type
+  check instead, because there a wrapper WEAKENS the demand: `access: Option<MailboxAccess>` names
+  the witness while letting the caller pass `None`. **Parameter and output positions are opposite
+  problems** — in output position a mention is conservative and right, in parameter position it is
+  exactly wrong.
+- **THE RESIDUAL CLASS, stated because six review passes earned it.** A public in-crate wrapper that
+  mints internally and exposes the capability through a signature that never names the witness —
+  `pub fn cancel_any(&self, id: Uuid) -> Result<bool>` on a blanket `impl<T: Mailbox>` — is
+  invisible to ANY signature analysis. It cannot even be banned as a construct, because
+  `enqueue_inbound_facts` (the sanctioned D8 bulk door) is itself a member of that class. The guard
+  blocks the two spellings that announce themselves (`trait Ext: Mailbox` and
+  `impl<T: Mailbox> Ext for T`), and that is worth having, but the class is not closed and calling
+  it closed would be the same failure as the doc comment this change deleted. What contains the
+  residue is what contains the decorator case: it is an edit to the boundary crate, visible in any
+  diff, plus the D3 capability allowlist and the composition root.
+  Six independent review passes each defeated an earlier version of this guard, and the failure
+  never changed shape: every version asked *where* the witness appears, and each answer left a slot
+  uninspected — text forms, then item kinds, then output-and-field positions, then a generic bound
+  and a callback parameter. Twenty-nine bypass shapes are now verified red against a green baseline,
+  alongside the legitimate refactors that must stay green (a doc comment naming a banned construct,
+  a `#[cfg(test)]` helper, a `pub(crate)` helper, an added supertrait on `Mailbox`).
+- **What the guard cannot see, stated rather than implied.** Macro EXPANSION: no AST walk of
+  unexpanded source can follow it, so the constructs that hide it are refused as a CLASS — matched
+  on the path's last segment, since `std::include!` walked past an `is_ident("include")` check and
+  `#[cfg_attr(<cond>, path = "…")]` walked past a `#[path]` check. Any item-position macro carrying
+  the witness as a token, any `include!`, and any `#[path]`/`cfg_attr`-path module fails. The walk
+  also does not resolve out-of-line modules, so moving the witness's impls out of `mailbox.rs` fails
+  the guard rather than following them. And the threat model is **safe Rust**:
+  `mem::zeroed::<MailboxAccess>()` would defeat the whole scheme identically, which makes the
+  workspace-wide `unsafe_code = "forbid"` (itself codegen-guarded) load-bearing here, not
+  incidental. The definitive form is a check over the POST-EXPANSION public API — rustdoc JSON
+  lists exactly the public items mentioning a type, immune to macros, `#[path]` and formatting
+  alike. It needs nightly, so it is recorded as the direction rather than built.
 - Callers that need the read door now need an `ActorClient`, which needs an `OperationStatusBus`.
   In the monolith that is the real bus. A **standalone adapter has no shared bus** —
   `run_standalone_workers` publishes onto a separate instance nothing outside it can subscribe to —

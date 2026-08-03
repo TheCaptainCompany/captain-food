@@ -191,7 +191,7 @@ inputs, output, field and variant types — as one token stream and fail on any 
 handful of legitimate sites explicitly. An open rule ("these positions are bad") loses to the next
 grammar; a closed one ("nothing but these") does not.
 
-Three riders, all learned the same way:
+Riders, all learned the same way:
 
 - **Parameter and output positions are OPPOSITE problems.** In output/field position a substring is
   correct and conservative (`-> Option<T>` still hands one over). In parameter position it is
@@ -200,9 +200,17 @@ Three riders, all learned the same way:
   existed for.
 - **Watch the ESCAPE HATCH as hard as the rule.** An inverted `#[cfg(not(feature = "..."))]` was
   honoured as a test-gate while compiling in exactly the release builds it claimed to exclude — the
-  guard's own exemption granting the thing it guarded.
-Two riders, both learned the same way:
-
+  guard's own exemption granting the thing it guarded. A `#[path]` ban that misses
+  `#[cfg_attr(<cond>, path = "…")]`, and an `include!` ban keyed on `is_ident` that misses
+  `std::include!`, are the same mistake: **ban a CLASS, matched on the last path segment, not a
+  spelling.**
+- **Know where the guard's ceiling is, and write it down.** Some classes are not checkable at all
+  by the technique you chose, and finding that out is a result, not a failure. Here: a public
+  in-crate wrapper that mints internally and exposes the capability through a signature that never
+  names the guarded type (`pub fn cancel_any(&self, id: Uuid) -> Result<bool>`) is invisible to ANY
+  signature analysis — and the codebase's own sanctioned bulk door is a member of that class, so it
+  cannot even be banned. When a rule blocks one spelling of a class while its twin passes, do not
+  call it closed; say which class it covers and what contains the rest.
 - **Macro expansion stays invisible** to an AST walk of unexpanded source, and so do `include!` and
   a `#[path]` module if you walk a directory. Refuse those constructs outright in the guarded crate
   and SAY that is what you are doing — "banned here" is honest; "analysed" is not. (The definitive form is a check

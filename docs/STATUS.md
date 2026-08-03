@@ -27,20 +27,26 @@
 > which is what keeps PROP-20260802-130500 phase 2 a visibility change rather than a redesign.
 > `ActorClient::pull_only` + `watch -> Option<OperationWatch>` put the no-shared-bus posture of a
 > standalone adapter in the type, instead of a default bus whose `watch` would hang forever.
-> `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) catches the widenings
-> the compiler cannot — they are all EDITS TO THE BOUNDARY CRATE. It parses the AST (syn, a new
-> dev-dependency) and asserts a CLOSED rule: for every release-reachable public item, the WHOLE
-> signature (generics, where-clause, inputs, output, field and variant types) must not mention the
-> witness, against a closed exemption list (the `Mailbox` trait's items, `impl Mailbox for _`, and
-> the cfg-gated `for_tests`). The port trait's own parameters keep an EXACT type check instead,
-> because there a wrapper weakens the demand — `Option<MailboxAccess>` mentions the witness while
-> letting the caller pass `None`. That asymmetry is the lesson: parameter and output positions are
-> opposite problems. Five review passes each defeated an earlier version, every one of which asked
-> *where* the witness appears and left a slot uninspected. Macro expansion stays invisible to any
-> such walk, so `macro_rules!` naming the witness, a macro invocation in the port trait, `include!`
-> and `#[path]` modules are refused outright; the threat model is safe Rust, so the workspace-wide
-> `unsafe_code = "forbid"` is load-bearing here. Twenty-three bypass shapes verified red against a
-> green baseline, plus the legitimate refactors that must stay green.
+> `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) catches the
+> SIGNATURE-LEVEL widenings the compiler cannot — they are all EDITS TO THE BOUNDARY CRATE. It
+> parses the AST (syn, a new dev-dependency): for every release-reachable public item the WHOLE
+> signature (generics, where-clause, inputs, output, field/variant types) must not mention the
+> witness, against an explicit exemption list (the `Mailbox` trait's items, `impl Mailbox for _`,
+> the cfg-gated `for_tests`); the port trait's own parameters keep an EXACT type check, because
+> there `Option<MailboxAccess>` would let the caller pass `None`. **Parameter and output positions
+> are opposite problems.** Six review passes each defeated an earlier version, every one of which
+> asked *where* the witness appears and left a slot uninspected. The claim is bounded, not closed:
+> a public in-crate wrapper that mints internally and never names the witness in its signature
+> (`pub fn cancel_any(&self, id)` on a blanket `impl<T: Mailbox>`) is invisible to any signature
+> analysis, and cannot even be banned as a construct because the sanctioned bulk door
+> `enqueue_inbound_facts` is a member of that class — what contains the residue is the same thing
+> that contains the decorator case: an edit to the boundary crate, visible in any diff. Macro
+> expansion is likewise invisible, so `include!`, `#[path]`/`cfg_attr`-path modules and any
+> item-position macro carrying the witness are refused as a CLASS (matched on the last path
+> segment, after `std::include!` and `cfg_attr(.., path=..)` each walked past a narrower check).
+> The threat model is safe Rust, so the workspace-wide `unsafe_code = "forbid"` is load-bearing.
+> Twenty-nine bypass shapes verified red against a green baseline, plus the legitimate refactors
+> that must stay green.
 > §5 audit: the `Mailbox` port row moves ❌ → ✅ compiler;
 > `View_*` reads ([#305](https://github.com/TheCaptainCompany/captain-food/issues/305)) and
 > `PgEventStore` append stay open.
