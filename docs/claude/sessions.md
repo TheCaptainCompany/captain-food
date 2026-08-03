@@ -177,7 +177,7 @@ public item returns — parse it.** `syn` (+`quote`) as a dev-dependency of `too
 text scanning for rules that genuinely are textual (`makefile_recipe_lines_are_ascii` is about bytes,
 so text is right).
 
-**But parsing alone does not converge.** Four further passes beat the AST versions too, because
+**But parsing alone does not converge.** Three further passes beat the AST versions too, because
 each one asked *where* the guarded type appears, and every answer left a slot uninspected: item
 kinds first (free fn, const, static, alias… then associated fn, associated const, struct field, enum
 variant, a trait's provided method), then output-and-field positions — which still missed a generic

@@ -74,8 +74,9 @@ is a loud, reviewable diff, not a silent shortcut.
   (tools/codegen-rs, using syn) catches the ones a signature can express. For every
   release-reachable public item it takes the WHOLE signature — generics, where-clause, inputs,
   output, field and variant types — as one token stream and fails on any mention of the witness,
-  against an explicit exemption list (the `Mailbox` trait's own items, `impl Mailbox for _`, and the
-  cfg-gated `MailboxAccess::for_tests`). The port trait's own parameters keep an EXACT parsed-type
+  against an explicit exemption list (the `Mailbox` trait's own METHODS — its associated consts and
+  types are checked like anything else — plus `impl Mailbox for _` blocks and the cfg-gated
+  `MailboxAccess::for_tests`). The port trait's own parameters keep an EXACT parsed-type
   check instead, because there a wrapper WEAKENS the demand: `access: Option<MailboxAccess>` names
   the witness while letting the caller pass `None`. **Parameter and output positions are opposite
   problems** — in output position a mention is conservative and right, in parameter position it is
@@ -84,10 +85,12 @@ is a loud, reviewable diff, not a silent shortcut.
   mints internally and exposes the capability through a signature that never names the witness —
   `pub fn cancel_any(&self, id: Uuid) -> Result<bool>` on a blanket `impl<T: Mailbox>` — is
   invisible to ANY signature analysis. It cannot even be banned as a construct, because
-  `enqueue_inbound_facts` (the sanctioned D8 bulk door) is itself a member of that class. The guard
-  blocks the two spellings that announce themselves (`trait Ext: Mailbox` and
-  `impl<T: Mailbox> Ext for T`), and that is worth having, but the class is not closed and calling
-  it closed would be the same failure as the doc comment this change deleted. What contains the
+  `enqueue_inbound_facts` (the sanctioned D8 bulk door) is itself a member of that class — contained
+  there by its own `bulk-door` feature gate, which only `infrastructure` may enable, not by any
+  signature rule. The guard blocks the spellings that announce themselves (`trait Ext: Mailbox`,
+  `impl<T: Mailbox> Ext for T`, and the same bound in a `where` clause), and that is worth having,
+  but the class is not closed and calling it closed would be the same failure as the doc comment
+  this change deleted. What contains the
   residue is what contains the decorator case: it is an edit to the boundary crate, visible in any
   diff, plus the D3 capability allowlist and the composition root.
   Six independent review passes each defeated an earlier version of this guard, and the failure

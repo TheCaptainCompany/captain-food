@@ -2098,8 +2098,18 @@ keys:
                     // least as idiomatic as `trait Ext: Mailbox`, and reaches the port exactly the
                     // same way. Blocking one and waving the other through is not a rule.
                     if !is_port_impl {
+                        // BOTH slots, mirroring the trait arm: `ToTokens for Generics` emits the
+                        // `<..>` params WITHOUT the where-clause, so reading `i.generics` alone
+                        // blocks `impl<T: Mailbox>` and waves `impl<T> .. where T: Mailbox`
+                        // through — the very spelling-vs-class mistake this arm exists to fix.
                         let g = &i.generics;
-                        if quote::quote!(#g).to_string().contains("Mailbox") {
+                        let w = i
+                            .generics
+                            .where_clause
+                            .as_ref()
+                            .map(|w| quote::quote!(#w).to_string())
+                            .unwrap_or_default();
+                        if quote::quote!(#g).to_string().contains("Mailbox") || w.contains("Mailbox") {
                             out.leaks.push(format!(
                                 "  {rel}: a blanket `impl<T: Mailbox>` — a method on it reaches \
                                  `cancel_scheduled`/`by_message` with a witness it mints itself, \
