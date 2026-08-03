@@ -322,6 +322,16 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
             (stranger_id, M::REJECTED, Some("NotAParticipant".into())),
         ]
     );
+    // …and EXACTLY one: a second next() on any watch must starve (every other update on the
+    // shared bus is filtered out), so a double-publish for one command cannot pass unnoticed.
+    for (message_id, watch) in &mut watches {
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), watch.next())
+                .await
+                .is_err(),
+            "a second update was published for {message_id}"
+        );
+    }
 
     // Atomicity spot-check: re-draining delivers nothing (all rows terminal).
     assert_eq!(worker.drain().await.expect("re-drain"), 0);

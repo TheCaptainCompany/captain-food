@@ -40,7 +40,10 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true, features = ["v5"] }
 # The operation-response bus (#303) is a tokio broadcast channel; also the async runtime for the
-# in-crate tests (drift guards, watch semantics).
+# in-crate tests (drift guards, watch semantics). Only `sync` is asked for here, but workspace
+# feature unification is ADDITIVE: any workspace build carries the full workspace tokio set
+# (rt-multi-thread, macros, net, signal, time) into this crate's graph too — the narrowing is
+# documentation of intent, not an enforced capability bound (tokio is not D3-gated).
 tokio = { workspace = true, features = ["sync"] }
 
 # D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
