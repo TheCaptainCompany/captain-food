@@ -144,6 +144,19 @@ Two traps behind it, both worth knowing before you reach for the same explanatio
   database whatever the schema says, and the gate is looking at the new instance while the old one is
   the one actually serving.
 
+Two more from the API side (2026-08-03 — cost: production briefly ROLLED BACK to the 07-29 binary
+while restoring auth):
+
+- The dashboard's "save and deploy" behaviour does NOT exist in the API: **`PUT
+  /v1/services/{id}/env-vars/{key}` changes the stored env and restarts NOTHING**. The running
+  process keeps its old environment until a deploy is explicitly POSTed — probe the actual
+  behaviour (the 503→401 dummy-JWT flip, not the env listing) before declaring a config change live.
+- The service is **image-backed with a PINNED `imagePath`** that CI's deploy-hook calls override
+  per-deploy but never update. So a bare **`POST /v1/services/{id}/deploys` redeploys the stale
+  pinned image** — the July binary, not what's live. Always pass the intended digest explicitly:
+  read `image.ref` from the latest good deploy (`GET .../deploys?limit=N`) and POST
+  `{"imageUrl": "<that ref>"}`. Verify `/health`'s `version` after, per the rule above.
+
 Tracked as [#281](https://github.com/TheCaptainCompany/captain-food/issues/281); until it lands, the
 manual check above is the whole safety net.
 
