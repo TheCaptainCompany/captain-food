@@ -359,9 +359,12 @@ spec/codegen lenses, 2026-08-01)** — 1 critical + 4 major (and a set of minors
   whose gate was merely UNSET (implicit false) against a monolith running true would record
   captures without chaining their saga hop. Fixed: the standalone fleet REFUSES the money lanes
   (Payment/PlaceOrderProcess/RefundProcess) unless the gate is set EXPLICITLY, runs the startup
-  backfill itself when ON (parity with the monolith), and the gate prose records the invariant;
-  a DB-persisted posture is the recorded follow-up that removes the residual explicit-mismatch
-  operator error.
+  backfill itself when ON (parity with the monolith), and the gate prose records the invariant.
+  The residual explicit-mismatch operator error is REMOVED since
+  [#318 "DB-persisted PM_MAILBOX_DELIVERY posture"](https://github.com/TheCaptainCompany/captain-food/issues/318)
+  (ADR-20260803-104819): the posture is one `RuntimePosture` database row every process reads at
+  startup — no per-process posture state left to drift at steady state; the flip window is
+  governed by the restart order prescribed in that ADR.
 - **MAJOR — Stripe HTTP 409 `idempotency_error` was classified terminal**, yet rebalancing
   manufactures it routinely (a steal redelivers while the victim's prepare is in flight, same
   idempotency key). Fixed: 409 (same key in flight) → retry-in-place; only the 400
@@ -386,9 +389,11 @@ degradation under `RUN_MAILBOX_WORKERS` (LISTEN/NOTIFY is the follow-up).
 
 ## Realization state (D1 — landed on PR #273, GATED)
 
-The flip is IMPLEMENTED behind **`PM_MAILBOX_DELIVERY`** (configuration.yaml, default false —
-gate-then-stabilize; the default flip is its own one-line ADR after staging smoke). One gate
-controls all three moving parts so the two worlds never interleave:
+The flip is IMPLEMENTED behind **`PM_MAILBOX_DELIVERY`** (since
+[#318](https://github.com/TheCaptainCompany/captain-food/issues/318) / ADR-20260803-104819 a
+seeded `RuntimePosture` database row read at startup by every process — no longer an env key;
+default false — gate-then-stabilize; the default flip is its own one-line ADR after staging
+smoke). One gate controls all three moving parts so the two worlds never interleave:
 
 - **Resolvers**: the generated PM resolvers (placeOrder/approveRefund/denyRefund) carry BOTH
   arms and pick per request — mailbox delivery through the PREPARE phase

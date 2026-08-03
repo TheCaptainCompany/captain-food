@@ -438,11 +438,12 @@ keys:
       delivers. The trade-off the flip accepts: the status/event buses are in-process, so a
       fact delivered by the adapter process never reaches the monolith's push subscribers
       (polls unaffected) — which is why this is a deployment posture, not a default. The MONEY
-      lanes (Payment / PlaceOrderProcess / RefundProcess) additionally demand an EXPLICIT
-      PM_MAILBOX_DELIVERY in the adapter's environment, matching the monolith's — an implicit
-      false against a monolith running true records captures without chaining their saga hop
-      (a paid order nobody reacts to until a restart); unset = those lanes are refused at
-      spawn. Read by the adapter binaries only; the monolith ignores it (its composition root
+      lanes (Payment / PlaceOrderProcess / RefundProcess) additionally follow the
+      PM_MAILBOX_DELIVERY posture read from its RuntimePosture database row at spawn (#318,
+      ADR-20260803-104819) — the SAME row the monolith reads, so an adapter fleet can no longer
+      drift from it; while the posture is UNPROVABLE (row or table missing) the money lanes are
+      refused at spawn, and a transient read error just delays the fleet until the row answers.
+      Read by the adapter binaries only; the monolith ignores it (its composition root
       always runs the full fleet).
 
   ACTOR_ACTIVATIONS:
@@ -624,24 +625,13 @@ keys:
       the default flips by its own one-line ADR after the gated form is smoked in staging.
       Readiness at GET /deletion.
 
-  PM_MAILBOX_DELIVERY:
-    type: bool
-    scalar:
-      $ref: 'scalars.yaml#/ConfigBoolean'
-    default: false
-    gates: >
-      The Runtime D1 flip (#272, ADR-20260801-023000): ON, the three process-manager mutations
-      (placeOrder / approveRefund / denyRefund) deliver through the PM mailboxes via the PREPARE
-      phase (Stripe call with no transaction open, one fenced commit), the Payment lane chains
-      the inbound Stripe facts to the PM lanes in the recording transaction (B2), and the saga
-      runner's Stripe-fact triggers retire. OFF, the legacy journal+spawn path and the runner
-      handle everything exactly as before -- the client contract is byte-identical on both arms
-      (each arm replays the OTHER acceptance store's messageIds as duplicates, so a retry never
-      re-executes across a flip), and every startup with the gate ON backfills un-reacted Stripe
-      facts past the runner checkpoints onto the PM lanes (idempotent), so flipping in EITHER
-      direction loses no saga hop. DEFAULT OFF (gate-then-stabilize): this flips the MONEY PATH;
-      the default flips by its own one-line ADR after the gated form is smoked in staging, and
-      command_journal DROPs only at that deploy.
+  # PM_MAILBOX_DELIVERY is NO LONGER an env key (#318, ADR-20260803-104819): the Runtime D1
+  # money gate lives in its RuntimePosture database row (specs/database/tables/referential.yaml),
+  # read at startup by the monolith AND every standalone adapter fleet — per-process env was
+  # per-deploy state, and a drifted value on one adapter fleet was the silent paid-order stall.
+  # The gate's semantics (ADR-20260801-023000: PM mutations through the PM mailboxes, B2
+  # chaining, saga-runner trigger retirement; both arms client-byte-identical; gate-on startup
+  # backfill) are documented on the table row and unchanged by the move.
 
   RUN_RETENTION_SWEEP:
     type: bool

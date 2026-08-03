@@ -110,3 +110,23 @@ RestaurantDispatchConfig:
     mode:                      { type: { $ref: 'scalars.yaml#/RestaurantDispatchMode' } }
     self_dispatch_ttl_seconds: { type: integer, nullable: true, note: "The restaurant's promised delivery-time threshold when mode=RESTAURANT; on breach the customer's tracking shows 'late' and feeds the satisfaction check (#62). Not a routing escalation." }
     effective_from:            { type: timestamptz }
+
+# --- Process-wide runtime postures (#318) ---
+
+RuntimePosture:
+  reference: true
+  description: >
+    Process-wide runtime postures — ONE row per posture, read at startup by EVERY process the
+    posture governs (#318, ADR-20260803-104819). Seeded: PM_MAILBOX_DELIVERY false (the Runtime
+    D1 money gate, ADR-20260801-023000 — ON, the PM mutations deliver through the PM mailboxes,
+    the Payment lane B2-chains inbound Stripe facts and the saga runner's Stripe-fact triggers
+    retire; OFF, the legacy journal+spawn path handles everything). A posture is DELIBERATELY
+    not an env key: per-process env is per-deploy state, and a drifted value on one adapter
+    fleet delivering Payment facts without the PM chain hop is the silent paid-order stall.
+    Flip = UPDATE the row + an ORDERED full restart of every mailbox-delivering process (ON:
+    adapter fleets first, monolith last; OFF: monolith first — ADR-20260803-104819 Decision 3);
+    while the row is unreadable a money-lane fleet fails closed (see the ADR).
+  columns:
+    posture:    { type: text, pk: true, note: "The posture key, e.g. 'PM_MAILBOX_DELIVERY'. Uppercase snake, mirroring the retired env-key spelling so the gate keeps its name across the move." }
+    enabled:    { type: boolean, note: "The posture value every process adopts at its next startup." }
+    updated_at: { type: timestamptz, note: "When the posture last changed — the operator's evidence trail for 'which processes have restarted into it'." }

@@ -58,22 +58,107 @@ pub fn standalone_workers_enabled() -> bool {
         .unwrap_or(false)
 }
 
-/// The `PM_MAILBOX_DELIVERY` posture (Runtime D1), EXPLICIT presence and all: the standalone
-/// fleet must chain PM copies of recorded Stripe facts exactly like the monolith's, or a flip
-/// behaves differently depending on WHICH process won the Payment lane's lease — a capture the
-/// adapter records without chaining is a saga hop nobody reacts to until a monolith restart
-/// (#272 review MAJOR, 2026-08-01). `None` = the key is UNSET in this environment, which for a
-/// money lane is an unprovable posture, not a default.
-fn pm_gate_posture() -> Option<bool> {
-    std::env::var("PM_MAILBOX_DELIVERY")
-        .ok()
-        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+/// The `PM_MAILBOX_DELIVERY` posture (Runtime D1), read from its `RuntimePosture` database row
+/// (#318, ADR-20260803-104819) — the SAME row the monolith reads, so this fleet can no longer
+/// drift from it: the standalone fleet must chain PM copies of recorded Stripe facts exactly
+/// like the monolith's, or a flip behaves differently depending on WHICH process won the
+/// Payment lane's lease — a capture the adapter records without chaining is a saga hop nobody
+/// reacts to until a monolith restart (#272 review MAJOR, 2026-08-01).
+///
+/// `None` = the posture is UNPROVABLE from the database (row or table missing) — deterministic
+/// across every process reading the same state, so refusing the money lanes here while the
+/// monolith runs gate-off is consistent by construction. A TRANSIENT read error never reaches
+/// this value: the caller retries until the database answers, because a fleet that cannot reach
+/// the database has nothing to deliver anyway — and a guessed posture is the exact stall the
+/// row exists to remove.
+async fn pm_gate_posture(pool: &sqlx::PgPool, adapter: &'static str) -> Option<bool> {
+    use crate::persistence::runtime_posture::{self, PostureRead};
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        match runtime_posture::read_posture(pool, runtime_posture::PM_MAILBOX_DELIVERY).await {
+            Ok(PostureRead::Enabled(v)) => {
+                tracing::info!(
+                    adapter,
+                    posture = runtime_posture::PM_MAILBOX_DELIVERY,
+                    enabled = v,
+                    "standalone mailbox: money posture read from its RuntimePosture row"
+                );
+                return Some(v);
+            }
+            Ok(PostureRead::Unprovable(reason)) => {
+                tracing::warn!(
+                    adapter,
+                    posture = runtime_posture::PM_MAILBOX_DELIVERY,
+                    reason,
+                    "standalone mailbox: money posture UNPROVABLE -- money lanes will be refused"
+                );
+                return None;
+            }
+            Err(e) => {
+                let wait = 2u64.saturating_pow(attempt.min(5)).min(30);
+                tracing::warn!(
+                    adapter,
+                    error = %e,
+                    attempt,
+                    retry_in_seconds = wait,
+                    "standalone mailbox: money posture read failed -- no worker spawns until the row answers"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+            }
+        }
+    }
 }
 
 /// The lanes whose behavior depends on the PM gate posture — recording Stripe facts (chaining)
 /// and reacting to them (the PM event legs).
 fn is_money_lane(actor_type: &str) -> bool {
     matches!(actor_type, "Payment" | "PlaceOrderProcess" | "RefundProcess")
+}
+
+/// The money-lane refusal decision (#318 review, 2026-08-03 — extracted so it carries its own
+/// regression test): an UNPROVABLE posture (`None`) refuses exactly the money lanes and keeps
+/// everything else; a proven posture (either value) keeps the full set — the VALUE then only
+/// picks chaining/backfill, never lane membership.
+fn filter_lanes_by_posture(
+    actor_types: &[&'static str],
+    posture: Option<bool>,
+    adapter: &'static str,
+) -> Vec<&'static str> {
+    actor_types
+        .iter()
+        .copied()
+        .filter(|a| {
+            if is_money_lane(a) && posture.is_none() {
+                tracing::error!(
+                    adapter,
+                    actor_type = a,
+                    "standalone mailbox: PM_MAILBOX_DELIVERY posture UNPROVABLE -- refusing this money lane (seed/migrate the RuntimePosture row)"
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filter_lanes_by_posture;
+
+    const LANES: &[&str] = &["Payment", "PlaceOrderProcess", "RefundProcess", "Conversation"];
+
+    #[test]
+    fn unprovable_posture_refuses_exactly_the_money_lanes() {
+        assert_eq!(filter_lanes_by_posture(LANES, None, "test"), vec!["Conversation"]);
+    }
+
+    #[test]
+    fn a_proven_posture_keeps_every_lane_whatever_its_value() {
+        assert_eq!(filter_lanes_by_posture(LANES, Some(false), "test"), LANES.to_vec());
+        assert_eq!(filter_lanes_by_posture(LANES, Some(true), "test"), LANES.to_vec());
+    }
 }
 
 /// Fully Pg-backed [`CommandDeps`] for a standalone adapter process. External services the
@@ -112,31 +197,33 @@ pub fn spawn_standalone_workers(
     actor_types: &'static [&'static str],
     payments: Arc<dyn PaymentService>,
     nudges: Arc<MailboxNudges>,
+    reminder_windows: std::collections::HashMap<&'static str, i64>,
+) {
+    // The whole fleet spawn rides ONE task: the money posture is a database read (#318), and
+    // NOTHING spawns until it resolves — spawning the non-money lanes early would only race the
+    // answer, and a fleet that cannot reach the database has nothing to deliver anyway.
+    tokio::spawn(async move {
+        run_standalone_workers(pool, adapter, actor_types, payments, nudges, reminder_windows)
+            .await;
+    });
+}
+
+async fn run_standalone_workers(
+    pool: PgPool,
+    adapter: &'static str,
+    actor_types: &'static [&'static str],
+    payments: Arc<dyn PaymentService>,
+    nudges: Arc<MailboxNudges>,
     mut reminder_windows: std::collections::HashMap<&'static str, i64>,
 ) {
-    // MONEY-LANE POSTURE CHECK: a fleet whose PM_MAILBOX_DELIVERY is merely UNSET must not
-    // lease-compete on the Payment/PM lanes — an implicit `false` against a monolith running
-    // `true` records captures without chaining, and the hop is lost until a monolith restart.
-    // The operator states the posture explicitly (matching the monolith's) or those lanes stay
-    // with the monolith. An explicitly WRONG value is still an operator error — recorded in the
-    // RUN_MAILBOX_WORKERS gate prose; a DB-persisted posture is the follow-up that removes it.
-    let posture = pm_gate_posture();
-    let actor_types: Vec<&'static str> = actor_types
-        .iter()
-        .copied()
-        .filter(|a| {
-            if is_money_lane(a) && posture.is_none() {
-                tracing::error!(
-                    adapter,
-                    actor_type = a,
-                    "standalone mailbox: PM_MAILBOX_DELIVERY is UNSET -- refusing this money lane (set it explicitly, matching the monolith)"
-                );
-                false
-            } else {
-                true
-            }
-        })
-        .collect();
+    // MONEY-LANE POSTURE CHECK: the posture comes from the shared RuntimePosture row (#318,
+    // ADR-20260803-104819) — the SAME row the monolith reads, so a fleet can no longer
+    // lease-compete on the Payment/PM lanes with a drifted gate value: a `false` against a
+    // monolith running `true` records captures without chaining, and the hop is lost until a
+    // monolith restart. UNPROVABLE (row/table missing — deterministic for every reader of the
+    // same state) refuses those lanes; a transient read error retries above, never guesses.
+    let posture = pm_gate_posture(&pool, adapter).await;
+    let actor_types = filter_lanes_by_posture(actor_types, posture, adapter);
     // Any lane with declared `schedules:` needs its window; fall back to the SPEC DEFAULT when
     // the caller wired none (the monolith reads Config; an adapter fleet has no Config reader) —
     // a missing window would otherwise abort every delivery on that lane while its heartbeat

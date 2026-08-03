@@ -147,7 +147,7 @@ pub fn wire() -> HealthDto {
 /// backoff scheduler reads on every retry) — so the rule is now EXECUTABLE: the codegen guard
 /// `required_schema_version_matches_the_latest_migration` fails the build whenever this constant
 /// is not the newest migration timestamp. It moves in the SAME commit as the migration, period.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260803004500;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260803104819;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -288,7 +288,7 @@ fn identity_service_impl() -> Arc<dyn application::generated::services::Identity
     }
 }
 
-pub fn router() -> Router {
+pub async fn router() -> Router {
     // The DECLARED configuration (specs/configuration.yaml), resolved once. Every value below comes
     // from here rather than a local `env::var` + inline fallback: a default that is declared in the
     // spec and then re-typed at the call site is two sources of truth, and the spec's copy is the one
@@ -365,6 +365,58 @@ pub fn router() -> Router {
                 // Configured but unconfirmed until the first probe: report DOWN, not NOT_CONFIGURED.
                 snap.lock().expect("health snapshot mutex").state = db_state::DOWN;
                 spawn_heartbeat(pool.clone(), snap.clone());
+
+                // THE MONEY POSTURE (#318, ADR-20260803-104819): PM_MAILBOX_DELIVERY is ONE
+                // RuntimePosture database row every process reads at startup — never env (a
+                // per-deploy override is a drift path), never a guess. Resolution is fail-closed
+                // by cause: a missing row/table is DETERMINISTIC (no process can read `true`
+                // from that state, so everyone falls to the legacy arm together — runner active,
+                // no chaining; /health independently reports schema_behind, ADR-0043); a
+                // transient error is NOT (a peer may have read TRUE), so after brief retries the
+                // process refuses to start — on Render a failed deploy keeps the previous
+                // version serving, which is strictly safer than booting into the silent
+                // paid-order stall this row exists to remove.
+                let pm_mailbox_delivery = {
+                    use infrastructure::persistence::runtime_posture::{self, PostureRead};
+                    let mut attempt = 0u32;
+                    loop {
+                        attempt += 1;
+                        match runtime_posture::read_posture(
+                            &pool,
+                            runtime_posture::PM_MAILBOX_DELIVERY,
+                        )
+                        .await
+                        {
+                            Ok(PostureRead::Enabled(v)) => {
+                                tracing::info!(
+                                    posture = runtime_posture::PM_MAILBOX_DELIVERY,
+                                    enabled = v,
+                                    "money posture read from its RuntimePosture row"
+                                );
+                                break v;
+                            }
+                            Ok(PostureRead::Unprovable(reason)) => {
+                                tracing::warn!(
+                                    posture = runtime_posture::PM_MAILBOX_DELIVERY,
+                                    reason,
+                                    "money posture UNPROVABLE -- legacy arm (gate off) until a migrated restart"
+                                );
+                                break false;
+                            }
+                            Err(e) if attempt < 5 => {
+                                tracing::warn!(error = %e, attempt, "money posture read failed -- retrying");
+                                tokio::time::sleep(Duration::from_secs(2)).await;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "money posture UNREADABLE after retries -- refusing to start (an unproven money posture must not boot)"
+                                );
+                                panic!("PM_MAILBOX_DELIVERY posture unreadable after retries: {e}");
+                            }
+                        }
+                    }
+                };
 
                 // Read-model repositories injected into GraphQL resolvers (ADR-0035 composition root).
                 let restaurants: Arc<dyn RestaurantReadRepository> =
@@ -487,8 +539,9 @@ pub fn router() -> Router {
                         infrastructure::PgSlugReservationRepository::new(pool.clone()),
                     ),
                     // The Runtime D1 flip (#272, ADR-20260801-023000, gate-then-stabilize): the
-                    // gated PM resolvers pick mailbox-vs-legacy from this at request time.
-                    pm_mailbox_delivery: config.pm_mailbox_delivery,
+                    // gated PM resolvers pick mailbox-vs-legacy from this at request time —
+                    // sourced from the RuntimePosture row read above (#318), never env.
+                    pm_mailbox_delivery,
                     auth_sessions: {
                         // Encrypted parking store when AUTH_SESSION_KEY is set; else stays the no-op
                         // (fail-closed: no key ⇒ no session cookies, never plaintext at rest).
@@ -554,7 +607,7 @@ pub fn router() -> Router {
                 // absorb already-delivered hops); PM lanes are seeded first so the width lookup
                 // can never race the workers' own seeding.
                 let pm_backfill = {
-                    let gate_on = config.pm_mailbox_delivery;
+                    let gate_on = pm_mailbox_delivery;
                     let pool = pool.clone();
                     let nudges = mailbox_nudges.clone();
                     async move {
@@ -667,7 +720,7 @@ pub fn router() -> Router {
                         .with_payments(saga_payments)
                         // Runtime D1 (#272): with PM mailboxes on, the Stripe-fact triggers are
                         // chained to the PM lanes by the mailbox — this runner must not race them.
-                        .with_pm_mailboxes(config.pm_mailbox_delivery);
+                        .with_pm_mailboxes(pm_mailbox_delivery);
                     saga_status = Some(runner.status());
                     // The backfill runs INSIDE the runner's task, before its first tick — the
                     // ordering the re-verification demanded (see the pm_backfill comment above).
@@ -828,7 +881,7 @@ pub fn router() -> Router {
                             // Runtime D1 (#272, B2): a recorded Stripe fact chains its
                             // PM-addressed copy in the SAME completion transaction, and the PM
                             // lane's worker is nudged post-commit.
-                            .with_pm_fact_chaining(config.pm_mailbox_delivery)
+                            .with_pm_fact_chaining(pm_mailbox_delivery)
                             .with_nudges(mailbox_nudges.clone());
                         if let Some(settings) = &activations {
                             h = h.with_activations(settings.clone());

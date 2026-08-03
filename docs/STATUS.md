@@ -1,7 +1,25 @@
 # 🚦 Captain.Food — Development & Deployment Status
 
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
-> Last updated: 2026-08-02. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+> Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
+
+> ✅ **2026-08-03 — [#318 "DB-persisted PM_MAILBOX_DELIVERY posture — precondition for adapter worker fleets (ADR-20260803-002712 Q4)"](https://github.com/TheCaptainCompany/captain-food/issues/318)
+> ([PR #322](https://github.com/TheCaptainCompany/captain-food/pull/322),
+> [ADR-20260803-104819](adr/20260803-104819-db-persisted-pm-mailbox-delivery-posture.md))**: the
+> Runtime D1 money gate moved from per-process env into ONE seeded `RuntimePosture` database row
+> (`referential.yaml`, migration `20260803104819`, `REQUIRED_SCHEMA_VERSION` bumped) read at
+> startup by the monolith composition root and every standalone adapter fleet — steady-state
+> posture drift (the drifted-env silent paid-order stall) is structurally impossible now (no
+> per-process posture state left to drift; the env key is REMOVED from configuration.yaml/Config);
+> the FLIP WINDOW is governed by the restart order prescribed in the ADR (ON: adapter fleets
+> first, monolith last; OFF: monolith first — independent-review finding). Fail-closed by cause:
+> missing row/table = deterministic legacy arm everywhere (monolith gate off, adapter money lanes
+> refused); transient read error = the monolith refuses to start after brief retries, an adapter
+> fleet spawns nothing until the row answers. Flip = `UPDATE RuntimePosture …` + ordered full restart.
+> The `RUN_MAILBOX_WORKERS` fleet-guidance flip to ON stays its own one-line ADR after smoke
+> (gate-then-stabilize), as does the gate's default flip. E2E `runtime_posture` proves the read
+> contract incl. seed-never-overwrites-a-flip. Remaining #313 follow-ups: #315 (admin requeue,
+> next), #317 (Honeycomb poison alert, ⏳ blocked on Honeycomb re-authorization).
 
 > ✅ **2026-08-02 — [#290 "Actor-client crate isolation (PROP-20260728-152752 D9): compiler-enforced door, then per-actor crates"](https://github.com/TheCaptainCompany/captain-food/issues/290)
 > phase 1 MERGED ([PR #297](https://github.com/TheCaptainCompany/captain-food/pull/297);
