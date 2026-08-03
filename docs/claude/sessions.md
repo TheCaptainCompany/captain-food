@@ -15,10 +15,18 @@ runs) · [../PLAYBOOK.md](../PLAYBOOK.md).
 | `specs/**` | `make validate`, then `make rust` before pushing | seconds, then minutes |
 | `crates/**`, `tools/**`, CI, deploy | `make rust` | minutes — **much** worse from a cold cache |
 
-`make rust` is `cargo build` + `cargo test` + validate + generate + drift check. On a warm cache it is
+`make rust` is `cargo build --workspace` + validate + generate + drift check. On a warm cache it is
 slow; on a cold one it rebuilds the whole workspace. Do not reach for it to prove a Markdown edit.
 CLAUDE.md already permits skipping it for docs-only changes — the point here is that the saving is
 minutes per invocation, so it is worth being deliberate.
+
+**`make rust` does NOT run the workspace test suite.** `rust-test` is `cargo test --manifest-path
+tools/codegen-rs/Cargo.toml` — the codegen/validator tests ONLY. CI runs `cargo test --workspace`
+as a separate step, so a change whose tests live in `crates/**` can pass `make rust` locally and
+still go red in CI. Run `cargo test --workspace` yourself before marking a PR ready; it is cheap
+once the build is warm. (This entry previously described `make rust` as including `cargo test` —
+#306 relied on that, and only noticed when a brand-new integration test failed to appear in the
+gate's output. If the wording ever drifts again, read the Makefile, not this table.)
 
 ## 2. Disk is a fixed per-session allowance, and `df` lies about it
 
@@ -357,3 +365,39 @@ slice (cost: a false "my move broke the boundary crate" scare and a stash/verify
 
 When wrapping up, state the handoff explicitly: what was pushed and to which branch, what remains on
 the user's side, which decisions are blocking, and what the next code slice is.
+
+## 12. A workspace GLOB member cannot bootstrap itself
+
+`members = ["crates/clients/*"]` is the right shape for codegen-emitted crates — a new one joins the
+workspace by being generated, so the list cannot drift from the spec. But **Cargo refuses to load a
+workspace whose glob matches nothing**, and the generator that would create the directories is
+itself a workspace member. The first `cargo run` after adding the glob therefore fails with
+`failed to read crates/clients/*/Cargo.toml` before any code runs.
+
+Bootstrap (cost: one wasted cycle in #306, and phase 3 will hit it again with ~17 more crates):
+
+```bash
+sed -i 's|^    "crates/clients/\*",|    # BOOTSTRAP|' Cargo.toml   # drop the glob
+cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --specs specs
+git checkout Cargo.toml                                            # restore it
+```
+
+Related, same change: **have the emitter DELETE stale generated directories.** `check-drift` diffs
+content, so it can never notice a directory that simply stopped being regenerated — and under a glob
+that stale directory is still a workspace crate.
+
+## 13. Build the narrow graph, not just the workspace
+
+`cargo build --workspace` unifies cargo features across every member, so a crate that is only sound
+*because a sibling lights a feature* looks fine. `cargo check -p <one-crate>` builds the real,
+narrow graph and can fail where the workspace build passes.
+
+In #306 the new per-actor client crates depend on `actor_client` with **no features at all** — a
+configuration that had never been compiled, because until then only the whole workspace (where
+`infrastructure` lights `bulk-door`) was ever built. Two `unreachable_pub`/`dead_code` findings on
+the feature-gated bulk-door items surfaced immediately. They were pre-existing, not caused by the
+change; the fix is `#[cfg_attr(not(feature = "…"), allow(…))]` scoped to the feature-off
+configuration, never a blanket `allow`.
+
+Corollary for any new crate: `cargo check -p <it>` **before** wiring consumers, or you debug the
+crate's own feature assumptions through the noise of the whole workspace.
