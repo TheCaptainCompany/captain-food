@@ -68,17 +68,35 @@ is a loud, reviewable diff, not a silent shortcut.
   explicitly NOT contained by D3 — a decorator needs no `sqlx` — and saying so would be worse than
   saying nothing, because a wrong justification stops the next reviewer looking. Dropping `Copy`
   would stop retention but not decoration, so it buys nothing real.
-- `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) keeps the rule applying
-  to the *whole* surface: a sixth method without the witness compiles fine and would silently
-  reopen the hole. The guard also pins the witness's `pub(crate)` field and its single public mint,
-  since widening either hands the key back without changing a signature.
+- **The guard is a level-3 gate protecting a level-4 property, and only inside the boundary crate.**
+  The compiler makes the rule unbreakable from outside `actor_client`; every remaining way to
+  reopen the door is an EDIT to that crate, and `every_mailbox_port_method_demands_the_access_witness`
+  (tools/codegen-rs) is what catches those. It pins: every port method takes the witness and the
+  surface is exactly five methods (fail-closed — it consumes every `fn` token rather than matching
+  a list of accepted prefixes, so `unsafe fn` and `#[attr] async fn` are seen); the witness's
+  `pub(crate)` field and mint; that the only public mint is `for_tests`, scoped **by span** to the
+  cfg-gated fixtures module; that no impl, construction or public function returning the witness
+  exists elsewhere in the crate; that `mailbox.rs` declares exactly one public trait, so an
+  extension trait with a defaulted method cannot mint internally and hand every port holder an
+  ungated door; and that no generated client names the witness at all.
+  It works on comment-stripped, whitespace-normalized source **because two independent review
+  passes each defeated an earlier version by nothing cleverer than reformatting** — `pub  fn` with
+  two spaces, a split signature, an attribute ahead of `async fn`, a comment standing in for a
+  parameter, a `From<()> for crate::mailbox::MailboxAccess` matching no literal pattern. Sixteen
+  mutation shapes are verified to turn it red against a green baseline. The honest claim is "the
+  plausible widenings are caught", not "the surface is proven": this is textual analysis of Rust,
+  and the record of this change is that textual analysis loses to anyone actually trying.
 - Callers that need the read door now need an `ActorClient`, which needs an `OperationStatusBus`.
   In the monolith that is the real bus. A **standalone adapter has no shared bus** —
   `run_standalone_workers` publishes onto a separate instance nothing outside it can subscribe to —
   so `HubRiseConnectFlow::new` takes `Option<OperationStatusBus>` and the standalone binary passes
   `None`, yielding a pull-only door. Taking the bus rather than a ready-made `ActorClient` also
   removes a hazard the reviewer named: a caller can no longer hand the flow a read door built over
-  a *different* mailbox than the one it writes through.
+  a *different* mailbox than the one it writes through. To be precise about what that buys **today**:
+  the connect flow only ever pulls, so `Some(bus)` and `None` are behaviourally identical for it
+  right now — the distinction is forward-looking, and stops a `watch` added later from hanging in
+  the standalone topology and nowhere else. No hang was averted on this path; one was made
+  impossible on it.
 - **No generated per-actor client names the witness.** `{Actor}Client::cancel_scheduling` was the
   one client method that spoke to the port directly; it now delegates to
   `enqueue::cancel_scheduled_mapped` like every other. That matters for

@@ -231,6 +231,10 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
     /// own that nothing here can see). Taking the BUS rather than a ready-made [`ActorClient`]
     /// is deliberate: a caller cannot then hand us a read door built over a DIFFERENT mailbox
     /// than the one we write through, and the pull-only posture stays visible as `None`.
+    ///
+    /// Today both arms behave identically here — this flow only ever PULLS a terminal status
+    /// (`await_message_terminal`), never `watch`. The distinction is forward-looking: it stops a
+    /// `watch` added later from hanging in the standalone topology and nowhere else.
     pub fn new(
         mailbox: Arc<dyn Mailbox>,
         bus: Option<OperationStatusBus>,
