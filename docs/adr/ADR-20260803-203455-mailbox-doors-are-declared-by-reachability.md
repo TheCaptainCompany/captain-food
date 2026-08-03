@@ -53,6 +53,18 @@ proposal rather than a test — tracked as
 [#331 "Decide whether the mailbox-door rule is worth type resolution"](https://github.com/TheCaptainCompany/captain-food/issues/331)
 so the deferral is visible in the prioritised backlog rather than living only in this sentence.
 
+**How this guard is maintained, stated so nobody mistakes it for a proof.** Six adversarial review
+rounds have each found an ADJACENT POSITION of a class already covered — three const positions then
+the fourth; one derive spelling, then `cfg_attr`, then nested `cfg_attr`; module-level items, then
+items nested in a function body. Every one was a traversal gap fixed in under twenty lines, and
+every one was found by a reviewer rather than by the guard. That is the expected cost of a syntactic
+tool, and it is the reason the scope sentence above is written the way it is. This check is
+defence-in-depth over a boundary the COMPILER already enforces against out-of-crate callers
+(ADR-20260803-172654): it earns its place by catching the plausible in-crate accident — a
+scoped-capability helper written `pub` instead of `pub(crate)` — not by being exhaustive. Treat a
+new bypass of this shape as maintenance, not as a design failure; and if the exhaustive property is
+ever actually wanted, that is #331, not another traversal patch.
+
 ## Consequences
 
 - **The seed and the call graph are read from the AST**, not from body text. The witness's own mints
