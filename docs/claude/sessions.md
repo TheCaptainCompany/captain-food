@@ -174,6 +174,13 @@ not a guard.
 
 ## 8b. A guard over Rust STRUCTURE must parse the AST, not the text
 
+> **First ask whether it should be a guard at all** (ADR-20260803-234035). If the type system can
+> make the mistake unspellable — a capability witness with a `pub(crate)` constructor, a sealed
+> trait, private fields, a newtype — do that instead and write no guard. Everything below is how to
+> build one WHEN THE COMPILER CANNOT, and it is the more expensive branch: the section exists
+> because a scanner over a boundary the compiler already enforced cost seven review rounds and
+> ~191 lines. Read it as a fallback, not as the method.
+
 `str::find` over source cannot enforce a structural rule about Rust, and three independent review
 passes proved it on one guard (#304's `every_mailbox_port_method_demands_the_access_witness`). Each
 pass defeated the previous version, never with anything clever: `pub  fn` with two spaces, a

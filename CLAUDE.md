@@ -183,6 +183,16 @@ trust the numbers above if they look off.
   **Every proposal has a tracking issue** (ADR-20260724-143000): create it before/with the proposal
   if missing, name it in the header, keep the two in step — an issue-less proposal is invisible to
   the prioritised backlog and gets lost.
+- **Compiler first; a check is the fallback** (product-owner directive, 2026-08-03,
+  ADR-20260803-234035): before writing any gate, ask whether the TYPE SYSTEM can make the mistake
+  unspellable — a capability witness with a `pub(crate)` constructor, a sealed marker trait, private
+  fields, a newtype, an unrepresentable state. The enforcement hierarchy in PROP-20260802-130500 §1
+  ranks the levels; level 4 is the **floor**, not an achievement. Write a gate only where types
+  genuinely cannot reach (cross-crate manifest capability, spec↔generation drift, non-Rust
+  artifacts). Deleting a gate the compiler subsumes is a correct outcome, not a regression. Earned
+  by [#329](https://github.com/TheCaptainCompany/captain-food/issues/329): seven review rounds and
+  ~191 lines hardening a source-text scanner over a boundary the compiler already enforced, every
+  gap in it found by a reviewer rather than by the scanner.
 - Business code (aggregates / pure command handlers) stays **independent of the telemetry SDK**;
   instrumentation lives only in framework/middleware boundaries (see `c4-l3.yaml` `instrumented` flags).
 - Every critical workflow must have an observability contract in `specs/observability.yaml`.
