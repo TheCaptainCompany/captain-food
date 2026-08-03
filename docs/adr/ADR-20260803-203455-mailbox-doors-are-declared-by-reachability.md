@@ -63,11 +63,20 @@ rounds shaped it, and the honest tally matters because it is the evidence #331 w
 | `8105e92` | `const`/`static` initializers unscanned; `derive` on the witness | +59 |
 | `616934b` | the fourth const position (trait-declared); `cfg_attr(.., derive(..))` | +34 |
 | `869d9d3` | items nested in a function body; nested `cfg_attr` | +18 |
-| this one | three inline copies of the cfg gate, the weakest deciding whether an item was scanned at all | — |
+| `8d4c3db` | three inline copies of the cfg gate, the weakest deciding whether an item was scanned at all | +18 |
+| `d0c…` (this one) | the cfg evaluator's feature LEAF was still a substring match | −3 |
 
-So: ~180 net functional lines over six rounds, not "six small patches", and only two rounds at or
-under twenty lines. Five of the six were adjacent positions of a class already covered; the first
-was a technique failure, and is narrated with the retraction above rather than in this list.
+So: **~191 net functional lines over seven rounds**, not "a few small patches" — and three of them are
+at or under twenty lines, not two. Row 1 is the odd one out: it was not an adjacent position but a
+technique failure (the seed and call graph were text-based, and the completeness claim was an
+overclaim), narrated with the retraction two sections above; the other rounds are the
+adjacent-position pattern.
+
+*(That sentence has now carried a wrong figure twice — first "under twenty lines" for every round,
+then a stale total that only read as true because the last row was blank. Both were caught by
+review, not by me. If the number in a paragraph titled "the honest tally" is this easy to get wrong,
+re-measure it rather than trusting it: `git show <sha> -- tools/codegen-rs/src/tests.rs`, net of
+comments and blanks.)*
 
 Every one was found by a reviewer, not by the guard. That is the expected cost of a syntactic tool,
 and it is why the scope sentence above reads as it does. This check is defence-in-depth over a

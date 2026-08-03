@@ -1886,13 +1886,6 @@ keys:
         attrs.iter().any(attr_is_test_only)
     }
 
-    /// A cfg attribute's token stream split into whole words (keeping `-`/`_` so feature names
-    /// stay intact).
-    fn cfg_tokens(toks: &str) -> Vec<&str> {
-        toks.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))
-            .filter(|t| !t.is_empty())
-            .collect()
-    }
 
     /// Every trait DERIVED by this attribute, following nested `cfg_attr` the way rustc expands it.
     ///
@@ -1944,10 +1937,18 @@ keys:
         match m {
             // `test`
             syn::Meta::Path(p) => path_is(p, "test"),
-            // `feature = "test-fixtures"`
+            // `feature = "test-fixtures"` — compared EXACTLY. A `contains` here accepts
+            // `test-fixtures-v2`, `no-test-fixtures` and `serde-test-fixtures-shim`, each of which
+            // would switch both guards off for everything under it in a release build. The
+            // structure is evaluated; the leaf must be too, or the evaluator just moves the sniff
+            // one level down.
             syn::Meta::NameValue(nv) => {
                 path_is(&nv.path, "feature")
-                    && quote::quote!(#nv).to_string().contains("test-fixtures")
+                    && matches!(
+                        &nv.value,
+                        syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(v), .. })
+                            if v.value() == "test-fixtures"
+                    )
             }
             syn::Meta::List(l) => {
                 let Ok(inner) = l.parse_args_with(
@@ -1959,8 +1960,6 @@ keys:
                     !inner.is_empty() && inner.iter().all(cfg_is_test_only)
                 } else if path_is(&l.path, "all") {
                     inner.iter().any(cfg_is_test_only)
-                } else if path_is(&l.path, "feature") {
-                    quote::quote!(#l).to_string().contains("test-fixtures")
                 } else {
                     // `not(..)` and anything unrecognised: never a gate.
                     false
