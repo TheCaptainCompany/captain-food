@@ -161,6 +161,7 @@ CREATE TABLE inbound_messages (
   error JSONB NULL,
   attempts SMALLINT NOT NULL,
   last_attempt_at TIMESTAMPTZ NULL,
+  next_attempt_at TIMESTAMPTZ NULL,
   received_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ NULL,
   UNIQUE (source, external_id)
