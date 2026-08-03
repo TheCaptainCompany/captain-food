@@ -24,6 +24,12 @@ async fn main() {
     // container FAILS THE DEPLOY and the previous version keeps serving — a misconfigured build cannot
     // replace a working one, which is strictly safer than booting into silent degradation.
     //
+    // ONE deliberate exception to the dependency half since #318 (ADR-20260803-104819): the
+    // PM_MAILBOX_DELIVERY posture is a DATABASE read inside router(), and a TRANSIENT failure
+    // there also refuses to start — a guessed money posture is worse than a refused boot. Do not
+    // "fix" that panic back to boot-and-degrade. (A missing table/row still boots: gate off,
+    // /health reports schema_behind.)
+    //
     // Every missing key is reported at once: one deploy fixes them all, rather than one per cycle.
     let (config, problems) = server::generated::config::Config::resolve();
 

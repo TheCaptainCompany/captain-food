@@ -363,7 +363,8 @@ spec/codegen lenses, 2026-08-01)** — 1 critical + 4 major (and a set of minors
   The residual explicit-mismatch operator error is REMOVED since
   [#318 "DB-persisted PM_MAILBOX_DELIVERY posture"](https://github.com/TheCaptainCompany/captain-food/issues/318)
   (ADR-20260803-104819): the posture is one `RuntimePosture` database row every process reads at
-  startup — there is no per-process posture state left to drift.
+  startup — no per-process posture state left to drift at steady state; the flip window is
+  governed by the restart order prescribed in that ADR.
 - **MAJOR — Stripe HTTP 409 `idempotency_error` was classified terminal**, yet rebalancing
   manufactures it routinely (a steal redelivers while the victim's prepare is in flight, same
   idempotency key). Fixed: 409 (same key in flight) → retry-in-place; only the 400

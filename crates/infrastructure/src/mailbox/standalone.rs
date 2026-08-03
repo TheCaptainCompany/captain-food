@@ -116,6 +116,51 @@ fn is_money_lane(actor_type: &str) -> bool {
     matches!(actor_type, "Payment" | "PlaceOrderProcess" | "RefundProcess")
 }
 
+/// The money-lane refusal decision (#318 review, 2026-08-03 — extracted so it carries its own
+/// regression test): an UNPROVABLE posture (`None`) refuses exactly the money lanes and keeps
+/// everything else; a proven posture (either value) keeps the full set — the VALUE then only
+/// picks chaining/backfill, never lane membership.
+fn filter_lanes_by_posture(
+    actor_types: &[&'static str],
+    posture: Option<bool>,
+    adapter: &'static str,
+) -> Vec<&'static str> {
+    actor_types
+        .iter()
+        .copied()
+        .filter(|a| {
+            if is_money_lane(a) && posture.is_none() {
+                tracing::error!(
+                    adapter,
+                    actor_type = a,
+                    "standalone mailbox: PM_MAILBOX_DELIVERY posture UNPROVABLE -- refusing this money lane (seed/migrate the RuntimePosture row)"
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filter_lanes_by_posture;
+
+    const LANES: &[&str] = &["Payment", "PlaceOrderProcess", "RefundProcess", "Conversation"];
+
+    #[test]
+    fn unprovable_posture_refuses_exactly_the_money_lanes() {
+        assert_eq!(filter_lanes_by_posture(LANES, None, "test"), vec!["Conversation"]);
+    }
+
+    #[test]
+    fn a_proven_posture_keeps_every_lane_whatever_its_value() {
+        assert_eq!(filter_lanes_by_posture(LANES, Some(false), "test"), LANES.to_vec());
+        assert_eq!(filter_lanes_by_posture(LANES, Some(true), "test"), LANES.to_vec());
+    }
+}
+
 /// Fully Pg-backed [`CommandDeps`] for a standalone adapter process. External services the
 /// adapter's lanes never exercise are fail-closed stand-ins; `payments` is injected because only
 /// the caller knows whether its deployment carries Stripe credentials (the Stripe adapter does,
@@ -178,22 +223,7 @@ async fn run_standalone_workers(
     // monolith restart. UNPROVABLE (row/table missing — deterministic for every reader of the
     // same state) refuses those lanes; a transient read error retries above, never guesses.
     let posture = pm_gate_posture(&pool, adapter).await;
-    let actor_types: Vec<&'static str> = actor_types
-        .iter()
-        .copied()
-        .filter(|a| {
-            if is_money_lane(a) && posture.is_none() {
-                tracing::error!(
-                    adapter,
-                    actor_type = a,
-                    "standalone mailbox: PM_MAILBOX_DELIVERY posture UNPROVABLE -- refusing this money lane (seed/migrate the RuntimePosture row)"
-                );
-                false
-            } else {
-                true
-            }
-        })
-        .collect();
+    let actor_types = filter_lanes_by_posture(actor_types, posture, adapter);
     // Any lane with declared `schedules:` needs its window; fall back to the SPEC DEFAULT when
     // the caller wired none (the monolith reads Config; an adapter fleet has no Config reader) —
     // a missing window would otherwise abort every delivery on that lane while its heartbeat

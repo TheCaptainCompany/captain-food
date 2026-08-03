@@ -8,12 +8,14 @@
 > [ADR-20260803-104819](adr/20260803-104819-db-persisted-pm-mailbox-delivery-posture.md))**: the
 > Runtime D1 money gate moved from per-process env into ONE seeded `RuntimePosture` database row
 > (`referential.yaml`, migration `20260803104819`, `REQUIRED_SCHEMA_VERSION` bumped) read at
-> startup by the monolith composition root and every standalone adapter fleet — the drifted-env
-> silent paid-order stall is structurally impossible now (no per-process posture state left to
-> drift; the env key is REMOVED from configuration.yaml/Config). Fail-closed by cause: missing
-> row/table = deterministic legacy arm everywhere (monolith gate off, adapter money lanes
+> startup by the monolith composition root and every standalone adapter fleet — steady-state
+> posture drift (the drifted-env silent paid-order stall) is structurally impossible now (no
+> per-process posture state left to drift; the env key is REMOVED from configuration.yaml/Config);
+> the FLIP WINDOW is governed by the restart order prescribed in the ADR (ON: adapter fleets
+> first, monolith last; OFF: monolith first — independent-review finding). Fail-closed by cause:
+> missing row/table = deterministic legacy arm everywhere (monolith gate off, adapter money lanes
 > refused); transient read error = the monolith refuses to start after brief retries, an adapter
-> fleet spawns nothing until the row answers. Flip = `UPDATE RuntimePosture … + rolling restart`.
+> fleet spawns nothing until the row answers. Flip = `UPDATE RuntimePosture …` + ordered full restart.
 > The `RUN_MAILBOX_WORKERS` fleet-guidance flip to ON stays its own one-line ADR after smoke
 > (gate-then-stabilize), as does the gate's default flip. E2E `runtime_posture` proves the read
 > contract incl. seed-never-overwrites-a-flip. Remaining #313 follow-ups: #315 (admin requeue,

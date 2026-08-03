@@ -123,8 +123,9 @@ RuntimePosture:
     retire; OFF, the legacy journal+spawn path handles everything). A posture is DELIBERATELY
     not an env key: per-process env is per-deploy state, and a drifted value on one adapter
     fleet delivering Payment facts without the PM chain hop is the silent paid-order stall.
-    Flip = UPDATE the row + rolling restart; while the row is unreadable a money-lane fleet
-    fails closed (see the ADR).
+    Flip = UPDATE the row + an ORDERED full restart of every mailbox-delivering process (ON:
+    adapter fleets first, monolith last; OFF: monolith first — ADR-20260803-104819 Decision 3);
+    while the row is unreadable a money-lane fleet fails closed (see the ADR).
   columns:
     posture:    { type: text, pk: true, note: "The posture key, e.g. 'PM_MAILBOX_DELIVERY'. Uppercase snake, mirroring the retired env-key spelling so the gate keeps its name across the move." }
     enabled:    { type: boolean, note: "The posture value every process adopts at its next startup." }
