@@ -173,10 +173,26 @@ of, which is the one you wrote it for. Its real coverage is the shapes you enume
 author of the next bypass is not enumerating.
 
 **If the rule is about Rust structure — visibility, trait membership, what a signature takes, what a
-public item returns — parse it.** `syn` (+`quote`) as a dev-dependency of `tools/codegen-rs`, walking
-`syn::Item`, collapses a patch-per-shape treadmill into a few structural rules, because all those
-"different" bypasses are one rule at the AST level. Reserve text scanning for rules that genuinely
-are textual (`makefile_recipe_lines_are_ascii` is about bytes, so text is right).
+public item returns — parse it.** `syn` (+`quote`) as a dev-dependency of `tools/codegen-rs`. Reserve
+text scanning for rules that genuinely are textual (`makefile_recipe_lines_are_ascii` is about bytes,
+so text is right).
+
+**But parsing alone does not converge — a fourth pass beat the first AST version too, because it
+enumerated ITEM KINDS instead of text forms.** Free fn, const, static, alias… then associated fn,
+associated const, struct field, enum variant, a trait's provided method: nine grammars for one idea.
+What converged was enumerating **positions**:
+
+- *Output and field positions* — every publicly-reachable place a value can come OUT — get one rule:
+  "does this type mention the guarded type?" Substring matching is correct here and conservative,
+  because `-> Option<T>` and a `PhantomData<T>` field both hand one over eventually.
+- *Parameter positions* need the OPPOSITE: compare the exact parsed type. A substring check accepted
+  `access: Option<Witness>` as taking the witness, and the caller then passed `None` — that single
+  defect defeated the primary rule the whole guard existed for.
+- Anything that HIDES expansion (`macro_rules!` naming the type, a macro invocation inside the
+  guarded trait, `include!`, `#[path]` modules) must be refused outright and documented as banned,
+  never described as analysed.
+- Watch the ESCAPE HATCH as hard as the rule: an inverted `#[cfg(not(feature = "..."))]` was honoured
+  as a test-gate while compiling in exactly the release builds it claimed to exclude.
 
 Two riders, both learned the same way:
 

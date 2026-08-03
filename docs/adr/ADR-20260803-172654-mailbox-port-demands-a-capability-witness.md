@@ -68,32 +68,45 @@ is a loud, reviewable diff, not a silent shortcut.
   explicitly NOT contained by D3 — a decorator needs no `sqlx` — and saying so would be worse than
   saying nothing, because a wrong justification stops the next reviewer looking. Dropping `Copy`
   would stop retention but not decoration, so it buys nothing real.
-- **The guard parses the AST, and that is the finding worth keeping.** The compiler makes the rule
-  unbreakable from outside `actor_client`; every remaining way to reopen the door is an edit INSIDE
-  that crate, and `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) catches
-  those. **Three independent review passes each defeated a string-matching version of it** — not
-  with anything clever: `pub  fn` with two spaces, a signature split across lines, an attribute
-  before `async fn`, a comment standing in for a parameter, `impl Default for MailboxAccess`,
-  `pub const KEY: MailboxAccess`, a type alias, an extension trait one file over, a
-  `From<()> for crate::mailbox::MailboxAccess` that matched no literal pattern. Each fix bought one
-  shape and the next pass found more, because *every* one of them is the SAME rule at the AST level
-  — "a public item that yields the witness" — and only source text made them look different.
-  Parsing (syn, a dev-dependency) replaced a patch-per-shape treadmill with four structural rules:
-  every port method takes the witness and the surface is exactly five; no public trait anywhere in
-  the crate has `Mailbox` as a supertrait (an extension trait with a defaulted method would mint
-  internally and hand every port holder an ungated door); no trait impl on the witness exists at all
-  and inherent impls live only in the port module with `for_tests` as their one public fn, gated by
-  a `#[cfg(.. test-fixtures ..)]` ancestor; and no public fn, const, static or type alias anywhere
-  yields it. Twenty-two mutation shapes are verified red against a green baseline.
+- **The guard parses the AST, and enumerates POSITIONS rather than item kinds.** The compiler makes
+  the rule unbreakable from outside `actor_client`; every remaining way to reopen the door is an
+  edit INSIDE that crate, and `every_mailbox_port_method_demands_the_access_witness`
+  (tools/codegen-rs, using syn) catches those. **Four independent review passes each defeated an
+  earlier version**, and the shape of the failure never changed: the guard enumerated *forms* —
+  first text forms (`pub  fn` with two spaces, a split signature, an attribute before `async fn`),
+  then AST item kinds (free fn, const, static, alias… then associated fn, associated const, struct
+  field, enum variant, a trait's provided method). Each fix bought one form. What finally converged
+  was to stop enumerating forms and enumerate **positions**:
+  - **Parameter position** (the port rule): every method of `trait Mailbox` must take the witness
+    as its EXACT type. Not a substring match — `access: Option<MailboxAccess>` *mentions* the
+    witness and lets the caller pass `None`, which defeated the guard's own primary assertion on
+    the very method this ADR calls the widest hole.
+  - **Output and field positions** (the leak rule): ONE rule over every publicly-reachable place a
+    value can come out — free fn returns, associated fns, associated consts and types, trait items
+    including provided methods, public struct fields, enum variant fields, consts, statics,
+    aliases. Any of them whose type mentions the witness is a mint. That single rule subsumes every
+    shape all four passes found, because they were one rule wearing nine grammars.
+  - Plus: no public trait anywhere in the crate takes `Mailbox` as a supertrait — in its bound list
+    **or its `where` clause** — since a provided method there mints internally and hands every port
+    holder an ungated door; no trait impl on the witness (`Default`, `From`, `FromStr` are each a
+    public mint); and inherent impls only in the port module, with `for_tests` as their one public
+    item under a genuinely positive `#[cfg(.. test-fixtures ..)]` ancestor — an INVERTED
+    `#[cfg(not(feature = "test-fixtures"))]` was accepted as a gate by an earlier version and
+    compiles in exactly the release builds it claimed to exclude.
+  Thirty-four mutation shapes are verified red against a green baseline, and the legitimate
+  refactors that must stay green (a doc comment naming a banned construct, an added supertrait on
+  `Mailbox`) are checked too.
 - **What the guard still cannot see, stated rather than implied**: macro EXPANSION. A `macro_rules!`
-  can expand to any of the items above, and no AST walk of unexpanded source will know. It is
-  therefore refused outright — a `macro_rules!` in the crate that mentions the witness fails, as
-  does a macro invocation inside the port trait, as does a `#[path]` module (which would compile a
-  file the directory walk never visits). Those refusals are blunt, and deliberately so: the honest
-  posture is "this shape is banned here" rather than "this shape is analysed". The definitive check
-  would be over the POST-EXPANSION public API (rustdoc JSON lists exactly the public items that
-  mention a type, immune to macros, `#[path]` and formatting alike) — it needs nightly today, so it
-  is recorded as the direction rather than built.
+  can expand to any of the items above, and no AST walk of unexpanded source will know. So the
+  constructs that hide expansion are refused outright rather than analysed — a `macro_rules!`
+  naming the witness, a macro invocation inside the port trait, `include!`, and `#[path]` modules
+  (both of which splice files the directory walk never visits). Those refusals are blunt, and
+  deliberately so: "this construct is banned in this crate" is honest; "this construct is analysed"
+  would not be. One further limit worth naming: the walk does not resolve out-of-line modules, so
+  moving the witness's impls out of `mailbox.rs` fails the guard rather than following them.
+  The definitive form is a check over the POST-EXPANSION public API — rustdoc JSON lists exactly
+  the public items mentioning a type, immune to macros, `#[path]` and formatting alike. It needs
+  nightly, so it is recorded as the direction rather than built.
 - Callers that need the read door now need an `ActorClient`, which needs an `OperationStatusBus`.
   In the monolith that is the real bus. A **standalone adapter has no shared bus** —
   `run_standalone_workers` publishes onto a separate instance nothing outside it can subscribe to —

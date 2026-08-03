@@ -416,7 +416,7 @@ pub async fn cancel_reminder(
 /// `{Actor}Client::cancel_scheduling`.
 ///
 /// It exists so that NO generated per-actor client ever mints a [`MailboxAccess`] itself (#304,
-/// asserted by `no_generated_client_mints_the_port_witness`). Every other client method already
+/// asserted by `every_mailbox_port_method_demands_the_access_witness`). Every other client method already
 /// delegated to [`insert_mapped`]/[`schedule_mapped`]; `cancel_scheduling` was the one that spoke
 /// to the port directly, which would have been the single line that failed to compile when
 /// PROP-20260802-130500 phase 2 moves each client into its own crate — and the "fix" there is to
