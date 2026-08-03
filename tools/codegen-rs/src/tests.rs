@@ -2184,6 +2184,31 @@ keys:
                 }
 
                 Item::Struct(s) => {
+                    if s.ident == WITNESS {
+                        // A DERIVE is a trait impl spelled in one word, and the leak rule below
+                        // only ever saw `Item::Impl`. `#[derive(Default)]` on the witness hands
+                        // every crate in the workspace a public mint via `Default::default()` —
+                        // proven from `server`, which holds only the port. Allowlist the derives
+                        // that cannot construct one; refuse the rest as a class.
+                        const HARMLESS: &[&str] =
+                            &["Debug", "Clone", "Copy", "PartialEq", "Eq", "Hash", "PartialOrd", "Ord"];
+                        for a in &s.attrs {
+                            if !a.path().is_ident("derive") {
+                                continue;
+                            }
+                            let m = &a.meta;
+                            for tok in ident_tokens(quote::quote!(#m)) {
+                                if tok != "derive" && !HARMLESS.contains(&tok.as_str()) {
+                                    out.leaks.push(format!(
+                                        "  {rel}: `#[derive({tok})]` on the witness — a derive is a \
+                                         trait impl in one word, and anything that can construct \
+                                         `Self` (`Default`, `From`, `FromStr`, `Deserialize`, …) is \
+                                         a public mint for every crate in the workspace"
+                                    ));
+                                }
+                            }
+                        }
+                    }
                     for (n, f) in s.fields.iter().enumerate() {
                         if s.ident == WITNESS {
                             if is_pub(&f.vis) {
@@ -2501,6 +2526,18 @@ keys:
         (s.mints || s.opaque_macro || (on_witness && s.self_ctor), s.refs)
     }
 
+    /// The same scan over a `const`/`static` INITIALIZER. Item initializers are constructions like
+    /// any other, and skipping them was a traversal gap rather than a scope limit: hoisting the
+    /// witness into `const HELD: MailboxAccess = MailboxAccess(());` — the ordinary way to stop
+    /// calling the mint in three places — made a public `cancel_any` over a held `Arc<dyn Mailbox>`
+    /// invisible to BOTH guards, which is verbatim the shape this test exists to catch.
+    fn scan_init(expr: &syn::Expr, on_witness: bool) -> (bool, std::collections::HashSet<String>) {
+        use syn::visit::Visit;
+        let mut s = BodyScan::default();
+        s.visit_expr(expr);
+        (s.mints || s.opaque_macro || (on_witness && s.self_ctor), s.refs)
+    }
+
     /// One function-like item seen by the door scan.
     struct FnNode {
         rel: String,
@@ -2546,10 +2583,45 @@ keys:
                         refs,
                     })
                 }
+                // A `const`/`static` that CONSTRUCTS a witness is a mint whose name then flows
+                // through the existing fixpoint like any other callee.
+                Item::Const(c) => {
+                    let (mints, refs) = scan_init(&c.expr, false);
+                    out.push(FnNode {
+                        rel: rel.into(),
+                        name: c.ident.to_string(),
+                        public: is_pub(&c.vis),
+                        test_only: t,
+                        mints,
+                        refs,
+                    })
+                }
+                Item::Static(st) => {
+                    let (mints, refs) = scan_init(&st.expr, false);
+                    out.push(FnNode {
+                        rel: rel.into(),
+                        name: st.ident.to_string(),
+                        public: is_pub(&st.vis),
+                        test_only: t,
+                        mints,
+                        refs,
+                    })
+                }
                 Item::Impl(i) => {
                     let trait_impl = i.trait_.is_some();
                     let on_witness = mentions(&i.self_ty, WITNESS);
                     for ii in &i.items {
+                        if let syn::ImplItem::Const(c) = ii {
+                            let (mints, refs) = scan_init(&c.expr, on_witness);
+                            out.push(FnNode {
+                                rel: rel.into(),
+                                name: c.ident.to_string(),
+                                public: trait_impl || is_pub(&c.vis),
+                                test_only: t || is_test_only_cfg(&c.attrs),
+                                mints,
+                                refs,
+                            });
+                        }
                         if let syn::ImplItem::Fn(f) = ii {
                             let (mints, refs) = scan_body(Some(&f.block), on_witness);
                             out.push(FnNode {

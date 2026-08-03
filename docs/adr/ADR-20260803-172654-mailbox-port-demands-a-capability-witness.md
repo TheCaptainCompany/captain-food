@@ -92,8 +92,8 @@ is a loud, reviewable diff, not a silent shortcut.
   shape by walking the crate's call graph, so a publicly-reachable minting function must appear on
   an explicit door list. That guard is a SYNTACTIC approximation (idents, no type resolution), so
   the limit recorded in this bullet still stands for anything its scan cannot resolve — it is
-  smaller, not gone. This sentence originally read "CLOSED"; that was an overclaim, and retracting
-  a limit seven review passes earned is a worse failure than the limit itself. The guard blocks the spellings that announce themselves (`trait Ext: Mailbox`,
+  smaller, not gone. This marker first read "CLOSED"; that was an overclaim, and retracting a limit
+  seven review passes earned is a worse failure than the limit itself. The guard blocks the spellings that announce themselves (`trait Ext: Mailbox`,
   `impl<T: Mailbox> Ext for T`, and the same bound in a `where` clause), and that is worth having,
   but the class is not closed and calling it closed would be the same failure as the doc comment
   this change deleted. What contains the

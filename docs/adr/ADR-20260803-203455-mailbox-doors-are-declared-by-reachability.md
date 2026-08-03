@@ -82,7 +82,9 @@ so the deferral is visible in the prioritised backlog rather than living only in
 - **Name-based call resolution over-approximates** (no type information), which flags too much
   rather than too little — the safe direction, and the same posture the witness guard takes on
   module privacy. The cost is that a genuinely new door must be named; that cost is the feature.
-  It over-approximates ONLY where it is meant to: an earlier version excluded call edges whose
+  It over-approximates broadly — planting one tainted `Held::new` also flags unrelated `default`
+  and `insert_many`, and the failure message says so — but it must not UNDER-approximate, and an
+  earlier version did: it excluded call edges whose
   callee shares the caller's name, which sounded like self-recursion protection but could not be
   (the candidate set holds only tainted functions) and silently dropped the ordinary shape "public
   `Facade::new` calls crate-internal minting `Held::new`" — `new` being the commonest ident in Rust.
@@ -92,6 +94,17 @@ so the deferral is visible in the prioritised backlog rather than living only in
   (`pub(crate)`) whose real remedy was rewording a log line.
 - **`unsafe_code = "forbid"` stays load-bearing.** `mem::zeroed::<MailboxAccess>()` would defeat both
   guards identically, so the threat model remains safe Rust.
+- **`const`, `static` and associated-const INITIALIZERS are scanned too.** Skipping them was a
+  traversal gap, not a scope limit: `const HELD: MailboxAccess = MailboxAccess(());` — the ordinary
+  way to stop calling the mint in three places — is a construction the AST recognises, and a public
+  `cancel_any` using `HELD` was invisible to BOTH guards. The initializer is scanned like a body and
+  the item's ident joins the fixpoint, so nothing about that shape needed type resolution.
+- **A `#[derive(..)]` on the witness is a trait impl in one word.** The leak rule saw only
+  `Item::Impl`, so `#[derive(Default)]` on `MailboxAccess` handed every crate in the workspace a
+  public mint via `Default::default()` — proven from `server`, which holds only the port. Derives
+  are now allowlisted (`Debug`/`Clone`/`Copy`/`PartialEq`/`Eq`/`Hash`/`PartialOrd`/`Ord`) and
+  anything else refused as a class, which is the rule sessions.md §8b already states: ban a class,
+  not a spelling.
 - **The anti-blindness assertion names `granted` specifically.** A bare "something is tainted" check
   is satisfied by the test-only `for_tests`, so the PRODUCTION mint could go dark unnoticed.
 - What remains outside both guards: any construction or call edge the syntactic scan cannot see (see
