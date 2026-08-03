@@ -2402,6 +2402,244 @@ keys:
         );
     }
 
+    /// One function-like item seen by the door scan.
+    struct FnNode {
+        rel: String,
+        name: String,
+        /// `pub` at its own site. Deliberately NOT resolved through module privacy: treating a
+        /// `pub fn` in a private module as public over-approximates, which is the safe direction
+        /// and forces every re-exported door onto the allowlist by name.
+        public: bool,
+        /// Under a `#[cfg(test)]` / `test-fixtures` ancestor — never compiled for a dependent.
+        test_only: bool,
+        /// Set when this fn lives in an `impl` ON the witness and constructs `Self(..)` — the
+        /// witness's own mints spell the construction `Self(())`, not `MailboxAccess(())`, so a
+        /// text seed alone misses `granted` and `for_tests`.
+        mints_self: bool,
+        body: String,
+    }
+
+    /// Collect every fn in a module tree with its body, for the call-graph scan.
+    fn collect_fns(
+        items: &[syn::Item],
+        rel: &str,
+        test_only: bool,
+        out: &mut Vec<FnNode>,
+    ) {
+        use syn::Item;
+        for item in items {
+            let t = test_only || is_test_only_cfg(item_attrs(item));
+            match item {
+                Item::Mod(m) => {
+                    if let Some((_, inner)) = &m.content {
+                        collect_fns(inner, rel, t, out);
+                    }
+                }
+                Item::Fn(f) => out.push(FnNode {
+                    rel: rel.into(),
+                    name: f.sig.ident.to_string(),
+                    public: is_pub(&f.vis),
+                    test_only: t,
+                    mints_self: false,
+                    body: quote::quote!(#f).to_string(),
+                }),
+                Item::Impl(i) => {
+                    let trait_impl = i.trait_.is_some();
+                    let on_witness = mentions(&i.self_ty, WITNESS);
+                    for ii in &i.items {
+                        if let syn::ImplItem::Fn(f) = ii {
+                            let body = quote::quote!(#f).to_string();
+                            let ctors_self =
+                                body.chars().filter(|c| !c.is_whitespace()).collect::<String>().contains("Self(()");
+                            out.push(FnNode {
+                                rel: rel.into(),
+                                name: f.sig.ident.to_string(),
+                                // A trait impl's methods are as public as the trait.
+                                public: trait_impl || is_pub(&f.vis),
+                                test_only: t || is_test_only_cfg(&f.attrs),
+                                mints_self: on_witness && ctors_self,
+                                body,
+                            });
+                        }
+                    }
+                }
+                Item::Trait(tr) => {
+                    for ti in &tr.items {
+                        if let syn::TraitItem::Fn(f) = ti {
+                            // Only PROVIDED methods have a body that could mint.
+                            if f.default.is_some() {
+                                out.push(FnNode {
+                                    rel: rel.into(),
+                                    name: f.sig.ident.to_string(),
+                                    public: is_pub(&tr.vis),
+                                    test_only: t,
+                                    mints_self: false,
+                                    body: quote::quote!(#f).to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// EVERY PUBLIC MAILBOX DOOR IS DECLARED (#329, closing the #304 residual class).
+    ///
+    /// The witness guard asks what a SIGNATURE says. That leaves one class it cannot see, named
+    /// openly in ADR-20260803-172654: a public in-crate item that mints internally and hands the
+    /// capability out through a signature that never mentions the witness —
+    /// `pub fn cancel_any(&self, id: Uuid) -> Result<bool>` over a held `Arc<dyn Mailbox>`.
+    /// Seven review passes on #304 established that no amount of signature analysis closes it.
+    ///
+    /// REACHABILITY does. The argument is short and, for safe Rust inside this crate, complete:
+    /// calling a port method requires a witness; a witness can only come from (a) a mint or
+    /// (b) a parameter. Case (b) names the witness in a signature and is already caught by
+    /// `every_mailbox_port_method_demands_the_access_witness`. So seeding on MINTS and propagating
+    /// through the call graph covers the other half — and the two rules together leave no route.
+    /// (Constructions via a field, a const or a static all reduce to (a) or (b): something had to
+    /// mint or receive the witness to put it there.)
+    ///
+    /// The payoff is not just the closure: the set of publicly-reachable minting functions IS the
+    /// door list. Every entry below is a door someone deliberately opened, and adding one is an
+    /// edit to this allowlist — which is exactly the ADR-20260802-170059 posture ("the declaration
+    /// is the permission") applied to the crate's own surface rather than to the spec.
+    #[test]
+    fn every_public_mailbox_door_is_declared() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = root.canonicalize().expect("repo root resolves");
+
+        // THE DOOR LIST. A publicly-reachable function that can reach a mint must be named here,
+        // with why it is a door. Anything else is a new door nobody declared.
+        // Keyed by (file, name), never by name alone: `send` is both a generated client's write
+        // door and `broadcast::Sender::send`, and a bare-name allowlist would pre-authorise any
+        // future `pub fn send` anywhere in the crate.
+        const DOORS: &[(&str, &str, &str)] = &[
+            // The generated per-actor clients — the write door (#284 slice 2).
+            ("crates/actor_client/src/generated/actor_clients.rs", "send", "typed command door"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "record", "typed inbound-fact door"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "schedule", "reminder door (reminders-declaring actors)"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "cancel_scheduling", "reminder withdrawal (ADR-20260731-150500 §3)"),
+            // The one generic read door (PROP-20260802-130500 D4).
+            ("crates/actor_client/src/client.rs", "get_operation_status", "ActorClient: the ONLY read path over inbound_messages status"),
+            // The reminder constructor the in-transaction `schedules:` upsert binds from.
+            ("crates/actor_client/src/reminders.rs", "declare", "the pool-backed reminder declaration (ADR-20260731-214500)"),
+            // The D8 bulk fact door — additionally gated by the `bulk-door` feature, which
+            // `bulk_door_feature_is_granted_only_to_infrastructure` allows only infrastructure to enable.
+            ("crates/actor_client/src/enqueue.rs", "enqueue_inbound_facts", "the UNTYPED bulk fact door (#290 review BLOCKING-1a)"),
+            // Test-only reference implementations (never in a release graph).
+            ("crates/actor_client/src/enqueue.rs", "cancel_reminder", "test-only reference impl behind `test-fixtures`"),
+            ("crates/actor_client/src/enqueue.rs", "schedule_reminder", "test-only reference impl behind `test-fixtures`"),
+            ("crates/actor_client/src/mailbox.rs", "for_tests", "the D5 test-only witness mint, cfg-gated"),
+        ];
+        let is_door = |f: &FnNode| DOORS.iter().any(|(p, n, _)| *p == f.rel && *n == f.name);
+
+        let mut files = Vec::new();
+        let mut stack = vec![root.join("crates/actor_client/src")];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).expect("actor_client sources are readable").flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    files.push(p);
+                }
+            }
+        }
+        files.sort();
+        assert!(files.len() >= 5, "found only {} sources — the walk went blind", files.len());
+
+        let mut fns: Vec<FnNode> = Vec::new();
+        for p in &files {
+            let rel = p.strip_prefix(&root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(p).expect("a partial scan is a silent no-op");
+            let file = syn::parse_file(&text)
+                .unwrap_or_else(|e| panic!("{rel} does not parse ({e}) — this guard reads the AST"));
+            collect_fns(&file.items, &rel, is_test_only_cfg(&file.attrs), &mut fns);
+        }
+
+        // SEED: a body that mints. `quote` renders paths spaced (`MailboxAccess :: granted`), so
+        // compare with whitespace removed.
+        let squash = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        let mut tainted: std::collections::HashSet<usize> = fns
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| {
+                let b = squash(&f.body);
+                f.mints_self
+                    || b.contains("MailboxAccess::granted()")
+                    || b.contains("MailboxAccess::for_tests()")
+                    || b.contains("MailboxAccess(())")
+            })
+            .map(|(i, _)| i)
+            .collect();
+        assert!(
+            !tainted.is_empty(),
+            "no minting function found at all — the mint was renamed and this guard went blind; \
+             fix the seed, do not delete the test"
+        );
+
+        // PROPAGATE to a fixpoint: a function that calls a tainted one is tainted. Matched by
+        // ident, which over-approximates across same-named methods — the safe direction.
+        loop {
+            // Taint flows out of MINTS and internal helpers, but STOPS at a declared door: a
+            // function calling `RestaurantClient::send` is using the sanctioned public API, which
+            // is available to every crate anyway — it is not a new capability.
+            let names: Vec<String> = tainted
+                .iter()
+                .filter(|i| !is_door(&fns[**i]))
+                .map(|i| fns[*i].name.clone())
+                .collect();
+            let mut grew = false;
+            for (i, f) in fns.iter().enumerate() {
+                if tainted.contains(&i) {
+                    continue;
+                }
+                let b = squash(&f.body);
+                if names.iter().any(|n| n != &f.name && b.contains(&format!("{n}("))) {
+                    grew = true;
+                    tainted.insert(i);
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+
+        let undeclared: Vec<String> = tainted
+            .iter()
+            .map(|i| &fns[*i])
+            .filter(|f| f.public && !f.test_only && !is_door(f))
+            .map(|f| format!("  {}: `{}`", f.rel, f.name))
+            .collect();
+        assert!(
+            undeclared.is_empty(),
+            "these PUBLIC functions can reach a MailboxAccess mint but are not declared doors:\n{}\n\n\
+             Fix: make it `pub(crate)`, or — if it really is a new door — add it to this test's \
+             DOORS list WITH the reason it exists. Why: this is the class \
+             `every_mailbox_port_method_demands_the_access_witness` cannot see, because such a \
+             function never names the witness in its signature (`pub fn cancel_any(&self, id)` \
+             over a held `Arc<dyn Mailbox>`). A witness reaches a port method only from a mint or \
+             a parameter; parameters are caught by the signature guard, so this covers the rest.",
+            undeclared.join("\n")
+        );
+
+        // Both directions, like the entry-construction guard: a stale door entry is an excuse
+        // nobody is using, and it would silently permit a future function of that name.
+        let stale: Vec<String> = DOORS
+            .iter()
+            .filter(|(p, n, _)| !tainted.iter().any(|i| &fns[*i].name == n && &fns[*i].rel == p))
+            .map(|(p, n, _)| format!("{p}::{n}"))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "these declared doors no longer reach the mailbox: {stale:?}\n\n\
+             Fix: remove them from DOORS. A stale entry pre-authorises any future function that \
+             happens to take the name."
+        );
+    }
+
     /// The Cargo.toml CAPABILITY ALLOWLIST (#290 phase 1, PROP-20260802-130500 D3): `sqlx` (talk
     /// to the database) and `reqwest` (reach the network) may appear in a crate's RELEASE
     /// dependency sections only when that crate is explicitly allowlisted here WITH its reason.

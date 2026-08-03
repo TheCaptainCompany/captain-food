@@ -217,6 +217,17 @@ Riders, all learned the same way:
   `#[cfg_attr(<cond>, path = "…")]`, and an `include!` ban keyed on `is_ident` that misses
   `std::include!`, are the same mistake: **ban a CLASS, matched on the last path segment, not a
   spelling.**
+- **A ceiling may be the technique's, not the problem's — check before you disclaim.** The class
+  above (a public wrapper that mints internally) is un-checkable *by signatures*, and that is not
+  the same as un-checkable. Capabilities have a small, enumerable set of SOURCES: for a token type,
+  a value arrives either as a parameter or from a construction. Cover the parameter case with the
+  signature rule you already have, then seed a call-graph taint scan on the CONSTRUCTIONS and
+  propagate to a fixpoint — the two compose into a complete rule where each alone leaks. Seed
+  structurally (`Self(())` inside an impl on the type) rather than on the mint's NAME, so a rename
+  cannot blind it; stop taint at declared entry points, or every caller of the public API looks like
+  a new door; and key the allowlist by `(file, name)`, because a bare name pre-authorises any future
+  function that takes it. The allowlist is then the real artifact: it enumerates the doors, and
+  opening another is an edit to it.
 - **Know where the guard's ceiling is, and write it down.** Some classes are not checkable at all
   by the technique you chose, and finding that out is a result, not a failure. Here: a public
   in-crate wrapper that mints internally and exposes the capability through a signature that never
