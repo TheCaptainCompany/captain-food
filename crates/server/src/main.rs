@@ -57,7 +57,7 @@ async fn main() {
 
     let addr = format!("0.0.0.0:{}", config.port);
 
-    let app = server::router();
+    let app = server::router().await;
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await

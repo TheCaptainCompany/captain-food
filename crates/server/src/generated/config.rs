@@ -243,8 +243,6 @@ pub struct Config {
     pub mailbox_max_delivery_attempts: i64,
     /// The generic deletion engine (ADR-20260731-214500 §4): runs the declared deletion journeys (tombstone -> stream deletion -> ledger receipt) for every actors.yaml `deletion:` block. OFF, recorded expiry facts accumulate and no stream is ever erased — GDPR deletion pauses, data is never lost. DEFAULT OFF (gate-then-stabilize): this worker DELETES event streams; the default flips by its own one-line ADR after the gated form is smoked in staging. Readiness at GET /deletion.
     pub run_deletion_engine: bool,
-    /// The Runtime D1 flip (#272, ADR-20260801-023000): ON, the three process-manager mutations (placeOrder / approveRefund / denyRefund) deliver through the PM mailboxes via the PREPARE phase (Stripe call with no transaction open, one fenced commit), the Payment lane chains the inbound Stripe facts to the PM lanes in the recording transaction (B2), and the saga runner's Stripe-fact triggers retire. OFF, the legacy journal+spawn path and the runner handle everything exactly as before -- the client contract is byte-identical on both arms (each arm replays the OTHER acceptance store's messageIds as duplicates, so a retry never re-executes across a flip), and every startup with the gate ON backfills un-reacted Stripe facts past the runner checkpoints onto the PM lanes (idempotent), so flipping in EITHER direction loses no saga hop. DEFAULT OFF (gate-then-stabilize): this flips the MONEY PATH; the default flips by its own one-line ADR after the gated form is smoked in staging, and command_journal DROPs only at that deploy.
-    pub pm_mailbox_delivery: bool,
     /// Retention sweep over terminal journal/mirror rows. OFF, nothing expires and storage grows without bound.
     pub run_retention_sweep: bool,
     /// SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene.
@@ -422,10 +420,6 @@ impl Config {
             .or_else(|| baked("RUN_DELETION_ENGINE", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_DELETION_ENGINE", &v, false))
             .unwrap_or(false);
-        let pm_mailbox_delivery = raw("PM_MAILBOX_DELIVERY")
-            .or_else(|| baked("PM_MAILBOX_DELIVERY", profile).map(str::to_string))
-            .map(|v| parse_bool("PM_MAILBOX_DELIVERY", &v, false))
-            .unwrap_or(false);
         let run_retention_sweep = raw("RUN_RETENTION_SWEEP")
             .or_else(|| baked("RUN_RETENTION_SWEEP", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_RETENTION_SWEEP", &v, true))
@@ -573,7 +567,6 @@ impl Config {
                 run_mailbox_push,
                 mailbox_max_delivery_attempts,
                 run_deletion_engine,
-                pm_mailbox_delivery,
                 run_retention_sweep,
                 run_sirene_worker,
                 run_delivery_offer_timeout,
@@ -654,7 +647,6 @@ impl Config {
         out.push_str(&format!("  RUN_MAILBOX_PUSH           = {}\n", self.run_mailbox_push));
         out.push_str(&format!("  MAILBOX_MAX_DELIVERY_ATTEMPTS = {}\n", self.mailbox_max_delivery_attempts));
         out.push_str(&format!("  RUN_DELETION_ENGINE        = {}\n", self.run_deletion_engine));
-        out.push_str(&format!("  PM_MAILBOX_DELIVERY        = {}\n", self.pm_mailbox_delivery));
         out.push_str(&format!("  RUN_RETENTION_SWEEP        = {}\n", self.run_retention_sweep));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
         out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
@@ -686,7 +678,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 60;
+pub const KEY_COUNT: usize = 59;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -724,7 +716,6 @@ pub const DECLARED_KEYS: &[&str] = &[
     "RUN_MAILBOX_PUSH",
     "MAILBOX_MAX_DELIVERY_ATTEMPTS",
     "RUN_DELETION_ENGINE",
-    "PM_MAILBOX_DELIVERY",
     "RUN_RETENTION_SWEEP",
     "RUN_SIRENE_WORKER",
     "RUN_DELIVERY_OFFER_TIMEOUT",

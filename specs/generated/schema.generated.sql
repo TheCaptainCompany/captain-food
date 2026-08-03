@@ -318,6 +318,12 @@ CREATE TABLE RestaurantDispatchConfig (
 );
 CREATE INDEX ON RestaurantDispatchConfig (city_id);
 
+CREATE TABLE RuntimePosture (
+  posture TEXT PRIMARY KEY,
+  enabled BOOLEAN NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE slug_reservations (
   slug TEXT PRIMARY KEY,
   restaurant_id UUID NOT NULL,
