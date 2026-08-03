@@ -412,6 +412,23 @@ pub async fn cancel_reminder(
         .await
 }
 
+/// Withdraw one SCHEDULED row through the port — the delegate behind every generated
+/// `{Actor}Client::cancel_scheduling`.
+///
+/// It exists so that NO generated per-actor client ever mints a [`MailboxAccess`] itself (#304,
+/// asserted by `no_generated_client_mints_the_port_witness`). Every other client method already
+/// delegated to [`insert_mapped`]/[`schedule_mapped`]; `cancel_scheduling` was the one that spoke
+/// to the port directly, which would have been the single line that failed to compile when
+/// PROP-20260802-130500 phase 2 moves each client into its own crate — and the "fix" there is to
+/// widen the mint, which is exactly the level-4 → level-3 slide the witness exists to prevent.
+/// With the mint kept in this core module, phase 2 only has to widen these delegates.
+pub(crate) async fn cancel_scheduled_mapped(
+    mailbox: &dyn Mailbox,
+    message_id: uuid::Uuid,
+) -> Result<bool, DomainError> {
+    mailbox.cancel_scheduled(message_id, MailboxAccess::granted()).await
+}
+
 /// Insert one entry and map the port outcome onto [`EnqueueOutcome`] — shared by the free-function
 /// enqueue helpers and the generated typed actor clients.
 pub(crate) async fn insert_mapped(

@@ -75,7 +75,7 @@ reviewable act (a `Cargo.toml` edit, a boundary-crate diff, a credential change)
 | what an actor receives | sealed `{Actor}Command`/`{Actor}Fact` traits ([#288](https://github.com/TheCaptainCompany/captain-food/pull/288)) | **4** ✅ |
 | the write door (who may build a mailbox row) | `pub(crate)` constructors + the `MailboxAccess` witness on every port method ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)) | **4** ✅ |
 | who may address which actor | anyone depending on `infrastructure` gets all 16 clients | 1 |
-| the read door (`operationStatus`) | `ActorClient` + the `MailboxAccess` witness ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)); a raw SELECT still needs `sqlx`, which D3 allowlists | **4** ✅ |
+| the read door (`operationStatus`) | `ActorClient` + the `MailboxAccess` witness ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)) | **4** ✅ *against the port* — the raw-SELECT path is still the level-1 row below |
 | **who may run SQL at all** | **`sqlx` in NINE crates** — server, all five adapters, actor_runtime, sirene_ingest, infrastructure | **1** |
 | who may reach the network | `reqwest` in ten crates | 1 |
 | event-store append | `PgEventStore` public; any infra-dependent code can append | 1 |
@@ -248,6 +248,16 @@ withdrawal method named `cancel_scheduling` per #308, lane-scoping declined). Th
    as its own change (product-owner decision, 2026-08-02).
 2. **Phase 2**: per-actor client crates — one per aggregate AND one per process manager (16 today),
    manifests codegen-emitted; an adapter's `Cargo.toml` names exactly the actors it may address.
+   **The wall phase 2 actually hits** (found while closing the port surface, #304): a per-actor
+   client crate must BUILD mailbox entries, and `command_entry`/`inbound_entry` are `pub(crate)`
+   while `MailboxEntry`'s fields are private — that is D1's whole enforcement. Two exits: widen
+   those to `pub` in the core crate (D1 then degrades to a manifest allowlist for anyone depending
+   on it), or expose an OPAQUE facade so both the entry and the `MailboxAccess` witness stay inside
+   the core (`handle.send_command(actor, width, id, message_type, payload, env)`). The second keeps
+   phase 2 at level 4 and is the recommendation; #304 is its rehearsal, one level up. The
+   client-side half of this wall is already gone: no generated client mints a witness or builds an
+   entry — every method delegates to `crate::enqueue`, so phase 2 widens three delegates, not
+   sixteen clients.
 3. **Phase 3**: per-actor handler crates per D2(a) — again one per aggregate and one per process
    manager — individually costed before committal; it reshapes application/domain codegen and is a
    program, not a slice.

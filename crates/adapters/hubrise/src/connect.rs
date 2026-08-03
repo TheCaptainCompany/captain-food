@@ -28,7 +28,7 @@
 use std::sync::Arc;
 
 use actor_client::mailbox::{Envelope, Mailbox};
-use actor_client::ActorClient;
+use actor_client::{ActorClient, OperationStatusBus};
 use actor_client::generated::actor_clients::{
     CatalogClient, RestaurantAccountClient, RestaurantClient,
 };
@@ -226,13 +226,22 @@ pub struct HubRiseConnectFlow<G: HubRiseConnectGateway> {
 }
 
 impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
+    /// `bus` is the process-wide operation-response bus, or `None` in a deployment that has no
+    /// shared one (a standalone adapter — `run_standalone_workers` publishes onto a bus of its
+    /// own that nothing here can see). Taking the BUS rather than a ready-made [`ActorClient`]
+    /// is deliberate: a caller cannot then hand us a read door built over a DIFFERENT mailbox
+    /// than the one we write through, and the pull-only posture stays visible as `None`.
     pub fn new(
         mailbox: Arc<dyn Mailbox>,
-        status: ActorClient,
+        bus: Option<OperationStatusBus>,
         restaurants: Arc<dyn RestaurantReadRepository>,
         connections: Arc<dyn HubRiseConnections>,
         gateway: G,
     ) -> Self {
+        let status = match bus {
+            Some(bus) => ActorClient::new(mailbox.clone(), bus),
+            None => ActorClient::pull_only(mailbox.clone()),
+        };
         Self { mailbox, status, restaurants, connections, gateway }
     }
 
@@ -715,7 +724,7 @@ mod tests {
         (
             HubRiseConnectFlow::new(
                 mailbox.clone(),
-                ActorClient::new(mailbox.clone(), Default::default()),
+                None,
                 Arc::new(CaughtUpRestaurants),
                 connections,
                 gateway,
@@ -790,7 +799,7 @@ mod tests {
         let mailbox = Arc::new(MemMailbox::instantly_delivered());
         let first = HubRiseConnectFlow::new(
             mailbox.clone(),
-            ActorClient::new(mailbox.clone(), Default::default()),
+            None,
             Arc::new(CaughtUpRestaurants),
             connections.clone(),
             fake_gateway("tok_1"),
@@ -804,7 +813,7 @@ mod tests {
         // AGGREGATES' job at delivery (their creation idempotency), not the mailbox key's.
         let second = HubRiseConnectFlow::new(
             mailbox.clone(),
-            ActorClient::new(mailbox.clone(), Default::default()),
+            None,
             Arc::new(CaughtUpRestaurants),
             connections.clone(),
             fake_gateway("tok_2"),

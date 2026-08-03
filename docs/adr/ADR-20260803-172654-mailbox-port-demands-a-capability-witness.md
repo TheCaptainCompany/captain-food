@@ -12,8 +12,9 @@
 Every method of the `Mailbox` port takes a `MailboxAccess` witness — a unit struct whose single
 field is `pub(crate)` to `actor_client`, minted only by `MailboxAccess::granted()` (also
 `pub(crate)`). Outside the boundary crate the witness cannot be constructed, so **no `Mailbox`
-method can be called at all**: the generated typed clients (write) and `ActorClient` (read) are the
-only paths that reach the mailbox, by compilation rather than by convention.
+method can be called by any out-of-crate CALLER**: the generated typed clients (write) and
+`ActorClient` (read) are the only paths that reach the mailbox, by compilation rather than by
+convention. (An out-of-crate *implementor* is a different case — see Consequences.)
 
 The one public mint is `MailboxAccess::for_tests()`, compiled only under the D5 `test-fixtures`
 feature that `test_fixtures_feature_never_reaches_a_release_artifact` already keeps out of every
@@ -50,27 +51,51 @@ is a loud, reviewable diff, not a silent shortcut.
 
 | option | why it won / lost |
 |---|---|
-| **Capability witness on every port method** ✅ | Closes the read and withdrawal doors outright; makes the write side's closure explicit instead of incidental, so a future method taking only primitives cannot silently reopen the surface; implementors outside the crate still compile (naming a type is not constructing one) |
-| Witness only on `by_message` / `cancel_scheduled` | Smaller diff, but leaves the port's guarantee dependent on a signature accident — the next `fn requeue(&self, message_id: Uuid)` reopens it with nobody noticing |
+| **Capability witness on every port method** ✅ | Closes the read and withdrawal doors outright, and makes the rule MECHANIZABLE: "every method of this trait takes the witness" is checkable by a scan, so the guard below can enforce it forever |
+| Witness only on `by_message` / `cancel_scheduled` | Smaller diff, but the rule becomes "methods whose arguments are not otherwise unconstructible" — which no textual guard can check, because it requires reasoning about type constructibility *across cfg configurations*, and that is already configuration-dependent here (`test-fixtures` flips `MailboxEntry` from unconstructible to constructible). A rule you cannot mechanize is a rule you re-litigate at every review |
 | Narrow the return types instead (opaque `MailboxStatusRow`) | Makes the bypass less *useful*, never impossible; still level 3 |
 | A `pub(crate)` extension trait over the port | A public trait's methods cannot be `pub(crate)`, and `PgMailbox` must implement them from another crate — the underlying methods stay public, so nothing closes |
 | Textual guard forbidding out-of-crate call sites | Level 3: an alias or a new crate walks past it, which is the failure the door guard's own doc admits |
 
 ## Consequences
 
-- `infrastructure::PgMailbox` and the `MemMailbox` double name `MailboxAccess` in their signatures
-  and ignore it. An out-of-crate *implementor* is handed a witness when a door calls it, so it
-  could retain one — accepted: implementing the port is itself a loud act, and D3's capability
-  allowlist governs who may hold `sqlx` at all.
+- **The boundary is level 4 against CALLERS, weaker against IMPLEMENTORS.** `infrastructure::PgMailbox`
+  and the `MemMailbox` double name `MailboxAccess` in their signatures and ignore it. But an
+  out-of-crate `impl Mailbox for Decorator(Arc<dyn Mailbox>)` is *handed* a real witness the moment
+  any door calls it, and the witness is `Copy` — so it can spend it on any other port method of the
+  wrapped mailbox. What contains that is **the composition root**: a decorator only receives calls
+  once someone wires it into `crates/server/src/lib.rs`, which is a loud, reviewable diff. It is
+  explicitly NOT contained by D3 — a decorator needs no `sqlx` — and saying so would be worse than
+  saying nothing, because a wrong justification stops the next reviewer looking. Dropping `Copy`
+  would stop retention but not decoration, so it buys nothing real.
 - `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) keeps the rule applying
   to the *whole* surface: a sixth method without the witness compiles fine and would silently
   reopen the hole. The guard also pins the witness's `pub(crate)` field and its single public mint,
   since widening either hands the key back without changing a signature.
 - Callers that need the read door now need an `ActorClient`, which needs an `OperationStatusBus`.
   In the monolith that is the real bus. A **standalone adapter has no shared bus** —
-  `run_standalone_workers` builds a local subscriber-less one — so the HubRise binary passes a
-  default: correct there, because the connect flow only ever pulls the durable row. A future
-  caller that wants `watch` in a standalone adapter must thread a real bus first.
+  `run_standalone_workers` publishes onto a separate instance nothing outside it can subscribe to —
+  so `HubRiseConnectFlow::new` takes `Option<OperationStatusBus>` and the standalone binary passes
+  `None`, yielding a pull-only door. Taking the bus rather than a ready-made `ActorClient` also
+  removes a hazard the reviewer named: a caller can no longer hand the flow a read door built over
+  a *different* mailbox than the one it writes through.
+- **No generated per-actor client names the witness.** `{Actor}Client::cancel_scheduling` was the
+  one client method that spoke to the port directly; it now delegates to
+  `enqueue::cancel_scheduled_mapped` like every other. That matters for
+  PROP-20260802-130500 **phase 2**: when each client moves to its own crate, a mint inside a client
+  would be the single line that fails to compile, and the tempting "fix" is to widen
+  `granted()` to `pub` — trading the compiler (level 4) for a manifest allowlist (level 3). With
+  every mint kept in the core module, phase 2 only has to widen the three `pub(crate)` delegates.
+  The guard asserts both halves, so the day phase 2 tries to widen the mint it fails loudly — the
+  wall becomes a recorded decision instead of a silent slide.
+  (The *bigger* phase-2 wall is not this one: per-actor client crates must BUILD entries, so
+  `command_entry`/`inbound_entry` and the entry's private fields are the real obstacle. Recorded in
+  the proposal's phasing, not here.)
+- `ActorClient::pull_only(mailbox)` exists for a caller with no response bus to share. Handing such
+  a caller `OperationStatusBus::default()` compiles and then lies: it builds a live broadcast
+  channel whose only sender is the client's own field, so a later `watch` awaits forever — never a
+  message (nothing publishes), never `Closed` (the client holds the sender). `watch` therefore
+  returns `Option<OperationWatch>`, and the posture lives in the type instead of a comment.
 - The PROP-20260802-130500 §5 audit row for the `Mailbox` port moves from ❌ hole to ✅ compiler.
   `View_*` read methods ([#305](https://github.com/TheCaptainCompany/captain-food/issues/305)) and
   `PgEventStore` append remain open.

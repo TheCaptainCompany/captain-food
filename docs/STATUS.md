@@ -6,9 +6,13 @@
 > ✅ **2026-08-03 — [#304 "The Mailbox port surface hole: insert/by_message are pub to any port holder"](https://github.com/TheCaptainCompany/captain-food/issues/304)
 > (PROP-20260802-130500 §5 directive, [ADR-20260803-172654](adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md))**:
 > holding the `Mailbox` port is no longer holding the door. Every port method takes a
-> `MailboxAccess` witness whose only mint is `pub(crate)` to `actor_client`, so outside the
-> boundary crate **no `Mailbox` method compiles at all** — the generated typed clients (write)
-> and `ActorClient` (read) are the only paths, by compiler rather than by convention. The write
+> `MailboxAccess` witness whose only mint is `pub(crate)` to `actor_client`, so **no out-of-crate
+> CALLER can invoke a `Mailbox` method at all** — the generated typed clients (write) and
+> `ActorClient` (read) are the only paths, by compiler rather than by convention. (Level 4 against
+> callers; weaker against IMPLEMENTORS — an out-of-crate `impl Mailbox` decorator is handed a real
+> witness when a door calls it. What contains that is the composition root, not the witness: a
+> decorator only receives calls once someone wires it into `server/src/lib.rs`. Recorded honestly
+> in the ADR's consequences rather than claimed away.) The write
 > methods were already closed incidentally (a `MailboxEntry` cannot be built outside the crate);
 > the two keyed by a bare `Uuid` were wide open: `by_message` (the D4 read side — its own doc
 > comment claimed a convention two callers were breaking) and `cancel_scheduled`, which would
@@ -18,10 +22,16 @@
 > holds an `ActorClient`; a standalone adapter has no shared bus, and that is fine because the
 > flow only pulls the durable row) and the generated legacy-arm cross-arm duplicate check.
 > Integration tests seed through `MailboxAccess::for_tests()` on the D5 `test-fixtures` feature
-> that never reaches a release graph. `every_mailbox_port_method_demands_the_access_witness`
-> (tools/codegen-rs) keeps the rule applying to the whole surface — a sixth method without the
-> witness would compile fine and silently reopen the hole — and pins the witness's `pub(crate)`
-> field and its single public mint. §5 audit: the `Mailbox` port row moves ❌ → ✅ compiler;
+> that never reaches a release graph. No generated per-actor client names the witness any more
+> (`cancel_scheduling` delegates to `enqueue::cancel_scheduled_mapped` like every other method),
+> which is what keeps PROP-20260802-130500 phase 2 a visibility change rather than a redesign.
+> `ActorClient::pull_only` + `watch -> Option<OperationWatch>` put the no-shared-bus posture of a
+> standalone adapter in the type, instead of a default bus whose `watch` would hang forever.
+> `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) keeps the rule applying
+> to the whole surface — a method without the witness compiles fine and silently reopens the hole —
+> and pins the witness's `pub(crate)` field, its single public mint, and the absence of any other
+> mint crate-wide; nine mutations were verified to turn it red. §5 audit: the `Mailbox` port row
+> moves ❌ → ✅ compiler;
 > `View_*` reads ([#305](https://github.com/TheCaptainCompany/captain-food/issues/305)) and
 > `PgEventStore` append stay open.
 

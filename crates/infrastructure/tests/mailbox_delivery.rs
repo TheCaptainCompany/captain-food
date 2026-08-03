@@ -232,7 +232,9 @@ async fn commands_flow_mailbox_to_domain_events_atomically() {
         bus.clone(),
     );
     let mut watches =
-        [open_id, post_id, stranger_id].map(|message_id| (message_id, reader.watch(message_id)));
+        [open_id, post_id, stranger_id].map(|message_id| {
+            (message_id, reader.watch(message_id).expect("a bus-backed door watches"))
+        });
     let worker = MailboxWorker::new(
         pool.clone(),
         "w-A",
