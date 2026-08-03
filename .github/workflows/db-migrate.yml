@@ -8,8 +8,24 @@
 # The app's /health schema-version gate holds the new instance (503) until this lands, so the rollout
 # converges whichever of the two finishes first.
 #
+# WHY it also WAITS for the new build to be serving: the `deploy` job only POSTs the Render deploy
+# hook and exits (fire-and-forget, #281) -- it returns in ~20s while the rollout takes minutes. So
+# "deploy succeeded" meant "the hook was accepted", not "the new binary is live", and this job would
+# convert the schema UNDER THE OLD BINARY. Observed 2026-08-03: the width-100 -> width-5 mailbox
+# re-stamp (20260802220000) ran while the previous binary was still serving, and any row that binary
+# enqueued in the window was stamped for the retired keyspace -- lanes the new one never claims.
+# So: poll /health (which carries `version` = the build's git SHA, ADR-20260721-175411) with
+# exponential backoff until it reports the SHA this deploy shipped, and only then migrate. A new
+# instance answers 503 `schema_behind` until this job lands, so the wait deliberately accepts ANY
+# status code and reads the body -- 503 with the right version is exactly the state to migrate in.
+#
+# If the expected build never appears, the job FAILS without migrating: a schema that moved for a
+# binary that never arrived is the one failure this ordering exists to prevent (ADR-20260730-051500).
+# A rollback deploy (`tag` input pointing at an older image) therefore times out here by design.
+#
 # `sqlx migrate run` is idempotent (applies only pending migrations), so running it after every deploy
-# is safe. The manual dispatch stays for exceptional runs (e.g. re-running after a space failure).
+# is safe. The manual dispatch stays for exceptional runs (e.g. re-running after a space failure);
+# use `skip_deploy_check` when running it deliberately against an already-settled deployment.
 # Requires repo secret DATABASE_URL = the Supabase Session-pooler string (5432, ?sslmode=require).
 name: db-migrate
 
@@ -18,6 +34,11 @@ on:
     workflows: ["deploy"]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      skip_deploy_check:
+        description: "Skip the wait-for-deployed-build check (exceptional manual runs only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,6 +57,42 @@ jobs:
         with:
           # The deploy's exact commit; on manual dispatch, the ref the run was dispatched on.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Wait for the deployed build to be serving
+        if: ${{ !inputs.skip_deploy_check }}
+        env:
+          # The commit this run is migrating for: the deploy's own head_sha, or the dispatched ref.
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          HEALTH_URL: https://api.captain.food/health
+          # Render rollouts take minutes (image pull + boot + health gate); 15 min is generous but
+          # finite -- an unbounded wait would hold the schema hostage to a stuck rollout.
+          DEADLINE_SECONDS: "900"
+        run: |
+          set -uo pipefail
+          expected="${EXPECTED_SHA:0:7}"   # /health reports the SHORT sha (build_version(), ADR-20260721-175411)
+          echo "waiting for ${HEALTH_URL} to report version=${expected} (deadline ${DEADLINE_SECONDS}s)"
+          deadline=$(( $(date +%s) + DEADLINE_SECONDS ))
+          delay=10
+          last="<no response yet>"
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            # ANY status is fine: a new instance answers 503 schema_behind until this job migrates,
+            # and that body still carries the version we are waiting for. `|| true` keeps a transient
+            # 502 during the container swap from killing the job.
+            body=$(curl -sS -m 15 "$HEALTH_URL" 2>/dev/null || true)
+            live=$(printf '%s' "$body" | jq -r '.version // empty' 2>/dev/null || true)
+            if [ -n "$live" ]; then
+              last="$live"
+              if [ "$live" = "$expected" ]; then
+                echo "live: version=${live} -- the deployed build is serving, migrating now"
+                printf '%s\n' "$body"
+                exit 0
+              fi
+            fi
+            echo "still ${last:-unknown} (want ${expected}) -- retrying in ${delay}s"
+            sleep "$delay"
+            delay=$(( delay * 2 )); [ "$delay" -gt 60 ] && delay=60
+          done
+          echo "::error::${HEALTH_URL} never reported version=${expected} within ${DEADLINE_SECONDS}s (last seen: ${last}). NOT migrating -- moving the schema under a binary that never arrived is the exact hazard this ordering prevents (ADR-20260730-051500). If this was a rollback deploy, that timeout is by design."
+          exit 1
       - uses: taiki-e/install-action@v2 # Node 24; installs a prebuilt sqlx-cli in seconds (no toolchain/cargo-install)
         with:
           tool: sqlx-cli
