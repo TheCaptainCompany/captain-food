@@ -1904,6 +1904,49 @@ keys:
             .collect()
     }
 
+    /// Every trait DERIVED by this attribute, following nested `cfg_attr` the way rustc expands it.
+    ///
+    /// A one-level parse bans two spellings rather than the class: rustc expands
+    /// `#[cfg_attr(a, cfg_attr(b, derive(Default)))]` recursively, and the `#[path]` check in this
+    /// same file already scans the whole token stream and so survives nesting. A cfg_attr whose
+    /// condition is POSITIVELY test-only contributes nothing — that derive never reaches a
+    /// dependent crate.
+    fn derives_from_meta(m: &syn::Meta) -> Vec<String> {
+        if m.path().is_ident("derive") {
+            return ident_tokens(quote::quote!(#m))
+                .into_iter()
+                .filter(|t| t != "derive")
+                .collect();
+        }
+        if m.path().is_ident("cfg_attr") {
+            let syn::Meta::List(l) = m else { return Vec::new() };
+            let Ok(nested) = l.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            ) else {
+                return Vec::new();
+            };
+            let mut it = nested.iter();
+            let Some(cond) = it.next() else { return Vec::new() };
+            if is_positively_test_only(&quote::quote!(#cond).to_string()) {
+                return Vec::new();
+            }
+            return it.flat_map(derives_from_meta).collect();
+        }
+        Vec::new()
+    }
+
+    /// Is this cfg CONDITION satisfied only in a test build?
+    ///
+    /// `any(test, feature = "serde")` mentions `test` and fires in every release build with the
+    /// feature on, so a "does it mention test" check reads it as a gate — `any(..)` is refused for
+    /// that reason, as is `not(..)`. One predicate, shared, because the inline copy of this logic
+    /// in the derive arm drifted from the original and reopened the hole it was written to close.
+    fn is_positively_test_only(cond: &str) -> bool {
+        cfg_tokens(cond).iter().any(|t| *t == "test" || *t == "test-fixtures")
+            && !cond.contains("not (")
+            && !cond.contains("any (")
+    }
+
     /// Specifically a POSITIVE `test-fixtures` gate — what makes the one public mint legitimate.
     fn is_fixtures_gate(attrs: &[syn::Attribute]) -> bool {
         attrs.iter().any(|a| {
@@ -2194,40 +2237,7 @@ keys:
                             &["Debug", "Clone", "Copy", "PartialEq", "Eq", "Hash", "PartialOrd", "Ord"];
                         let mut derived: Vec<String> = Vec::new();
                         for a in &s.attrs {
-                            if a.path().is_ident("derive") {
-                                let m = &a.meta;
-                                derived.extend(ident_tokens(quote::quote!(#m)));
-                            } else if a.path().is_ident("cfg_attr") {
-                                // `#[cfg_attr(<cond>, derive(Default))]` is a derive in disguise,
-                                // and `#[cfg_attr(feature = "serde", derive(Deserialize))]` is the
-                                // ORDINARY idiom for optional serde — so this is an honest-diff
-                                // hole, not an adversarial one. The same file already treats
-                                // `cfg_attr(.., path = ..)` as a `#[path]`; this arm was written
-                                // without that precedent, which is banning a spelling rather than
-                                // a class.
-                                let Ok(nested) = a.parse_args_with(
-                                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-                                ) else {
-                                    continue;
-                                };
-                                let mut it = nested.iter();
-                                let cond = it.next().map(|c| quote::quote!(#c).to_string()).unwrap_or_default();
-                                // A genuinely test-only `#[cfg_attr(test, derive(Default))]` never
-                                // reaches a dependent, so it is allowed — the same rule the rest of
-                                // this guard uses, inversion refused.
-                                let test_only = cfg_tokens(&cond)
-                                    .iter()
-                                    .any(|t| *t == "test" || *t == "test-fixtures")
-                                    && !cond.contains("not (");
-                                if test_only {
-                                    continue;
-                                }
-                                for m in it {
-                                    if m.path().is_ident("derive") {
-                                        derived.extend(ident_tokens(quote::quote!(#m)));
-                                    }
-                                }
-                            }
+                            derived.extend(derives_from_meta(&a.meta));
                         }
                         for tok in derived {
                             if tok != "derive" && !HARMLESS.contains(&tok.as_str()) {
@@ -2587,6 +2597,20 @@ keys:
         refs: std::collections::HashSet<String>,
     }
 
+    /// Items declared inside a function BODY. Rust does not scope them to the body — an `impl`
+    /// written in a fn applies crate-wide — so `fn setup() { impl Held { pub(crate) const H: W = W(()); } }`
+    /// puts a mint in the crate while the walk sees only a private, never-called `setup`.
+    fn nested_items(block: &syn::Block) -> Vec<syn::Item> {
+        block
+            .stmts
+            .iter()
+            .filter_map(|st| match st {
+                syn::Stmt::Item(i) => Some(i.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Collect every fn in a module tree with its body, for the call-graph scan.
     fn collect_fns(
         items: &[syn::Item],
@@ -2612,7 +2636,8 @@ keys:
                         test_only: t,
                         mints,
                         refs,
-                    })
+                    });
+                    collect_fns(&nested_items(&f.block), rel, t, out);
                 }
                 // A `const`/`static` that CONSTRUCTS a witness is a mint whose name then flows
                 // through the existing fixpoint like any other callee.
@@ -2654,6 +2679,7 @@ keys:
                             });
                         }
                         if let syn::ImplItem::Fn(f) = ii {
+                            collect_fns(&nested_items(&f.block), rel, t, out);
                             let (mints, refs) = scan_body(Some(&f.block), on_witness);
                             out.push(FnNode {
                                 rel: rel.into(),
@@ -2689,6 +2715,7 @@ keys:
                         if let syn::TraitItem::Fn(f) = ti {
                             // Only PROVIDED methods have a body that could mint.
                             if let Some(block) = &f.default {
+                                collect_fns(&nested_items(block), rel, t, out);
                                 let (mints, refs) = scan_body(Some(block), false);
                                 out.push(FnNode {
                                     rel: rel.into(),
