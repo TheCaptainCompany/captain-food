@@ -40,3 +40,7 @@ tokio = { workspace = true }
 # crate above this one. Cargo permits dev-dependency cycles (the lib graph stays acyclic); the
 # `test-fixtures` feature is what exposes the mem double, and only dev-dependencies may enable it.
 actor_client = { path = "../actor_client", features = ["test-fixtures"] }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

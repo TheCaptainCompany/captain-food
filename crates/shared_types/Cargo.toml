@@ -8,3 +8,7 @@ description = "Captain.Food shared types: serde request/response DTOs and the ge
 
 [dependencies]
 serde = { workspace = true }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

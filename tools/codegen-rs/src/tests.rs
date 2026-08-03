@@ -1991,6 +1991,130 @@ keys:
         );
     }
 
+    /// The D6 LINT-FLOOR guard (#302, PROP-20260802-130500 D6): every workspace member inherits
+    /// the workspace `[lints]` baseline (`unsafe_code = forbid`), boundary crates additionally
+    /// deny `unreachable_pub` in their own `[lints]` tables (Cargo inheritance is all-or-nothing,
+    /// so they restate the floor), and the cargo-machete step stays wired in CI. Without this
+    /// test, the floor holds only for the crates that existed when #302 landed — a NEW member
+    /// crate ships with no `[lints]` at all and the whole floor silently stops being
+    /// workspace-wide. Style of the D3 capability allowlist: both directions asserted, an
+    /// FFI-crate opt-out must be allowlisted here WITH its reason (none exists today).
+    #[test]
+    fn lint_floor_covers_every_member() {
+        // (manifest path, WHY the crate may opt out of `unsafe_code = forbid`) — empty on
+        // purpose: no crate writes unsafe today. The day UniFFI/Tauri needs one, the entry
+        // lands here with its justification, a loud reviewable diff.
+        const FFI_EXEMPT: &[(&str, &str)] = &[];
+
+        // Boundary crates: their own [lints.rust] must restate the floor AND deny
+        // `unreachable_pub` — on a boundary, a `pub` item nobody outside uses is an open door
+        // someone WILL use (ADR-20260802-170059, mechanically). `server` is NOT here: its 207
+        // findings live mostly in the generated GraphQL layer — widening the floor to it is
+        // emitter work, tracked as follow-up, not silently claimed by this guard.
+        const BOUNDARY: &[&str] = &[
+            "crates/actor_client/Cargo.toml",
+            "crates/infrastructure/Cargo.toml",
+            "crates/telemetry/Cargo.toml",
+            "crates/adapters/stripe/Cargo.toml",
+            "crates/adapters/hubrise/Cargo.toml",
+            "crates/adapters/avelo37/Cargo.toml",
+            "crates/adapters/coopcycle/Cargo.toml",
+            "crates/adapters/uber_direct/Cargo.toml",
+        ];
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+
+        // The workspace baseline itself must hold — a floor nobody defines covers nothing.
+        let ws = std::fs::read_to_string(root.join("Cargo.toml"))
+            .expect("workspace Cargo.toml readable");
+        assert!(
+            ws.contains("[workspace.lints.rust]") && ws.contains("unsafe_code = \"forbid\""),
+            "the workspace [lints] baseline (unsafe_code = forbid) is gone from Cargo.toml — \
+             the D6 lint floor no longer exists"
+        );
+
+        // The third leg of D6: the unused-dependency gate must stay wired in CI — an unused
+        // dependency is an unheld capability someone can silently start using.
+        let ci = std::fs::read_to_string(root.join(".github/workflows/ci.yml"))
+            .expect(".github/workflows/ci.yml readable");
+        assert!(
+            ci.contains("cargo machete"),
+            "ci.yml no longer runs `cargo machete` — the D6 unused-dependency gate is unwired"
+        );
+
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut manifests = Vec::new();
+        walk(&root.join("crates"), &mut manifests);
+        walk(&root.join("tools"), &mut manifests);
+        manifests.sort();
+        assert!(!manifests.is_empty(), "found no member manifests to scan");
+
+        /// Line-based section scan (workspace house style): does this manifest carry the given
+        /// `[lints...]` header with the given `key = value` line inside that section?
+        fn section_has(src: &str, header: &str, entry: &str) -> bool {
+            let mut in_section = false;
+            for line in src.lines() {
+                let t = line.trim();
+                if t.starts_with('[') {
+                    in_section = t == header;
+                    continue;
+                }
+                if in_section && t.starts_with(entry) {
+                    return true;
+                }
+            }
+            false
+        }
+
+        let mut offenders: Vec<String> = Vec::new();
+        for m in &manifests {
+            let rel = m.strip_prefix(&root).unwrap_or(m).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(m).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) — a partially-scanned workspace is a silent no-op")
+            });
+            let inherits = section_has(&src, "[lints]", "workspace = true");
+            let own_forbid = section_has(&src, "[lints.rust]", "unsafe_code = \"forbid\"");
+            let own_deny = section_has(&src, "[lints.rust]", "unreachable_pub = \"deny\"");
+            let exempt = FFI_EXEMPT.iter().any(|(p, _)| *p == rel);
+            if BOUNDARY.contains(&rel.as_str()) {
+                if !(own_forbid && own_deny) {
+                    offenders.push(format!(
+                        "  {rel} is a BOUNDARY crate but its [lints.rust] no longer carries \
+                         unsafe_code = forbid AND unreachable_pub = deny"
+                    ));
+                }
+            } else if !inherits && !own_forbid && !exempt {
+                offenders.push(format!(
+                    "  {rel} carries no lint floor: add `[lints] workspace = true` (or, for a \
+                     genuine FFI crate, an FFI_EXEMPT entry here WITH its reason)"
+                ));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "the D6 lint floor (PROP-20260802-130500, #302) has holes:\n{}\n\n\
+             Why: `unsafe_code = forbid` keeps AI-authored code inside safe Rust workspace-wide, \
+             and `unreachable_pub = deny` on boundary crates makes a dead `pub` item a compile \
+             error instead of an open door; a member without the floor re-opens both silently.",
+            offenders.join("\n")
+        );
+    }
+
     /// The D5 escape-hatch guard (#290 phase 1, PROP-20260802-130500 D5): the `test-fixtures`
     /// feature on `actor_client` (mem mailbox double, EntryFixture conversions, drift-guard
     /// reference impls) may be enabled ONLY from `[dev-dependencies]` — a release artifact that

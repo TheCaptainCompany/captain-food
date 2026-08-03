@@ -40,3 +40,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "nat
 http = "1"
 bytes = "1"
 async-trait = { workspace = true }
+
+# D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
+# and additionally denies `unreachable_pub` -- on a boundary, a `pub` item nobody outside uses is
+# an open door someone WILL use (the mechanical form of ADR-20260802-170059). Cargo lint
+# inheritance is all-or-nothing, hence the restated `unsafe_code`.
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"

@@ -96,6 +96,17 @@ jobs:
       # build cache: it runs a prebuilt sqlx-cli, so there is no artifact worth sharing between the two.)
       - uses: Swatinem/rust-cache@v2
 
+      # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability
+      # someone can silently start using. cargo-machete is static analysis over manifests + source
+      # (no compilation), so it runs BEFORE the expensive build and fails fast. False positives are
+      # excused per crate via `[package.metadata.cargo-machete] ignored = [...]` — a visible,
+      # reviewable manifest diff, in the same spirit as the D3 capability allowlist.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: Unused dependencies (cargo-machete — the D6 lint floor, #302)
+        run: cargo machete
+
       - name: Build the workspace (codegen + all layer crates — enforces the ADR-0035 dependency graph)
         run: cargo build --workspace --verbose
 

@@ -10,3 +10,7 @@ description = "Captain.Food Tauri 2.0 desktop shell (restaurant manager): embeds
 [dependencies]
 server = { path = "../server" }
 web = { path = "../web" }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

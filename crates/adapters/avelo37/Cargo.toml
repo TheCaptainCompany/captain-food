@@ -25,7 +25,6 @@ sqlx = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v5", "v7"] }
-chrono = { workspace = true }
 # Signature verification (same versions as the workspace's other HMAC users).
 hmac = "0.12"
 sha2 = "0.10"
@@ -39,3 +38,11 @@ reqwest = { version = "0.12", default-features = false, features = ["native-tls"
 [dev-dependencies]
 # D5 test-fixtures (PROP-20260802-130500): the in-memory mailbox double for this adapter's tests.
 actor_client = { path = "../../actor_client", features = ["test-fixtures"] }
+
+# D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
+# and additionally denies `unreachable_pub` -- on a boundary, a `pub` item nobody outside uses is
+# an open door someone WILL use (the mechanical form of ADR-20260802-170059). Cargo lint
+# inheritance is all-or-nothing, hence the restated `unsafe_code`.
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
