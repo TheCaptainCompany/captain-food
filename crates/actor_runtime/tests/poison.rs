@@ -272,7 +272,7 @@ async fn backoff_doubles_and_in_window_drains_consume_no_attempts() {
     assert!(error.is_none());
 
     // Fast-forward: expire the schedule and fail again — the NEXT window must double.
-    sqlx::query("UPDATE inbound_messages SET next_attempt_at = now() WHERE message_id = $1")
+    sqlx::query("UPDATE inbound_messages SET next_attempt_at = now() - interval '1 second' WHERE message_id = $1")
         .bind(poison)
         .execute(&pool)
         .await

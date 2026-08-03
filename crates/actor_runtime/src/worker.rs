@@ -485,7 +485,7 @@ impl MailboxWorker {
                 attempts,
                 cap,
                 error = %err,
-                "mailbox: delivery attempt failed -- will retry after the spacing window"
+                "mailbox: delivery attempt failed -- will retry after the backoff window"
             );
             return Ok(false);
         }
