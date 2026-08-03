@@ -27,8 +27,7 @@ pub use integrations::delivery_offer_timeout_worker::DeliveryOfferTimeoutWorker;
 pub use integrations::retention_sweep_worker::{RetentionSweepSummary, RetentionSweepWorker};
 pub use integrations::sync_sirene_worker::{SireneSyncStatus, SireneSyncSummary, SireneSyncWorker};
 pub use persistence::{
-    spawn_event_listener, AppendedEvent, EventBus, EventWake, EventWaiter, OperationStatusBus,
-    OperationUpdate, PgCartRepository,
+    spawn_event_listener, AppendedEvent, EventBus, EventWake, EventWaiter, PgCartRepository,
     PgAuthSessionStore, PgCatalogRepository, PgCommandJournal, PgCustomerCreditRepository,
     PgCustomerRepository,
     PgDeliveryPartnerAvailabilityRepository, PgDeliveryRepository, PgDeliverySatisfactionRepository,

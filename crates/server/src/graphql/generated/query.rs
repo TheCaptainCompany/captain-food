@@ -43,7 +43,7 @@ impl QueryRoot {
     #[graphql(name = "operationStatus")]
     async fn operation_status(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusQueryInput) -> async_graphql::Result<Option<Operation>> {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let status_door = actor_client::ActorClient::new(mailbox);
+        let status_door = actor_client::ActorClient::new(mailbox, ctx.data::<actor_client::OperationStatusBus>()?.clone());
         if let Some(row) = status_door
             .get_operation_status(input.message_id.0)
             .await

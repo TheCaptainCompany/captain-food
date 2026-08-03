@@ -24,7 +24,7 @@ use sqlx::PgPool;
 
 use crate::generated::command_router::{CommandDeps, ACTOR_MAILBOXES};
 use crate::persistence::mailbox_store::MailboxNudges;
-use crate::persistence::status_bus::OperationStatusBus;
+use actor_client::status_bus::OperationStatusBus;
 
 /// Resolves on SIGTERM/ctrl-c — the adapter mains hand this to axum's `with_graceful_shutdown`.
 /// Installing the fleet's own signal task REPLACES the default SIGTERM disposition for the whole

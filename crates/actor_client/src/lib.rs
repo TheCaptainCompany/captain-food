@@ -11,9 +11,12 @@
 //!   actors.yaml), the ONLY write door: sealed per-actor `Command`/`Fact` traits make sending a
 //!   message the actor does not `receive` a COMPILE error.
 //! - [`client::ActorClient`] — the one generic READ door over operation status
-//!   (`get_operation_status(message_id)`, PROP-20260802-130500 D4): status is an envelope-level
-//!   outcome keyed by the globally-unique `message_id`, so the read side is actor-agnostic while
-//!   the write side stays per-actor.
+//!   (`get_operation_status(message_id)` + `watch(message_id)`, PROP-20260802-130500 D4, #303):
+//!   status is an envelope-level outcome keyed by the globally-unique `message_id`, so the read
+//!   side is actor-agnostic while the write side stays per-actor.
+//! - [`status_bus`] — the in-process operation-response bus (§2.1 generalized, relocated from
+//!   `infrastructure` under #303): publishers push post-commit verdicts, and the ONLY consumer
+//!   surface is `ActorClient::watch` (`subscribe` is crate-internal).
 //! - [`reminders`] — the reminder-row constructor (`scheduled_entry`) the in-transaction
 //!   `schedules:` upsert binds from, and the pool-backed `declare`.
 //! - [`stable_partition`] — the FROZEN partition routing hash (re-homed from `actor_runtime`,
@@ -29,12 +32,13 @@ mod enqueue;
 pub mod mailbox;
 mod partition;
 pub mod reminders;
+pub mod status_bus;
 
 /// GENERATED surface (do not edit by hand): the per-actor typed clients and the frozen
 /// command-addressing tables, emitted by tools/codegen-rs from specs/actors.yaml.
 pub mod generated;
 
-pub use client::ActorClient;
+pub use client::{ActorClient, OperationWatch, OperationWatchEvent};
 pub use enqueue::{
     inbound_message_id, inbound_namespace, reminder_message_id, surrogate_actor_id,
     EnqueueOutcome, ScheduleOutcome,
@@ -50,6 +54,7 @@ pub use mailbox::{
     MailboxStatusRow,
 };
 pub use partition::stable_partition;
+pub use status_bus::{OperationStatusBus, OperationUpdate};
 
 // The drift-guard REFERENCE implementations (test-only, PROP-20260802-130500 D5): visible to
 // other crates' tests through the `test-fixtures` feature, never to a release artifact.

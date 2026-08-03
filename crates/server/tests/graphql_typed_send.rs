@@ -91,7 +91,7 @@ fn schema_with(
             refund_state: Arc::new(application::generated::pm_state::mem::MemRefundProcessState::default()),
             journal,
             mailbox,
-            status_bus: infrastructure::OperationStatusBus::default(),
+            status_bus: actor_client::OperationStatusBus::default(),
             auth_sessions: Arc::new(application::auth_sessions::NoopAuthSessionStore),
             slug_reservations: Arc::new(AlwaysFreeSlugs),
             pm_mailbox_delivery,

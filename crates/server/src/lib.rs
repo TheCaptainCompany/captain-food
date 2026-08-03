@@ -301,10 +301,11 @@ pub async fn router() -> Router {
     // Constructed unconditionally so the schema always carries a bus (subscriptions without a DB
     // simply never receive anything).
     let event_bus = EventBus::default();
-    // Journal-transition broadcast (ADR-20260720-015500): the acceptance-first dispatch publishes
-    // every command_journal transition here; operationStatusChanged streams it. Like the event bus,
+    // Operation-response broadcast (ADR-20260720-015500; behind the actor_client boundary since
+    // #303): the legacy dispatch and the mailbox workers publish every completion here;
+    // operationStatusChanged streams it through ActorClient::watch. Like the event bus,
     // constructed unconditionally so the schema always carries one.
-    let operation_status_bus = infrastructure::OperationStatusBus::default();
+    let operation_status_bus = actor_client::OperationStatusBus::default();
     // The enqueue→worker wake registry (one Notify per mailbox actor type): every in-process
     // PgMailbox insert nudges the actor type's worker, cutting delivery latency from the
     // heartbeat poll (~10s) to ~immediate. Registered up-front from the SAME generated table the

@@ -39,10 +39,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true, features = ["v5"] }
-
-[dev-dependencies]
-# Async runtime for the in-crate drift guards (typed door vs reference constructors).
-tokio = { workspace = true }
+# The operation-response bus (#303) is a tokio broadcast channel; also the async runtime for the
+# in-crate tests (drift guards, watch semantics).
+tokio = { workspace = true, features = ["sync"] }
 
 # D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
 # and additionally denies `unreachable_pub` -- on a boundary, a `pub` item nobody outside uses is

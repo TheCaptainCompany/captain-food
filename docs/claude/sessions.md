@@ -270,5 +270,15 @@ proxy only supports fetch/push of refs, not deletions — and the GitHub MCP too
 ref-deletion tool either. Branch cleanup must happen from the GitHub UI or a normal clone; don't
 burn retries on it (cost: three failed attempts before diagnosing, 2026-07-31).
 
+**`cargo check -p actor_client` alone is RED on a green main — it is not your change.** The D6
+lint floor's `unreachable_pub = deny` fires on the `bulk-door` items (`InboundFact`,
+`enqueue_inbound_facts`): their re-export is feature-gated, `infrastructure` is the only crate
+that lights the feature, and cargo resolves features per SELECTION — so a solo `-p actor_client`
+build sees pub items nobody re-exports and denies them, while every workspace-level build (what
+CI and `make rust` run) unifies the feature in and passes. Check that crate at workspace level,
+or with `--features bulk-door`. The clean fix — `#[cfg(any(test, feature = "bulk-door"))]` on the
+item definitions themselves — belongs to whoever next touches the bulk door, not to an unrelated
+slice (cost: a false "my move broke the boundary crate" scare and a stash/verify round, 2026-08-03).
+
 When wrapping up, state the handoff explicitly: what was pushed and to which branch, what remains on
 the user's side, which decisions are blocking, and what the next code slice is.

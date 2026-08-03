@@ -13,25 +13,29 @@
 //! query and the `operationStatusChanged` snapshot both resolve through it, and nobody SELECTs
 //! the table (the D3 capability allowlist keeps SQL out of every crate that could try).
 //!
-//! `watch(message_id)` (the §2.1 response-bus subscription) is deliberately ABSENT for now: the
-//! in-process `OperationStatusBus` lives in `infrastructure` — above this crate — keyed to the
-//! legacy `CommandJournalStatus`; folding it down into this crate is a boundary move of its own,
-//! recorded on #290 rather than improvised here.
+//! `watch(message_id)` (the §2.1 response-bus subscription, #303) is the push half: the
+//! relocated [`crate::status_bus::OperationStatusBus`] lives BEHIND this door now, so a caller
+//! subscribes to the response of its message through the same client that serves the snapshot —
+//! pull first, then stream, the first-value-then-transitions contract of ADR-20260720-015500.
 
 use std::sync::Arc;
 
 use domain::shared::errors::DomainError;
+use tokio::sync::broadcast;
 
 use crate::mailbox::{Mailbox, MailboxStatusRow};
+use crate::status_bus::{OperationStatusBus, OperationUpdate};
 
-/// The one generic, actor-agnostic client: holds the read capability over operation status.
+/// The one generic, actor-agnostic client: holds the read capability over operation status —
+/// the durable row (pull) and the post-commit response stream (push).
 pub struct ActorClient {
     mailbox: Arc<dyn Mailbox>,
+    bus: OperationStatusBus,
 }
 
 impl ActorClient {
-    pub fn new(mailbox: Arc<dyn Mailbox>) -> Self {
-        Self { mailbox }
+    pub fn new(mailbox: Arc<dyn Mailbox>, bus: OperationStatusBus) -> Self {
+        Self { mailbox, bus }
     }
 
     /// The status of one operation by its globally-unique acceptance handle — the row behind
@@ -43,6 +47,52 @@ impl ActorClient {
         message_id: uuid::Uuid,
     ) -> Result<Option<MailboxStatusRow>, DomainError> {
         self.mailbox.by_message(message_id).await
+    }
+
+    /// Subscribe to the response stream of ONE operation (§2.1 `watch`, #303): every post-commit
+    /// transition published for `message_id`, in publish order, with lag made explicit. Subscribe
+    /// BEFORE the snapshot read to close the subscribe/complete race — the returned watch only
+    /// sees updates published after this call. The stream is notification, never truth: on
+    /// [`OperationWatchEvent::Lagged`] re-read via [`ActorClient::get_operation_status`], and the
+    /// OWNERSHIP decision (no existence oracle, ADR-20260720-015500) stays with the caller.
+    pub fn watch(&self, message_id: uuid::Uuid) -> OperationWatch {
+        OperationWatch { message_id, rx: self.bus.subscribe() }
+    }
+}
+
+/// One event on an [`ActorClient::watch`] stream.
+#[derive(Debug, Clone)]
+pub enum OperationWatchEvent {
+    /// A post-commit transition of the watched operation.
+    Update(OperationUpdate),
+    /// The watcher fell behind the bus's retention and transitions were dropped. The durable row
+    /// is the pull truth — re-read via [`ActorClient::get_operation_status`].
+    Lagged,
+}
+
+/// A live subscription to one operation's responses, from [`ActorClient::watch`]. Updates for
+/// other operations on the shared bus are filtered out here, so the caller never sees them.
+pub struct OperationWatch {
+    message_id: uuid::Uuid,
+    rx: broadcast::Receiver<OperationUpdate>,
+}
+
+impl OperationWatch {
+    /// The next event for this operation; `None` once the bus closes (every publisher dropped —
+    /// process teardown in practice).
+    pub async fn next(&mut self) -> Option<OperationWatchEvent> {
+        loop {
+            match self.rx.recv().await {
+                Ok(update) if update.message_id == self.message_id => {
+                    return Some(OperationWatchEvent::Update(update));
+                }
+                Ok(_) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    return Some(OperationWatchEvent::Lagged);
+                }
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
     }
 }
 
@@ -88,7 +138,7 @@ mod tests {
             .await
             .expect("typed send");
 
-        let reader = ActorClient::new(mem.clone());
+        let reader = ActorClient::new(mem.clone(), crate::status_bus::OperationStatusBus::default());
         let row = reader
             .get_operation_status(message_id)
             .await
@@ -106,5 +156,72 @@ mod tests {
                 .is_none(),
             "an unknown handle is None — the ownership/oracle policy stays with the caller"
         );
+    }
+
+    /// `watch` is keyed: it delivers the watched operation's transitions in publish order and
+    /// silently drops everything else on the shared bus.
+    #[tokio::test]
+    async fn watch_filters_to_the_watched_operation() {
+        use domain::generated::scalars::InboundMessageStatus as M;
+
+        use crate::status_bus::{OperationStatusBus, OperationUpdate};
+        let bus = OperationStatusBus::default();
+        let reader = ActorClient::new(Arc::new(MemMailbox::default()), bus.clone());
+        let watched = uuid::Uuid::from_u128(0xA);
+        let other = uuid::Uuid::from_u128(0xB);
+        let mut watch = reader.watch(watched);
+        for (id, status) in [(other, M::SUCCEEDED), (watched, M::RECEIVED), (watched, M::REJECTED)] {
+            bus.publish(OperationUpdate {
+                message_id: id,
+                correlation_id: id,
+                status,
+                error_code: (status == M::REJECTED).then(|| "RestaurantNotFound".into()),
+                message: None,
+            });
+        }
+        let super::OperationWatchEvent::Update(first) = watch.next().await.expect("first") else {
+            panic!("expected an update, not lag")
+        };
+        assert_eq!((first.message_id, first.status), (watched, M::RECEIVED));
+        let super::OperationWatchEvent::Update(second) = watch.next().await.expect("second") else {
+            panic!("expected an update, not lag")
+        };
+        assert_eq!((second.message_id, second.status), (watched, M::REJECTED));
+        assert_eq!(second.error_code.as_deref(), Some("RestaurantNotFound"));
+    }
+
+    /// A watcher that fell behind the bus's retention gets an explicit Lagged event — the cue to
+    /// re-read the durable row — and the stream ends (None) when every publisher is gone.
+    #[tokio::test]
+    async fn watch_makes_lag_explicit_and_ends_when_the_bus_closes() {
+        use domain::generated::scalars::InboundMessageStatus as M;
+
+        use crate::status_bus::{OperationStatusBus, OperationUpdate};
+        let bus = OperationStatusBus::new(1);
+        let reader = ActorClient::new(Arc::new(MemMailbox::default()), bus.clone());
+        let watched = uuid::Uuid::from_u128(0xC);
+        let mut watch = reader.watch(watched);
+        for status in [M::RECEIVED, M::SUCCEEDED] {
+            bus.publish(OperationUpdate {
+                message_id: watched,
+                correlation_id: watched,
+                status,
+                error_code: None,
+                message: None,
+            });
+        }
+        assert!(
+            matches!(watch.next().await, Some(super::OperationWatchEvent::Lagged)),
+            "capacity 1 with two publishes must surface as Lagged, never a silent drop"
+        );
+        // The retained tail is still delivered after the lag marker…
+        let Some(super::OperationWatchEvent::Update(kept)) = watch.next().await else {
+            panic!("the retained update survives the lag")
+        };
+        assert_eq!(kept.status, M::SUCCEEDED);
+        // …and the stream ends once every publisher is gone.
+        drop(bus);
+        drop(reader);
+        assert!(watch.next().await.is_none(), "a closed bus ends the watch");
     }
 }
