@@ -28,15 +28,19 @@
 > `ActorClient::pull_only` + `watch -> Option<OperationWatch>` put the no-shared-bus posture of a
 > standalone adapter in the type, instead of a default bus whose `watch` would hang forever.
 > `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) catches the widenings
-> the compiler cannot — they are all EDITS TO THE BOUNDARY CRATE, so it is a level-3 gate over a
-> level-4 property: every port method takes the witness and the surface is exactly five (fail-closed
-> on every `fn` token, so `unsafe fn` and `#[attr] async fn` are seen); the only public mint is
-> `for_tests`, scoped BY SPAN to the cfg-gated fixtures module; no impl, construction or public
-> function returning the witness exists elsewhere in the crate; exactly one public trait in
-> `mailbox.rs`, so an extension trait cannot re-expose the port. It runs on comment-stripped,
-> whitespace-normalized source because two review passes each defeated an earlier version by pure
-> reformatting; sixteen mutation shapes are verified red against a green baseline. §5 audit: the
-> `Mailbox` port row moves ❌ → ✅ compiler;
+> the compiler cannot — they are all EDITS TO THE BOUNDARY CRATE. It **parses the AST** (syn, a new
+> dev-dependency), which is the durable lesson of this change: three independent review passes each
+> defeated a string-matching version by pure reformatting or by a shape the pattern list did not
+> name (`impl Default for MailboxAccess`, `pub const KEY: MailboxAccess`, a type alias, an
+> extension trait one file over). All of those are ONE rule at the AST level — a public item that
+> yields the witness — so parsing replaced a patch-per-shape treadmill with four structural rules:
+> every port method takes the witness and the surface is exactly five; no public trait crate-wide
+> has `Mailbox` as a supertrait; no trait impl on the witness exists and inherent impls live only
+> in the port module with a cfg-gated `for_tests` as their one public fn; no public fn/const/static
+> /alias yields it. Macro EXPANSION remains invisible to any such walk, so a `macro_rules!` naming
+> the witness, a macro invocation inside the port trait, and `#[path]` modules are refused outright
+> rather than waved through. Twenty-two mutation shapes verified red against a green baseline.
+> §5 audit: the `Mailbox` port row moves ❌ → ✅ compiler;
 > `View_*` reads ([#305](https://github.com/TheCaptainCompany/captain-food/issues/305)) and
 > `PgEventStore` append stay open.
 

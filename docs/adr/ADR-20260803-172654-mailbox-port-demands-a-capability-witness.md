@@ -68,24 +68,32 @@ is a loud, reviewable diff, not a silent shortcut.
   explicitly NOT contained by D3 — a decorator needs no `sqlx` — and saying so would be worse than
   saying nothing, because a wrong justification stops the next reviewer looking. Dropping `Copy`
   would stop retention but not decoration, so it buys nothing real.
-- **The guard is a level-3 gate protecting a level-4 property, and only inside the boundary crate.**
-  The compiler makes the rule unbreakable from outside `actor_client`; every remaining way to
-  reopen the door is an EDIT to that crate, and `every_mailbox_port_method_demands_the_access_witness`
-  (tools/codegen-rs) is what catches those. It pins: every port method takes the witness and the
-  surface is exactly five methods (fail-closed — it consumes every `fn` token rather than matching
-  a list of accepted prefixes, so `unsafe fn` and `#[attr] async fn` are seen); the witness's
-  `pub(crate)` field and mint; that the only public mint is `for_tests`, scoped **by span** to the
-  cfg-gated fixtures module; that no impl, construction or public function returning the witness
-  exists elsewhere in the crate; that `mailbox.rs` declares exactly one public trait, so an
-  extension trait with a defaulted method cannot mint internally and hand every port holder an
-  ungated door; and that no generated client names the witness at all.
-  It works on comment-stripped, whitespace-normalized source **because two independent review
-  passes each defeated an earlier version by nothing cleverer than reformatting** — `pub  fn` with
-  two spaces, a split signature, an attribute ahead of `async fn`, a comment standing in for a
-  parameter, a `From<()> for crate::mailbox::MailboxAccess` matching no literal pattern. Sixteen
-  mutation shapes are verified to turn it red against a green baseline. The honest claim is "the
-  plausible widenings are caught", not "the surface is proven": this is textual analysis of Rust,
-  and the record of this change is that textual analysis loses to anyone actually trying.
+- **The guard parses the AST, and that is the finding worth keeping.** The compiler makes the rule
+  unbreakable from outside `actor_client`; every remaining way to reopen the door is an edit INSIDE
+  that crate, and `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) catches
+  those. **Three independent review passes each defeated a string-matching version of it** — not
+  with anything clever: `pub  fn` with two spaces, a signature split across lines, an attribute
+  before `async fn`, a comment standing in for a parameter, `impl Default for MailboxAccess`,
+  `pub const KEY: MailboxAccess`, a type alias, an extension trait one file over, a
+  `From<()> for crate::mailbox::MailboxAccess` that matched no literal pattern. Each fix bought one
+  shape and the next pass found more, because *every* one of them is the SAME rule at the AST level
+  — "a public item that yields the witness" — and only source text made them look different.
+  Parsing (syn, a dev-dependency) replaced a patch-per-shape treadmill with four structural rules:
+  every port method takes the witness and the surface is exactly five; no public trait anywhere in
+  the crate has `Mailbox` as a supertrait (an extension trait with a defaulted method would mint
+  internally and hand every port holder an ungated door); no trait impl on the witness exists at all
+  and inherent impls live only in the port module with `for_tests` as their one public fn, gated by
+  a `#[cfg(.. test-fixtures ..)]` ancestor; and no public fn, const, static or type alias anywhere
+  yields it. Twenty-two mutation shapes are verified red against a green baseline.
+- **What the guard still cannot see, stated rather than implied**: macro EXPANSION. A `macro_rules!`
+  can expand to any of the items above, and no AST walk of unexpanded source will know. It is
+  therefore refused outright — a `macro_rules!` in the crate that mentions the witness fails, as
+  does a macro invocation inside the port trait, as does a `#[path]` module (which would compile a
+  file the directory walk never visits). Those refusals are blunt, and deliberately so: the honest
+  posture is "this shape is banned here" rather than "this shape is analysed". The definitive check
+  would be over the POST-EXPANSION public API (rustdoc JSON lists exactly the public items that
+  mention a type, immune to macros, `#[path]` and formatting alike) — it needs nightly today, so it
+  is recorded as the direction rather than built.
 - Callers that need the read door now need an `ActorClient`, which needs an `OperationStatusBus`.
   In the monolith that is the real bus. A **standalone adapter has no shared bus** —
   `run_standalone_workers` publishes onto a separate instance nothing outside it can subscribe to —

@@ -19,3 +19,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
 [lints]
 workspace = true
+
+[dev-dependencies]
+quote = "1.0.47"
+syn = { version = "2", features = ["full"] }

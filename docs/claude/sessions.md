@@ -159,6 +159,37 @@ the spec both sides agree on. `generated_config_patterns_match_the_spec_byte_for
 was confirmed to FAIL on the reverted emitter before being trusted — a regression test never seen red is
 not a guard.
 
+## 8b. A guard over Rust STRUCTURE must parse the AST, not the text
+
+`str::find` over source cannot enforce a structural rule about Rust, and three independent review
+passes proved it on one guard (#304's `every_mailbox_port_method_demands_the_access_witness`). Each
+pass defeated the previous version, never with anything clever: `pub  fn` with two spaces, a
+signature split across lines, an attribute before `async fn`, a comment standing in for a parameter,
+`impl Default for X`, `pub const KEY: X`, a type alias, the banned trait moved one file over, a
+`From<()> for crate::path::X` matching no literal pattern. Every fix bought exactly one shape.
+
+The trap is that a textual guard **looks** like it works — it goes red on the mutation you thought
+of, which is the one you wrote it for. Its real coverage is the shapes you enumerated, and the
+author of the next bypass is not enumerating.
+
+**If the rule is about Rust structure — visibility, trait membership, what a signature takes, what a
+public item returns — parse it.** `syn` (+`quote`) as a dev-dependency of `tools/codegen-rs`, walking
+`syn::Item`, collapses a patch-per-shape treadmill into a few structural rules, because all those
+"different" bypasses are one rule at the AST level. Reserve text scanning for rules that genuinely
+are textual (`makefile_recipe_lines_are_ascii` is about bytes, so text is right).
+
+Two riders, both learned the same way:
+
+- **Macro expansion stays invisible** to an AST walk of unexpanded source, and so does a `#[path]`
+  module if you walk a directory. Refuse those constructs outright in the guarded crate and SAY that
+  is what you are doing — "banned here" is honest; "analysed" is not. (The definitive form is a check
+  over the post-expansion public API, e.g. rustdoc JSON; it needs nightly, so it is not available on
+  this stable CI.)
+- **Mutation-test every arm, and re-run the whole battery after each rewrite.** A fix that closes one
+  hole reopened another twice here — once because a mint was excused by NAME rather than by span, so
+  the legitimate gated copy excused an un-gated duplicate. Keep the battery in the commit message or
+  the guard's doc comment; "verified red" is only worth stating with the count and the shapes.
+
 ## 9. This file is your obligation, not just your reference
 
 **Every session records what it learned** (ADR-20260730-034635), in the same change as the work. That
