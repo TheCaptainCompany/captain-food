@@ -37,10 +37,22 @@ rule.
    `MailboxMessageNotRequeueable` — a handler REJECTED/FAILED is a recorded business decision
    and SUCCEEDED/IGNORED/DUPLICATE already ran (rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).
 
-3. **Already-deliverable converges as success.** Like the slug-reservation port, the row write
-   lands alongside (not inside) the fenced event append; if the delivery retries after the flip,
-   the port finds `RECEIVED` and reports `AlreadyDeliverable` — the handler records the fact
-   rather than erroring on its own earlier effect. Idempotence by outcome, not by transaction.
+3. **Already-deliverable converges as success — with two honestly-accepted edges** (independent
+   review, 2026-08-03). Like the slug-reservation port, the row write lands alongside (not
+   inside) the fenced event append, so a retried delivery of the requeue command meets its own
+   earlier effect. The full retry outcome matrix:
+   - target still `RECEIVED` → `AlreadyDeliverable`, the fact records, the operation SUCCEEDS
+     (the common case — idempotence by outcome, not by transaction);
+   - target already REDELIVERED and terminal by retry time (the flip's own nudge makes this
+     fast) → the retry reads `NotRequeueable{SUCCEEDED|…}` and the operation lands REJECTED
+     **even though the requeue worked** and no audit fact was recorded. Narrow (requires the
+     completion transaction to abort exactly between the flip and the append) and self-evident
+     to the operator (the row has left the poisoned list, visibly recovered) — accepted rather
+     than plumbing flip-provenance through the mailbox.
+   - Corollary of convergence: requeueing a row that is `RECEIVED` because it was NEVER
+     poisoned also records a `MailboxMessageRequeued` fact (the intent, not a flip). ADMIN-only
+     surface, audit-visible, harmless to the row — accepted; keying convergence to the
+     supervision stream's own history would refuse it at the cost of the retry case above.
 
 4. **Discovery is a separate ADMIN query, `poisonedMailboxMessages`** (transient type
    `PoisonedMailboxMessage`, page clamped to 200, optional lane filter): `MailboxLane.poisoned`
@@ -65,6 +77,15 @@ rule.
 
 - Poison recovery is: fix the cause → `poisonedMailboxMessages` → `requeueMailboxMessage` →
   the lane redelivers on commit. No SQL, full audit, ADMIN-only at every step.
+- **Ordering honesty** (independent review, 2026-08-03): the requeued row keeps its ORIGINAL
+  position, so it re-enters HEAD-OF-LINE — ahead of every newer pending row on its lane — and
+  it executes AFTER whatever was delivered while it sat FAILED: a genuine per-aggregate ordering
+  inversion (an old command re-applied after newer ones; `*Updated` replace semantics make that
+  a last-write-wins reversal). The operator judges whether replaying the OLD intent is still
+  right — that judgement is exactly why requeue is a human action, and the screen guide says so.
+  Also: a row poisoned by an UNDECODABLE payload carries the same error code and offers the same
+  button, but a requeue can only re-burn the backoff ladder head-of-line — the guide warns that
+  a row whose error names a decode failure is not recoverable by requeue.
 - New spec surface rides the ADR-0032 train end to end: command + event + 2 errors + actor +
   mutation + query + rule + 3 behaviour tests + story steps + screen wiring + `platform`
   bounded context (C4 L2).

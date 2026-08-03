@@ -85,9 +85,10 @@ screens:
             items: "{{ mailbox_poisoned }}"
             empty_state: { icon: check_circle, title: { $ref: 'system.translations.yaml#/mailbox.poisoned.empty.title' }, body: { $ref: 'system.translations.yaml#/mailbox.poisoned.empty.body' } }
             item_components:
-              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.message' },  value: "{{ item.messageType }} ({{ item.actorType }} / {{ item.partition }})" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.message' },  value: "{{ item.messageType }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.lane' },              value: "{{ item.actorType }} / {{ item.partition }}" }
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.id' },       value: "{{ item.messageId }}" }
-              - { type: badge, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.attempts' },    value: "{{ item.attempts }}", variant_when: { warning: "item.attempts > 0" } }
+              - { type: badge, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.attempts' },    value: "{{ item.attempts }}" }
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.error' },    value: "{{ item.errorCode }}", visible_when: "item.errorCode != null" }
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.received' }, value: "{{ item.receivedAt }}" }
               - { type: button, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.requeue' }, variant: outline, action: { type: requeue_mailbox_message, variables: { targetMessageId: "{{ item.messageId }}" } } }

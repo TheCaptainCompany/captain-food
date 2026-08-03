@@ -7253,7 +7253,7 @@ An ADMIN operator returned a poisoned mailbox row (terminal FAILED at the delive
 
 - **Emitted by**: [🎭 `MailboxSupervision`](#actor-mailboxsupervision)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: _non-projected (saga/transient)_
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -11512,7 +11512,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-mailbox-guide-title"></a>`mailbox.guide.title` | — | How to read this page | Comment lire cette page |
 | <a id="translation-mailbox-guide-body"></a>`mailbox.guide.body` | — | A healthy lane has a live lease and pending near zero. A growing pending count with an expired lease means no worker owns the lane; a growing count with a live lease means the owner is stuck. Ownership version increments on every takeover — it should be stable outside deployments. | Une voie saine a un bail actif et un arriéré proche de zéro. Un arriéré croissant avec un bail expiré signifie qu'aucun worker ne possède la voie ; un arriéré croissant avec un bail actif signifie que le propriétaire est bloqué. La version de propriété s'incrémente à chaque reprise — elle doit rester stable hors déploiements. |
 | <a id="translation-mailbox-poisoned-title"></a>`mailbox.poisoned.title` | — | Poisoned rows | Lignes empoisonnées |
-| <a id="translation-mailbox-poisoned-guide"></a>`mailbox.poisoned.guide` | — | Rows terminally FAILED at the delivery-attempts cap. Fix the cause first (the error code is the lead), then requeue — the row returns to RECEIVED with its attempts reset and its lane is nudged. | Lignes en échec définitif au plafond de tentatives de livraison. Corrigez d'abord la cause (le code d'erreur est la piste), puis remettez en file — la ligne repasse à RECEIVED, ses tentatives sont réinitialisées et sa voie est relancée. |
+| <a id="translation-mailbox-poisoned-guide"></a>`mailbox.poisoned.guide` | — | Rows terminally FAILED at the delivery-attempts cap. Fix the cause first (the error code is the lead), then requeue — the row returns to RECEIVED with its attempts reset and its lane is nudged. Judge before you click: the row re-enters AHEAD of newer work on its lane and replays an OLD intent after everything delivered since (last-write-wins updates can reverse). A row whose error names a payload decode failure cannot be recovered by requeue — it would only fail again. | Lignes en échec définitif au plafond de tentatives de livraison. Corrigez d'abord la cause (le code d'erreur est la piste), puis remettez en file — la ligne repasse à RECEIVED, ses tentatives sont réinitialisées et sa voie est relancée. Jugez avant de cliquer : la ligne repasse DEVANT le travail plus récent de sa voie et rejoue une intention ANCIENNE après tout ce qui a été livré depuis (les mises à jour dernier-écrit-gagne peuvent s'inverser). Une ligne dont l'erreur indique un échec de décodage ne peut pas être récupérée par remise en file — elle échouerait à nouveau. |
 | <a id="translation-mailbox-poisoned-message"></a>`mailbox.poisoned.message` | — | Message | Message |
 | <a id="translation-mailbox-poisoned-id"></a>`mailbox.poisoned.id` | — | Message id | Identifiant du message |
 | <a id="translation-mailbox-poisoned-attempts"></a>`mailbox.poisoned.attempts` | — | Attempts | Tentatives |
