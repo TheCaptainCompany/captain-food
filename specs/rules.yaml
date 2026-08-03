@@ -280,3 +280,12 @@ OrderExpiryIsRecordedNeverRejected:
     first time, a benign no-op when the order is already expired — a retention deadline's passage
     cannot be refused, so REJECTED is not a possible verdict for this delivery
     (ADR-20260731-153000 §1a, #272).
+OnlyCapPoisonedMailboxRowsAreRequeueable:
+  description: >
+    An admin requeue returns a POISONED mailbox row — one the delivery-attempts cap flipped to
+    terminal FAILED with error code DeliveryInfrastructureError (PROP-20260802-223522 D4) — to
+    RECEIVED with attempts reset and error + backoff schedule cleared, and records the
+    intervention as a MailboxMessageRequeued fact on the row's supervision stream. Rows in any
+    other state are never requeued: handler REJECTED/FAILED verdicts are recorded business
+    decisions, and SUCCEEDED/IGNORED/DUPLICATE rows already ran — re-executing either class
+    would overturn something the system decided on purpose (#315, ADR-20260803-002712 Q1).

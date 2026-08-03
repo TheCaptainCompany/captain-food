@@ -154,6 +154,7 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: infrastructure::OperationStatusBus)
         payments: Arc::new(FailClosedPaymentGateway),
         pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(pool.clone())),
         refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(pool.clone())),
+        mailbox_requeue: Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(pool.clone())),
     };
     let handler = Arc::new(infrastructure::mailbox::MailboxCommandHandler::new(deps));
     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(bus));

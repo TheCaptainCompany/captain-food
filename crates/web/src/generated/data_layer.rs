@@ -44,6 +44,7 @@ pub enum ResolverKey {
     DeliveriesMine,
     DeliveryByOrder,
     MailboxLanes,
+    MailboxPoisoned,
 }
 
 impl ResolverKey {
@@ -79,6 +80,7 @@ impl ResolverKey {
         ResolverKey::DeliveriesMine,
         ResolverKey::DeliveryByOrder,
         ResolverKey::MailboxLanes,
+        ResolverKey::MailboxPoisoned,
     ];
 
     /// The spec key (dotted) this resolver is declared under — 1:1 with the DSL.
@@ -114,6 +116,7 @@ impl ResolverKey {
             ResolverKey::DeliveriesMine => "deliveries.mine",
             ResolverKey::DeliveryByOrder => "delivery.byOrder",
             ResolverKey::MailboxLanes => "mailbox.lanes",
+            ResolverKey::MailboxPoisoned => "mailbox.poisoned",
         }
     }
 
@@ -150,6 +153,7 @@ impl ResolverKey {
             "deliveries.mine" => Some(ResolverKey::DeliveriesMine),
             "delivery.byOrder" => Some(ResolverKey::DeliveryByOrder),
             "mailbox.lanes" => Some(ResolverKey::MailboxLanes),
+            "mailbox.poisoned" => Some(ResolverKey::MailboxPoisoned),
             _ => None,
         }
     }
@@ -187,6 +191,7 @@ impl ResolverKey {
             ResolverKey::DeliveriesMine => Some("myDeliveries"),
             ResolverKey::DeliveryByOrder => Some("delivery"),
             ResolverKey::MailboxLanes => Some("mailboxLanes"),
+            ResolverKey::MailboxPoisoned => Some("poisonedMailboxMessages"),
         }
     }
 
@@ -225,6 +230,7 @@ impl ResolverKey {
             ResolverKey::DeliveriesMine => Some("MyDeliveriesQueryInput"),
             ResolverKey::DeliveryByOrder => Some("DeliveryQueryInput"),
             ResolverKey::MailboxLanes => None,
+            ResolverKey::MailboxPoisoned => Some("PoisonedMailboxMessagesQueryInput"),
         }
     }
 
@@ -263,6 +269,7 @@ impl ResolverKey {
             ResolverKey::DeliveriesMine => Some("{ id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt }"),
             ResolverKey::DeliveryByOrder => Some("{ id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt }"),
             ResolverKey::MailboxLanes => Some("{ actorType partition ownershipVersion claimedBy leaseUntil checkpoint pending scheduled oldestPendingAt retryingAttempts poisoned }"),
+            ResolverKey::MailboxPoisoned => Some("{ messageId actorType partition messageType attempts errorCode correlationId receivedAt completedAt }"),
         }
     }
 
@@ -299,6 +306,7 @@ impl ResolverKey {
             ResolverKey::DeliveriesMine => &[],
             ResolverKey::DeliveryByOrder => &[],
             ResolverKey::MailboxLanes => &[],
+            ResolverKey::MailboxPoisoned => &[],
         }
     }
 
@@ -335,6 +343,7 @@ impl ResolverKey {
             ResolverKey::DeliveriesMine => None,
             ResolverKey::DeliveryByOrder => None,
             ResolverKey::MailboxLanes => None,
+            ResolverKey::MailboxPoisoned => None,
         }
     }
 }
@@ -415,6 +424,7 @@ pub enum ActionKey {
     CompleteDelivery,
     RiderToggleOnline,
     Refresh,
+    RequeueMailboxMessage,
 }
 
 impl ActionKey {
@@ -471,6 +481,7 @@ impl ActionKey {
         ActionKey::CompleteDelivery,
         ActionKey::RiderToggleOnline,
         ActionKey::Refresh,
+        ActionKey::RequeueMailboxMessage,
     ];
 
     /// The spec key this action is declared under — 1:1 with the DSL.
@@ -527,6 +538,7 @@ impl ActionKey {
             ActionKey::CompleteDelivery => "complete_delivery",
             ActionKey::RiderToggleOnline => "rider_toggle_online",
             ActionKey::Refresh => "refresh",
+            ActionKey::RequeueMailboxMessage => "requeue_mailbox_message",
         }
     }
 
@@ -584,6 +596,7 @@ impl ActionKey {
             "complete_delivery" => Some(ActionKey::CompleteDelivery),
             "rider_toggle_online" => Some(ActionKey::RiderToggleOnline),
             "refresh" => Some(ActionKey::Refresh),
+            "requeue_mailbox_message" => Some(ActionKey::RequeueMailboxMessage),
             _ => None,
         }
     }
@@ -642,6 +655,7 @@ impl ActionKey {
             ActionKey::CompleteDelivery => ActionKind::Mutation,
             ActionKey::RiderToggleOnline => ActionKind::Mutation,
             ActionKey::Refresh => ActionKind::Client,
+            ActionKey::RequeueMailboxMessage => ActionKind::Mutation,
         }
     }
 
@@ -699,6 +713,7 @@ impl ActionKey {
             ActionKey::CompleteDelivery => Some("completeDelivery"),
             ActionKey::RiderToggleOnline => Some("changeRiderStatus"),
             ActionKey::Refresh => None,
+            ActionKey::RequeueMailboxMessage => Some("requeueMailboxMessage"),
         }
     }
 
@@ -758,6 +773,7 @@ impl ActionKey {
             ActionKey::CompleteDelivery => Some("CompleteDeliveryInput"),
             ActionKey::RiderToggleOnline => Some("ChangeRiderStatusInput"),
             ActionKey::Refresh => None,
+            ActionKey::RequeueMailboxMessage => Some("RequeueMailboxMessageInput"),
         }
     }
 
@@ -815,6 +831,7 @@ impl ActionKey {
             ActionKey::CompleteDelivery => None,
             ActionKey::RiderToggleOnline => None,
             ActionKey::Refresh => None,
+            ActionKey::RequeueMailboxMessage => None,
         }
     }
 }

@@ -30,15 +30,17 @@ app_types: [web]   # ops tooling is web-only; no mobile shell planned
 # ──────────────────────────────────────────────────────────────────────────────
 resolvers:
   mailbox.lanes: { query: { $ref: 'api.yaml#/queries/mailboxLanes' } }
+  mailbox.poisoned: { query: { $ref: 'api.yaml#/queries/poisonedMailboxMessages' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# DATA LAYER — ACTIONS. Read-only surface for now: navigation + refresh only. Lane
-# interventions (force-release a lease, requeue a FAILED message) are Runtime C+ work and
-# will arrive as spec'd mutations, never as raw SQL buttons.
+# DATA LAYER — ACTIONS. Navigation + refresh, plus the FIRST lane intervention (#315,
+# ADR-20260803-002712 Q1): requeueing a cap-poisoned row is a spec'd ADMIN mutation, never a
+# raw SQL button. Remaining interventions (force-release a lease) stay recorded gaps.
 # ──────────────────────────────────────────────────────────────────────────────
 actions:
   navigate: { kind: client }
   refresh:  { kind: client, note: "Re-runs the screen's data_requirements; no mutation involved." }
+  requeue_mailbox_message: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/requeueMailboxMessage' }, note: "Operator recovery of a cap-poisoned row after fixing the cause (#315); acceptance-first — poll operationStatus with the returned messageId, then refresh." }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
@@ -51,7 +53,7 @@ screens:
     route: "/system/mailbox"
     title: { $ref: 'system.translations.yaml#/mailbox.title' }
     sdui: true
-    data_requirements: [mailbox.lanes]
+    data_requirements: [mailbox.lanes, mailbox.poisoned]
     components:
       - { type: page_header, title: { $ref: 'system.translations.yaml#/mailbox.title' }, subtitle: { $ref: 'system.translations.yaml#/mailbox.subtitle' } }
       - type: section
@@ -71,6 +73,25 @@ screens:
               - { type: badge, label: { $ref: 'system.translations.yaml#/mailbox.pending' },   value: "{{ item.pending }}", variant_when: { warning: "item.pending > 0" } }
               - { type: badge, label: { $ref: 'system.translations.yaml#/mailbox.scheduled' }, value: "{{ item.scheduled }}" }
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.oldest_pending' }, value: "{{ item.oldestPendingAt }}", visible_when: "item.oldestPendingAt != null" }
+      # Poisoned rows (#315): the per-row detail behind each lane's `poisoned` count — the
+      # messageId an operator needs, the error evidence, and the ONE intervention (requeue).
+      - type: section
+        id: poisoned_messages
+        title: { $ref: 'system.translations.yaml#/mailbox.poisoned.title' }
+        content:
+          - { type: text, value: { $ref: 'system.translations.yaml#/mailbox.poisoned.guide' } }
+          - type: list
+            id: poisoned_list
+            items: "{{ mailbox_poisoned }}"
+            empty_state: { icon: check_circle, title: { $ref: 'system.translations.yaml#/mailbox.poisoned.empty.title' }, body: { $ref: 'system.translations.yaml#/mailbox.poisoned.empty.body' } }
+            item_components:
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.message' },  value: "{{ item.messageType }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.lane' },              value: "{{ item.actorType }} / {{ item.partition }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.id' },       value: "{{ item.messageId }}" }
+              - { type: badge, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.attempts' },    value: "{{ item.attempts }}" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.error' },    value: "{{ item.errorCode }}", visible_when: "item.errorCode != null" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.received' }, value: "{{ item.receivedAt }}" }
+              - { type: button, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.requeue' }, variant: outline, action: { type: requeue_mailbox_message, variables: { targetMessageId: "{{ item.messageId }}" } } }
       - type: section
         id: reading_guide
         title: { $ref: 'system.translations.yaml#/mailbox.guide.title' }

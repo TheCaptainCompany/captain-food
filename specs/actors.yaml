@@ -995,6 +995,30 @@ CustomerCredit:
       emits: [{ $ref: 'events.yaml#/CustomerCreditConsumed' }]
       throws:
         - { $ref: 'errors.yaml#/InsufficientCustomerCredit' }
+MailboxSupervision:
+  type: aggregate
+  identity: { $ref: '#/MailboxSupervision/state/targetMessageId' }   # one supervision stream per supervised mailbox row
+  mailbox:
+    partitions: 1             # operator actions are rare and human-paced; one lane is plenty
+  description: >
+    Operator supervision actions over the actor mailbox itself (#315, ADR-20260803-002712 Q1) —
+    the write-side counterpart of the ADMIN mailboxLanes/poisonedMailboxMessages reads. Keyed by
+    the SUPERVISED row's messageId: every operator intervention on that row accumulates on one
+    stream (`MailboxSupervision-{targetMessageId}`), which is the audit trail SQL runbooks never
+    leave. RequeueMailboxMessage flips a cap-poisoned FAILED row back to RECEIVED through the
+    application MailboxRequeue port (attempts reset, error + backoff schedule cleared, lane
+    nudged); the port write is idempotent (an already-deliverable row is a recorded no-op), so a
+    redelivered requeue command converges instead of erroring. The command itself rides this
+    actor's own mailbox lane like any other command — acceptance-first, pollable via
+    operationStatus. No lifecycle: a supervision stream is a ledger of interventions, not a
+    state machine.
+  receives:
+    - message: { $ref: 'commands.yaml#/RequeueMailboxMessage' }
+      emits: [{ $ref: 'events.yaml#/MailboxMessageRequeued' }]
+      throws:
+        - { $ref: 'errors.yaml#/MailboxMessageNotFound' }
+        - { $ref: 'errors.yaml#/MailboxMessageNotRequeueable' }
+
 # --- Process managers (sagas) — #272 Runtime D1 (PM mailboxes, ADR-20260801-023000) ---
 #
 # These entries land STRICTLY WITH the D-A wiring (the prepare-phase delivery + the gated

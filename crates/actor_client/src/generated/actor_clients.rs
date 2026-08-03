@@ -105,6 +105,7 @@ impl sealed::Sealed for domain::generated::commands::RequestEmailVerification {}
 impl sealed::Sealed for domain::generated::commands::RequestPhoneChange {}
 impl sealed::Sealed for domain::generated::commands::RequestPhoneVerification {}
 impl sealed::Sealed for domain::generated::commands::RequestRefund {}
+impl sealed::Sealed for domain::generated::commands::RequeueMailboxMessage {}
 impl sealed::Sealed for domain::generated::commands::ResolveDeliveryIssue {}
 impl sealed::Sealed for domain::generated::commands::ResolveReclamation {}
 impl sealed::Sealed for domain::generated::commands::RevokeDeliveryPartnerAvailability {}
@@ -913,6 +914,65 @@ impl DeliveryPartnerRegistrationClient {
         match declared_identity(message_type, payload)? {
             Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
                 "{message_type}: payload identity {id} does not match this DeliveryPartnerRegistrationClient lane {} — refusing a mis-addressed send",
+                self.actor_id
+            ))),
+            _ => Ok(()),
+        }
+    }
+}
+
+// ─── MailboxSupervision ───
+
+/// GENERATED from actors.yaml `MailboxSupervision.receives`: marker for every COMMAND the `MailboxSupervision` actor
+/// receives. SEALED (private supertrait) so no impl can exist outside the generated file —
+/// sending a command this actor does not `receive` is a COMPILE error, not a runtime rejection.
+pub trait MailboxSupervisionCommand: sealed::Sealed + serde::Serialize + Send {
+    /// The mailbox `message_type` (the commands.yaml key).
+    const MESSAGE_TYPE: &'static str;
+}
+
+impl MailboxSupervisionCommand for domain::generated::commands::RequeueMailboxMessage {
+    const MESSAGE_TYPE: &'static str = "RequeueMailboxMessage";
+}
+
+/// GENERATED from actors.yaml: the strongly-typed client for ONE `MailboxSupervision` mailbox lane —
+/// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
+/// width 1 (`mailbox.partitions`). The only door non-GraphQL code should use to reach this
+/// actor (PROP-20260728-152752 §2.1).
+pub struct MailboxSupervisionClient {
+    mailbox: Arc<dyn Mailbox>,
+    actor_id: uuid::Uuid,
+}
+
+impl MailboxSupervisionClient {
+    /// A client addressing the `MailboxSupervision` instance `actor_id`.
+    pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
+        Self { mailbox, actor_id }
+    }
+    /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared
+    /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same
+    /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).
+    pub async fn send<M: MailboxSupervisionCommand>(
+        &self,
+        msg: M,
+        env: Envelope,
+    ) -> Result<EnqueueOutcome, DomainError> {
+        let payload = serde_json::to_value(&msg)
+            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;
+        let entry = command_entry("MailboxSupervision", 1, self.actor_id, M::MESSAGE_TYPE, payload, env);
+        let payload_hash = entry.payload_hash.clone();
+        insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await
+    }
+    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
+    /// free-function door uses: when the command declares an identity property, its value MUST
+    /// equal this client's lane — a mismatch would park the command on one lane while the handler
+    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose
+    /// actor declares no identity property is addressed by the lane the client was built with.
+    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
+        match declared_identity(message_type, payload)? {
+            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(
+                "{message_type}: payload identity {id} does not match this MailboxSupervisionClient lane {} — refusing a mis-addressed send",
                 self.actor_id
             ))),
             _ => Ok(()),

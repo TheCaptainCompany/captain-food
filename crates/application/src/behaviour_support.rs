@@ -106,6 +106,7 @@ pub struct TestBed {
     pub dispatch_pm: MemDeliveryDispatchState,
     pub restaurants: SpecRestaurants,
     pub slugs: SpecSlugReservations,
+    pub mailbox_requeue: SpecMailboxRequeue,
     pub catalogs: SpecCatalogs,
     pub carts: SpecCarts,
     pub customers: SpecCustomers,
@@ -537,6 +538,60 @@ impl Default for SpecSlugReservations {
         let mut held = std::collections::HashMap::new();
         held.insert("already-held".to_string(), RestaurantId(uuid::Uuid::from_u128(0xA11EAD)));
         Self { held: std::sync::Mutex::new(held) }
+    }
+}
+
+/// In-memory `MailboxRequeue` (#315), sentinel-seeded like [`SpecSlugReservations`]:
+/// `uid("poisoned-1")` is a cap-poisoned Payment-lane row (the happy path flips it and returns
+/// the lane), `uid("settled-1")` exists but SUCCEEDED (NotRequeueable), anything else is unknown
+/// to the mailbox (NotFound). The sentinels are what make the tests.yaml cases real assertions
+/// rather than tautologies — port state is not declarable in YAML, so it lives here by
+/// convention and the spec references the literals.
+pub struct SpecMailboxRequeue {
+    /// message_id -> (poisoned?, actor_type-or-status). Flipped entries move to deliverable.
+    rows: std::sync::Mutex<std::collections::HashMap<uuid::Uuid, SpecMailboxRow>>,
+}
+
+enum SpecMailboxRow {
+    Poisoned { actor_type: String },
+    Deliverable { actor_type: String },
+    Terminal { status: String },
+}
+
+impl Default for SpecMailboxRequeue {
+    fn default() -> Self {
+        let mut rows = std::collections::HashMap::new();
+        rows.insert(uid("poisoned-1"), SpecMailboxRow::Poisoned { actor_type: "Payment".into() });
+        rows.insert(uid("settled-1"), SpecMailboxRow::Terminal { status: "SUCCEEDED".into() });
+        Self { rows: std::sync::Mutex::new(rows) }
+    }
+}
+
+#[async_trait]
+impl crate::queries::MailboxRequeue for SpecMailboxRequeue {
+    async fn requeue_if_poisoned(
+        &self,
+        message_id: uuid::Uuid,
+    ) -> Result<crate::queries::RequeueOutcome, DomainError> {
+        use crate::queries::RequeueOutcome;
+        let mut rows = self.rows.lock().unwrap();
+        match rows.get(&message_id) {
+            Some(SpecMailboxRow::Poisoned { actor_type }) => {
+                let actor_type = actor_type.clone();
+                rows.insert(
+                    message_id,
+                    SpecMailboxRow::Deliverable { actor_type: actor_type.clone() },
+                );
+                Ok(RequeueOutcome::Requeued { actor_type })
+            }
+            Some(SpecMailboxRow::Deliverable { actor_type }) => {
+                Ok(RequeueOutcome::AlreadyDeliverable { actor_type: actor_type.clone() })
+            }
+            Some(SpecMailboxRow::Terminal { status }) => {
+                Ok(RequeueOutcome::NotRequeueable { status: status.clone() })
+            }
+            None => Ok(RequeueOutcome::NotFound),
+        }
     }
 }
 

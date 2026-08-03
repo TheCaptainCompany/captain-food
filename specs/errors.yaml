@@ -925,3 +925,28 @@ RefundExceedsCaptured:
   messages:
     en: "The refund amount exceeds the order's captured total."
     fr: "Le montant du remboursement dépasse le total encaissé de la commande."
+
+# =====================================================================
+# Mailbox supervision (#315)
+# =====================================================================
+
+MailboxMessageNotFound:
+  description: "No inbound_messages row with this id (e.g. a stale supervision screen after retention swept the row)."
+  context:
+    targetMessageId: { $ref: 'scalars.yaml#/MessageId' }
+  messages:
+    en: "Mailbox message not found."
+    fr: "Message de boîte aux lettres introuvable."
+
+MailboxMessageNotRequeueable:
+  description: >
+    The row exists but is not a cap-poisoned FAILED (error code DeliveryInfrastructureError):
+    handler REJECTED/FAILED verdicts are recorded business decisions and SUCCEEDED/IGNORED/
+    DUPLICATE rows already ran — requeueing any of them would re-execute something the system
+    decided on purpose (#315, rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).
+  context:
+    targetMessageId: { $ref: 'scalars.yaml#/MessageId' }
+    status: { $ref: 'scalars.yaml#/InboundMessageStatus' }
+  messages:
+    en: "This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued."
+    fr: "Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file."

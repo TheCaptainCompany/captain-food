@@ -936,3 +936,10 @@ pub struct AttachReclamationEvidence {
     pub reclamation_id: ReclamationId,
     pub attachment_ref: AttachmentRef,
 }
+
+/// ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause, return an inbound_messages row that the delivery-attempts cap flipped to terminal FAILED (error code DeliveryInfrastructureError, PROP-20260802-223522 D4) to RECEIVED — attempts reset, error and backoff schedule cleared — so its lane's worker delivers it again. Only cap-poisoned rows are requeueable: handler REJECTED/FAILED verdicts are business decisions, not infrastructure casualties (errors.yaml#/MailboxMessageNotRequeueable). `targetMessageId` names the poisoned row (from the poisonedMailboxMessages supervision query) — distinct from the envelope's own messageId, which identifies THIS requeue submission.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequeueMailboxMessage {
+    pub target_message_id: MessageId,
+}

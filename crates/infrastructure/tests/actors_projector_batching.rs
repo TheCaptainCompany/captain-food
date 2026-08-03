@@ -149,6 +149,7 @@ fn deps_over(pool: &PgPool) -> CommandDeps {
         payments: Arc::new(FailClosedPaymentGateway) as Arc<dyn PaymentService>,
         pm_state: Arc::new(infrastructure::persistence::PgPaymentProcessState::new(pool.clone())),
         refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(pool.clone())),
+        mailbox_requeue: Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(pool.clone())),
     }
 }
 

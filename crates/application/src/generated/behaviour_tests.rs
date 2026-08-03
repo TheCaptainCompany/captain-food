@@ -657,6 +657,11 @@ fn fx_reclamation_evidence_attached() -> DomainEvent {
     DomainEvent::ReclamationEvidenceAttached(evs::ReclamationEvidenceAttached { reclamation_id: sc::ReclamationId(support::uid("recl-1")), order_id: sc::OrderId(support::uid("order-1")), attachment_ref: sc::AttachmentRef("attachment-ref-1".into()) })
 }
 
+/// tests.yaml#/fixtures/mailboxMessageRequeued — events.yaml#/MailboxMessageRequeued
+fn fx_mailbox_message_requeued() -> DomainEvent {
+    DomainEvent::MailboxMessageRequeued(evs::MailboxMessageRequeued { target_message_id: sc::MessageId(support::uid("poisoned-1")), actor_type: sc::MailboxActorType("Payment".into()) })
+}
+
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
 /// the canonical OrderTracking rows the saga legs read (`read_order`) — state the spec's
 /// GIVEN (an event list) cannot express but its cases assume.
@@ -4256,5 +4261,48 @@ async fn test_place_replacement_order_copies_items() {
     bed.assert_appended("TestPlaceReplacementOrderCopiesItems", &before, &[
         (format!("Order-{}", support::uid("replacement-order-1")), fx_order_placed_replacement()),
     ]);
+}
+
+/// tests.yaml#/tests/TestMailboxMessageRequeued — "Requeues a cap-poisoned mailbox row and records the intervention"
+/// rules: OnlyCapPoisonedMailboxRowsAreRequeueable
+#[tokio::test]
+async fn test_mailbox_message_requeued() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequeueMailboxMessage { target_message_id: sc::MessageId(support::uid("poisoned-1")) };
+    let result = crate::commands::requeue_mailbox_message(&bed.store, &bed.mailbox_requeue, cmd, &support::actor()).await;
+    let _ = result.expect("TestMailboxMessageRequeued: the spec expects acceptance");
+    bed.assert_appended("TestMailboxMessageRequeued", &before, &[
+        (format!("MailboxSupervision-{}", support::uid("poisoned-1")), fx_mailbox_message_requeued()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestRequeueOfNonPoisonedRowIsRejected — "Refuses to requeue a row that did not fail at the delivery-attempts cap"
+/// rules: OnlyCapPoisonedMailboxRowsAreRequeueable
+#[tokio::test]
+async fn test_requeue_of_non_poisoned_row_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequeueMailboxMessage { target_message_id: sc::MessageId(support::uid("settled-1")) };
+    let result = crate::commands::requeue_mailbox_message(&bed.store, &bed.mailbox_requeue, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRequeueOfNonPoisonedRowIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRequeueOfNonPoisonedRowIsRejected", &err, &["MailboxMessageNotRequeueable"]);
+    bed.assert_appended("TestRequeueOfNonPoisonedRowIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRequeueOfUnknownMessageIsRejected — "Refuses to requeue a mailbox row that does not exist"
+/// rules: OnlyCapPoisonedMailboxRowsAreRequeueable
+#[tokio::test]
+async fn test_requeue_of_unknown_message_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequeueMailboxMessage { target_message_id: sc::MessageId(support::uid("missing-1")) };
+    let result = crate::commands::requeue_mailbox_message(&bed.store, &bed.mailbox_requeue, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRequeueOfUnknownMessageIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRequeueOfUnknownMessageIsRejected", &err, &["MailboxMessageNotFound"]);
+    bed.assert_appended("TestRequeueOfUnknownMessageIsRejected", &before, &[]);
 }
 

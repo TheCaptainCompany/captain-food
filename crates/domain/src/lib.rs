@@ -18,6 +18,7 @@ pub mod customer_credit;
 pub mod delivery_job;
 pub mod delivery_partner_registration;
 pub mod generated;
+pub mod mailbox_supervision;
 pub mod order;
 pub mod payment;
 pub mod prospect;

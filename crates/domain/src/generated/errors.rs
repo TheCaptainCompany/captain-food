@@ -770,6 +770,22 @@ pub const REFUND_EXCEEDS_CAPTURED: ErrorDef = ErrorDef {
     message_fr: "Le montant du remboursement dépasse le total encaissé de la commande.",
 };
 
+/// No inbound_messages row with this id (e.g. a stale supervision screen after retention swept the row).
+/// Context: `targetMessageId`.
+pub const MAILBOX_MESSAGE_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "MailboxMessageNotFound",
+    message_en: "Mailbox message not found.",
+    message_fr: "Message de boîte aux lettres introuvable.",
+};
+
+/// The row exists but is not a cap-poisoned FAILED (error code DeliveryInfrastructureError): handler REJECTED/FAILED verdicts are recorded business decisions and SUCCEEDED/IGNORED/ DUPLICATE rows already ran — requeueing any of them would re-execute something the system decided on purpose (#315, rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).
+/// Context: `targetMessageId`, `status`.
+pub const MAILBOX_MESSAGE_NOT_REQUEUEABLE: ErrorDef = ErrorDef {
+    code: "MailboxMessageNotRequeueable",
+    message_en: "This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued.",
+    message_fr: "Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file.",
+};
+
 /// Every anticipated error, in errors.yaml order.
 pub const ERRORS: &[ErrorDef] = &[
     UNAUTHORIZED,
@@ -868,6 +884,8 @@ pub const ERRORS: &[ErrorDef] = &[
     REJECTION_REASON_REQUIRED,
     PARTIAL_REFUND_AMOUNT_REQUIRED,
     REFUND_EXCEEDS_CAPTURED,
+    MAILBOX_MESSAGE_NOT_FOUND,
+    MAILBOX_MESSAGE_NOT_REQUEUEABLE,
 ];
 
 /// Look up an anticipated error by its stable PascalCase code.

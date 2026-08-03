@@ -83,6 +83,7 @@ nonProjectedEvents:
   # deletion engine's projection slice (#194), not with the recording pilot (#272 D2). Remove this
   # entry when the first tombstone fold lands so the validator hunts the stragglers.
   - { $ref: 'events.yaml#/OrderExpired' }
+  - { $ref: 'events.yaml#/MailboxMessageRequeued' }   # audit-only operator fact (#315); the supervision reads (mailboxLanes/poisonedMailboxMessages) serve from inbound_messages directly, no View_*
   # CustomerCreditGranted / CustomerCreditConsumed are now PROJECTED into the materialized
   # CustomerCreditBalance table (a SUM read model, tables/projection_tables.yaml; #158 Part B of #207).
 

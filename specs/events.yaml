@@ -1936,3 +1936,20 @@ OrderDeleted:
       nullable: true
       description: "The technical tombstone event (envelope-level, ADR-20260731-160000 §5) that instructed the stream deletion — the receipt's 'deleted, thanks to tombstone <id>' stamp."
   required: [orderId, restaurantId, policy]
+
+# --- Mailbox supervision (#315, ADR-20260803-002712 Q1) ---
+
+MailboxMessageRequeued:
+  description: >
+    An ADMIN operator returned a poisoned mailbox row (terminal FAILED at the delivery-attempts
+    cap, error code DeliveryInfrastructureError) to RECEIVED for redelivery (#315) — attempts
+    reset, error and backoff schedule cleared, the lane's worker nudged. The audit fact of the
+    operator action: WHO requeued is the envelope's acting user (ADR-0041), never payload;
+    `actorType` names the lane whose row was requeued so the audit trail reads without
+    dereferencing the id. Idempotent at the port: requeueing a row that is ALREADY deliverable
+    again records the intent without touching the row.
+  type: object
+  properties:
+    targetMessageId: { $ref: 'scalars.yaml#/MessageId' }
+    actorType: { $ref: 'scalars.yaml#/MailboxActorType' }
+  required: [targetMessageId, actorType]

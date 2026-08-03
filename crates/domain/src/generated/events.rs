@@ -1056,6 +1056,14 @@ pub struct OrderDeleted {
     pub tombstone_event_id: Option<String>,
 }
 
+/// An ADMIN operator returned a poisoned mailbox row (terminal FAILED at the delivery-attempts cap, error code DeliveryInfrastructureError) to RECEIVED for redelivery (#315) — attempts reset, error and backoff schedule cleared, the lane's worker nudged. The audit fact of the operator action: WHO requeued is the envelope's acting user (ADR-0041), never payload; `actorType` names the lane whose row was requeued so the audit trail reads without dereferencing the id. Idempotent at the port: requeueing a row that is ALREADY deliverable again records the intent without touching the row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxMessageRequeued {
+    pub target_message_id: MessageId,
+    pub actor_type: MailboxActorType,
+}
+
 /// Every business event as a typed, adjacently-tagged union: `{ "eventType": <name>, "payload": { … } }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "eventType", content = "payload")]
@@ -1169,4 +1177,5 @@ pub enum DomainEvent {
     CustomerCreditConsumed(CustomerCreditConsumed),
     OrderExpired(OrderExpired),
     OrderDeleted(OrderDeleted),
+    MailboxMessageRequeued(MailboxMessageRequeued),
 }

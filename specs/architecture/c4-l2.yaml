@@ -48,6 +48,10 @@ boundedContexts:
       - { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
       - { $ref: 'processmanager.yaml#/RefundProcess' }
       - { $ref: 'processmanager.yaml#/ReclamationProcess' }
+  platform:
+    description: "Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI."
+    aggregates:
+      - { $ref: 'actors.yaml#/MailboxSupervision' }
   customer:
     description: "Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding."
     roles: [CUSTOMER, PUBLIC]

@@ -1142,6 +1142,23 @@ pub struct AttachReclamationEvidenceInput {
     pub attachment_ref: AttachmentRef,
 }
 
+/// ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause, return an inbound_messages row that the delivery-attempts cap flipped to terminal FAILED (error code DeliveryInfrastructureError, PROP-20260802-223522 D4) to RECEIVED — attempts reset, error and backoff schedule cleared — so its lane's worker delivers it again. Only cap-poisoned rows are requeueable: handler REJECTED/FAILED verdicts are business decisions, not infrastructure casualties (errors.yaml#/MailboxMessageNotRequeueable). `targetMessageId` names the poisoned row (from the poisonedMailboxMessages supervision query) — distinct from the envelope's own messageId, which identifies THIS requeue submission.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RequeueMailboxMessageInput {
+    #[graphql(name = "targetMessageId")]
+    pub target_message_id: MessageId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct PoisonedMailboxMessagesQueryInput {
+    #[graphql(name = "actorType")]
+    pub actor_type: Option<MailboxActorType>,
+    #[graphql(name = "limit")]
+    pub limit: Option<PageLimit>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationStatusQueryInput {

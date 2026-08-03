@@ -26,6 +26,19 @@ impl QueryRoot {
         let rows = repo.list().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(MailboxLane::from).collect())
     }
+    /// Actor supervision detail (ADMIN, #315): every cap-poisoned mailbox row — terminal FAILED with error code DeliveryInfrastructureError — newest first, with the messageId the requeueMailboxMessage recovery needs and the error evidence to judge whether the cause is fixed. The per-row detail behind MailboxLane.poisoned's count. Transient — served from inbound_messages directly, no View_* (write-path infrastructure, not a business read model). Server clamps the page to 200.
+    #[graphql(name = "poisonedMailboxMessages", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    async fn poisoned_mailbox_messages(&self, ctx: &async_graphql::Context<'_>, input: Option<PoisonedMailboxMessagesQueryInput>) -> async_graphql::Result<Vec<PoisonedMailboxMessage>> {
+        let repo = ctx.data::<std::sync::Arc<dyn application::queries::MailboxLaneRepository>>()?;
+        let (actor_type, limit) = input
+            .map(|i| (i.actor_type.map(|v| v.0), i.limit.map(|v| v.0)))
+            .unwrap_or((None, None));
+        let rows = repo
+            .poisoned(actor_type, limit.unwrap_or(200).clamp(1, 200))
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(PoisonedMailboxMessage::from).collect())
+    }
     /// Poll a journaled command's status by its messageId acceptance handle (the pull counterpart of the operationStatusChanged subscription, ADR-20260720-015500). Open to every role path (roles omitted) but OWNERSHIP-SCOPED in the resolver: the row is returned only to the journaling actor (JWT subject match), the journaling session (X-SESSION-ID match — anonymous users), or ADMIN; anything else resolves null (no existence oracle). Transient — served from the command_journal, no View_*.
     #[graphql(name = "operationStatus")]
     async fn operation_status(&self, ctx: &async_graphql::Context<'_>, input: OperationStatusQueryInput) -> async_graphql::Result<Option<Operation>> {

@@ -927,6 +927,46 @@
     "en": "Pending",
     "fr": "En attente"
   },
+  "mailbox.poisoned.attempts": {
+    "en": "Attempts",
+    "fr": "Tentatives"
+  },
+  "mailbox.poisoned.empty.body": {
+    "en": "Nothing has failed at the delivery-attempts cap. This is the healthy state.",
+    "fr": "Rien n'a échoué au plafond de tentatives de livraison. C'est l'état sain."
+  },
+  "mailbox.poisoned.empty.title": {
+    "en": "No poisoned rows",
+    "fr": "Aucune ligne empoisonnée"
+  },
+  "mailbox.poisoned.error": {
+    "en": "Error code",
+    "fr": "Code d'erreur"
+  },
+  "mailbox.poisoned.guide": {
+    "en": "Rows terminally FAILED at the delivery-attempts cap. Fix the cause first (the error code is the lead), then requeue — the row returns to RECEIVED with its attempts reset and its lane is nudged. Judge before you click: the row re-enters AHEAD of newer work on its lane and replays an OLD intent after everything delivered since (last-write-wins updates can reverse). A row whose error names a payload decode failure cannot be recovered by requeue — it would only fail again.",
+    "fr": "Lignes en échec définitif au plafond de tentatives de livraison. Corrigez d'abord la cause (le code d'erreur est la piste), puis remettez en file — la ligne repasse à RECEIVED, ses tentatives sont réinitialisées et sa voie est relancée. Jugez avant de cliquer : la ligne repasse DEVANT le travail plus récent de sa voie et rejoue une intention ANCIENNE après tout ce qui a été livré depuis (les mises à jour dernier-écrit-gagne peuvent s'inverser). Une ligne dont l'erreur indique un échec de décodage ne peut pas être récupérée par remise en file — elle échouerait à nouveau."
+  },
+  "mailbox.poisoned.id": {
+    "en": "Message id",
+    "fr": "Identifiant du message"
+  },
+  "mailbox.poisoned.message": {
+    "en": "Message",
+    "fr": "Message"
+  },
+  "mailbox.poisoned.received": {
+    "en": "Received at",
+    "fr": "Reçu à"
+  },
+  "mailbox.poisoned.requeue": {
+    "en": "Requeue",
+    "fr": "Remettre en file"
+  },
+  "mailbox.poisoned.title": {
+    "en": "Poisoned rows",
+    "fr": "Lignes empoisonnées"
+  },
   "mailbox.scheduled": {
     "en": "Scheduled",
     "fr": "Planifiés"

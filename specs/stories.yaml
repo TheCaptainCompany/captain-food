@@ -252,9 +252,11 @@ admin:
         ActivateRestaurant: { $ref: 'api.yaml#/mutations/activateRestaurant' }
         ImportCatalog: { $ref: 'api.yaml#/mutations/importCatalog' }
     SuperviseActorMailbox:
-      description: As an admin, I watch the write-path mailbox lanes (pending depth, checkpoints, leases, fencing counters) to catch a stuck or starved lane before customers feel it (#242).
+      description: As an admin, I watch the write-path mailbox lanes (pending depth, checkpoints, leases, fencing counters) to catch a stuck or starved lane before customers feel it (#242) — and when a row poisons at the delivery-attempts cap, I inspect it and requeue it after fixing the cause (#315).
       steps:
         ViewMailboxLanes: { $ref: 'api.yaml#/queries/mailboxLanes' }
+        ReviewPoisonedMessages: { $ref: 'api.yaml#/queries/poisonedMailboxMessages' }
+        RequeuePoisonedMessage: { $ref: 'api.yaml#/mutations/requeueMailboxMessage' }
     ManageListings:
       description: As an admin, I curate the restaurant listings and partnership funnel.
       steps:
