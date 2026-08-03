@@ -1,4 +1,4 @@
-# ADR-20260803-203455 — Every public mailbox door is declared: closing the #304 residual class by reachability
+# ADR-20260803-203455 — Every public mailbox door is declared: narrowing the #304 residual class by reachability
 
 - **Status**: Accepted
 - **Date**: 2026-08-03
@@ -8,46 +8,64 @@
 
 ## Decision
 
-A second guard, `every_public_mailbox_door_is_declared`, closes the class the witness guard cannot
-see. It seeds on **mints** of `MailboxAccess`, propagates through `actor_client`'s call graph to a
+A second guard, `every_public_mailbox_door_is_declared`, NARROWS the class the witness guard cannot
+see — it does not close it; see the scope statement below. It seeds on **mints** of `MailboxAccess`, propagates through `actor_client`'s call graph to a
 fixpoint, and requires every publicly-reachable tainted function to appear on an explicit **door
 list** keyed by `(file, name)` with the reason it exists.
 
-The door list is the whole point, not a side effect: it is the enumeration of every public function
-in the boundary crate that can reach the mailbox — ten today, each one a door somebody deliberately
-opened. Adding an eleventh is an edit to that list, which is the ADR-20260802-170059 posture ("the
+The door list is the whole point, not a side effect: it enumerates the public functions in the
+boundary crate that can reach the mailbox — ten entries, of which the seven non-test ones are the
+release surface (the other three are `test-fixtures`-gated and excluded from the undeclared check
+anyway; they appear so taint stops correctly). Each is a door somebody deliberately opened. Adding an eleventh is an edit to that list, which is the ADR-20260802-170059 posture ("the
 declaration is the permission") applied to the crate's own surface rather than to the spec.
 
-## Why this closes the class, and why the argument is short
+## What it does, and the completeness claim I got wrong
 
 ADR-20260803-172654 disclaimed one class: a public in-crate item that mints internally and hands the
-capability out through a signature that never names the witness —
-`pub fn cancel_any(&self, id: Uuid) -> Result<bool>` over a held `Arc<dyn Mailbox>`. Seven review
-passes established that no signature analysis reaches it, and the disclaimer was the honest answer
-at the time.
+capability out through a signature that never names the witness. This guard **narrows** that class;
+the first version of this ADR said it *closed* it, and that was false.
 
-But the class is not un-checkable, only un-checkable *by signatures*. Calling a port method requires
-a witness, and a witness can arrive only two ways:
+The abstract argument is sound as far as it goes. A witness reaches a port method from either a
+**parameter** — which names it in a signature, caught by
+`every_mailbox_port_method_demands_the_access_witness` — or a **construction**, caught here; a field,
+a `const` or a `static` all reduce to one of the two, since something had to mint or receive the
+witness to put it there. That dichotomy is real value provenance.
 
-- **from a parameter** — which names the witness in a signature, and is caught by
-  `every_mailbox_port_method_demands_the_access_witness`;
-- **from a mint** — which is caught here.
+The unsound step was the silent leap from *"a construction exists somewhere"* to *"this scan finds
+every construction and every path from it"*. This scan is a **syntactic approximation of the call
+graph**: it resolves calls by ident, with no type information. A semantic argument cannot be
+discharged by a syntactic tool, and review proved it with four counterexamples that were ordinary
+rather than adversarial — `MailboxAccess { 0: () }` (the same construction, a spelling the seed did
+not match), a function passed as a VALUE (`let f = MailboxAccess::granted;`, so the ident is never
+followed by `(`), a wrapper over a feature-gated door (which does not inherit the door's cargo
+feature), and an expression-position macro (the #304 refusal covered only item position).
 
-There is no third source in safe Rust. Constructions via a field, a `const` or a `static` all reduce
-to one of the two: something had to mint or receive the witness to put it there. So the two guards
-compose into a complete rule for the crate, where each alone was open.
+All four are fixed — the seed and the call graph are read from the AST now, and taint no longer
+stops at a *gated* door. But the honest scope is: **sound for constructions the AST recognises as
+constructions of the witness, and for call edges resolvable by ident**. A genuinely complete rule
+needs type resolution (a rustc lint, or HIR/MIR reachability), which is a scope decision for a
+proposal rather than a test.
 
 ## Consequences
 
-- **The seed is structural, not textual.** The witness's own mints spell the construction `Self(())`
-  inside an `impl MailboxAccess`, not `MailboxAccess(())`, so a text seed alone misses `granted` and
-  `for_tests`. Seeding on "constructs `Self` in an impl on the witness" means **renaming the mint
-  does not blind the guard** — verified by renaming `granted` throughout and confirming the guard
-  still catches a planted exploit.
-- **Taint stops at a declared door.** A function calling `RestaurantClient::send` is using the
-  sanctioned public API, which every crate has anyway; it is not a new capability. Without this the
-  scan reported `OperationStatusBus::publish` as a door, because it calls `broadcast::Sender::send`
-  and the propagation matched the ident `send`.
+- **The seed and the call graph are read from the AST**, not from body text. The witness's own mints
+  spell the construction `Self(())` inside an `impl MailboxAccess`, so a type-name seed misses
+  `granted` and `for_tests`; and `MailboxAccess { 0: () }` is the same construction as
+  `MailboxAccess(())`. Both are constructions in the AST. Neither a rename NOR a respelling of the
+  mint blinds it — both verified against a planted exploit. Function bodies are scanned with their
+  ATTRIBUTES excluded, so a doc comment naming the mint is documentation rather than a door (the
+  text version reported one, with advice whose only real remedy was deleting the docs).
+- **Call edges include bare references, not just call syntax.** `let f = MailboxAccess::granted;`,
+  `.map(insert_mapped)` and `unwrap_or_else(Self::helper)` all pass a function as a value, so an
+  ident-followed-by-`(` scan misses them — and that is a plausible false negative in honest code,
+  not only an attack.
+- **Taint stops at an UNGATED door only.** Stopping at a door at all is right: a function calling
+  `RestaurantClient::send` uses the sanctioned public API every crate has anyway, and without that
+  rule the scan reported `OperationStatusBus::publish`, which calls `broadcast::Sender::send`. But a
+  GATED door's containment is a cargo feature on its `pub use`, and an in-crate wrapper does not
+  inherit it: wrapping `enqueue_inbound_facts` would
+  otherwise have re-exposed the untyped bulk door to crates the `bulk-door` manifest guard exists to
+  exclude — verified by compiling such a wrapper from `server`, which does not enable the feature.
 - **Doors are keyed by `(file, name)`, never by name alone** — for the same reason: `send` is both a
   generated client's write door and `Sender::send`, and a bare-name allowlist would pre-authorise
   any future `pub fn send` anywhere in the crate.
@@ -59,6 +77,9 @@ compose into a complete rule for the crate, where each alone was open.
   module privacy. The cost is that a genuinely new door must be named; that cost is the feature.
 - **`unsafe_code = "forbid"` stays load-bearing.** `mem::zeroed::<MailboxAccess>()` would defeat both
   guards identically, so the threat model remains safe Rust.
-- What remains outside both guards is unchanged and already recorded: macro expansion (refused as a
-  class rather than analysed), out-of-crate implementors of the port (contained by the composition
-  root), and edits to the boundary crate itself, which are visible in any diff.
+- **The anti-blindness assertion names `granted` specifically.** A bare "something is tainted" check
+  is satisfied by the test-only `for_tests`, so the PRODUCTION mint could go dark unnoticed.
+- What remains outside both guards: any construction or call edge the syntactic scan cannot see (see
+  the scope statement above), out-of-crate implementors of the port (contained by the composition
+  root), and edits to the boundary crate itself, which are visible in any diff. An expression-position
+  macro mentioning the witness is now treated as a mint conservatively, since its expansion is opaque.

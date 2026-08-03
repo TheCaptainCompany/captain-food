@@ -22,4 +22,4 @@ workspace = true
 
 [dev-dependencies]
 quote = "1.0.47"
-syn = { version = "2", features = ["full"] }
+syn = { version = "2", features = ["full", "visit"] }

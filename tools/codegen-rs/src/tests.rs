@@ -2402,6 +2402,90 @@ keys:
         );
     }
 
+    /// What one function BODY does, read from the AST rather than its text.
+    ///
+    /// The first version of this scan matched two hand-picked spellings (`MailboxAccess(())`,
+    /// `MailboxAccess::granted()`) and resolved calls with `body.contains("{name}(")`. Review found
+    /// both unsound in ways that are ordinary rather than adversarial: `MailboxAccess { 0: () }` is
+    /// the same construction of a tuple struct, and `let f = MailboxAccess::granted;` — or any
+    /// `.map(insert_mapped)` / `unwrap_or_else(Self::helper)` — passes a function as a VALUE, so the
+    /// ident is never followed by `(`. Both are read correctly here.
+    #[derive(Default)]
+    struct BodyScan {
+        /// Constructs the witness directly (`MailboxAccess(..)` or `MailboxAccess { .. }`).
+        mints: bool,
+        /// Constructs `Self(..)`/`Self { .. }` — a mint when the enclosing impl is on the witness.
+        self_ctor: bool,
+        /// A macro invocation whose opaque tokens mention the witness. Expansion is invisible, so
+        /// this is treated as a mint conservatively — an EXPRESSION-position macro was the one
+        /// macro shape the #304 item-position refusal never covered.
+        opaque_macro: bool,
+        /// Every ident referenced anywhere in the body: call targets, method names, and bare paths
+        /// in value position.
+        refs: std::collections::HashSet<String>,
+    }
+
+    fn last_seg(p: &syn::Path) -> String {
+        p.segments.last().map(|s| s.ident.to_string()).unwrap_or_default()
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for BodyScan {
+        fn visit_expr_call(&mut self, n: &'ast syn::ExprCall) {
+            if let syn::Expr::Path(p) = &*n.func {
+                match last_seg(&p.path).as_str() {
+                    WITNESS => self.mints = true,
+                    "Self" => self.self_ctor = true,
+                    _ => {}
+                }
+            }
+            syn::visit::visit_expr_call(self, n);
+        }
+        fn visit_expr_struct(&mut self, n: &'ast syn::ExprStruct) {
+            match last_seg(&n.path).as_str() {
+                WITNESS => self.mints = true,
+                "Self" => self.self_ctor = true,
+                _ => {}
+            }
+            syn::visit::visit_expr_struct(self, n);
+        }
+        fn visit_path(&mut self, n: &'ast syn::Path) {
+            // EVERY segment, so a bare `MailboxAccess::granted` in value position is seen exactly
+            // like a call to it.
+            for seg in &n.segments {
+                self.refs.insert(seg.ident.to_string());
+            }
+            syn::visit::visit_path(self, n);
+        }
+        fn visit_expr_method_call(&mut self, n: &'ast syn::ExprMethodCall) {
+            self.refs.insert(n.method.to_string());
+            syn::visit::visit_expr_method_call(self, n);
+        }
+        fn visit_macro(&mut self, n: &'ast syn::Macro) {
+            let toks = n.tokens.to_string();
+            if toks.contains(WITNESS) {
+                self.opaque_macro = true;
+            }
+            for t in toks.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+                if !t.is_empty() {
+                    self.refs.insert(t.to_string());
+                }
+            }
+            syn::visit::visit_macro(self, n);
+        }
+    }
+
+    /// Scan a function's body, with its ATTRIBUTES excluded — a doc comment naming the mint is
+    /// documentation, not a door, and the text-based version reported it as one with advice
+    /// ("make it `pub(crate)`") whose only real remedy was deleting the docs.
+    fn scan_body(block: Option<&syn::Block>, on_witness: bool) -> (bool, std::collections::HashSet<String>) {
+        use syn::visit::Visit;
+        let mut s = BodyScan::default();
+        if let Some(b) = block {
+            s.visit_block(b);
+        }
+        (s.mints || s.opaque_macro || (on_witness && s.self_ctor), s.refs)
+    }
+
     /// One function-like item seen by the door scan.
     struct FnNode {
         rel: String,
@@ -2412,11 +2496,12 @@ keys:
         public: bool,
         /// Under a `#[cfg(test)]` / `test-fixtures` ancestor — never compiled for a dependent.
         test_only: bool,
-        /// Set when this fn lives in an `impl` ON the witness and constructs `Self(..)` — the
-        /// witness's own mints spell the construction `Self(())`, not `MailboxAccess(())`, so a
-        /// text seed alone misses `granted` and `for_tests`.
-        mints_self: bool,
-        body: String,
+        /// Constructs a witness in its body (AST-derived: any construction of the type, or of
+        /// `Self` inside an impl on the witness, or an opaque macro mentioning it).
+        mints: bool,
+        /// Every ident the body references — call targets, method names, bare paths in value
+        /// position.
+        refs: std::collections::HashSet<String>,
     }
 
     /// Collect every fn in a module tree with its body, for the call-graph scan.
@@ -2435,30 +2520,31 @@ keys:
                         collect_fns(inner, rel, t, out);
                     }
                 }
-                Item::Fn(f) => out.push(FnNode {
-                    rel: rel.into(),
-                    name: f.sig.ident.to_string(),
-                    public: is_pub(&f.vis),
-                    test_only: t,
-                    mints_self: false,
-                    body: quote::quote!(#f).to_string(),
-                }),
+                Item::Fn(f) => {
+                    let (mints, refs) = scan_body(Some(&f.block), false);
+                    out.push(FnNode {
+                        rel: rel.into(),
+                        name: f.sig.ident.to_string(),
+                        public: is_pub(&f.vis),
+                        test_only: t,
+                        mints,
+                        refs,
+                    })
+                }
                 Item::Impl(i) => {
                     let trait_impl = i.trait_.is_some();
                     let on_witness = mentions(&i.self_ty, WITNESS);
                     for ii in &i.items {
                         if let syn::ImplItem::Fn(f) = ii {
-                            let body = quote::quote!(#f).to_string();
-                            let ctors_self =
-                                body.chars().filter(|c| !c.is_whitespace()).collect::<String>().contains("Self(()");
+                            let (mints, refs) = scan_body(Some(&f.block), on_witness);
                             out.push(FnNode {
                                 rel: rel.into(),
                                 name: f.sig.ident.to_string(),
                                 // A trait impl's methods are as public as the trait.
                                 public: trait_impl || is_pub(&f.vis),
                                 test_only: t || is_test_only_cfg(&f.attrs),
-                                mints_self: on_witness && ctors_self,
-                                body,
+                                mints,
+                                refs,
                             });
                         }
                     }
@@ -2467,14 +2553,15 @@ keys:
                     for ti in &tr.items {
                         if let syn::TraitItem::Fn(f) = ti {
                             // Only PROVIDED methods have a body that could mint.
-                            if f.default.is_some() {
+                            if let Some(block) = &f.default {
+                                let (mints, refs) = scan_body(Some(block), false);
                                 out.push(FnNode {
                                     rel: rel.into(),
                                     name: f.sig.ident.to_string(),
                                     public: is_pub(&tr.vis),
                                     test_only: t,
-                                    mints_self: false,
-                                    body: quote::quote!(#f).to_string(),
+                                    mints,
+                                    refs,
                                 });
                             }
                         }
@@ -2515,25 +2602,29 @@ keys:
         // Keyed by (file, name), never by name alone: `send` is both a generated client's write
         // door and `broadcast::Sender::send`, and a bare-name allowlist would pre-authorise any
         // future `pub fn send` anywhere in the crate.
-        const DOORS: &[(&str, &str, &str)] = &[
+        // (file, name, gated-by-a-cargo-feature, why). `gated` matters for taint: a wrapper does
+        // NOT inherit the feature that contains the door it calls.
+        const DOORS: &[(&str, &str, bool, &str)] = &[
             // The generated per-actor clients — the write door (#284 slice 2).
-            ("crates/actor_client/src/generated/actor_clients.rs", "send", "typed command door"),
-            ("crates/actor_client/src/generated/actor_clients.rs", "record", "typed inbound-fact door"),
-            ("crates/actor_client/src/generated/actor_clients.rs", "schedule", "reminder door (reminders-declaring actors)"),
-            ("crates/actor_client/src/generated/actor_clients.rs", "cancel_scheduling", "reminder withdrawal (ADR-20260731-150500 §3)"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "send", false, "typed command door"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "record", false, "typed inbound-fact door"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "schedule", false, "reminder door (reminders-declaring actors)"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "cancel_scheduling", false, "reminder withdrawal (ADR-20260731-150500 §3)"),
             // The one generic read door (PROP-20260802-130500 D4).
-            ("crates/actor_client/src/client.rs", "get_operation_status", "ActorClient: the ONLY read path over inbound_messages status"),
+            ("crates/actor_client/src/client.rs", "get_operation_status", false, "ActorClient: the ONLY read path over inbound_messages status"),
             // The reminder constructor the in-transaction `schedules:` upsert binds from.
-            ("crates/actor_client/src/reminders.rs", "declare", "the pool-backed reminder declaration (ADR-20260731-214500)"),
+            ("crates/actor_client/src/reminders.rs", "declare", false, "the pool-backed reminder declaration (ADR-20260731-214500)"),
             // The D8 bulk fact door — additionally gated by the `bulk-door` feature, which
             // `bulk_door_feature_is_granted_only_to_infrastructure` allows only infrastructure to enable.
-            ("crates/actor_client/src/enqueue.rs", "enqueue_inbound_facts", "the UNTYPED bulk fact door (#290 review BLOCKING-1a)"),
+            ("crates/actor_client/src/enqueue.rs", "enqueue_inbound_facts", true, "the UNTYPED bulk fact door, `bulk-door` feature (#290 review BLOCKING-1a)"),
             // Test-only reference implementations (never in a release graph).
-            ("crates/actor_client/src/enqueue.rs", "cancel_reminder", "test-only reference impl behind `test-fixtures`"),
-            ("crates/actor_client/src/enqueue.rs", "schedule_reminder", "test-only reference impl behind `test-fixtures`"),
-            ("crates/actor_client/src/mailbox.rs", "for_tests", "the D5 test-only witness mint, cfg-gated"),
+            ("crates/actor_client/src/enqueue.rs", "cancel_reminder", true, "test-only reference impl behind `test-fixtures`"),
+            ("crates/actor_client/src/enqueue.rs", "schedule_reminder", true, "test-only reference impl behind `test-fixtures`"),
+            ("crates/actor_client/src/mailbox.rs", "for_tests", true, "the D5 test-only witness mint, cfg-gated"),
         ];
-        let is_door = |f: &FnNode| DOORS.iter().any(|(p, n, _)| *p == f.rel && *n == f.name);
+        let is_door = |f: &FnNode| DOORS.iter().any(|(p, n, _, _)| *p == f.rel && *n == f.name);
+        let is_ungated_door =
+            |f: &FnNode| DOORS.iter().any(|(p, n, g, _)| *p == f.rel && *n == f.name && !*g);
 
         let mut files = Vec::new();
         let mut stack = vec![root.join("crates/actor_client/src")];
@@ -2559,36 +2650,29 @@ keys:
             collect_fns(&file.items, &rel, is_test_only_cfg(&file.attrs), &mut fns);
         }
 
-        // SEED: a body that mints. `quote` renders paths spaced (`MailboxAccess :: granted`), so
-        // compare with whitespace removed.
-        let squash = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
-        let mut tainted: std::collections::HashSet<usize> = fns
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| {
-                let b = squash(&f.body);
-                f.mints_self
-                    || b.contains("MailboxAccess::granted()")
-                    || b.contains("MailboxAccess::for_tests()")
-                    || b.contains("MailboxAccess(())")
-            })
-            .map(|(i, _)| i)
-            .collect();
+        // SEED: a body that CONSTRUCTS a witness, read from the AST.
+        let mut tainted: std::collections::HashSet<usize> =
+            fns.iter().enumerate().filter(|(_, f)| f.mints).map(|(i, _)| i).collect();
+        // Anti-blindness, named specifically: `!tainted.is_empty()` alone is satisfied by the
+        // test-only `for_tests`, so the PRODUCTION mint could go dark unnoticed.
         assert!(
-            !tainted.is_empty(),
-            "no minting function found at all — the mint was renamed and this guard went blind; \
-             fix the seed, do not delete the test"
+            fns.iter().any(|f| f.mints && f.name == "granted"),
+            "`MailboxAccess::granted` is no longer detected as a mint — the seed went blind (the \
+             construction was respelled, or the mint moved). Fix the seed; do not delete the test."
         );
 
         // PROPAGATE to a fixpoint: a function that calls a tainted one is tainted. Matched by
         // ident, which over-approximates across same-named methods — the safe direction.
         loop {
-            // Taint flows out of MINTS and internal helpers, but STOPS at a declared door: a
-            // function calling `RestaurantClient::send` is using the sanctioned public API, which
-            // is available to every crate anyway — it is not a new capability.
+            // Taint flows out of MINTS and internal helpers, and STOPS at an UNGATED declared
+            // door: a function calling `RestaurantClient::send` is using the sanctioned public
+            // API, which every crate has anyway. It does NOT stop at a gated door — that door's
+            // containment is a cargo feature on its `pub use`, and an in-crate wrapper does not
+            // inherit the feature, so wrapping `enqueue_inbound_facts` would have re-exposed the
+            // untyped bulk door to crates the `bulk-door` manifest guard exists to exclude.
             let names: Vec<String> = tainted
                 .iter()
-                .filter(|i| !is_door(&fns[**i]))
+                .filter(|i| !is_ungated_door(&fns[**i]))
                 .map(|i| fns[*i].name.clone())
                 .collect();
             let mut grew = false;
@@ -2596,8 +2680,7 @@ keys:
                 if tainted.contains(&i) {
                     continue;
                 }
-                let b = squash(&f.body);
-                if names.iter().any(|n| n != &f.name && b.contains(&format!("{n}("))) {
+                if names.iter().any(|n| n != &f.name && f.refs.contains(n)) {
                     grew = true;
                     tainted.insert(i);
                 }
@@ -2629,14 +2712,15 @@ keys:
         // nobody is using, and it would silently permit a future function of that name.
         let stale: Vec<String> = DOORS
             .iter()
-            .filter(|(p, n, _)| !tainted.iter().any(|i| &fns[*i].name == n && &fns[*i].rel == p))
-            .map(|(p, n, _)| format!("{p}::{n}"))
+            .filter(|(p, n, _, _)| !tainted.iter().any(|i| &fns[*i].name == n && &fns[*i].rel == p))
+            .map(|(p, n, _, _)| format!("{p}::{n}"))
             .collect();
         assert!(
             stale.is_empty(),
             "these declared doors no longer reach the mailbox: {stale:?}\n\n\
-             Fix: remove them from DOORS. A stale entry pre-authorises any future function that \
-             happens to take the name."
+             Fix: update the PATH if the function merely moved (a module split or file rename is the \
+             usual cause), or remove the entry if the door is genuinely gone. A stale entry \
+             pre-authorises any future function that happens to take that name in that file."
         );
     }
 

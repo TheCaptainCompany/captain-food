@@ -5,22 +5,22 @@
 
 > ✅ **2026-08-03 — [#329 "Close the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)
 > ([ADR-20260803-203455](adr/ADR-20260803-203455-mailbox-doors-are-declared-by-reachability.md))**:
-> the one class [#304](https://github.com/TheCaptainCompany/captain-food/issues/304)'s witness guard
+> the class [#304](https://github.com/TheCaptainCompany/captain-food/issues/304)'s witness guard
 > could not see — a public in-crate item that MINTS internally and hands the capability out through
-> a signature that never names the witness (`pub fn cancel_any(&self, id)` over a held
-> `Arc<dyn Mailbox>`) — is closed. It was un-checkable by SIGNATURES, not un-checkable: a witness
-> reaches a port method only from a parameter (which names it in a signature, caught by the #304
-> guard) or from a MINT, so `every_public_mailbox_door_is_declared` seeds on mints, propagates
-> through `actor_client`'s call graph to a fixpoint, and requires every publicly-reachable tainted
-> function to sit on an explicit door list keyed by `(file, name)`. There is no third source in safe
-> Rust, so the two guards COMPOSE into a complete rule where each alone was open. The door list —
-> ten entries, each with its reason — is the deliverable as much as the check: it enumerates every
-> public function in the boundary crate that can reach the mailbox, and an eleventh is an edit to
-> that list (ADR-20260802-170059's "the declaration is the permission", applied to the crate's own
-> surface). The seed is structural (`Self(())` inside an impl on the witness), so renaming the mint
-> does not blind it — verified. Taint stops at a declared door, since calling `RestaurantClient::send`
-> uses the sanctioned API rather than creating capability. Both directions asserted: an undeclared
-> public minter fails, and so does a stale door entry.
+> a signature that never names the witness — is **narrowed, not closed**.
+> `every_public_mailbox_door_is_declared` seeds on witness CONSTRUCTIONS read from the AST,
+> propagates through `actor_client`'s call graph to a fixpoint (call edges include bare references,
+> since `let f = MailboxAccess::granted;` and `.map(insert_mapped)` pass a function as a value), and
+> requires every publicly-reachable tainted function to sit on an explicit door list keyed by
+> `(file, name)`. Taint stops at an UNGATED door only — a wrapper does not inherit the cargo feature
+> that contains a gated one, which would otherwise have re-exposed the untyped bulk door to crates
+> `bulk-door` exists to exclude. The door list is the deliverable as much as the check: ten entries
+> (seven non-test) enumerating what can reach the mailbox, so an eleventh is an edit to that list.
+> **The scope is honest and was got wrong first**: the parameter-or-construction dichotomy is sound
+> value provenance, but this scan is a SYNTACTIC approximation of the call graph (idents, no type
+> resolution), so it does not discharge a semantic completeness argument — review proved four
+> ordinary counterexamples against the first version. A complete rule needs type resolution (rustc
+> lint / HIR / MIR) and is a proposal-level scope decision, not a test.
 
 > ✅ **2026-08-03 — [#304 "The Mailbox port surface hole: insert/by_message are pub to any port holder"](https://github.com/TheCaptainCompany/captain-food/issues/304)
 > (PROP-20260802-130500 §5 directive, [ADR-20260803-172654](adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md))**:

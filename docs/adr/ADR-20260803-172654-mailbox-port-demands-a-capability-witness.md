@@ -87,12 +87,13 @@ is a loud, reviewable diff, not a silent shortcut.
   invisible to ANY signature analysis. It cannot even be banned as a construct, because
   `enqueue_inbound_facts` (the sanctioned D8 bulk door) is itself a member of that class — contained
   there by its own `bulk-door` feature gate, which only `infrastructure` may enable, not by any
-  signature rule. **CLOSED since [ADR-20260803-203455](ADR-20260803-203455-mailbox-doors-are-declared-by-reachability.md)**:
-  the class is un-checkable by SIGNATURES, not un-checkable — a companion guard seeds on mints and
-  propagates through the crate's call graph, so every publicly-reachable minting function must
-  appear on an explicit door list. The two guards compose into a complete rule (a witness reaches a
-  port method only from a parameter, caught here, or a mint, caught there). The rest of this bullet
-  records the state as shipped in #304 and why the limit was real at the time. The guard blocks the spellings that announce themselves (`trait Ext: Mailbox`,
+  signature rule. **NARROWED — not closed — by [ADR-20260803-203455](ADR-20260803-203455-mailbox-doors-are-declared-by-reachability.md)**:
+  the class is un-checkable by SIGNATURES, and a companion guard catches the reachable-from-a-mint
+  shape by walking the crate's call graph, so a publicly-reachable minting function must appear on
+  an explicit door list. That guard is a SYNTACTIC approximation (idents, no type resolution), so
+  the limit recorded in this bullet still stands for anything its scan cannot resolve — it is
+  smaller, not gone. This sentence originally read "CLOSED"; that was an overclaim, and retracting
+  a limit seven review passes earned is a worse failure than the limit itself. The guard blocks the spellings that announce themselves (`trait Ext: Mailbox`,
   `impl<T: Mailbox> Ext for T`, and the same bound in a `where` clause), and that is worth having,
   but the class is not closed and calling it closed would be the same failure as the doc comment
   this change deleted. What contains the
