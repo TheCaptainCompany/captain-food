@@ -1883,34 +1883,105 @@ keys:
     /// OFF — every release build. Pass 4 used that to make the guard's own excuse mechanism grant
     /// the mint.
     fn is_test_only_cfg(attrs: &[syn::Attribute]) -> bool {
-        attrs.iter().any(|a| {
-            if !a.path().is_ident("cfg") {
-                return false;
-            }
-            let m = &a.meta;
-            let toks = quote::quote!(#m).to_string();
-            // WHOLE tokens: a substring match honours `#[cfg(feature = "fastest")]` as a test
-            // gate and stops scanning everything under it, in release.
-            cfg_tokens(&toks).iter().any(|t| *t == "test" || *t == "test-fixtures")
-                && !toks.contains("not (")
-        })
+        attrs.iter().any(attr_is_test_only)
     }
 
-    /// A cfg attribute's token stream split into whole words (keeping `-`/`_` so feature names
-    /// stay intact).
-    fn cfg_tokens(toks: &str) -> Vec<&str> {
-        toks.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))
-            .filter(|t| !t.is_empty())
-            .collect()
+
+    /// Every trait DERIVED by this attribute, following nested `cfg_attr` the way rustc expands it.
+    ///
+    /// A one-level parse bans two spellings rather than the class: rustc expands
+    /// `#[cfg_attr(a, cfg_attr(b, derive(Default)))]` recursively, and the `#[path]` check in this
+    /// same file already scans the whole token stream and so survives nesting. A cfg_attr whose
+    /// condition is POSITIVELY test-only contributes nothing — that derive never reaches a
+    /// dependent crate.
+    fn derives_from_meta(m: &syn::Meta) -> Vec<String> {
+        if m.path().is_ident("derive") {
+            return ident_tokens(quote::quote!(#m))
+                .into_iter()
+                .filter(|t| t != "derive")
+                .collect();
+        }
+        if m.path().is_ident("cfg_attr") {
+            let syn::Meta::List(l) = m else { return Vec::new() };
+            let Ok(nested) = l.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            ) else {
+                return Vec::new();
+            };
+            let mut it = nested.iter();
+            let Some(cond) = it.next() else { return Vec::new() };
+            if cfg_is_test_only(cond) {
+                return Vec::new();
+            }
+            return it.flat_map(derives_from_meta).collect();
+        }
+        Vec::new()
+    }
+
+    /// Is this cfg predicate satisfied ONLY in a test build — evaluated over the cfg tree rather
+    /// than sniffed for the substring `test`?
+    ///
+    /// The distinction is a door. `any(test, feature = "serde")` MENTIONS `test` and fires in every
+    /// release build with the feature on, so a mention-check reads it as a gate and stops scanning
+    /// everything under it. Refusing `any(..)` outright is not the fix either: the real
+    /// `#[cfg(any(test, feature = "test-fixtures"))]` on the fixtures module is a legitimate
+    /// all-test-disjuncts `any` that must keep passing. So: `any` is test-only when EVERY disjunct
+    /// is, `all` when ANY conjunct is, and `not` never (conservative).
+    ///
+    /// One predicate, actually shared — `is_test_only_cfg`, `is_fixtures_gate` and the
+    /// `cfg_attr`-derive arm all route through it. Three inline near-copies of this logic existed
+    /// before, they were not identical, and the weakest of them decided whether a whole item was
+    /// scanned at all.
+    fn cfg_is_test_only(m: &syn::Meta) -> bool {
+        let path_is = |p: &syn::Path, n: &str| p.is_ident(n);
+        match m {
+            // `test`
+            syn::Meta::Path(p) => path_is(p, "test"),
+            // `feature = "test-fixtures"` — compared EXACTLY. A `contains` here accepts
+            // `test-fixtures-v2`, `no-test-fixtures` and `serde-test-fixtures-shim`, each of which
+            // would switch both guards off for everything under it in a release build. The
+            // structure is evaluated; the leaf must be too, or the evaluator just moves the sniff
+            // one level down.
+            syn::Meta::NameValue(nv) => {
+                path_is(&nv.path, "feature")
+                    && matches!(
+                        &nv.value,
+                        syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(v), .. })
+                            if v.value() == "test-fixtures"
+                    )
+            }
+            syn::Meta::List(l) => {
+                let Ok(inner) = l.parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                ) else {
+                    return false;
+                };
+                if path_is(&l.path, "any") {
+                    !inner.is_empty() && inner.iter().all(cfg_is_test_only)
+                } else if path_is(&l.path, "all") {
+                    inner.iter().any(cfg_is_test_only)
+                } else {
+                    // `not(..)` and anything unrecognised: never a gate.
+                    false
+                }
+            }
+        }
+    }
+
+    /// The same question asked of a whole `#[cfg(..)]` ATTRIBUTE.
+    fn attr_is_test_only(a: &syn::Attribute) -> bool {
+        if !a.path().is_ident("cfg") {
+            return false;
+        }
+        a.parse_args::<syn::Meta>().map(|m| cfg_is_test_only(&m)).unwrap_or(false)
     }
 
     /// Specifically a POSITIVE `test-fixtures` gate — what makes the one public mint legitimate.
     fn is_fixtures_gate(attrs: &[syn::Attribute]) -> bool {
         attrs.iter().any(|a| {
-            a.path().is_ident("cfg") && {
+            attr_is_test_only(a) && {
                 let m = &a.meta;
-                let t = quote::quote!(#m).to_string();
-                cfg_tokens(&t).contains(&"test-fixtures") && !t.contains("not (")
+                quote::quote!(#m).to_string().contains("test-fixtures")
             }
         })
     }
@@ -2184,6 +2255,29 @@ keys:
                 }
 
                 Item::Struct(s) => {
+                    if s.ident == WITNESS {
+                        // A DERIVE is a trait impl spelled in one word, and the leak rule below
+                        // only ever saw `Item::Impl`. `#[derive(Default)]` on the witness hands
+                        // every crate in the workspace a public mint via `Default::default()` —
+                        // proven from `server`, which holds only the port. Allowlist the derives
+                        // that cannot construct one; refuse the rest as a class.
+                        const HARMLESS: &[&str] =
+                            &["Debug", "Clone", "Copy", "PartialEq", "Eq", "Hash", "PartialOrd", "Ord"];
+                        let mut derived: Vec<String> = Vec::new();
+                        for a in &s.attrs {
+                            derived.extend(derives_from_meta(&a.meta));
+                        }
+                        for tok in derived {
+                            if tok != "derive" && !HARMLESS.contains(&tok.as_str()) {
+                                out.leaks.push(format!(
+                                    "  {rel}: `derive({tok})` on the witness — a derive is a trait \
+                                     impl in one word, and anything that can construct `Self` \
+                                     (`Default`, `From`, `FromStr`, `Deserialize`, …) is a public \
+                                     mint for every crate in the workspace"
+                                ));
+                            }
+                        }
+                    }
                     for (n, f) in s.fields.iter().enumerate() {
                         if s.ident == WITNESS {
                             if is_pub(&f.vis) {
@@ -2399,6 +2493,441 @@ keys:
              through the shared delegates in `crate::enqueue`. Why: ONE public route to a witness \
              reopens every method of the port for every crate in the workspace.",
             scan.leaks.join("\n")
+        );
+    }
+
+    /// What one function BODY does, read from the AST rather than its text.
+    ///
+    /// The first version of this scan matched two hand-picked spellings (`MailboxAccess(())`,
+    /// `MailboxAccess::granted()`) and resolved calls with `body.contains("{name}(")`. Review found
+    /// both unsound in ways that are ordinary rather than adversarial: `MailboxAccess { 0: () }` is
+    /// the same construction of a tuple struct, and `let f = MailboxAccess::granted;` — or any
+    /// `.map(insert_mapped)` / `unwrap_or_else(Self::helper)` — passes a function as a VALUE, so the
+    /// ident is never followed by `(`. Both are read correctly here.
+    #[derive(Default)]
+    struct BodyScan {
+        /// Constructs the witness directly (`MailboxAccess(..)` or `MailboxAccess { .. }`).
+        mints: bool,
+        /// Constructs `Self(..)`/`Self { .. }` — a mint when the enclosing impl is on the witness.
+        self_ctor: bool,
+        /// A macro invocation whose opaque tokens mention the witness. Expansion is invisible, so
+        /// this is treated as a mint conservatively — an EXPRESSION-position macro was the one
+        /// macro shape the #304 item-position refusal never covered.
+        opaque_macro: bool,
+        /// Every ident referenced anywhere in the body: call targets, method names, and bare paths
+        /// in value position.
+        refs: std::collections::HashSet<String>,
+    }
+
+    /// Every IDENT in a token stream, recursing into groups and skipping literals — a macro's
+    /// arguments are opaque, but its identifiers are still call edges worth following.
+    fn ident_tokens(ts: proc_macro2::TokenStream) -> Vec<String> {
+        let mut out = Vec::new();
+        for t in ts {
+            match t {
+                proc_macro2::TokenTree::Ident(i) => out.push(i.to_string()),
+                proc_macro2::TokenTree::Group(g) => out.extend(ident_tokens(g.stream())),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    fn last_seg(p: &syn::Path) -> String {
+        p.segments.last().map(|s| s.ident.to_string()).unwrap_or_default()
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for BodyScan {
+        fn visit_expr_call(&mut self, n: &'ast syn::ExprCall) {
+            if let syn::Expr::Path(p) = &*n.func {
+                match last_seg(&p.path).as_str() {
+                    WITNESS => self.mints = true,
+                    "Self" => self.self_ctor = true,
+                    _ => {}
+                }
+            }
+            syn::visit::visit_expr_call(self, n);
+        }
+        fn visit_expr_struct(&mut self, n: &'ast syn::ExprStruct) {
+            match last_seg(&n.path).as_str() {
+                WITNESS => self.mints = true,
+                "Self" => self.self_ctor = true,
+                _ => {}
+            }
+            syn::visit::visit_expr_struct(self, n);
+        }
+        fn visit_path(&mut self, n: &'ast syn::Path) {
+            // EVERY segment, so a bare `MailboxAccess::granted` in value position is seen exactly
+            // like a call to it.
+            for seg in &n.segments {
+                self.refs.insert(seg.ident.to_string());
+            }
+            syn::visit::visit_path(self, n);
+        }
+        fn visit_expr_method_call(&mut self, n: &'ast syn::ExprMethodCall) {
+            self.refs.insert(n.method.to_string());
+            syn::visit::visit_expr_method_call(self, n);
+        }
+        fn visit_macro(&mut self, n: &'ast syn::Macro) {
+            // LITERALS ARE NOT CODE. Harvesting a macro's whole token text made
+            // `println!("access granted for the caller")` taint its enclosing public fn, and
+            // `println!("MailboxAccess")` read as a mint — with a failure message advising
+            // `pub(crate)`, when the real fix was rewording a log line. Same principle as excluding
+            // doc attributes: prose naming the mint is prose.
+            let idents = ident_tokens(n.tokens.clone());
+            if idents.iter().any(|t| t == WITNESS) {
+                self.opaque_macro = true;
+            }
+            self.refs.extend(idents);
+            syn::visit::visit_macro(self, n);
+        }
+    }
+
+    /// Scan a function's body, with its ATTRIBUTES excluded — a doc comment naming the mint is
+    /// documentation, not a door, and the text-based version reported it as one with advice
+    /// ("make it `pub(crate)`") whose only real remedy was deleting the docs.
+    fn scan_body(block: Option<&syn::Block>, on_witness: bool) -> (bool, std::collections::HashSet<String>) {
+        use syn::visit::Visit;
+        let mut s = BodyScan::default();
+        if let Some(b) = block {
+            s.visit_block(b);
+        }
+        (s.mints || s.opaque_macro || (on_witness && s.self_ctor), s.refs)
+    }
+
+    /// The same scan over a `const`/`static` INITIALIZER. Item initializers are constructions like
+    /// any other, and skipping them was a traversal gap rather than a scope limit: hoisting the
+    /// witness into `const HELD: MailboxAccess = MailboxAccess(());` — the ordinary way to stop
+    /// calling the mint in three places — made a public `cancel_any` over a held `Arc<dyn Mailbox>`
+    /// invisible to BOTH guards, which is verbatim the shape this test exists to catch.
+    fn scan_init(expr: &syn::Expr, on_witness: bool) -> (bool, std::collections::HashSet<String>) {
+        use syn::visit::Visit;
+        let mut s = BodyScan::default();
+        s.visit_expr(expr);
+        (s.mints || s.opaque_macro || (on_witness && s.self_ctor), s.refs)
+    }
+
+    /// One function-like item seen by the door scan.
+    struct FnNode {
+        rel: String,
+        name: String,
+        /// `pub` at its own site. Deliberately NOT resolved through module privacy: treating a
+        /// `pub fn` in a private module as public over-approximates, which is the safe direction
+        /// and forces every re-exported door onto the allowlist by name.
+        public: bool,
+        /// Under a `#[cfg(test)]` / `test-fixtures` ancestor — never compiled for a dependent.
+        test_only: bool,
+        /// Constructs a witness in its body (AST-derived: any construction of the type, or of
+        /// `Self` inside an impl on the witness, or an opaque macro mentioning it).
+        mints: bool,
+        /// Every ident the body references — call targets, method names, bare paths in value
+        /// position.
+        refs: std::collections::HashSet<String>,
+    }
+
+    /// Items declared inside a function BODY. An `impl` written in a fn is NOT scoped to it —
+    /// rustc says so itself ("an `impl` is never scoped, even when it is nested inside an item") —
+    /// so `fn setup() { impl Held { pub(crate) const H: W = W(()); } }`
+    /// puts a mint in the crate while the walk sees only a private, never-called `setup`.
+    fn nested_items(block: &syn::Block) -> Vec<syn::Item> {
+        block
+            .stmts
+            .iter()
+            .filter_map(|st| match st {
+                syn::Stmt::Item(i) => Some(i.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Collect every fn in a module tree with its body, for the call-graph scan.
+    fn collect_fns(
+        items: &[syn::Item],
+        rel: &str,
+        test_only: bool,
+        out: &mut Vec<FnNode>,
+    ) {
+        use syn::Item;
+        for item in items {
+            let t = test_only || is_test_only_cfg(item_attrs(item));
+            match item {
+                Item::Mod(m) => {
+                    if let Some((_, inner)) = &m.content {
+                        collect_fns(inner, rel, t, out);
+                    }
+                }
+                Item::Fn(f) => {
+                    let (mints, refs) = scan_body(Some(&f.block), false);
+                    out.push(FnNode {
+                        rel: rel.into(),
+                        name: f.sig.ident.to_string(),
+                        public: is_pub(&f.vis),
+                        test_only: t,
+                        mints,
+                        refs,
+                    });
+                    collect_fns(&nested_items(&f.block), rel, t, out);
+                }
+                // A `const`/`static` that CONSTRUCTS a witness is a mint whose name then flows
+                // through the existing fixpoint like any other callee.
+                Item::Const(c) => {
+                    let (mints, refs) = scan_init(&c.expr, false);
+                    out.push(FnNode {
+                        rel: rel.into(),
+                        name: c.ident.to_string(),
+                        public: is_pub(&c.vis),
+                        test_only: t,
+                        mints,
+                        refs,
+                    })
+                }
+                Item::Static(st) => {
+                    let (mints, refs) = scan_init(&st.expr, false);
+                    out.push(FnNode {
+                        rel: rel.into(),
+                        name: st.ident.to_string(),
+                        public: is_pub(&st.vis),
+                        test_only: t,
+                        mints,
+                        refs,
+                    })
+                }
+                Item::Impl(i) => {
+                    let trait_impl = i.trait_.is_some();
+                    let on_witness = mentions(&i.self_ty, WITNESS);
+                    for ii in &i.items {
+                        if let syn::ImplItem::Const(c) = ii {
+                            let (mints, refs) = scan_init(&c.expr, on_witness);
+                            out.push(FnNode {
+                                rel: rel.into(),
+                                name: c.ident.to_string(),
+                                public: trait_impl || is_pub(&c.vis),
+                                test_only: t || is_test_only_cfg(&c.attrs),
+                                mints,
+                                refs,
+                            });
+                        }
+                        if let syn::ImplItem::Fn(f) = ii {
+                            collect_fns(&nested_items(&f.block), rel, t, out);
+                            let (mints, refs) = scan_body(Some(&f.block), on_witness);
+                            out.push(FnNode {
+                                rel: rel.into(),
+                                name: f.sig.ident.to_string(),
+                                // A trait impl's methods are as public as the trait.
+                                public: trait_impl || is_pub(&f.vis),
+                                test_only: t || is_test_only_cfg(&f.attrs),
+                                mints,
+                                refs,
+                            });
+                        }
+                    }
+                }
+                Item::Trait(tr) => {
+                    for ti in &tr.items {
+                        // A trait-declared associated const with a DEFAULT is the fourth const
+                        // position, and the one the first pass at this missed. A PRIVATE trait
+                        // carrying it is invisible to the signature guard too (that arm only
+                        // inspects `pub trait`), so the two together left the class open.
+                        if let syn::TraitItem::Const(c) = ti {
+                            if let Some((_, expr)) = &c.default {
+                                let (mints, refs) = scan_init(expr, false);
+                                out.push(FnNode {
+                                    rel: rel.into(),
+                                    name: c.ident.to_string(),
+                                    public: is_pub(&tr.vis),
+                                    test_only: t,
+                                    mints,
+                                    refs,
+                                });
+                            }
+                        }
+                        if let syn::TraitItem::Fn(f) = ti {
+                            // Only PROVIDED methods have a body that could mint.
+                            if let Some(block) = &f.default {
+                                collect_fns(&nested_items(block), rel, t, out);
+                                let (mints, refs) = scan_body(Some(block), false);
+                                out.push(FnNode {
+                                    rel: rel.into(),
+                                    name: f.sig.ident.to_string(),
+                                    public: is_pub(&tr.vis),
+                                    test_only: t,
+                                    mints,
+                                    refs,
+                                });
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// EVERY PUBLIC MAILBOX DOOR IS DECLARED (#329, NARROWING the #304 residual class).
+    ///
+    /// The witness guard asks what a SIGNATURE says. That leaves one class it cannot see, named
+    /// openly in ADR-20260803-172654: a public in-crate item that mints internally and hands the
+    /// capability out through a signature that never mentions the witness —
+    /// `pub fn cancel_any(&self, id: Uuid) -> Result<bool>` over a held `Arc<dyn Mailbox>`.
+    /// Seven review passes on #304 established that no amount of signature analysis closes it.
+    ///
+    /// REACHABILITY narrows it. The provenance argument is sound: calling a port method requires a
+    /// witness, and a witness comes from (a) a construction or (b) a parameter; case (b) names the
+    /// witness in a signature and is caught by `every_mailbox_port_method_demands_the_access_witness`,
+    /// so seeding on CONSTRUCTIONS and propagating through the call graph covers the other half.
+    /// (A field, a const or a static all reduce to (a) or (b): something had to mint or receive the
+    /// witness to put it there.)
+    ///
+    /// But this scan is a SYNTACTIC approximation of that call graph — it resolves calls by ident,
+    /// with no type information — so it does NOT discharge the semantic argument, and saying it did
+    /// was the review-corrected overclaim of ADR-20260803-203455. Scope: sound for constructions the
+    /// AST recognises as constructions of the witness, and for call edges resolvable by ident.
+    /// A complete rule needs type resolution (a rustc lint, or HIR/MIR reachability) — see #331.
+    ///
+    /// The payoff is not just the narrowing: the set of publicly-reachable minting functions IS the
+    /// door list. Every entry below is a door someone deliberately opened, and adding one is an
+    /// edit to this allowlist — which is exactly the ADR-20260802-170059 posture ("the declaration
+    /// is the permission") applied to the crate's own surface rather than to the spec.
+    #[test]
+    fn every_public_mailbox_door_is_declared() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = root.canonicalize().expect("repo root resolves");
+
+        // THE DOOR LIST. A publicly-reachable function that can reach a mint must be named here,
+        // with why it is a door. Anything else is a new door nobody declared.
+        // Keyed by (file, name), never by name alone: `send` is both a generated client's write
+        // door and `broadcast::Sender::send`, and a bare-name allowlist would pre-authorise any
+        // future `pub fn send` anywhere in the crate.
+        // (file, name, gated-by-a-cargo-feature, why). `gated` matters for taint: a wrapper does
+        // NOT inherit the feature that contains the door it calls.
+        const DOORS: &[(&str, &str, bool, &str)] = &[
+            // The generated per-actor clients — the write door (#284 slice 2).
+            ("crates/actor_client/src/generated/actor_clients.rs", "send", false, "typed command door"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "record", false, "typed inbound-fact door"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "schedule", false, "reminder door (reminders-declaring actors)"),
+            ("crates/actor_client/src/generated/actor_clients.rs", "cancel_scheduling", false, "reminder withdrawal (ADR-20260731-150500 §3)"),
+            // The one generic read door (PROP-20260802-130500 D4).
+            ("crates/actor_client/src/client.rs", "get_operation_status", false, "ActorClient: the ONLY read path over inbound_messages status"),
+            // The reminder constructor the in-transaction `schedules:` upsert binds from.
+            ("crates/actor_client/src/reminders.rs", "declare", false, "the pool-backed reminder declaration (ADR-20260731-214500)"),
+            // The D8 bulk fact door — additionally gated by the `bulk-door` feature, which
+            // `bulk_door_feature_is_granted_only_to_infrastructure` allows only infrastructure to enable.
+            ("crates/actor_client/src/enqueue.rs", "enqueue_inbound_facts", true, "the UNTYPED bulk fact door, `bulk-door` feature (#290 review BLOCKING-1a)"),
+            // Test-only reference implementations (never in a release graph).
+            ("crates/actor_client/src/enqueue.rs", "cancel_reminder", true, "test-only reference impl behind `test-fixtures`"),
+            ("crates/actor_client/src/enqueue.rs", "schedule_reminder", true, "test-only reference impl behind `test-fixtures`"),
+            ("crates/actor_client/src/mailbox.rs", "for_tests", true, "the D5 test-only witness mint, cfg-gated"),
+        ];
+        let is_door = |f: &FnNode| DOORS.iter().any(|(p, n, _, _)| *p == f.rel && *n == f.name);
+        let is_ungated_door =
+            |f: &FnNode| DOORS.iter().any(|(p, n, g, _)| *p == f.rel && *n == f.name && !*g);
+
+        let mut files = Vec::new();
+        let mut stack = vec![root.join("crates/actor_client/src")];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).expect("actor_client sources are readable").flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    files.push(p);
+                }
+            }
+        }
+        files.sort();
+        assert!(files.len() >= 5, "found only {} sources — the walk went blind", files.len());
+
+        let mut fns: Vec<FnNode> = Vec::new();
+        for p in &files {
+            let rel = p.strip_prefix(&root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(p).expect("a partial scan is a silent no-op");
+            let file = syn::parse_file(&text)
+                .unwrap_or_else(|e| panic!("{rel} does not parse ({e}) — this guard reads the AST"));
+            collect_fns(&file.items, &rel, is_test_only_cfg(&file.attrs), &mut fns);
+        }
+
+        // SEED: a body that CONSTRUCTS a witness, read from the AST.
+        let mut tainted: std::collections::HashSet<usize> =
+            fns.iter().enumerate().filter(|(_, f)| f.mints).map(|(i, _)| i).collect();
+        // Anti-blindness, named specifically: `!tainted.is_empty()` alone is satisfied by the
+        // test-only `for_tests`, so the PRODUCTION mint could go dark unnoticed.
+        assert!(
+            fns.iter().any(|f| f.mints && f.name == "granted"),
+            "no function named `granted` constructs a MailboxAccess any more. If the mint was \
+             RENAMED that is fine — update this assertion to the new name (the AST seed follows \
+             renames, so the guard is still live). If it was REMOVED or its construction moved \
+             behind something the AST scan cannot see, the seed has gone blind: fix the seed, do \
+             not delete the test."
+        );
+
+        // PROPAGATE to a fixpoint: a function that calls a tainted one is tainted. Matched by
+        // ident, which over-approximates across same-named methods — the safe direction.
+        loop {
+            // Taint flows out of MINTS and internal helpers, and STOPS at an UNGATED declared
+            // door: a function calling `RestaurantClient::send` is using the sanctioned public
+            // API, which every crate has anyway. It does NOT stop at a gated door — that door's
+            // containment is a cargo feature on its `pub use`, and an in-crate wrapper does not
+            // inherit the feature, so wrapping `enqueue_inbound_facts` would have re-exposed the
+            // untyped bulk door to crates the `bulk-door` manifest guard exists to exclude.
+            let names: Vec<String> = tainted
+                .iter()
+                .filter(|i| !is_ungated_door(&fns[**i]))
+                .map(|i| fns[*i].name.clone())
+                .collect();
+            let mut grew = false;
+            for (i, f) in fns.iter().enumerate() {
+                if tainted.contains(&i) {
+                    continue;
+                }
+                // NO same-ident exclusion. `names` holds only TAINTED functions, so `n == f.name`
+                // cannot mean self-recursion — it means a DIFFERENT tainted function shares this
+                // one's name, which is exactly the edge "public `Facade::new` calls crate-internal
+                // minting `Held::new`". Excluding it dropped a real, ident-resolvable edge and
+                // reopened the class this guard exists to narrow (`new` is the commonest ident in
+                // Rust). Including it costs nothing: the clean tree stays green.
+                if names.iter().any(|n| f.refs.contains(n)) {
+                    grew = true;
+                    tainted.insert(i);
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+
+        let undeclared: Vec<String> = tainted
+            .iter()
+            .map(|i| &fns[*i])
+            .filter(|f| f.public && !f.test_only && !is_door(f))
+            .map(|f| format!("  {}: `{}`", f.rel, f.name))
+            .collect();
+        assert!(
+            undeclared.is_empty(),
+            "these PUBLIC functions can reach a MailboxAccess mint but are not declared doors:\n{}\n\n\
+             Fix: make it `pub(crate)`; or UPDATE THE PATH of an existing DOORS entry if the \
+             function merely moved (a file rename or module split is the usual cause); or — if it \
+             really is a new door — add it to DOORS WITH the reason it exists. Why: this is the \
+             class `every_mailbox_port_method_demands_the_access_witness` cannot see, because such \
+             a function never names the witness in its signature (`pub fn cancel_any(&self, id)` \
+             over a held `Arc<dyn Mailbox>`). NOTE this scan resolves calls by IDENT, so a public \
+             fn can also be flagged for merely mentioning a tainted name — check the body before \
+             assuming it is a door.",
+            undeclared.join("\n")
+        );
+
+        // Both directions, like the entry-construction guard: a stale door entry is an excuse
+        // nobody is using, and it would silently permit a future function of that name.
+        let stale: Vec<String> = DOORS
+            .iter()
+            .filter(|(p, n, _, _)| !tainted.iter().any(|i| &fns[*i].name == n && &fns[*i].rel == p))
+            .map(|(p, n, _, _)| format!("{p}::{n}"))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "these declared doors no longer reach the mailbox: {stale:?}\n\n\
+             Fix: update the PATH if the function merely moved (a module split or file rename is the \
+             usual cause), or remove the entry if the door is genuinely gone. A stale entry \
+             pre-authorises any future function that happens to take that name in that file."
         );
     }
 
