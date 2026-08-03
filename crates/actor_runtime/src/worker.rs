@@ -38,11 +38,11 @@ pub struct WorkerConfig {
     /// promotion + claim + drain stretch to this safety net, because enqueues wake the worker
     /// directly. Lease renewal never stretches — `beat` stays on `heartbeat_seconds`.
     pub pushed_pass_seconds: u64,
-    /// Minimum spacing between delivery ATTEMPTS of the same failing row (#314 review MAJOR-3):
-    /// push-driven retries have no natural cadence — a nudge storm at peak would burn the whole
-    /// attempts cap on a seconds-long transient blip. A head row inside its spacing window makes
-    /// the lane WAIT (head-of-line, never skip past); the default restores the approved
-    /// cap x cadence arithmetic (>= ~50 s to poison at cap 5). `0` disables the pacing.
+    /// BASE of the exponential backoff between delivery ATTEMPTS of the same failing row
+    /// (ADR-20260803-002712 Q2; #314 review MAJOR-3 introduced the pacing): attempt N schedules
+    /// the next try `base * 2^(N-1)` seconds out (10s -> 20s -> 40s -> 80s -> 160s at the
+    /// default, ~5 min to poison at cap 5). A head row whose `next_attempt_at` is in the future
+    /// makes the lane WAIT (head-of-line, never skip past). `0` disables the pacing.
     pub retry_spacing_seconds: u64,
 }
 
@@ -336,7 +336,7 @@ impl MailboxWorker {
             let rows = sqlx::query(
                 "SELECT message_id, position, kind, actor_type, actor_id, partition, message_type, \
                         payload, payload_hash, channel, user_id, user_type, correlation_id, cause_id, \
-                        session_id, received_at, attempts, last_attempt_at \
+                        session_id, received_at, attempts, next_attempt_at \
                  FROM inbound_messages \
                  WHERE actor_type = $1 AND partition = $2 AND status = 'RECEIVED' \
                  ORDER BY position \
@@ -352,21 +352,17 @@ impl MailboxWorker {
                 return Ok(delivered);
             }
             for row in &rows {
-                // ATTEMPT PACING (#314 review MAJOR-3): a previously-failed row inside its
-                // spacing window makes the whole lane WAIT — head-of-line means never skipping
-                // past an undelivered row, and pacing means never burning the cap in a nudge
-                // storm. The next wake or safety pass re-checks.
-                if self.config.retry_spacing_seconds > 0 {
-                    let attempts: i16 = row.try_get("attempts").map_err(CompletionError::Db)?;
-                    if attempts > 0 {
-                        let last: Option<chrono::DateTime<chrono::Utc>> =
-                            row.try_get("last_attempt_at").map_err(CompletionError::Db)?;
-                        if let Some(last) = last {
-                            let spacing =
-                                chrono::Duration::seconds(self.config.retry_spacing_seconds as i64);
-                            if chrono::Utc::now() - last < spacing {
-                                return Ok(delivered);
-                            }
+                // ATTEMPT PACING (ADR-20260803-002712 Q2, exponential): a previously-failed row
+                // whose backoff schedule is still in the future makes the whole lane WAIT —
+                // head-of-line means never skipping past an undelivered row, and pacing means
+                // never burning the cap in a nudge storm. The next wake or safety pass
+                // re-checks; NULL (fresh row, or pacing disabled) is deliverable now.
+                {
+                    let next: Option<chrono::DateTime<chrono::Utc>> =
+                        row.try_get("next_attempt_at").map_err(CompletionError::Db)?;
+                    if let Some(next) = next {
+                        if next > chrono::Utc::now() {
+                            return Ok(delivered);
                         }
                     }
                 }
@@ -460,13 +456,22 @@ impl MailboxWorker {
     /// completed the row meanwhile; under a dual-belief window (a stolen lane, both owners
     /// failing) the counter can advance faster — the cap is a bound, not an exact count.
     async fn poison_raw(&self, message_id: uuid::Uuid, err: &str) -> Result<bool, CompletionError> {
+        // The doubling schedule (ADR-20260803-002712 Q2): in the SET, `attempts` reads the OLD
+        // value, so the exponent is (previous attempts) — attempt 1 waits base, attempt 2 waits
+        // 2x base, and so on; the exponent is clamped so a pathological counter cannot overflow
+        // the interval. Base 0 = pacing off (the rollback lever): no schedule is stamped.
         let attempts: i16 = sqlx::query_scalar(
             "UPDATE inbound_messages \
-             SET attempts = attempts + 1, last_attempt_at = now() \
+             SET attempts = attempts + 1, \
+                 last_attempt_at = now(), \
+                 next_attempt_at = CASE WHEN $2 <= 0 THEN NULL \
+                     ELSE now() + make_interval(secs => $2 * power(2, LEAST(attempts, 16)::int)) \
+                 END \
              WHERE message_id = $1 AND status = 'RECEIVED' \
              RETURNING attempts",
         )
         .bind(message_id)
+        .bind(self.config.retry_spacing_seconds as f64)
         .fetch_optional(&self.pool)
         .await
         .map_err(CompletionError::Db)?

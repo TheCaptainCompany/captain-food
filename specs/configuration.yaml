@@ -601,9 +601,11 @@ keys:
       increments inbound_messages.attempts OUTSIDE the failed transaction; at this cap the row
       flips to terminal FAILED with the error recorded and the lane's head-of-line unblocks.
       Counts only actual delivery attempts — a lane that cannot be claimed consumes none, and
-      re-attempts are PACED at least a retry-spacing apart (default = the heartbeat), because
-      push-driven retries have no natural cadence: without spacing, a nudge storm at Friday peak
-      could burn the whole cap on a seconds-long transient blip (review #314 MAJOR-3). 0 = no
+      re-attempts back off EXPONENTIALLY (ADR-20260803-002712 Q2): attempt N schedules the next
+      try base * 2^(N-1) seconds out, base = the heartbeat (10s -> 20s -> 40s -> 80s -> 160s,
+      ~5 min to terminal at cap 5), because push-driven retries have no natural cadence: without
+      pacing, a nudge storm at Friday peak could burn the whole cap on a seconds-long transient
+      blip (review #314 MAJOR-3). 0 = no
       cap: the pre-#313 infinite-retry behaviour, kept as the rollback lever. Handler
       REJECTED/FAILED verdicts are terminal on the first attempt and never involve this cap.
       A poison flip is an OPERATOR EVENT: counted (mailbox_poison_failed_total{actor_type}) and

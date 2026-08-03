@@ -79,6 +79,10 @@ async fn setup(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the mailbox attempts migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox backoff migration");
 }
 
 async fn enqueue(pool: &PgPool, n: u128) -> uuid::Uuid {
@@ -211,11 +215,11 @@ async fn cap_zero_keeps_the_pre_313_infinite_retry() {
     }
 }
 
-/// 4. Attempt pacing (#314 review MAJOR-3): inside the spacing window a nudge-storm of drains
-/// consumes NO further attempts — the lane waits, so the cap arithmetic is time-bounded
-/// (>= cap x spacing to poison), not wake-bounded.
+/// 4. Exponential backoff (ADR-20260803-002712 Q2): attempt N schedules the next try
+/// base x 2^(N-1) out — the schedule doubles, a storm of in-window drains consumes nothing, and
+/// the lane still waits head-of-line. Time-to-poison is >= base x (2^cap - 1), not wake-bounded.
 #[tokio::test]
-async fn inside_the_spacing_window_drains_consume_no_attempts() {
+async fn backoff_doubles_and_in_window_drains_consume_no_attempts() {
     let Some(url) = database_url() else { return };
     let _guard = DB_LOCK.lock().await;
     let pool = PgPool::connect(&url).await.expect("connect");
@@ -229,8 +233,8 @@ async fn inside_the_spacing_window_drains_consume_no_attempts() {
         ACTOR_TYPE,
         WorkerConfig {
             lease_seconds: 300,
-            max_delivery_attempts: 2,
-            retry_spacing_seconds: 300,
+            max_delivery_attempts: 3,
+            retry_spacing_seconds: 100,
             ..WorkerConfig::default()
         },
         Arc::new(PoisonedHeadHandler { poison_id: poison }),
@@ -238,19 +242,44 @@ async fn inside_the_spacing_window_drains_consume_no_attempts() {
     w.seed(5).await.expect("seed");
     w.claim().await.expect("claim");
 
+    async fn schedule_secs(pool: &PgPool, id: uuid::Uuid) -> f64 {
+        sqlx::query(
+            "SELECT EXTRACT(EPOCH FROM (next_attempt_at - last_attempt_at))::float8 AS delay \
+             FROM inbound_messages WHERE message_id = $1",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .expect("row")
+        .get("delay")
+    }
+
     let first = w.drain().await.expect("pass 1");
     assert_eq!(first, 0);
     let (status, attempts, _) = row_state(&pool, poison).await;
     assert_eq!((status.as_str(), attempts), ("RECEIVED", 1), "first attempt counted");
+    assert_eq!(schedule_secs(&pool, poison).await, 100.0, "attempt 1 waits base x 1");
 
     // A storm of immediate re-drains (what a peak nudge burst looks like): all inside the
-    // 300 s window — none may consume attempt 2 of 2, none may flip the row.
+    // window — none may consume attempt 2, none may flip the row.
     for _ in 0..5 {
         let delivered = w.drain().await.expect("in-window drain");
         assert_eq!(delivered, 0);
     }
     let (status, attempts, error) = row_state(&pool, poison).await;
     assert_eq!(status, "RECEIVED", "still retrying -- the window protected the cap");
-    assert_eq!(attempts, 1, "no attempt consumed inside the spacing window");
+    assert_eq!(attempts, 1, "no attempt consumed inside the backoff window");
     assert!(error.is_none());
+
+    // Fast-forward: expire the schedule and fail again — the NEXT window must double.
+    sqlx::query("UPDATE inbound_messages SET next_attempt_at = now() WHERE message_id = $1")
+        .bind(poison)
+        .execute(&pool)
+        .await
+        .expect("expire window");
+    let second = w.drain().await.expect("pass 2");
+    assert_eq!(second, 0);
+    let (status, attempts, _) = row_state(&pool, poison).await;
+    assert_eq!((status.as_str(), attempts), ("RECEIVED", 2));
+    assert_eq!(schedule_secs(&pool, poison).await, 200.0, "attempt 2 waits base x 2 -- doubling");
 }

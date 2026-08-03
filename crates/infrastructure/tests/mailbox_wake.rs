@@ -63,6 +63,10 @@ async fn setup(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply the mailbox attempts migration");
+    sqlx::raw_sql(include_str!("../../../migrations/20260803004500_mailbox_backoff_next_attempt.sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mailbox backoff migration");
 }
 
 fn cart_command(cart_id: uuid::Uuid) -> AddCartLine {
