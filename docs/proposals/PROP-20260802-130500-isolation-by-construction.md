@@ -8,7 +8,7 @@
   [#303 "ActorClient::watch — relocate OperationStatusBus"](https://github.com/TheCaptainCompany/captain-food/issues/303) (done 2026-08-03) ·
   [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304) (done 2026-08-03) ·
   [#305 "View_* read declarations"](https://github.com/TheCaptainCompany/captain-food/issues/305) ·
-  [#306 "Isolation phase 2: one crate per actor client"](https://github.com/TheCaptainCompany/captain-food/issues/306) ·
+  [#306 "Isolation phase 2: one crate per actor client"](https://github.com/TheCaptainCompany/captain-food/issues/306) (done 2026-08-03) ·
   [#307 "Isolation phase 3: per-actor implementation crates"](https://github.com/TheCaptainCompany/captain-food/issues/307) ·
   [#308 "Decide cancel lane-scoping"](https://github.com/TheCaptainCompany/captain-food/issues/308) ·
   [#309 "C4 update for the actor_client boundary crate"](https://github.com/TheCaptainCompany/captain-food/issues/309)
@@ -18,7 +18,9 @@
   client, one per actor implementation; the assembly is the boundary.
 - **Realized by**: phase 1 — [#297 "refactor(#290): the actor-client crate is the compiler-enforced mailbox door (phase 1)"](https://github.com/TheCaptainCompany/captain-food/pull/297)
   (merged 2026-08-02, incl. [ADR-20260802-170059](../adr/ADR-20260802-170059-client-surface-is-spec-gated.md));
-  phases 2–3 pending
+  phase 2 — [#332 "refactor(#306): one crate per actor client (isolation phase 2)"](https://github.com/TheCaptainCompany/captain-food/pull/332)
+  (incl. [ADR-20260803-214500](../adr/ADR-20260803-214500-actor-door-contains-the-phase-2-widening.md));
+  phase 3 pending (costing first)
 
 ---
 
@@ -74,7 +76,8 @@ reviewable act (a `Cargo.toml` edit, a boundary-crate diff, a credential change)
 | domain purity (no outward deps) | `domain` depends on nothing | **4** ✅ |
 | what an actor receives | sealed `{Actor}Command`/`{Actor}Fact` traits ([#288](https://github.com/TheCaptainCompany/captain-food/pull/288)) | **4** ✅ |
 | the write door (who may build a mailbox row) | `pub(crate)` constructors + the `MailboxAccess` witness on every port method ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)) | **4** ✅ |
-| who may address which actor | anyone depending on `infrastructure` gets all 16 clients | 1 |
+| who may address which actor | one crate per actor (`crates/clients/*`); the manifest names the reach ([#306](https://github.com/TheCaptainCompany/captain-food/issues/306)) | **4** ✅ |
+| the string-keyed `ActorDoor` the client crates enqueue through | `actor_door_is_named_only_by_generated_client_crates` ([ADR-20260803-214500](../adr/ADR-20260803-214500-actor-door-contains-the-phase-2-widening.md)) | 3 — phase 2's deliberate trade |
 | the read door (`operationStatus`) | `ActorClient` + the `MailboxAccess` witness ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)) | **4** ✅ *against the port* — the raw-SELECT path is still the level-1 row below |
 | **who may run SQL at all** | **`sqlx` in NINE crates** — server, all five adapters, actor_runtime, sirene_ingest, infrastructure | **1** |
 | who may reach the network | `reqwest` in ten crates | 1 |
@@ -149,7 +152,9 @@ clients co-resident), phased to per-actor client crates. Recorded there; restate
 proposal is the one map of the whole isolation program.
 
 **Scope of "per actor" (product-owner directive, 2026-08-02): every actor in actors.yaml — the
-process managers included.** The catalog today is 14 aggregates + 2 process managers
+process managers included.** The catalog is now 15 aggregates + 2 process managers = **17**
+(`CustomerCredit` and `MailboxSupervision` landed after this proposal was written; it originally
+said 14 + 2)
 (`PlaceOrderProcess`, `RefundProcess`), and the generated clients already treat them uniformly
 (`PlaceOrderProcessClient` and `RefundProcessClient` exist alongside the aggregate clients). The
 crate split keeps that symmetry at every phase: **phase 2 emits one client crate per process
@@ -246,18 +251,25 @@ withdrawal method named `cancel_scheduling` per #308, lane-scoping declined). Th
    + `test-fixtures` mechanism (D5). Behavior frozen by the existing drift guards;
    the textual door guard stays as the tripwire on the boundary itself. The lint floor (D6) follows
    as its own change (product-owner decision, 2026-08-02).
-2. **Phase 2**: per-actor client crates — one per aggregate AND one per process manager (16 today),
-   manifests codegen-emitted; an adapter's `Cargo.toml` names exactly the actors it may address.
-   **The wall phase 2 actually hits** (found while closing the port surface, #304): a per-actor
+2. **Phase 2** ✅ **DONE 2026-08-03** ([#306](https://github.com/TheCaptainCompany/captain-food/issues/306),
+   [ADR-20260803-214500](../adr/ADR-20260803-214500-actor-door-contains-the-phase-2-widening.md)):
+   per-actor client crates — one per aggregate AND one per process manager (**17**), manifests
+   codegen-emitted; a consumer's `Cargo.toml` names exactly the actors it may address (`server`
+   names 15 and reaches neither `Payment` nor `CustomerCredit`).
+   **The wall phase 2 actually hit** (predicted while closing the port surface, #304): a per-actor
    client crate must BUILD mailbox entries, and `command_entry`/`inbound_entry` are `pub(crate)`
    while `MailboxEntry`'s fields are private — that is D1's whole enforcement. Two exits: widen
    those to `pub` in the core crate (D1 then degrades to a manifest allowlist for anyone depending
    on it), or expose an OPAQUE facade so both the entry and the `MailboxAccess` witness stay inside
-   the core (`handle.send_command(actor, width, id, message_type, payload, env)`). The second keeps
-   phase 2 at level 4 and is the recommendation; #304 is its rehearsal, one level up. The
-   client-side half of this wall is already gone: no generated client mints a witness or builds an
-   entry — every method delegates to `crate::enqueue`, so phase 2 widens three delegates, not
-   sixteen clients.
+   the core. **The second was taken**: `ActorDoor::send_command(actor, width, id, message_type,
+   payload, env)`. The prediction that "phase 2 widens three delegates, not sixteen clients" held —
+   no generated client mints a witness or builds an entry.
+   **What it cost, recorded rather than glossed**: the facade is public and string-keyed, so it
+   could address any actor with any message — a capability that did not exist before. The entry and
+   the witness stay level 4; the facade is contained at level 3 by
+   `actor_door_is_named_only_by_generated_client_crates`, shipped in the same change. Phase 2 is
+   therefore a level-1 → level-4 gain on *which actor a crate may address*, paid for with one new
+   level-3 surface — a trade, not a free win.
 3. **Phase 3**: per-actor handler crates per D2(a) — again one per aggregate and one per process
    manager — individually costed before committal; it reshapes application/domain codegen and is a
    program, not a slice.

@@ -1,11 +1,22 @@
-//! Emit `crates/actor_client/src/generated/actor_clients.rs` — one strongly-typed client per
-//! mailbox actor (#284 slice 1, PROP-20260728-152752 §2.1): the ONLY typed door to the
-//! `inbound_messages` mailbox. Per-actor SEALED marker traits make "send a message the actor does
-//! not `receive`" a COMPILE error, and every entry is assembled by the shared crate-internal
-//! constructors in `actor_client::enqueue`, so the typed door and the free-function door can
-//! never drift on lane, partition, principal or channel. Since #290 phase 1
-//! (PROP-20260802-130500 D1) the clients live IN the boundary crate that owns the private
-//! `MailboxEntry` — the compiler, not a scan, closes the door.
+//! Emit ONE CRATE PER MAILBOX ACTOR under `crates/clients/` — `client-restaurant`,
+//! `client-cart`, …, including `client-place-order-process` and `client-refund-process`
+//! (PROP-20260802-130500 phase 2, #306; the per-actor scope covering both process managers is the
+//! product-owner directive of 2026-08-02).
+//!
+//! WHAT THE SPLIT BUYS. Before phase 2 the 17 typed clients shared one crate, so any crate
+//! depending on `actor_client` could address every actor — the "who may address which actor"
+//! level-1 row of the proposal's §2 table. Now the CRATE IS THE PERMISSION at actor granularity:
+//! an adapter's `Cargo.toml` names exactly the actors it may reach, and an actor it does not
+//! declare is an actor whose client type does not exist for it. Adding one is a manifest diff —
+//! the loud, reviewable act.
+//!
+//! WHAT STAYS BEHIND. The per-actor crates cannot build a `MailboxEntry` (private fields) or mint
+//! a `MailboxAccess` (`pub(crate)`), and phase 2 deliberately does NOT widen either — that is the
+//! level-4 → level-3 slide #304 installed the witness to prevent. They enqueue through
+//! `actor_client::ActorDoor`, the opaque facade the proposal's §6 named as the recommended exit.
+//! Per-actor SEALED marker traits still make "send a message the actor does not `receive`" a
+//! COMPILE error, and each crate now owns its own `sealed::Sealed`, so an actor's receive set is
+//! not even nameable from a sibling client crate.
 //!
 //! Also emits `crates/actor_client/src/generated/addresses.rs` — the frozen command-addressing
 //! tables (`mailbox_address`, `ACTOR_MAILBOXES`) the constructors and the composition root share;
@@ -83,40 +94,318 @@ fn client_actors(model: &Model) -> Vec<ClientActor> {
     out
 }
 
-pub(crate) fn emit_actor_clients(model: &Model) -> String {
-    let actors = client_actors(model);
-    // The scheduling machinery is imported only when some actor actually earns the surface —
-    // otherwise the generated file would carry unused imports the day the last reminder
-    // declaration leaves the spec.
-    let any_reminders = actors.iter().any(|a| a.reminders);
-    let enqueue_imports = if any_reminders {
-        "use crate::enqueue::{\n    cancel_scheduled_mapped, command_entry, declared_identity, enqueue_inbound_fact, insert_mapped,\n    schedule_mapped, InboundFact,\n};\nuse crate::mailbox::{Envelope, Mailbox};\nuse crate::{EnqueueOutcome, ScheduleOutcome};"
+/// One generated per-actor client crate: where it lives, and the two files that make it. Both are
+/// GENERATED — the manifest as much as the code, so "which actors exist" and "which crates exist"
+/// cannot drift (the `check-drift` gate diffs the whole tree).
+pub(crate) struct ClientCrate {
+    /// The actors.yaml key this crate is the door to, e.g. `RestaurantAccount`.
+    pub(crate) actor: String,
+    /// Directory relative to the repo root, e.g. `crates/clients/restaurant-account`.
+    pub(crate) dir: String,
+    pub(crate) manifest: String,
+    pub(crate) lib: String,
+}
+
+/// `RestaurantAccount` -> `restaurant-account`: the crate name and directory spelling. Cargo maps
+/// the dashes back to underscores for the `use` path (`client_restaurant_account`).
+pub(crate) fn kebab(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_ascii_uppercase() {
+            if i != 0 {
+                out.push('-');
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `RestaurantAccount` -> `client_restaurant_account`: the crate as a Rust path segment, i.e. what
+/// a consumer writes in a `use`. Cargo turns the manifest's dashes into underscores, so this is the
+/// one place that mapping is spelled out — generated consumers (the GraphQL resolvers) call it
+/// rather than re-deriving it, so the manifest name and the import cannot drift.
+pub(crate) fn client_crate_ident(actor: &str) -> String {
+    format!("client_{}", kebab(actor).replace('-', "_"))
+}
+
+/// The manifest of one client crate. Deliberately minimal: `domain` for the message types,
+/// `actor_client` for the door, serde/uuid to build the payload — NO sqlx, NO reqwest, and no
+/// dependency on any sibling client crate. `chrono` appears only for an actor that earned the
+/// scheduling surface, so `cargo machete` stays green.
+fn client_manifest(a: &ClientActor) -> String {
+    let actor = &a.name;
+    let k = kebab(actor);
+    let chrono = if a.reminders {
+        "\n# Only a `reminders:` actor gets `schedule`, whose signature names a timestamp.\nchrono = { workspace = true }"
     } else {
-        "use crate::enqueue::{\n    command_entry, declared_identity, enqueue_inbound_fact, insert_mapped, InboundFact,\n};\nuse crate::mailbox::{Envelope, Mailbox};\nuse crate::EnqueueOutcome;"
+        ""
     };
-    let mut out = format!(
-        "// GENERATED by the Captain.Food codegen from specs/actors.yaml (`receives` + `mailbox.partitions`)\n// — do not edit by hand (#284 slice 1, PROP-20260728-152752 §2.1; #290 phase 1,\n// PROP-20260802-130500 D1). One strongly-typed client per mailbox actor: the ONLY typed door to\n// the `inbound_messages` mailbox. The clients construct NOTHING themselves — every entry is\n// assembled by the shared crate-internal constructors in `crate::enqueue`, so a typed send and a\n// free-function enqueue can never drift on lane, partition, principal or channel; this file only\n// gathers typed inputs and delegates. `MailboxEntry` fields are pub(crate), so this crate is the\n// only place such a row can exist at all. EVERY method is spec-gated (product-owner\n// directive, 2026-08-02 — the declaration is the permission): `send` + `{{Actor}}Command` exist\n// iff the actor receives >=1 COMMAND, `record` + `{{Actor}}Fact` iff it receives >=1 inbound\n// FACT, `schedule`/`cancel_scheduling` iff it declares `reminders:`. An unjustified surface is\n// ABSENT — a compile error at any call site — never uncallable-but-present.\n\nuse std::sync::Arc;\n\nuse domain::shared::errors::DomainError;\n\n{enqueue_imports}\n\n/// The privacy SEAL: `Sealed` lives in a private module, so it cannot be named — let alone\n/// implemented — outside this GENERATED file. Every `{{Actor}}Command`/`{{Actor}}Fact` marker trait\n/// requires it, so the receive set an actor declares in actors.yaml is the receive set, period:\n/// widening it takes a spec change and a regeneration, never a stray downstream `impl`.\nmod sealed {{\n    pub trait Sealed {{}}\n}}\n\n// One `Sealed` impl per DISTINCT message type (a fact received by several actors — the fan-out\n// kind — is sealed once and marked per actor below).\n",
-    );
-    let mut sealed: BTreeSet<String> = BTreeSet::new();
-    for a in &actors {
+    format!(
+        r#"# GENERATED by the Captain.Food codegen from specs/actors.yaml -- do not edit by hand
+# (PROP-20260802-130500 phase 2, #306).
+#
+# ONE CRATE PER MAILBOX ACTOR: depending on this crate is the permission to address the `{actor}`
+# actor -- and nothing else. An actor a crate does not name in its manifest is an actor whose
+# client type does not exist for it, so widening reach is a Cargo.toml diff (loud, reviewable)
+# rather than an import nobody notices.
+#
+# This crate cannot build a mailbox row or mint a `MailboxAccess`: both stay private to
+# `actor_client`, and everything here enqueues through the opaque `ActorDoor`. That is what keeps
+# the entry and the witness at compile-time enforcement while the split happens around them.
+[package]
+name = "client-{k}"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+publish = false
+description = "Captain.Food typed mailbox client for the `{actor}` actor -- the write door to its lane, and the permission to address it (PROP-20260802-130500 phase 2)."
+
+[dependencies]
+actor_client = {{ path = "../../actor_client" }}
+domain = {{ path = "../../domain" }}
+serde = {{ workspace = true }}
+serde_json = {{ workspace = true }}
+uuid = {{ workspace = true }}{chrono}
+
+# D6 lint floor (PROP-20260802-130500, #302). A client crate is a BOUNDARY crate -- it exists to
+# be the door -- so it restates the workspace baseline and additionally denies `unreachable_pub`.
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+"#
+    )
+}
+
+/// The `src/lib.rs` of one client crate: the sealed marker traits for what this actor receives,
+/// and the client that enqueues through the door.
+fn client_lib(a: &ClientActor) -> String {
+    let actor = &a.name;
+    let width = a.width;
+    let mut out = String::new();
+
+    out.push_str(&HEADER.replace("{ACTOR}", actor));
+
+    // Imports follow the SAME spec gating as the methods, so a crate never carries an import its
+    // actor's declarations did not earn — `Envelope` is a send/schedule parameter, `ScheduleOutcome`
+    // a reminders-only return. An unused import would be a warning in every consumer's build, and
+    // (worse) a hint that the surface and its declarations have drifted apart.
+    out.push_str(if a.commands.is_empty() {
+        "use actor_client::mailbox::Mailbox;\n"
+    } else {
+        "use actor_client::mailbox::{Envelope, Mailbox};\n"
+    });
+    out.push_str(if a.reminders {
+        "use actor_client::{ActorDoor, EnqueueOutcome, ScheduleOutcome};\n"
+    } else {
+        "use actor_client::{ActorDoor, EnqueueOutcome};\n"
+    });
+    out.push_str("use domain::shared::errors::DomainError;\n");
+
+    out.push_str(SEALED);
+    for c in &a.commands {
+        out.push_str(&format!("impl sealed::Sealed for domain::generated::commands::{c} {{}}\n"));
+    }
+    for f in &a.facts {
+        out.push_str(&format!("impl sealed::Sealed for domain::generated::events::{f} {{}}\n"));
+    }
+
+    // THE DECLARATION IS THE PERMISSION (product-owner directive, 2026-08-02, generalized):
+    // every client method -- and its sealed marker trait -- is emitted only when the actor's spec
+    // declarations justify it. An unjustified surface is ABSENT (a compile error at any call
+    // site), never uncallable-but-present.
+    if !a.commands.is_empty() {
+        out.push_str(&COMMAND_TRAIT.replace("{ACTOR}", actor));
         for c in &a.commands {
-            sealed.insert(format!("domain::generated::commands::{c}"));
+            out.push_str(&format!(
+                "\nimpl {actor}Command for domain::generated::commands::{c} {{\n    const MESSAGE_TYPE: &'static str = \"{c}\";\n}}\n"
+            ));
         }
+    }
+    if !a.facts.is_empty() {
+        out.push_str(&FACT_TRAIT.replace("{ACTOR}", actor));
         for f in &a.facts {
-            sealed.insert(format!("domain::generated::events::{f}"));
+            out.push_str(&format!(
+                "\nimpl {actor}Fact for domain::generated::events::{f} {{\n    const EVENT_TYPE: &'static str = \"{f}\";\n    fn into_domain_event(self) -> domain::generated::events::DomainEvent {{\n        domain::generated::events::DomainEvent::{f}(self)\n    }}\n}}\n"
+            ));
         }
     }
-    for path in &sealed {
-        out.push_str(&format!("impl sealed::Sealed for {path} {{}}\n"));
+
+    out.push_str(&CLIENT_STRUCT.replace("{ACTOR}", actor).replace("{WIDTH}", &width.to_string()));
+    if !a.commands.is_empty() {
+        out.push_str(&SEND.replace("{ACTOR}", actor).replace("{WIDTH}", &width.to_string()));
     }
+    if !a.facts.is_empty() {
+        out.push_str(&RECORD.replace("{ACTOR}", actor));
+    }
+    if a.reminders {
+        out.push_str(&SCHEDULE.replace("{ACTOR}", actor).replace("{WIDTH}", &width.to_string()));
+    }
+    out.push_str("}\n");
+    out
+}
+
+const HEADER: &str = r#"// GENERATED by the Captain.Food codegen from specs/actors.yaml (`receives` +
+// `mailbox.partitions` + `reminders`) -- do not edit by hand (PROP-20260802-130500 phase 2,
+// #306). The typed mailbox client for ONE actor, in its OWN crate: depending on this crate is the
+// permission to address `{ACTOR}`, and nothing else.
+//
+// The client constructs NOTHING itself. Every row is assembled behind `actor_client::ActorDoor`,
+// whose delegates own the lane, partition, principal and channel derivation -- so a typed send
+// here and the string-keyed reference implementation in `actor_client` cannot drift (the
+// out-of-crate drift guard in `crates/actor_client/tests/drift_guard.rs` proves it field for
+// field). `MailboxEntry` and `MailboxAccess` are not nameable from this crate at all.
+//
+// EVERY method is spec-gated (product-owner directive, 2026-08-02 -- the declaration is the
+// permission): `send` + `{ACTOR}Command` exist iff the actor receives >=1 COMMAND, `record` +
+// `{ACTOR}Fact` iff it receives >=1 inbound FACT, `schedule`/`cancel_scheduling` iff it declares
+// `reminders:`. An unjustified surface is ABSENT -- a compile error at any call site -- never
+// uncallable-but-present.
+
+use std::sync::Arc;
+
+"#;
+
+const SEALED: &str = r#"
+/// The privacy SEAL: `Sealed` lives in a private module, so it cannot be named -- let alone
+/// implemented -- outside this GENERATED crate. Every marker trait below requires it, so the
+/// receive set this actor declares in actors.yaml is the receive set, period: widening it takes a
+/// spec change and a regeneration, never a stray downstream `impl`. Since phase 2 each actor owns
+/// its own seal, so a sibling client crate cannot even name this actor's marker supertrait.
+mod sealed {
+    pub trait Sealed {}
+}
+
+"#;
+
+const COMMAND_TRAIT: &str = r#"
+/// GENERATED from actors.yaml `{ACTOR}.receives`: marker for every COMMAND the `{ACTOR}` actor
+/// receives. SEALED (private supertrait) so no impl can exist outside this generated crate --
+/// sending a command this actor does not `receive` is a COMPILE error, not a runtime rejection.
+pub trait {ACTOR}Command: sealed::Sealed + serde::Serialize + Send {
+    /// The mailbox `message_type` (the commands.yaml key).
+    const MESSAGE_TYPE: &'static str;
+}
+"#;
+
+const FACT_TRAIT: &str = r#"
+/// GENERATED from actors.yaml `{ACTOR}.receives`: marker for every inbound FACT (an
+/// `events.yaml#/...` ref -- an external fact that already happened) the `{ACTOR}` actor records.
+/// SEALED for the same reason as [`{ACTOR}Command`].
+pub trait {ACTOR}Fact: sealed::Sealed + serde::Serialize + Send {
+    /// The mailbox `message_type` (the events.yaml key) -- also the `DomainEvent` adjacent tag.
+    const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant -- so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
+}
+"#;
+
+const CLIENT_STRUCT: &str = r#"
+/// GENERATED from actors.yaml: the strongly-typed client for ONE `{ACTOR}` mailbox lane --
+/// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over
+/// width {WIDTH} (`mailbox.partitions`). The only door to this actor.
+pub struct {ACTOR}Client {
+    door: ActorDoor,
+    actor_id: uuid::Uuid,
+}
+
+impl {ACTOR}Client {
+    /// A client addressing the `{ACTOR}` instance `actor_id`.
+    pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {
+        Self { door: ActorDoor::new(mailbox), actor_id }
+    }
+"#;
+
+const SEND: &str = r#"
+    /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the door's
+    /// `send_command`, which builds the row with the shared `command_entry` constructor -- the
+    /// very row `enqueue_worker_command` builds for the same inputs, field for field.
+    pub async fn send<M: {ACTOR}Command>(
+        &self,
+        msg: M,
+        env: Envelope,
+    ) -> Result<EnqueueOutcome, DomainError> {
+        let payload = serde_json::to_value(&msg)
+            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.door.assert_addressed("{ACTOR}Client", self.actor_id, M::MESSAGE_TYPE, &payload)?;
+        self.door
+            .send_command("{ACTOR}", {WIDTH}, self.actor_id, M::MESSAGE_TYPE, payload, env)
+            .await
+    }
+"#;
+
+const RECORD: &str = r#"
+    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
+    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
+    /// external_id)` -- never caller-supplied -- and provenance is a REQUIRED parameter, because
+    /// the `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal
+    /// is the per-source system user, stamped by the shared `inbound_entry` constructor.
+    pub async fn record<F: {ACTOR}Fact>(
+        &self,
+        fact: F,
+        source: &str,
+        external_id: &str,
+        correlation_id: uuid::Uuid,
+    ) -> Result<EnqueueOutcome, DomainError> {
+        let tagged = serde_json::to_value(fact.into_domain_event())
+            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
+        self.door
+            .record_fact(
+                "{ACTOR}",
+                self.actor_id,
+                F::EVENT_TYPE,
+                tagged,
+                source,
+                external_id,
+                correlation_id,
+            )
+            .await
+    }
+"#;
+
+const SCHEDULE: &str = r#"
+    /// Schedule one typed COMMAND for LATER delivery: a SCHEDULED row (`position` NULL) the
+    /// promotion pass delivers when due; a still-SCHEDULED identity reschedules IN PLACE
+    /// (ADR-20260731-150500).
+    pub async fn schedule<M: {ACTOR}Command>(
+        &self,
+        msg: M,
+        env: Envelope,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<ScheduleOutcome, DomainError> {
+        let payload = serde_json::to_value(&msg)
+            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.door.assert_addressed("{ACTOR}Client", self.actor_id, M::MESSAGE_TYPE, &payload)?;
+        self.door
+            .schedule_command("{ACTOR}", {WIDTH}, self.actor_id, M::MESSAGE_TYPE, payload, env, at)
+            .await
+    }
+
+    /// Withdraw a SCHEDULED reminder (`SCHEDULED -> CANCELLED`, ADR-20260731-150500 section 3).
+    /// `false` = absent, delivered or already cancelled -- the caller decides whether losing that
+    /// race matters. Named `cancel_scheduling` (product-owner decision 2026-08-02, #308): the name
+    /// says exactly what it withdraws -- a scheduled reminder, never an in-flight command. Keyed
+    /// by `message_id` like the port beneath it: the id is minted by `schedule`, so holding it IS
+    /// the capability (decided over lane-scoping, #308).
+    pub async fn cancel_scheduling(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
+        self.door.cancel_scheduling(message_id).await
+    }
+"#;
+
+/// Every generated client crate, one per mailbox actor, sorted by actor name (stable output).
+pub(crate) fn emit_client_crates(model: &Model) -> Vec<ClientCrate> {
+    let actors = client_actors(model);
+    let mut out = Vec::new();
     for a in &actors {
         let actor = &a.name;
-        let width = a.width;
         // Latent edge, failed LOUDLY at generation (#290 re-review NOTE): `schedule`'s bound is
-        // the `{Actor}Command` trait, which only exists with >=1 received command — a facts-only
-        // actor declaring `reminders:` would emit non-compiling code. Impossible in today's
-        // catalog (Order receives 13 commands); if a spec ever gets here, the fix is a spec
-        // decision, not a silent drop of the scheduling surface.
+        // the `{Actor}Command` trait, which only exists with >=1 received command -- a facts-only
+        // actor declaring `reminders:` would emit non-compiling code. If a spec ever gets here,
+        // the fix is a spec decision, not a silent drop of the scheduling surface.
         assert!(
             !(a.reminders && a.commands.is_empty()),
             "actors.yaml: `{actor}` declares `reminders:` but receives no COMMAND — the generated \
@@ -124,65 +413,12 @@ pub(crate) fn emit_actor_clients(model: &Model) -> String {
              received command, so the generated crate would not compile. Declare a received \
              command or move the reminder."
         );
-        out.push_str(&format!("\n// ─── {actor} ───\n"));
-        // THE DECLARATION IS THE PERMISSION (product-owner directive, 2026-08-02, generalized):
-        // every client method — and its sealed marker trait — is emitted only when the actor's
-        // spec declarations justify it. `send` + `{{Actor}}Command` need >=1 received COMMAND;
-        // `record` + `{{Actor}}Fact` need >=1 received inbound FACT; `schedule`/`cancel_scheduling`
-        // need a `reminders:` declaration. An unjustified surface is ABSENT (a compile error at
-        // any call site), never uncallable-but-present.
-        if !a.commands.is_empty() {
-        out.push_str(&format!(
-            "\n/// GENERATED from actors.yaml `{actor}.receives`: marker for every COMMAND the `{actor}` actor\n/// receives. SEALED (private supertrait) so no impl can exist outside the generated file —\n/// sending a command this actor does not `receive` is a COMPILE error, not a runtime rejection.\npub trait {actor}Command: sealed::Sealed + serde::Serialize + Send {{\n    /// The mailbox `message_type` (the commands.yaml key).\n    const MESSAGE_TYPE: &'static str;\n}}\n"
-        ));
-        for c in &a.commands {
-            out.push_str(&format!(
-                "\nimpl {actor}Command for domain::generated::commands::{c} {{\n    const MESSAGE_TYPE: &'static str = \"{c}\";\n}}\n"
-            ));
-        }
-        }
-        if !a.facts.is_empty() {
-        out.push_str(&format!(
-            "\n/// GENERATED from actors.yaml `{actor}.receives`: marker for every inbound FACT (an\n/// `events.yaml#/…` ref — an external fact that already happened) the `{actor}` actor records.\n/// SEALED for the same reason as [`{actor}Command`].\npub trait {actor}Fact: sealed::Sealed + serde::Serialize + Send {{\n    /// The mailbox `message_type` (the events.yaml key) — also the `DomainEvent` adjacent tag.\n    const EVENT_TYPE: &'static str;\n    /// The fact wrapped in ITS `DomainEvent` variant — so the adjacently-tagged wire form comes\n    /// from the domain enum's own serde representation, never from a hand-built literal that\n    /// could drift from it.\n    fn into_domain_event(self) -> domain::generated::events::DomainEvent;\n}}\n"
-        ));
-        for f in &a.facts {
-            out.push_str(&format!(
-                "\nimpl {actor}Fact for domain::generated::events::{f} {{\n    const EVENT_TYPE: &'static str = \"{f}\";\n    fn into_domain_event(self) -> domain::generated::events::DomainEvent {{\n        domain::generated::events::DomainEvent::{f}(self)\n    }}\n}}\n"
-            ));
-        }
-        }
-        out.push_str(&format!(
-            "\n/// GENERATED from actors.yaml: the strongly-typed client for ONE `{actor}` mailbox lane —\n/// `actor_id` is the addressed instance, the partition is the FROZEN `stable_partition` over\n/// width {width} (`mailbox.partitions`). The only door non-GraphQL code should use to reach this\n/// actor (PROP-20260728-152752 §2.1).\npub struct {actor}Client {{\n    mailbox: Arc<dyn Mailbox>,\n    actor_id: uuid::Uuid,\n}}\n\nimpl {actor}Client {{\n    /// A client addressing the `{actor}` instance `actor_id`.\n    pub fn new(mailbox: Arc<dyn Mailbox>, actor_id: uuid::Uuid) -> Self {{\n        Self {{ mailbox, actor_id }}\n    }}"
-        ));
-        if !a.commands.is_empty() {
-            out.push_str(&format!(
-                "\n    /// Enqueue one typed COMMAND on this lane (kind COMMAND). Delegates to the shared\n    /// `command_entry` constructor — the very row `enqueue_worker_command` builds for the same\n    /// inputs, field for field (the in-crate drift guard (`enqueue::drift_guard`) proves it).\n    pub async fn send<M: {actor}Command>(\n        &self,\n        msg: M,\n        env: Envelope,\n    ) -> Result<EnqueueOutcome, DomainError> {{\n        let payload = serde_json::to_value(&msg)\n            .map_err(|e| DomainError::Repository(format!(\"{{}} payload: {{e}}\", M::MESSAGE_TYPE)))?;\n        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;\n        let entry = command_entry(\"{actor}\", {width}, self.actor_id, M::MESSAGE_TYPE, payload, env);\n        let payload_hash = entry.payload_hash.clone();\n        insert_mapped(self.mailbox.as_ref(), entry, &payload_hash).await\n    }}"
-            ));
-        }
-        if !a.facts.is_empty() {
-            out.push_str(&format!(
-                "\n    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`\n    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,\n    /// external_id)` — never caller-supplied — and provenance is a REQUIRED parameter, because the\n    /// `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal is\n    /// the per-source system user, stamped by the shared `inbound_entry` constructor.\n    pub async fn record<F: {actor}Fact>(\n        &self,\n        fact: F,\n        source: &str,\n        external_id: &str,\n        correlation_id: uuid::Uuid,\n    ) -> Result<EnqueueOutcome, DomainError> {{\n        let tagged = serde_json::to_value(fact.into_domain_event())\n            .map_err(|e| DomainError::Repository(format!(\"{{}} payload: {{e}}\", F::EVENT_TYPE)))?;\n        enqueue_inbound_fact(\n            self.mailbox.as_ref(),\n            InboundFact {{\n                source: source.to_owned(),\n                external_id: external_id.to_owned(),\n                event_type: F::EVENT_TYPE.to_owned(),\n                payload: tagged,\n                correlation_id,\n                actor_type: \"{actor}\".to_owned(),\n                actor_id: self.actor_id,\n            }},\n        )\n        .await\n    }}"
-            ));
-        }
-        // The SCHEDULING surface is spec-gated (product-owner directive, 2026-08-02): only an
-        // actor declaring `reminders:` in actors.yaml gets `schedule`/`cancel_scheduling` — for
-        // everyone else the methods DO NOT EXIST, so calling them is a compile error, exactly like
-        // a non-received message. `cancel_scheduling` rides the same condition: it can only
-        // withdraw what `schedule` or the reminder upsert could have parked, so without a
-        // declaration it is dead surface.
-        if a.reminders {
-            out.push_str(&format!(
-                "\n    /// Schedule one typed COMMAND for LATER delivery via the port's `schedule`: a SCHEDULED row\n    /// (`position` NULL) the promotion pass delivers when due; a still-SCHEDULED identity\n    /// reschedules IN PLACE (ADR-20260731-150500).\n    pub async fn schedule<M: {actor}Command>(\n        &self,\n        msg: M,\n        env: Envelope,\n        at: chrono::DateTime<chrono::Utc>,\n    ) -> Result<ScheduleOutcome, DomainError> {{\n        let payload = serde_json::to_value(&msg)\n            .map_err(|e| DomainError::Repository(format!(\"{{}} payload: {{e}}\", M::MESSAGE_TYPE)))?;\n        self.assert_addressed(M::MESSAGE_TYPE, &payload)?;\n        let entry = command_entry(\"{actor}\", {width}, self.actor_id, M::MESSAGE_TYPE, payload, env);\n        let payload_hash = entry.payload_hash.clone();\n        schedule_mapped(self.mailbox.as_ref(), entry, at, &payload_hash).await\n    }}\n\n    /// Withdraw a SCHEDULED reminder (`SCHEDULED → CANCELLED`, ADR-20260731-150500 §3). `false` =\n    /// absent, delivered or already cancelled — the caller decides whether losing that race\n    /// matters. Named `cancel_scheduling` (product-owner decision 2026-08-02, #308): the name says\n    /// exactly what it withdraws — a scheduled reminder, never an in-flight command. Keyed by\n    /// `message_id` like the port beneath it: the id is minted by `schedule`, so holding it IS the\n    /// capability (decided over lane-scoping, #308).\n    pub async fn cancel_scheduling(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {{\n        cancel_scheduled_mapped(self.mailbox.as_ref(), message_id).await\n    }}"
-            ));
-        }
-        // `assert_addressed` backs `send`/`schedule`, whose bound is the `{Actor}Command`
-        // trait — absent commands, absent callers, absent helper (dead code otherwise).
-        if !a.commands.is_empty() {
-            out.push_str(&format!(
-            "\n    /// The addressing invariant, enforced with the SAME `declared_identity` derivation the\n    /// free-function door uses: when the command declares an identity property, its value MUST\n    /// equal this client's lane — a mismatch would park the command on one lane while the handler\n    /// acts on another aggregate, silently breaking per-aggregate serialization. A command whose\n    /// actor declares no identity property is addressed by the lane the client was built with.\n    fn assert_addressed(&self, message_type: &str, payload: &serde_json::Value) -> Result<(), DomainError> {{\n        match declared_identity(message_type, payload)? {{\n            Some(id) if id != self.actor_id => Err(DomainError::Repository(format!(\n                \"{{message_type}}: payload identity {{id}} does not match this {actor}Client lane {{}} — refusing a mis-addressed send\",\n                self.actor_id\n            ))),\n            _ => Ok(()),\n        }}\n    }}\n"
-        ));
-        }
-        out.push_str("}\n");
+        out.push(ClientCrate {
+            actor: actor.clone(),
+            dir: format!("crates/clients/{}", kebab(actor)),
+            manifest: client_manifest(a),
+            lib: client_lib(a),
+        });
     }
     out
 }

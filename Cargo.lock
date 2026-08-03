@@ -12,9 +12,13 @@ checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
 name = "actor_client"
 version = "0.1.0"
 dependencies = [
+ "actor_client",
  "application",
  "async-trait",
  "chrono",
+ "client-order",
+ "client-payment",
+ "client-restaurant",
  "domain",
  "serde",
  "serde_json",
@@ -371,6 +375,7 @@ dependencies = [
  "application",
  "async-trait",
  "axum",
+ "client-delivery-job",
  "domain",
  "hex",
  "hmac",
@@ -562,6 +567,194 @@ dependencies = [
 ]
 
 [[package]]
+name = "client-cart"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-catalog"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-conversation"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-customer"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-customer-credit"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-delivery-job"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-delivery-partner-registration"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-mailbox-supervision"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-order"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "chrono",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-payment"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-place-order-process"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-prospect"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-reclamation"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-refund-process"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-restaurant"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-restaurant-account"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-rider"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "codee"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -674,6 +867,7 @@ dependencies = [
  "application",
  "async-trait",
  "axum",
+ "client-delivery-job",
  "domain",
  "hex",
  "hmac",
@@ -1596,6 +1790,9 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "client-catalog",
+ "client-restaurant",
+ "client-restaurant-account",
  "domain",
  "hex",
  "hmac",
@@ -1841,6 +2038,8 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
+ "client-cart",
+ "client-restaurant",
  "domain",
  "futures",
  "hex",
@@ -3375,6 +3574,21 @@ dependencies = [
  "avelo37-adapter",
  "axum",
  "chrono",
+ "client-cart",
+ "client-catalog",
+ "client-conversation",
+ "client-customer",
+ "client-delivery-job",
+ "client-delivery-partner-registration",
+ "client-mailbox-supervision",
+ "client-order",
+ "client-place-order-process",
+ "client-prospect",
+ "client-reclamation",
+ "client-refund-process",
+ "client-restaurant",
+ "client-restaurant-account",
+ "client-rider",
  "coopcycle-adapter",
  "domain",
  "hubrise-adapter",
@@ -3833,6 +4047,7 @@ dependencies = [
  "application",
  "async-trait",
  "axum",
+ "client-payment",
  "domain",
  "hex",
  "hmac",
@@ -4404,6 +4619,7 @@ dependencies = [
  "application",
  "async-trait",
  "axum",
+ "client-delivery-job",
  "domain",
  "hex",
  "hmac",

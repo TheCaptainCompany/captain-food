@@ -59,7 +59,7 @@ use domain::generated::scalars::{
     CommandChannel, RestaurantListingStatus, RestaurantStatus,
 };
 
-use actor_client::generated::actor_clients::RestaurantClient;
+use client_restaurant::RestaurantClient;
 use actor_client::{enqueue_inbound_facts, EnqueueOutcome, InboundFact};
 use crate::persistence::mailbox_store::PgMailbox;
 use domain::shared::errors::DomainError;

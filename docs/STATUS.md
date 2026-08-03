@@ -3,6 +3,37 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-03 — [#306 "Isolation phase 2: one crate per actor client (aggregates AND process managers)"](https://github.com/TheCaptainCompany/captain-food/issues/306)
+> (PROP-20260802-130500 phase 2, [ADR-20260803-214500](adr/ADR-20260803-214500-actor-door-contains-the-phase-2-widening.md))**:
+> the 17 typed clients (15 aggregates + both process managers — the proposal header's "16" predates
+> `CustomerCredit` and `MailboxSupervision`) now live in **one generated crate each** under
+> `crates/clients/<actor>`, manifest AND code emitted from actors.yaml. **Depending on a crate is
+> the permission to address that actor**: `server` names 15 and reaches neither `Payment` nor
+> `CustomerCredit`; each delivery adapter names `client-delivery-job` alone; Stripe names
+> `client-payment` alone. Workspace members carries `crates/clients/*` as a GLOB, so a new actor's
+> crate joins by being generated; the emitter also REMOVES a stale crate whose actor left the spec
+> (a content diff would never notice a directory that simply stopped being regenerated).
+> **The wall, and what it cost** (proposal §6 predicted both): the per-actor crates must build
+> mailbox rows, and both `MailboxEntry`'s fields and the `MailboxAccess` mint are what D1/#304 keep
+> private. Neither was widened — they enqueue through the opaque **`ActorDoor`** facade, which
+> builds the row and mints the witness inside `actor_client`. Honest accounting: `ActorDoor` is
+> string-keyed and public, so it *could* address any actor with any message — a capability that did
+> not exist before (`command_entry` was `pub(crate)`). It is contained at level 3 by
+> `actor_door_is_named_only_by_generated_client_crates` (naming it outside `crates/clients/**` is
+> CI-red), landed in the same change; the entry and the witness stay level 4. A `client-door` cargo
+> feature was considered and rejected — feature unification makes it the same tier for real dead-code
+> cost. **Guards**: the two new ones were negative-tested (each fails on a planted violation, not
+> merely green); the lint floor now matches `crates/clients/` by PREFIX so a new actor cannot join
+> below it; the witness scan extends to the client crates; `client_crates_are_exactly_the_mailbox_actors`
+> refuses a hand-made directory the glob would otherwise silently enlist. The typed-send drift guard
+> moved OUT of the crate (`crates/actor_client/tests/drift_guard.rs`) and now runs as a consumer
+> does, comparing rows through the D5 `EntryFixture` mirror over a dev-dependency cycle Cargo
+> permits. Validator unchanged at **0 errors / 33 warnings** (main's baseline).
+> **Not in this change**: C4 (`specs/architecture/**`) is source DSL and needs plan mode — it rides
+> [#309](https://github.com/TheCaptainCompany/captain-food/issues/309)'s "repeat per phase" rule.
+> Phase 3 ([#307](https://github.com/TheCaptainCompany/captain-food/issues/307), per-actor
+> implementation crates) is unstarted and still owes its costing first.
+
 > ✅ **2026-08-03 — [#304 "The Mailbox port surface hole: insert/by_message are pub to any port holder"](https://github.com/TheCaptainCompany/captain-food/issues/304)
 > (PROP-20260802-130500 §5 directive, [ADR-20260803-172654](adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md))**:
 > holding the `Mailbox` port is no longer holding the door. Every port method takes a

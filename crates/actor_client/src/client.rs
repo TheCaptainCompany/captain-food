@@ -121,63 +121,8 @@ impl OperationWatch {
 mod tests {
     use std::sync::Arc;
 
-    use domain::generated::scalars::InboundMessageStatus;
-
     use super::ActorClient;
     use crate::mailbox::mem::MemMailbox;
-    use crate::mailbox::{Envelope, Mailbox};
-
-    /// The read door answers with the very row the write door accepted — same identity, same
-    /// status the mem worker left it in — and `None` for an unknown handle.
-    #[tokio::test]
-    async fn get_operation_status_reads_the_accepted_row_and_none_for_unknown() {
-        let mem = Arc::new(MemMailbox::default());
-        let restaurant_id = uuid::Uuid::from_u128(0xF00D);
-        let message_id = uuid::Uuid::from_u128(0x0B5);
-        let cmd = domain::generated::commands::MarkRestaurantClosed {
-            restaurant_id: domain::generated::scalars::RestaurantId(restaurant_id),
-            reason: None,
-        };
-        let writer = crate::generated::actor_clients::RestaurantClient::new(
-            mem.clone() as Arc<dyn Mailbox>,
-            restaurant_id,
-        );
-        writer
-            .send(
-                cmd,
-                Envelope {
-                    message_id,
-                    correlation_id: message_id,
-                    cause_id: None,
-                    session_id: None,
-                    trace_id: None,
-                    user_id: None,
-                    user_type: "EXTERNAL".into(),
-                    channel: "WORKER".into(),
-                },
-            )
-            .await
-            .expect("typed send");
-
-        let reader = ActorClient::new(mem.clone(), crate::status_bus::OperationStatusBus::default());
-        let row = reader
-            .get_operation_status(message_id)
-            .await
-            .expect("read")
-            .expect("the accepted row is visible through the read door");
-        assert_eq!(row.message_id, message_id);
-        assert_eq!(row.correlation_id, message_id);
-        assert_eq!(row.status, InboundMessageStatus::RECEIVED);
-
-        assert!(
-            reader
-                .get_operation_status(uuid::Uuid::from_u128(0xDEAD))
-                .await
-                .expect("read")
-                .is_none(),
-            "an unknown handle is None — the ownership/oracle policy stays with the caller"
-        );
-    }
 
     /// `watch` is keyed: it delivers the watched operation's transitions in publish order and
     /// silently drops everything else on the shared bus.

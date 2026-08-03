@@ -33,7 +33,7 @@ use domain::generated::scalars::{
     AddressLine, CityName, CountryCode, PostalCode, RestaurantDisplayName, RestaurantId,
     RestaurantListingStatus,
 };
-use actor_client::generated::actor_clients::RestaurantClient;
+use client_restaurant::RestaurantClient;
 use infrastructure::generated::command_router::CommandDeps;
 use actor_client::EnqueueOutcome;
 use infrastructure::mailbox::MailboxCommandHandler;

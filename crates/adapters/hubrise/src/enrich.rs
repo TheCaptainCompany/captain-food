@@ -55,7 +55,7 @@
 use std::sync::Arc;
 
 use actor_client::mailbox::{Envelope, Mailbox};
-use actor_client::generated::actor_clients::CatalogClient;
+use client_catalog::CatalogClient;
 use actor_client::EnqueueOutcome;
 use domain::generated::commands::{ImportCatalog, UpdateOfferStock};
 use domain::shared::errors::DomainError;

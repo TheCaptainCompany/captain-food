@@ -1,8 +1,9 @@
 //! The shared mailbox-entry CONSTRUCTORS (ADR-20260731-122500 "the mailbox is the only door"):
 //! the one place a typed message becomes a [`MailboxEntry`] row. Producers never see this module —
-//! the only doors offered outside the crate are the GENERATED typed actor clients
-//! (`crate::generated::actor_clients`), which delegate here — so a typed send and any other
-//! channel can never drift on lane, partition, principal or channel.
+//! the only doors offered outside the crate are the GENERATED typed actor clients — since phase 2
+//! (#306) one crate per actor under `crates/clients/`, reaching these constructors through the
+//! opaque [`crate::ActorDoor`] — so a typed send and any other channel can never drift on lane,
+//! partition, principal or channel.
 //!
 //! Since #290 phase 1 (PROP-20260802-130500 D1) the boundary is the CRATE: `MailboxEntry` fields
 //! are `pub(crate)`, so these constructors physically cannot be re-implemented anywhere else. The
@@ -13,7 +14,7 @@ use crate::mailbox::{
     Envelope, Mailbox, MailboxAccess, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
 };
 // Only the test-only `enqueue_worker_command` reference implementation still takes an `Actor`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-fixtures"))]
 use application::ports::Actor;
 use domain::generated::scalars::InboundMessageStatus;
 use domain::shared::errors::DomainError;
@@ -67,10 +68,11 @@ pub(crate) fn declared_identity(
 }
 
 /// TEST-ONLY since #284 slice 3 (the typed clients are the door, and no production caller
-/// remains): kept as the string-keyed reference implementation the drift guard (`drift_guard`
-/// tests below) compares the typed `send` against, field for field.
-#[cfg(test)]
-pub(crate) async fn enqueue_worker_command(
+/// remains): kept as the string-keyed reference implementation the drift guard compares the typed
+/// `send` against, field for field. Exported under `test-fixtures` since phase 2 (#306) — the
+/// guard moved to `tests/drift_guard.rs` when the clients it exercises became separate crates.
+#[cfg(any(test, feature = "test-fixtures"))]
+pub async fn enqueue_worker_command(
     mailbox: &dyn Mailbox,
     message_id: uuid::Uuid,
     command_type: &str,
@@ -105,9 +107,9 @@ pub(crate) async fn enqueue_worker_command(
 }
 
 /// The one place a typed COMMAND becomes a [`MailboxEntry`] (kind COMMAND). Shared by
-/// [`enqueue_worker_command`] and the generated typed actor clients
-/// (`crate::generated::actor_clients`), so the two doors cannot drift on lane, partition or
-/// envelope columns — the clients only assemble typed inputs and delegate here.
+/// [`enqueue_worker_command`] and the generated typed actor clients (one crate per actor since
+/// phase 2, reaching it via [`crate::ActorDoor`]), so the two doors cannot drift on lane, partition
+/// or envelope columns — the clients only assemble typed inputs and delegate here.
 pub(crate) fn command_entry(
     actor_type: &str,
     width: u16,
@@ -151,6 +153,17 @@ pub(crate) fn command_entry(
 /// are derived by the shared [`inbound_entry`] constructor, exactly as for a typed client
 /// `record` — and its `event_type` is validated against the actor's declared `receives` at the
 /// door. Singular producers hold TYPED facts and go through a client's `record`.
+/// Always `pub` because the shared constructors and the door take it, but only RE-EXPORTED under
+/// `bulk-door` — so in a build that does not light that feature it is unreachable from the crate
+/// root and the boundary crate's `unreachable_pub = deny` fires. Phase 2 (#306) made that build
+/// configuration real: a client crate's dependency graph is `actor_client` with no features at
+/// all, whereas before only the whole workspace (where `infrastructure` lights the feature) was
+/// ever compiled. The item is deliberately not feature-gated itself — `record` needs it in every
+/// configuration.
+#[cfg_attr(
+    not(any(feature = "bulk-door", feature = "test-fixtures", test)),
+    allow(unreachable_pub)
+)]
 #[derive(Debug, Clone)]
 pub struct InboundFact {
     pub source: String,
@@ -176,10 +189,15 @@ pub fn inbound_message_id(source: &str, external_id: &str) -> uuid::Uuid {
     uuid::Uuid::new_v5(&inbound_namespace(), format!("{source}:{external_id}").as_bytes())
 }
 
-/// Enqueue one adapted inbound fact. CRATE-INTERNAL since #284 slice 3: the generated clients'
-/// `record` delegates here (and the drift guard compares against it); adapters record TYPED facts
-/// through those clients.
-pub(crate) async fn enqueue_inbound_fact(
+/// Enqueue one adapted inbound fact. The generated clients' `record` delegates here through
+/// [`crate::ActorDoor::record_fact`] (and the drift guard compares against it); adapters record
+/// TYPED facts through those clients.
+///
+/// Declared `pub` with the RE-EXPORT cfg-gated (rather than a cfg-duplicated `pub`/`pub(crate)`
+/// pair) so there is exactly one definition: outside `test-fixtures` it is unreachable from the
+/// crate root and stays crate-internal in practice, which is what the allow below records.
+#[cfg_attr(not(any(test, feature = "test-fixtures")), allow(unreachable_pub))]
+pub async fn enqueue_inbound_fact(
     mailbox: &dyn Mailbox,
     fact: InboundFact,
 ) -> Result<EnqueueOutcome, DomainError> {
@@ -278,6 +296,11 @@ pub(crate) fn inbound_entry(fact: InboundFact) -> Result<MailboxEntry, DomainErr
 /// why the guard fails the MANIFEST grant, the reviewable act); (b) every fact's `event_type` is
 /// validated against the target actor's declared `receives` in [`inbound_entry`] — the runtime
 /// re-proof of what the sealed `{Actor}Fact` traits prove at compile time on the typed path.
+/// Unreachable AND uncalled when `bulk-door` is off (see [`InboundFact`] for why that build now
+/// exists): the feature is what exports it, and `infrastructure` is the only crate that may light
+/// it. Both allows are scoped to the feature-off configuration so that lighting the feature still
+/// gets the full lint treatment.
+#[cfg_attr(not(feature = "bulk-door"), allow(unreachable_pub, dead_code))]
 pub async fn enqueue_inbound_facts(
     mailbox: &dyn Mailbox,
     facts: Vec<InboundFact>,
@@ -460,202 +483,15 @@ pub fn surrogate_actor_id(actor_type: &str, key: &str) -> uuid::Uuid {
 // Tests
 // ================================================================================================
 
-/// Drift guards for the GENERATED typed actor clients (#284 slice 1, PROP-20260728-152752 §2.1):
-/// a typed `send` must produce the very mailbox row `enqueue_worker_command` builds for the same
-/// inputs, and a typed `record` the very row `enqueue_inbound_fact` builds — field for field.
-/// If either assertion ever fails, the clients stopped delegating to the shared constructors in
-/// this module and the two doors have drifted. In-memory mailbox double; no Postgres.
-///
-/// These live as UNIT tests since #284 slice 3: the free-function door is crate-internal — the
-/// guard deliberately compares the public typed door against the crate-internal reference
-/// implementation, which only an in-crate test can still name.
+/// The one door guard that still belongs INSIDE the crate: it is about the UNTYPED bulk path, so
+/// it needs no typed client and gains nothing from crossing the crate line. Its typed siblings
+/// moved to `tests/drift_guard.rs` with phase 2 (#306), where they exercise the per-actor client
+/// crates exactly as a consumer does.
 #[cfg(test)]
-mod drift_guard {
-    use std::sync::Arc;
-
+mod bulk_door_guard {
     use crate::mailbox::mem::MemMailbox;
-    use crate::mailbox::{Envelope, MailboxEntry};
-    use application::ports::Actor;
-    use domain::generated::commands::MarkRestaurantClosed;
-    use domain::generated::entities::Money;
-    use domain::generated::events::PaymentCaptured;
-    use domain::generated::scalars::{CurrencyCode, MoneyCents, PaymentIntentId, RestaurantId};
 
-    use super::{
-        enqueue_inbound_fact, enqueue_worker_command, inbound_message_id, surrogate_actor_id,
-        EnqueueOutcome, InboundFact,
-    };
-    use crate::generated::actor_clients::{PaymentClient, RestaurantClient};
-
-    /// Field-for-field equality (MailboxEntry deliberately does not derive PartialEq), by FULL
-    /// destructuring with no `..` rest pattern — so adding an 18th column to `MailboxEntry` is a
-    /// COMPILE error here, not a silently-unasserted field. That structural exhaustiveness is the
-    /// guard's guarantee; a named-field comparison list only covers the columns someone remembered.
-    fn assert_same_entry(typed: &MailboxEntry, free: &MailboxEntry) {
-        let MailboxEntry {
-            message_id,
-            kind,
-            actor_type,
-            actor_id,
-            partition,
-            message_type,
-            payload,
-            payload_hash,
-            channel,
-            user_id,
-            user_type,
-            correlation_id,
-            cause_id,
-            session_id,
-            trace_id,
-            source,
-            external_id,
-        } = typed;
-        let MailboxEntry {
-            message_id: f_message_id,
-            kind: f_kind,
-            actor_type: f_actor_type,
-            actor_id: f_actor_id,
-            partition: f_partition,
-            message_type: f_message_type,
-            payload: f_payload,
-            payload_hash: f_payload_hash,
-            channel: f_channel,
-            user_id: f_user_id,
-            user_type: f_user_type,
-            correlation_id: f_correlation_id,
-            cause_id: f_cause_id,
-            session_id: f_session_id,
-            trace_id: f_trace_id,
-            source: f_source,
-            external_id: f_external_id,
-        } = free;
-        assert_eq!(message_id, f_message_id, "message_id");
-        assert_eq!(kind, f_kind, "kind");
-        assert_eq!(actor_type, f_actor_type, "actor_type");
-        assert_eq!(actor_id, f_actor_id, "actor_id");
-        assert_eq!(partition, f_partition, "partition");
-        assert_eq!(message_type, f_message_type, "message_type");
-        assert_eq!(payload, f_payload, "payload");
-        assert_eq!(payload_hash, f_payload_hash, "payload_hash");
-        assert_eq!(channel, f_channel, "channel");
-        assert_eq!(user_id, f_user_id, "user_id");
-        assert_eq!(user_type, f_user_type, "user_type");
-        assert_eq!(correlation_id, f_correlation_id, "correlation_id");
-        assert_eq!(cause_id, f_cause_id, "cause_id");
-        assert_eq!(session_id, f_session_id, "session_id");
-        assert_eq!(trace_id, f_trace_id, "trace_id");
-        assert_eq!(source, f_source, "source");
-        assert_eq!(external_id, f_external_id, "external_id");
-    }
-
-    #[tokio::test]
-    async fn typed_send_builds_the_same_row_as_enqueue_worker_command() {
-        let restaurant_id = uuid::Uuid::from_u128(0xF00D);
-        let cmd = MarkRestaurantClosed {
-            restaurant_id: RestaurantId(restaurant_id),
-            reason: Some("SIRENE closure".into()),
-        };
-        let message_id = uuid::Uuid::from_u128(0x1);
-        let actor = Actor {
-            user_id: uuid::Uuid::from_u128(0x2),
-            user_type: "EXTERNAL".into(),
-            domain_id: None,
-            correlation_id: uuid::Uuid::from_u128(0x3),
-            cause_id: Some(uuid::Uuid::from_u128(0x4)),
-        };
-
-        let free = MemMailbox::default();
-        let outcome = enqueue_worker_command(
-            &free,
-            message_id,
-            "MarkRestaurantClosed",
-            serde_json::to_value(&cmd).expect("serialize command"),
-            &actor,
-        )
-        .await
-        .expect("free-function enqueue");
-        assert_eq!(outcome, EnqueueOutcome::Enqueued);
-
-        let typed = Arc::new(MemMailbox::default());
-        let client = RestaurantClient::new(typed.clone(), restaurant_id);
-        let env = Envelope {
-            message_id,
-            correlation_id: actor.correlation_id,
-            cause_id: actor.cause_id,
-            session_id: None,
-            trace_id: None,
-            user_id: Some(actor.user_id),
-            user_type: actor.user_type.clone(),
-            channel: "WORKER".into(),
-        };
-        assert_eq!(client.send(cmd, env).await.expect("typed send"), EnqueueOutcome::Enqueued);
-
-        assert_same_entry(
-            &typed.entry(message_id).expect("typed row"),
-            &free.entry(message_id).expect("free row"),
-        );
-    }
-
-    #[tokio::test]
-    async fn typed_record_builds_the_same_row_as_enqueue_inbound_fact() {
-        let fact = PaymentCaptured {
-            payment_intent_id: PaymentIntentId("pi_84".into()),
-            order_id: None,
-            restaurant_id: RestaurantId(uuid::Uuid::from_u128(0xF00D)),
-            amount: Money { amount_cents: MoneyCents(1990), currency: CurrencyCode("EUR".into()) },
-        };
-        // The Payment lane id is the UUIDv5 surrogate over the gateway's intent id — the same key
-        // the Stripe ACL uses, so the typed client and the adapter land on the same lane.
-        let actor_id = surrogate_actor_id("Payment", "pi_84");
-        let correlation_id = uuid::Uuid::from_u128(0xC0);
-        let tagged = serde_json::json!({
-            "eventType": "PaymentCaptured",
-            "payload": serde_json::to_value(&fact).expect("serialize fact"),
-        });
-
-        let free = MemMailbox::default();
-        let outcome = enqueue_inbound_fact(
-            &free,
-            InboundFact {
-                source: "stripe".into(),
-                external_id: "evt_84".into(),
-                event_type: "PaymentCaptured".into(),
-                payload: tagged,
-                correlation_id,
-                actor_type: "Payment".into(),
-                actor_id,
-            },
-        )
-        .await
-        .expect("free-function enqueue");
-        assert_eq!(outcome, EnqueueOutcome::Enqueued);
-
-        let typed = Arc::new(MemMailbox::default());
-        let client = PaymentClient::new(typed.clone(), actor_id);
-        assert_eq!(
-            client.record(fact, "stripe", "evt_84", correlation_id).await.expect("typed record"),
-            EnqueueOutcome::Enqueued
-        );
-
-        // The identity MUST be the deterministic (source, external_id) key — never caller-minted —
-        // or webhook redelivery double-applies instead of colliding on the pk.
-        let message_id = inbound_message_id("stripe", "evt_84");
-        let typed_row =
-            typed.entry(message_id).expect("typed row keyed by the deterministic inbound id");
-        assert_same_entry(&typed_row, &free.entry(message_id).expect("free row"));
-
-        // The wire form must be the DOMAIN ENUM's own representation, not a hand-built literal that
-        // happens to match it today: round-trip through `DomainEvent` so a tag/content rename in
-        // the domain emitter fails HERE instead of at delivery time in production.
-        let round_tripped: domain::generated::events::DomainEvent =
-            serde_json::from_value(typed_row.payload.clone())
-                .expect("recorded payload deserializes as DomainEvent — the delivery route's own type");
-        assert!(
-            matches!(round_tripped, domain::generated::events::DomainEvent::PaymentCaptured(_)),
-            "the adjacent tag routes back to the variant that was recorded"
-        );
-    }
+    use super::{enqueue_inbound_fact, InboundFact};
 
     /// BLOCKING-1b invariant (#290 review): the UNTYPED bulk door must refuse an event type the
     /// target actor does not `receive` — singular and batched forms alike, since both feed the
@@ -703,80 +539,5 @@ mod drift_guard {
             .expect_err("a tag/event_type mismatch must refuse");
         assert!(err.to_string().contains("payload tag"), "the error names the mismatch: {err}");
         assert!(mailbox.entries().is_empty(), "nothing reaches the mailbox on a refusal");
-    }
-
-    /// Fix-1 invariant (#288 review): a payload whose DECLARED identity names a DIFFERENT
-    /// aggregate than the client's lane must be REFUSED at the door. Accepting it would park the
-    /// command on one lane while the handler acts on another aggregate — per-aggregate
-    /// serialization silently broken, which is the exact failure the mailbox exists to prevent.
-    #[tokio::test]
-    async fn a_mis_addressed_send_is_refused() {
-        let lane = uuid::Uuid::from_u128(0xAAAA);
-        let other = uuid::Uuid::from_u128(0xBBBB);
-        let cmd = MarkRestaurantClosed { restaurant_id: RestaurantId(other), reason: None };
-        let mailbox = Arc::new(MemMailbox::default());
-        let client = RestaurantClient::new(mailbox.clone(), lane);
-
-        let err = client
-            .send(cmd, test_envelope(uuid::Uuid::from_u128(0x10)))
-            .await
-            .expect_err("identity mismatch must refuse, not mis-file");
-        assert!(err.to_string().contains("does not match"), "the error names the mismatch: {err}");
-        assert!(mailbox.entries().is_empty(), "nothing may reach the mailbox on a refused send");
-    }
-
-    /// Typed `schedule` has no free-function counterpart (it mints the first kind-COMMAND
-    /// SCHEDULED rows), so its guard is ABSOLUTE assertions instead of a drift comparison: the row
-    /// must carry the same `command_entry` columns as an immediate send plus the `scheduled_at`
-    /// the caller gave — and `cancel_scheduling` must withdraw it exactly once.
-    ///
-    /// Exercises the ORDER client on purpose: the scheduling surface is SPEC-GATED (product-owner
-    /// directive, 2026-08-02 — no `schedule`/`cancel_scheduling` without a `reminders:` declaration), and
-    /// Order is the one declaring actor today. A `RestaurantClient` (no declaration) has no
-    /// `schedule` method at all — that absence is a compile fact, not something a runtime test
-    /// can assert.
-    #[tokio::test]
-    async fn typed_schedule_parks_a_command_row_and_cancel_withdraws_it_once() {
-        let order_id = uuid::Uuid::from_u128(0x0DE7);
-        let cmd = domain::generated::commands::MarkOrderDelivered {
-            order_id: domain::generated::scalars::OrderId(order_id),
-            restaurant_id: RestaurantId(uuid::Uuid::from_u128(0xF00D)),
-        };
-        let message_id = uuid::Uuid::from_u128(0x5C);
-        let at = chrono::DateTime::parse_from_rfc3339("2026-08-03T06:00:00Z")
-            .expect("fixed timestamp")
-            .with_timezone(&chrono::Utc);
-
-        let mailbox = Arc::new(MemMailbox::default());
-        let client = crate::generated::actor_clients::OrderClient::new(mailbox.clone(), order_id);
-        client.schedule(cmd, test_envelope(message_id), at).await.expect("typed schedule");
-
-        let row = mailbox.entry(message_id).expect("scheduled row");
-        assert_eq!(row.kind(), "COMMAND");
-        assert_eq!(row.actor_type(), "Order");
-        assert_eq!(row.actor_id(), order_id);
-        assert_eq!(row.message_type(), "MarkOrderDelivered");
-        assert_eq!(row.partition(), crate::partition::stable_partition(&order_id, 5));
-        assert_eq!(mailbox.scheduled_at(message_id), Some(at), "parked until due, not delivered now");
-
-        assert!(client.cancel_scheduling(message_id).await.expect("cancel"), "a SCHEDULED row cancels");
-        assert!(
-            !client.cancel_scheduling(message_id).await.expect("second cancel"),
-            "a spent cancellation reports false, not an error"
-        );
-    }
-
-    /// The envelope every test hands the client — deterministic ids, WORKER channel.
-    fn test_envelope(message_id: uuid::Uuid) -> Envelope {
-        Envelope {
-            message_id,
-            correlation_id: uuid::Uuid::from_u128(0x3),
-            cause_id: None,
-            session_id: None,
-            trace_id: None,
-            user_id: Some(uuid::Uuid::from_u128(0x2)),
-            user_type: "EXTERNAL".into(),
-            channel: "WORKER".into(),
-        }
     }
 }
