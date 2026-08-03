@@ -3,6 +3,25 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-03 — [#302 "Lint floor (PROP-20260802-130500 D6): workspace [lints] + cargo-machete in CI"](https://github.com/TheCaptainCompany/captain-food/issues/302)**:
+> the D6 lint floor is in force. Workspace `[workspace.lints.rust]` sets `unsafe_code = "forbid"`
+> (no crate writes unsafe today; a future FFI crate opts out via its own `[lints]` table — a
+> visible one-crate manifest diff, never a workspace-wide relaxation), inherited by every member
+> via `[lints] workspace = true`. BOUNDARY crates (`actor_client`, `infrastructure`, `telemetry`,
+> the five partner adapters) additionally carry `unreachable_pub = "deny"` in their own `[lints]`
+> tables — a dead `pub` on a boundary is now a compile error (the mechanical form of
+> [ADR-20260802-170059](adr/ADR-20260802-170059-client-surface-is-spec-gated.md)); measurement
+> found the whole set already clean except 5 items narrowed to `pub(crate)` (3 hubrise env-name
+> consts, telemetry's `HoneycombHttpClient`). `server` is deliberately NOT in the boundary set:
+> 207 findings, mostly in the generated GraphQL layer — widening the floor there is emitter work,
+> a recorded follow-up, not part of this pure-configuration change. `cargo-machete` gates CI
+> (before the build — static analysis, fails fast) and removed six genuinely unused deps
+> (`serde` in actor_runtime/app-core, `chrono` in four adapters — each an unheld capability).
+> Codegen guard `lint_floor_covers_every_member` (verified red) asserts the workspace baseline
+> exists, every member inherits or restates it (FFI opt-outs must be allowlisted with a reason),
+> boundary crates keep the deny, and ci.yml keeps `cargo machete` — a new crate cannot silently
+> skip the floor.
+
 > ✅ **2026-08-03 — [#318 "DB-persisted PM_MAILBOX_DELIVERY posture — precondition for adapter worker fleets (ADR-20260803-002712 Q4)"](https://github.com/TheCaptainCompany/captain-food/issues/318)
 > ([PR #322](https://github.com/TheCaptainCompany/captain-food/pull/322),
 > [ADR-20260803-104819](adr/20260803-104819-db-persisted-pm-mailbox-delivery-posture.md))**: the

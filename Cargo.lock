@@ -28,7 +28,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "serde",
  "serde_json",
  "sqlx",
  "tokio",
@@ -117,7 +116,6 @@ name = "app-core"
 version = "0.1.0"
 dependencies = [
  "domain",
- "serde",
  "shared_types",
 ]
 
@@ -373,7 +371,6 @@ dependencies = [
  "application",
  "async-trait",
  "axum",
- "chrono",
  "domain",
  "hex",
  "hmac",
@@ -675,7 +672,6 @@ dependencies = [
  "application",
  "async-trait",
  "axum",
- "chrono",
  "domain",
  "hex",
  "hmac",
@@ -3835,7 +3831,6 @@ dependencies = [
  "application",
  "async-trait",
  "axum",
- "chrono",
  "domain",
  "hex",
  "hmac",
@@ -4407,7 +4402,6 @@ dependencies = [
  "application",
  "async-trait",
  "axum",
- "chrono",
  "domain",
  "hex",
  "hmac",

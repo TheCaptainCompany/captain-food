@@ -40,6 +40,18 @@ members = [
 edition = "2021"
 license-file = "LICENSE.md"
 
+# The D6 LINT FLOOR (PROP-20260802-130500, #302): the workspace-wide lint baseline every member
+# inherits via `[lints] workspace = true`. `unsafe_code = forbid`: no crate in this workspace
+# writes unsafe today, and an AI session must not be able to introduce an unsafe block silently —
+# the day a real FFI crate needs one (shared_types/UniFFI, desktop/Tauri), it replaces
+# `workspace = true` with its own `[lints]` table, a visible one-crate manifest diff to review,
+# never a workspace-wide relaxation. Boundary crates additionally deny `unreachable_pub` in their
+# own `[lints]` tables (Cargo inheritance is all-or-nothing, so they restate the floor there).
+# The floor is guarded by the codegen test `lint_floor_covers_every_member` — a new member crate
+# cannot silently skip it.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 # Optimized release profile for the deployed `server` binary. This tunes the RUNTIME performance of the
 # generated code and is independent of the build method (Docker vs native cargo) — the binary runs the same
 # either way; these flags are what actually make it faster. `panic = "abort"` is deliberately NOT set: the

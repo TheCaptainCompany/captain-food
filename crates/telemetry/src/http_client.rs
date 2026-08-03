@@ -20,12 +20,12 @@ use opentelemetry_http::{HttpClient, HttpError};
 /// An `HttpClient` over `reqwest::Client`. Cheap to clone (reqwest clones share the connection pool),
 /// so the trace and metric exporters share one pool rather than opening two.
 #[derive(Debug, Clone)]
-pub struct HoneycombHttpClient {
+pub(crate) struct HoneycombHttpClient {
     inner: reqwest::Client,
 }
 
 impl HoneycombHttpClient {
-    pub fn new() -> Result<Self, reqwest::Error> {
+    pub(crate) fn new() -> Result<Self, reqwest::Error> {
         let inner = reqwest::Client::builder()
             // Export must never outlive the batch interval it belongs to: a hung POST would otherwise
             // pin a batch and let the queue grow behind it, turning a telemetry outage into memory

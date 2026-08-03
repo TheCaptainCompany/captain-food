@@ -15,7 +15,6 @@ license-file.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 chrono = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["chrono", "uuid", "json"] }
 tokio = { workspace = true, features = ["sync", "time"] }
@@ -24,3 +23,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

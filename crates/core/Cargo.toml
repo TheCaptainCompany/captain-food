@@ -10,4 +10,7 @@ description = "Captain.Food Crux core (app-shell over the domain): typed app sta
 [dependencies]
 domain = { path = "../domain" }
 shared_types = { path = "../shared_types" }
-serde = { workspace = true }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

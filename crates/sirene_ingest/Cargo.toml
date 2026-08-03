@@ -34,3 +34,7 @@ sqlx = { workspace = true, features = ["uuid", "chrono", "json"] }
 # Same TLS choice as the rest of the workspace: SChannel on Windows dev boxes, OpenSSL on the
 # Linux CI image (no C toolchain needed for rustls' `ring`).
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

@@ -208,6 +208,16 @@ scratchpad directory (session-specific paths), so a resumed branch reuses it by 
 don't initdb a fresh cluster when yesterday's is one `pg_ctl start` away. Diagnose "tests
 suddenly failing" with `pg_isready`/`psql` FIRST, before reading a single line of code.
 
+## 11. Installing a dev tool: crates.io works, GitHub release downloads do not
+
+The session proxy scopes GitHub — the REST API **and** release-asset downloads — to the
+repositories attached to the session: `curl https://api.github.com/repos/<other-owner>/...`
+returns 403 with an `add_repo` hint, and a `releases/latest/download/<asset>` URL "succeeds"
+with a tiny error body that only surfaces when `tar` rejects it (cost: one debugging round while
+fetching a prebuilt cargo-machete, 2026-08-03). `cargo install <tool> --locked` from crates.io
+works fine (~2–3 min compile) — go straight there for Rust tooling; do not burn turns on
+prebuilt-binary URLs.
+
 **A DB-gated suite that is green in CI can still be order-dependent** — CI runs the whole
 workspace against ONE shared database, so a suite can silently depend on a table a SIBLING suite
 leaves behind (`graphql_write_path` needed `catalog`, created only by other suites' resets; alone

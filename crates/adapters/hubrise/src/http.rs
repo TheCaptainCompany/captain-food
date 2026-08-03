@@ -27,12 +27,12 @@ use crate::raw::RawHubRiseCallbacks;
 
 /// HubRise app client id — enables the connect flow (with the client secret, which doubles as the
 /// webhook HMAC key: `HUBRISE_WEBHOOK_SECRET`).
-pub const HUBRISE_CLIENT_ID_ENV: &str = "HUBRISE_CLIENT_ID";
+pub(crate) const HUBRISE_CLIENT_ID_ENV: &str = "HUBRISE_CLIENT_ID";
 /// OAuth scope requested on connect. Default: account-wide catalog+inventory read — one token covers
 /// every location of the account (`docs/integrations/hubrise-process.md` §0).
-pub const HUBRISE_OAUTH_SCOPE_ENV: &str = "HUBRISE_OAUTH_SCOPE";
+pub(crate) const HUBRISE_OAUTH_SCOPE_ENV: &str = "HUBRISE_OAUTH_SCOPE";
 /// The public URL HubRise redirects back to (this deployable's `/adapters/hubrise/oauth/callback`).
-pub const HUBRISE_CONNECT_REDIRECT_URL_ENV: &str = "HUBRISE_CONNECT_REDIRECT_URL";
+pub(crate) const HUBRISE_CONNECT_REDIRECT_URL_ENV: &str = "HUBRISE_CONNECT_REDIRECT_URL";
 
 const DEFAULT_OAUTH_SCOPE: &str = "account[catalog.read,inventory.read]";
 const AUTHORIZE_URL: &str = "https://manager.hubrise.com/oauth2/v1/authorize";

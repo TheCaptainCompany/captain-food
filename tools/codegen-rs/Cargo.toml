@@ -15,3 +15,7 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 # preserve_order: JSON.stringify keeps object insertion order; match it (map/desc payloads in the HTML doc).
 serde_json = { version = "1", features = ["preserve_order"] }
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true

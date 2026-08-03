@@ -60,3 +60,7 @@ ssr = ["leptos/ssr"]
 # Client hydration path (wasm32): attach to the server-rendered DOM. Built by trunk, not by CI's
 # native workspace build.
 hydrate = ["leptos/hydrate", "dep:wasm-bindgen"]
+
+# D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
+[lints]
+workspace = true
