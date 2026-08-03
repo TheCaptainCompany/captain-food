@@ -341,8 +341,12 @@ unresolved questions live on the tracking issue's checklist.
 | D4 | Poison policy | `attempts` cap (default 5) → terminal `FAILED` + error on the row | ✅ as recommended (2026-08-02) |
 | D5 | Gating | Own toggle (worker-toggle pattern) + `MAILBOX_MAX_DELIVERY_ATTEMPTS` (0 = today) | ✅ as recommended (2026-08-02) |
 
-Unresolved questions (proposal §Unresolved): requeue tooling, backoff shape, poison alerting
-(page for Payment/PlaceOrderProcess?), adapter-side fleet posture once push is live.
+Unresolved questions — **all four decided 2026-08-03**
+([ADR-20260803-002712](../adr/20260803-002712-mailbox-poison-follow-ups-decided.md)): admin
+requeue mutation ([#315](https://github.com/TheCaptainCompany/captain-food/issues/315)) ·
+exponential backoff ([#316](https://github.com/TheCaptainCompany/captain-food/issues/316)) ·
+page on EVERY poison ([#317](https://github.com/TheCaptainCompany/captain-food/issues/317)) ·
+fleets default-off until DB-persisted posture ([#318](https://github.com/TheCaptainCompany/captain-food/issues/318)).
 
 ---
 
