@@ -64,7 +64,7 @@ rounds shaped it, and the honest tally matters because it is the evidence #331 w
 | `616934b` | the fourth const position (trait-declared); `cfg_attr(.., derive(..))` | +34 |
 | `869d9d3` | items nested in a function body; nested `cfg_attr` | +18 |
 | `8d4c3db` | three inline copies of the cfg gate, the weakest deciding whether an item was scanned at all | +18 |
-| `d0c…` (this one) | the cfg evaluator's feature LEAF was still a substring match | −3 |
+| `bdf6f9f` | the cfg evaluator's feature LEAF was still a substring match | −3 |
 
 So: **~191 net functional lines over seven rounds**, not "a few small patches" — and three of them are
 at or under twenty lines, not two. Row 1 is the odd one out: it was not an adjacent position but a
