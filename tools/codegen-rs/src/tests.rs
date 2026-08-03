@@ -1883,17 +1883,7 @@ keys:
     /// OFF — every release build. Pass 4 used that to make the guard's own excuse mechanism grant
     /// the mint.
     fn is_test_only_cfg(attrs: &[syn::Attribute]) -> bool {
-        attrs.iter().any(|a| {
-            if !a.path().is_ident("cfg") {
-                return false;
-            }
-            let m = &a.meta;
-            let toks = quote::quote!(#m).to_string();
-            // WHOLE tokens: a substring match honours `#[cfg(feature = "fastest")]` as a test
-            // gate and stops scanning everything under it, in release.
-            cfg_tokens(&toks).iter().any(|t| *t == "test" || *t == "test-fixtures")
-                && !toks.contains("not (")
-        })
+        attrs.iter().any(attr_is_test_only)
     }
 
     /// A cfg attribute's token stream split into whole words (keeping `-`/`_` so feature names
@@ -1927,7 +1917,7 @@ keys:
             };
             let mut it = nested.iter();
             let Some(cond) = it.next() else { return Vec::new() };
-            if is_positively_test_only(&quote::quote!(#cond).to_string()) {
+            if cfg_is_test_only(cond) {
                 return Vec::new();
             }
             return it.flat_map(derives_from_meta).collect();
@@ -1935,25 +1925,64 @@ keys:
         Vec::new()
     }
 
-    /// Is this cfg CONDITION satisfied only in a test build?
+    /// Is this cfg predicate satisfied ONLY in a test build — evaluated over the cfg tree rather
+    /// than sniffed for the substring `test`?
     ///
-    /// `any(test, feature = "serde")` mentions `test` and fires in every release build with the
-    /// feature on, so a "does it mention test" check reads it as a gate — `any(..)` is refused for
-    /// that reason, as is `not(..)`. One predicate, shared, because the inline copy of this logic
-    /// in the derive arm drifted from the original and reopened the hole it was written to close.
-    fn is_positively_test_only(cond: &str) -> bool {
-        cfg_tokens(cond).iter().any(|t| *t == "test" || *t == "test-fixtures")
-            && !cond.contains("not (")
-            && !cond.contains("any (")
+    /// The distinction is a door. `any(test, feature = "serde")` MENTIONS `test` and fires in every
+    /// release build with the feature on, so a mention-check reads it as a gate and stops scanning
+    /// everything under it. Refusing `any(..)` outright is not the fix either: the real
+    /// `#[cfg(any(test, feature = "test-fixtures"))]` on the fixtures module is a legitimate
+    /// all-test-disjuncts `any` that must keep passing. So: `any` is test-only when EVERY disjunct
+    /// is, `all` when ANY conjunct is, and `not` never (conservative).
+    ///
+    /// One predicate, actually shared — `is_test_only_cfg`, `is_fixtures_gate` and the
+    /// `cfg_attr`-derive arm all route through it. Three inline near-copies of this logic existed
+    /// before, they were not identical, and the weakest of them decided whether a whole item was
+    /// scanned at all.
+    fn cfg_is_test_only(m: &syn::Meta) -> bool {
+        let path_is = |p: &syn::Path, n: &str| p.is_ident(n);
+        match m {
+            // `test`
+            syn::Meta::Path(p) => path_is(p, "test"),
+            // `feature = "test-fixtures"`
+            syn::Meta::NameValue(nv) => {
+                path_is(&nv.path, "feature")
+                    && quote::quote!(#nv).to_string().contains("test-fixtures")
+            }
+            syn::Meta::List(l) => {
+                let Ok(inner) = l.parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                ) else {
+                    return false;
+                };
+                if path_is(&l.path, "any") {
+                    !inner.is_empty() && inner.iter().all(cfg_is_test_only)
+                } else if path_is(&l.path, "all") {
+                    inner.iter().any(cfg_is_test_only)
+                } else if path_is(&l.path, "feature") {
+                    quote::quote!(#l).to_string().contains("test-fixtures")
+                } else {
+                    // `not(..)` and anything unrecognised: never a gate.
+                    false
+                }
+            }
+        }
+    }
+
+    /// The same question asked of a whole `#[cfg(..)]` ATTRIBUTE.
+    fn attr_is_test_only(a: &syn::Attribute) -> bool {
+        if !a.path().is_ident("cfg") {
+            return false;
+        }
+        a.parse_args::<syn::Meta>().map(|m| cfg_is_test_only(&m)).unwrap_or(false)
     }
 
     /// Specifically a POSITIVE `test-fixtures` gate — what makes the one public mint legitimate.
     fn is_fixtures_gate(attrs: &[syn::Attribute]) -> bool {
         attrs.iter().any(|a| {
-            a.path().is_ident("cfg") && {
+            attr_is_test_only(a) && {
                 let m = &a.meta;
-                let t = quote::quote!(#m).to_string();
-                cfg_tokens(&t).contains(&"test-fixtures") && !t.contains("not (")
+                quote::quote!(#m).to_string().contains("test-fixtures")
             }
         })
     }
@@ -2597,8 +2626,9 @@ keys:
         refs: std::collections::HashSet<String>,
     }
 
-    /// Items declared inside a function BODY. Rust does not scope them to the body — an `impl`
-    /// written in a fn applies crate-wide — so `fn setup() { impl Held { pub(crate) const H: W = W(()); } }`
+    /// Items declared inside a function BODY. An `impl` written in a fn is NOT scoped to it —
+    /// rustc says so itself ("an `impl` is never scoped, even when it is nested inside an item") —
+    /// so `fn setup() { impl Held { pub(crate) const H: W = W(()); } }`
     /// puts a mint in the crate while the walk sees only a private, never-called `setup`.
     fn nested_items(block: &syn::Block) -> Vec<syn::Item> {
         block

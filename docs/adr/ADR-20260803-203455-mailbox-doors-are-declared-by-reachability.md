@@ -54,16 +54,28 @@ proposal rather than a test — tracked as
 so the deferral is visible in the prioritised backlog rather than living only in this sentence.
 
 **How this guard is maintained, stated so nobody mistakes it for a proof.** Six adversarial review
-rounds have each found an ADJACENT POSITION of a class already covered — three const positions then
-the fourth; one derive spelling, then `cfg_attr`, then nested `cfg_attr`; module-level items, then
-items nested in a function body. Every one was a traversal gap fixed in under twenty lines, and
-every one was found by a reviewer rather than by the guard. That is the expected cost of a syntactic
-tool, and it is the reason the scope sentence above is written the way it is. This check is
-defence-in-depth over a boundary the COMPILER already enforces against out-of-crate callers
-(ADR-20260803-172654): it earns its place by catching the plausible in-crate accident — a
-scoped-capability helper written `pub` instead of `pub(crate)` — not by being exhaustive. Treat a
-new bypass of this shape as maintenance, not as a design failure; and if the exhaustive property is
-ever actually wanted, that is #331, not another traversal patch.
+rounds shaped it, and the honest tally matters because it is the evidence #331 will be decided on:
+
+| round | what it found | net functional lines in `tests.rs` |
+|---|---|---|
+| `e330228` | **not** an adjacent position — the seed and call graph were TEXT-based, and the completeness claim was an overclaim | +53 |
+| `91e138e` | same-ident call edges dropped; string literals treated as code | +12 |
+| `8105e92` | `const`/`static` initializers unscanned; `derive` on the witness | +59 |
+| `616934b` | the fourth const position (trait-declared); `cfg_attr(.., derive(..))` | +34 |
+| `869d9d3` | items nested in a function body; nested `cfg_attr` | +18 |
+| this one | three inline copies of the cfg gate, the weakest deciding whether an item was scanned at all | — |
+
+So: ~180 net functional lines over six rounds, not "six small patches", and only two rounds at or
+under twenty lines. Five of the six were adjacent positions of a class already covered; the first
+was a technique failure, and is narrated with the retraction above rather than in this list.
+
+Every one was found by a reviewer, not by the guard. That is the expected cost of a syntactic tool,
+and it is why the scope sentence above reads as it does. This check is defence-in-depth over a
+boundary the COMPILER already enforces against out-of-crate callers (ADR-20260803-172654): it earns
+its place by catching the plausible in-crate accident — a scoped-capability helper written `pub`
+instead of `pub(crate)` — not by being exhaustive. Treat a new bypass of this shape as maintenance;
+if the exhaustive property is genuinely wanted, that is #331, and the table above is the cost side
+of that decision.
 
 ## Consequences
 
@@ -123,8 +135,17 @@ ever actually wanted, that is #331, not another traversal patch.
   thing sessions.md §8b says not to do, and with a precedent already in the same file
   (`cfg_attr(.., path = ..)` was long treated as a `#[path]`). It matters beyond neatness:
   `#[cfg_attr(feature = "serde", derive(serde::Deserialize))]` is the ordinary idiom for optional
-  serde support, so the hole was reachable from an honest diff. A genuinely test-only
-  `#[cfg_attr(test, derive(Default))]` is still allowed, inversion refused as everywhere else.
+  serde support, so the hole was reachable from an honest diff. Derives are harvested RECURSIVELY
+  through nested `cfg_attr`, the way rustc expands it.
+- **The cfg gate is a real evaluator, and genuinely shared.** `any` is test-only when EVERY disjunct
+  is, `all` when ANY conjunct is, `not` never. Blanket-refusing `any(..)` would have been wrong —
+  the shipped `#[cfg(any(test, feature = "test-fixtures"))]` on the fixtures module is a legitimate
+  all-test `any` that must keep passing. Three inline near-copies of this logic existed beforehand
+  and were NOT identical: the weakest gated whether an item was scanned AT ALL, so
+  `#[cfg(any(test, feature = "serde"))] pub fn mint() -> MailboxAccess` was invisible to both
+  guards while compiling in every release build with that feature on. `is_test_only_cfg`,
+  `is_fixtures_gate` and the derive arm all route through the one evaluator now, which closes that
+  and keeps the real gate green.
 - **The anti-blindness assertion names `granted` specifically.** A bare "something is tainted" check
   is satisfied by the test-only `for_tests`, so the PRODUCTION mint could go dark unnoticed.
 - What remains outside both guards: any construction or call edge the syntactic scan cannot see (see
