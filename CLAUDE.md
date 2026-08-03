@@ -139,7 +139,16 @@ lists entrypoints. The validator (`make validate`, the Rust `tools/codegen-rs`) 
 the **whole spec** — schema/refs, actor wiring, api↔model, views, C4, observability, and (ADR-0032)
 **tests, stories and rules completeness**: every message/event/error is exercised by a test, every
 mutation/query is reached by a story step, and every test↔rule link holds both ways. It must be
-**0 errors** (only the known view design-holes warn).
+**0 errors**. Warnings are a **baseline to compare against, not a clean slate**: `main` carries 33,
+and only 5 are the "known view design-holes" the earlier wording implied were the whole set —
+`command-no-mutation` ×13 and `event-not-projected` ×11 dominate, then `id-not-in-payload` ×3,
+`view-fedby-unused` ×2, `view-column-no-source` ×2, `view-no-query` ×1,
+`identity-property-not-on-command` ×1. The rule for a change is therefore **0 errors and no NEW
+warning**: diff the count and kinds against `main` (`make validate` prints
+`checks: N error(s), M warning(s)`), and never read a non-zero count as a regression you caused.
+Three independent reviewer passes on [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)
+each had to stop and re-derive this because the old wording said otherwise — re-measure rather than
+trust the numbers above if they look off.
 
 ### Non-negotiable rules
 
