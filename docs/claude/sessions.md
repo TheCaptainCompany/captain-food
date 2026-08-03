@@ -172,6 +172,68 @@ the spec both sides agree on. `generated_config_patterns_match_the_spec_byte_for
 was confirmed to FAIL on the reverted emitter before being trusted — a regression test never seen red is
 not a guard.
 
+## 8b. A guard over Rust STRUCTURE must parse the AST, not the text
+
+`str::find` over source cannot enforce a structural rule about Rust, and three independent review
+passes proved it on one guard (#304's `every_mailbox_port_method_demands_the_access_witness`). Each
+pass defeated the previous version, never with anything clever: `pub  fn` with two spaces, a
+signature split across lines, an attribute before `async fn`, a comment standing in for a parameter,
+`impl Default for X`, `pub const KEY: X`, a type alias, the banned trait moved one file over, a
+`From<()> for crate::path::X` matching no literal pattern. Every fix bought exactly one shape.
+
+The trap is that a textual guard **looks** like it works — it goes red on the mutation you thought
+of, which is the one you wrote it for. Its real coverage is the shapes you enumerated, and the
+author of the next bypass is not enumerating.
+
+**If the rule is about Rust structure — visibility, trait membership, what a signature takes, what a
+public item returns — parse it.** `syn` (+`quote`) as a dev-dependency of `tools/codegen-rs`. Reserve
+text scanning for rules that genuinely are textual (`makefile_recipe_lines_are_ascii` is about bytes,
+so text is right).
+
+**But parsing alone does not converge.** Three further passes beat the AST versions too, because
+each one asked *where* the guarded type appears, and every answer left a slot uninspected: item
+kinds first (free fn, const, static, alias… then associated fn, associated const, struct field, enum
+variant, a trait's provided method), then output-and-field positions — which still missed a generic
+BOUND (`pub fn mint<T: From<Witness>>() -> T`) and a PARAMETER on a non-port item
+(`pub fn with_access(f: impl FnOnce(Witness) -> R) -> R`, a scoped-capability helper written `pub`
+by accident — the most plausible real mistake of the set).
+
+**Stop asking where. Assert the guarded type appears in NO release-reachable public signature, with
+a CLOSED exemption list.** For each public item take the whole signature — generics, where-clause,
+inputs, output, field and variant types — as one token stream and fail on any mention; then name the
+handful of legitimate sites explicitly. An open rule ("these positions are bad") loses to the next
+grammar; a closed one ("nothing but these") does not.
+
+Riders, all learned the same way:
+
+- **Parameter and output positions are OPPOSITE problems.** In output/field position a substring is
+  correct and conservative (`-> Option<T>` still hands one over). In parameter position it is
+  exactly wrong: `access: Option<Witness>` mentions the type while letting the caller pass `None`.
+  Compare the exact parsed type there. That single defect defeated the primary rule the guard
+  existed for.
+- **Watch the ESCAPE HATCH as hard as the rule.** An inverted `#[cfg(not(feature = "..."))]` was
+  honoured as a test-gate while compiling in exactly the release builds it claimed to exclude — the
+  guard's own exemption granting the thing it guarded. A `#[path]` ban that misses
+  `#[cfg_attr(<cond>, path = "…")]`, and an `include!` ban keyed on `is_ident` that misses
+  `std::include!`, are the same mistake: **ban a CLASS, matched on the last path segment, not a
+  spelling.**
+- **Know where the guard's ceiling is, and write it down.** Some classes are not checkable at all
+  by the technique you chose, and finding that out is a result, not a failure. Here: a public
+  in-crate wrapper that mints internally and exposes the capability through a signature that never
+  names the guarded type (`pub fn cancel_any(&self, id: Uuid) -> Result<bool>`) is invisible to ANY
+  signature analysis — and the codebase's own sanctioned bulk door is a member of that class, so it
+  cannot even be banned. When a rule blocks one spelling of a class while its twin passes, do not
+  call it closed; say which class it covers and what contains the rest.
+- **Macro expansion stays invisible** to an AST walk of unexpanded source, and so do `include!` and
+  a `#[path]` module if you walk a directory. Refuse those constructs outright in the guarded crate
+  and SAY that is what you are doing — "banned here" is honest; "analysed" is not. (The definitive form is a check
+  over the post-expansion public API, e.g. rustdoc JSON; it needs nightly, so it is not available on
+  this stable CI.)
+- **Mutation-test every arm, and re-run the whole battery after each rewrite.** A fix that closes one
+  hole reopened another twice here — once because a mint was excused by NAME rather than by span, so
+  the legitimate gated copy excused an un-gated duplicate. Keep the battery in the commit message or
+  the guard's doc comment; "verified red" is only worth stating with the count and the shapes.
+
 ## 9. This file is your obligation, not just your reference
 
 **Every session records what it learned** (ADR-20260730-034635), in the same change as the work. That

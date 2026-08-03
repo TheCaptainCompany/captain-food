@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use actor_client::mailbox::{
-    Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome, MailboxStatusRow,
+    Mailbox, MailboxAccess, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
+    MailboxStatusRow,
 };
 use async_trait::async_trait;
 use domain::shared::errors::DomainError;
@@ -80,7 +81,11 @@ impl PgMailbox {
 
 #[async_trait]
 impl Mailbox for PgMailbox {
-    async fn insert(&self, entry: &MailboxEntry) -> Result<MailboxInsertOutcome, DomainError> {
+    async fn insert(
+        &self,
+        entry: &MailboxEntry,
+        _access: MailboxAccess,
+    ) -> Result<MailboxInsertOutcome, DomainError> {
         // The pg_notify rides the INSERT's own transaction (PROP-20260802-223522 D1/D2): the
         // notification exists only if the row does, is delivered at COMMIT, and carries the
         // actor type so exactly that type's workers wake — in THIS process via the in-process
@@ -144,6 +149,7 @@ impl Mailbox for PgMailbox {
         &self,
         entry: &MailboxEntry,
         scheduled_at: chrono::DateTime<chrono::Utc>,
+        _access: MailboxAccess,
     ) -> Result<MailboxScheduleOutcome, DomainError> {
         // The ADR-20260731-150500 §4 atomic form. Two constraints shape the statement:
         // - `position` is named and bound NULL — leaving it out would fire the column DEFAULT and
@@ -212,7 +218,11 @@ impl Mailbox for PgMailbox {
         }
     }
 
-    async fn cancel_scheduled(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
+    async fn cancel_scheduled(
+        &self,
+        message_id: uuid::Uuid,
+        _access: MailboxAccess,
+    ) -> Result<bool, DomainError> {
         // The status predicate makes the flip race-safe against promotion: whichever statement
         // locks the row first wins, the loser matches zero rows.
         Ok(sqlx::query(
@@ -243,6 +253,7 @@ impl Mailbox for PgMailbox {
     async fn insert_many(
         &self,
         entries: &[MailboxEntry],
+        _access: MailboxAccess,
     ) -> Result<Vec<uuid::Uuid>, DomainError> {
         if entries.is_empty() {
             return Ok(Vec::new());
@@ -302,6 +313,7 @@ impl Mailbox for PgMailbox {
     async fn by_message(
         &self,
         message_id: uuid::Uuid,
+        _access: MailboxAccess,
     ) -> Result<Option<MailboxStatusRow>, DomainError> {
         let row = sqlx::query(
             "SELECT message_id, correlation_id, status, error, payload_hash, user_id, session_id, \

@@ -48,7 +48,12 @@ impl SubscriptionRoot {
         let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
         // Watch BEFORE the snapshot read (the subscribe/complete race stays closed): the typed
         // §2.1 response stream (#303), filtered to this messageId, lag made explicit.
-        let mut watch = status_door.watch(wanted);
+        // `watch` is None only on a pull-only door (ActorClient::pull_only); this one is built
+        // from the context's real bus two statements up, so None here is a wiring bug, surfaced
+        // rather than silently degrading the subscription to nothing.
+        let mut watch = status_door
+            .watch(wanted)
+            .ok_or_else(|| async_graphql::Error::new("operationStatusChanged: the status door carries no response stream"))?;
         Ok(async_stream::stream! {
             use domain::generated::scalars::CommandJournalStatus as J;
             use domain::generated::scalars::InboundMessageStatus as M;

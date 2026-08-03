@@ -3,6 +3,54 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-03 — [#304 "The Mailbox port surface hole: insert/by_message are pub to any port holder"](https://github.com/TheCaptainCompany/captain-food/issues/304)
+> (PROP-20260802-130500 §5 directive, [ADR-20260803-172654](adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md))**:
+> holding the `Mailbox` port is no longer holding the door. Every port method takes a
+> `MailboxAccess` witness whose only mint is `pub(crate)` to `actor_client`, so **no out-of-crate
+> CALLER can invoke a `Mailbox` method at all** — the generated typed clients (write) and
+> `ActorClient` (read) are the only paths, by compiler rather than by convention. (Level 4 against
+> callers; weaker against IMPLEMENTORS — an out-of-crate `impl Mailbox` decorator is handed a real
+> witness when a door calls it. What contains that is the composition root, not the witness: a
+> decorator only receives calls once someone wires it into `server/src/lib.rs`. Recorded honestly
+> in the ADR's consequences rather than claimed away.) The write
+> methods were already closed incidentally (a `MailboxEntry` cannot be built outside the crate);
+> the two keyed by a bare `Uuid` were wide open: `by_message` (the D4 read side — its own doc
+> comment claimed a convention two callers were breaking) and `cancel_scheduled`, which would
+> withdraw any scheduled reminder for anyone while `cancel_scheduling` above it is emitted only
+> for actors declaring `reminders:` (ADR-20260802-170059). Both direct readers moved onto
+> `ActorClient::get_operation_status`: the HubRise connect flow's terminal-status poll (it now
+> holds an `ActorClient`; a standalone adapter has no shared bus, and that is fine because the
+> flow only pulls the durable row) and the generated legacy-arm cross-arm duplicate check.
+> Integration tests seed through `MailboxAccess::for_tests()` on the D5 `test-fixtures` feature
+> that never reaches a release graph. No generated per-actor client names the witness any more
+> (`cancel_scheduling` delegates to `enqueue::cancel_scheduled_mapped` like every other method),
+> which is what keeps PROP-20260802-130500 phase 2 a visibility change rather than a redesign.
+> `ActorClient::pull_only` + `watch -> Option<OperationWatch>` put the no-shared-bus posture of a
+> standalone adapter in the type, instead of a default bus whose `watch` would hang forever.
+> `every_mailbox_port_method_demands_the_access_witness` (tools/codegen-rs) catches the
+> SIGNATURE-LEVEL widenings the compiler cannot — they are all EDITS TO THE BOUNDARY CRATE. It
+> parses the AST (syn, a new dev-dependency): for every release-reachable public item the WHOLE
+> signature (generics, where-clause, inputs, output, field/variant types) must not mention the
+> witness, against an explicit exemption list (the `Mailbox` trait's items, `impl Mailbox for _`,
+> the cfg-gated `for_tests`); the port trait's own parameters keep an EXACT type check, because
+> there `Option<MailboxAccess>` would let the caller pass `None`. **Parameter and output positions
+> are opposite problems.** Six review passes each defeated an earlier version, every one of which
+> asked *where* the witness appears and left a slot uninspected. The claim is bounded, not closed:
+> a public in-crate wrapper that mints internally and never names the witness in its signature
+> (`pub fn cancel_any(&self, id)` on a blanket `impl<T: Mailbox>`) is invisible to any signature
+> analysis, and cannot even be banned as a construct because the sanctioned bulk door
+> `enqueue_inbound_facts` is a member of that class — what contains the residue is the same thing
+> that contains the decorator case: an edit to the boundary crate, visible in any diff. Macro
+> expansion is likewise invisible, so `include!`, `#[path]`/`cfg_attr`-path modules and any
+> item-position macro carrying the witness are refused as a CLASS (matched on the last path
+> segment, after `std::include!` and `cfg_attr(.., path=..)` each walked past a narrower check).
+> The threat model is safe Rust, so the workspace-wide `unsafe_code = "forbid"` is load-bearing.
+> Twenty-nine bypass shapes verified red against a green baseline, plus the legitimate refactors
+> that must stay green.
+> §5 audit: the `Mailbox` port row moves ❌ → ✅ compiler;
+> `View_*` reads ([#305](https://github.com/TheCaptainCompany/captain-food/issues/305)) and
+> `PgEventStore` append stay open.
+
 > ✅ **2026-08-03 — [#303 "ActorClient::watch — relocate OperationStatusBus behind the actor-client boundary"](https://github.com/TheCaptainCompany/captain-food/issues/303)
 > (PROP-20260802-130500 D4 tail, PROP-20260728-152752 §2.1)**: the operation-response bus is
 > behind the boundary now. `OperationStatusBus`/`OperationUpdate` moved from

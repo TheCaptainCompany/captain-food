@@ -1100,6 +1100,7 @@ pub async fn router() -> Router {
                     )));
                     hubrise_state.connect = Some(Arc::new(hubrise_adapter::HubRiseConnectFlow::new(
                         hubrise_mailbox,
+                        Some(operation_status_bus.clone()),
                         hubrise_restaurants,
                         hubrise_connections,
                         hubrise_adapter::connect::HttpHubRiseConnectGateway {

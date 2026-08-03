@@ -3711,8 +3711,11 @@ impl MutationRoot {
         // Cross-arm duplicate identity (#272 review MAJOR-3, mirror direction): a messageId
         // accepted on the MAILBOX arm must replay as a duplicate here, never re-execute --
         // a gate rolled back mid-retry must not re-run a committed command.
-        let __mailbox_port = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        if let Some(prior) = __mailbox_port.by_message(env.message_id).await.map_err(domain_error)? {
+        let __mailbox_door = actor_client::ActorClient::new(
+            ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone(),
+            status_bus.clone(),
+        );
+        if let Some(prior) = __mailbox_door.get_operation_status(env.message_id).await.map_err(domain_error)? {
             // The mailbox arm stores the TYPED command's serde form (#284 slice 2), so this
             // cross-check must hash the SAME form -- hashing the null-stripped GraphQL input here
             // would 409 a legitimate same-payload retry straddling a gate rollback whenever the
@@ -4715,8 +4718,11 @@ impl MutationRoot {
         // Cross-arm duplicate identity (#272 review MAJOR-3, mirror direction): a messageId
         // accepted on the MAILBOX arm must replay as a duplicate here, never re-execute --
         // a gate rolled back mid-retry must not re-run a committed command.
-        let __mailbox_port = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        if let Some(prior) = __mailbox_port.by_message(env.message_id).await.map_err(domain_error)? {
+        let __mailbox_door = actor_client::ActorClient::new(
+            ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone(),
+            status_bus.clone(),
+        );
+        if let Some(prior) = __mailbox_door.get_operation_status(env.message_id).await.map_err(domain_error)? {
             // The mailbox arm stores the TYPED command's serde form (#284 slice 2), so this
             // cross-check must hash the SAME form -- hashing the null-stripped GraphQL input here
             // would 409 a legitimate same-payload retry straddling a gate rollback whenever the
@@ -4911,8 +4917,11 @@ impl MutationRoot {
         // Cross-arm duplicate identity (#272 review MAJOR-3, mirror direction): a messageId
         // accepted on the MAILBOX arm must replay as a duplicate here, never re-execute --
         // a gate rolled back mid-retry must not re-run a committed command.
-        let __mailbox_port = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        if let Some(prior) = __mailbox_port.by_message(env.message_id).await.map_err(domain_error)? {
+        let __mailbox_door = actor_client::ActorClient::new(
+            ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone(),
+            status_bus.clone(),
+        );
+        if let Some(prior) = __mailbox_door.get_operation_status(env.message_id).await.map_err(domain_error)? {
             // The mailbox arm stores the TYPED command's serde form (#284 slice 2), so this
             // cross-check must hash the SAME form -- hashing the null-stripped GraphQL input here
             // would 409 a legitimate same-payload retry straddling a gate rollback whenever the

@@ -16,8 +16,8 @@ use std::sync::Arc;
 use domain::shared::errors::DomainError;
 
 use crate::enqueue::{
-    command_entry, declared_identity, enqueue_inbound_fact, insert_mapped, schedule_mapped,
-    InboundFact,
+    cancel_scheduled_mapped, command_entry, declared_identity, enqueue_inbound_fact, insert_mapped,
+    schedule_mapped, InboundFact,
 };
 use crate::mailbox::{Envelope, Mailbox};
 use crate::{EnqueueOutcome, ScheduleOutcome};
@@ -1142,7 +1142,7 @@ impl OrderClient {
     /// `message_id` like the port beneath it: the id is minted by `schedule`, so holding it IS the
     /// capability (decided over lane-scoping, #308).
     pub async fn cancel_scheduling(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
+        cancel_scheduled_mapped(self.mailbox.as_ref(), message_id).await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST

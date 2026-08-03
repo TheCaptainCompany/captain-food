@@ -1855,6 +1855,553 @@ keys:
         );
     }
 
+    /// Does this syntax node mention `name` anywhere in its token stream? Path-spelling agnostic,
+    /// so `MailboxAccess`, `mailbox::MailboxAccess` and `crate::mailbox::MailboxAccess` all match.
+    fn mentions(node: &impl quote::ToTokens, name: &str) -> bool {
+        node.to_token_stream().to_string().contains(name)
+    }
+
+    /// Is this type EXACTLY the witness — not a wrapper around it?
+    ///
+    /// Used ONLY for the port trait's parameters, where a wrapper weakens the demand:
+    /// `access: Option<MailboxAccess>` *mentions* the witness, so a substring check accepts it,
+    /// and then the caller writes `mb.cancel_scheduled(id, None)` and needs no witness at all.
+    /// Review pass 4 defeated the guard's own primary assertion that way.
+    fn is_exact_witness(ty: &syn::Type) -> bool {
+        let syn::Type::Path(p) = ty else { return false };
+        p.qself.is_none()
+            && p.path.segments.last().is_some_and(|s| {
+                s.ident == WITNESS && matches!(s.arguments, syn::PathArguments::None)
+            })
+    }
+
+    /// Is this `#[cfg(..)]` satisfied ONLY in a test build — `test`, the `test-fixtures` feature,
+    /// or both? Such an item is never compiled for a dependent crate, so it cannot leak.
+    ///
+    /// An INVERTED cfg is not a gate and must not be read as one: `#[cfg(not(feature =
+    /// "test-fixtures"))]` names the feature while compiling in exactly the builds where it is
+    /// OFF — every release build. Pass 4 used that to make the guard's own excuse mechanism grant
+    /// the mint.
+    fn is_test_only_cfg(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| {
+            if !a.path().is_ident("cfg") {
+                return false;
+            }
+            let m = &a.meta;
+            let toks = quote::quote!(#m).to_string();
+            // WHOLE tokens: a substring match honours `#[cfg(feature = "fastest")]` as a test
+            // gate and stops scanning everything under it, in release.
+            cfg_tokens(&toks).iter().any(|t| *t == "test" || *t == "test-fixtures")
+                && !toks.contains("not (")
+        })
+    }
+
+    /// A cfg attribute's token stream split into whole words (keeping `-`/`_` so feature names
+    /// stay intact).
+    fn cfg_tokens(toks: &str) -> Vec<&str> {
+        toks.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))
+            .filter(|t| !t.is_empty())
+            .collect()
+    }
+
+    /// Specifically a POSITIVE `test-fixtures` gate — what makes the one public mint legitimate.
+    fn is_fixtures_gate(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| {
+            a.path().is_ident("cfg") && {
+                let m = &a.meta;
+                let t = quote::quote!(#m).to_string();
+                cfg_tokens(&t).contains(&"test-fixtures") && !t.contains("not (")
+            }
+        })
+    }
+
+    /// Everything the #304 scan needs to say about one `actor_client` source.
+    #[derive(Default)]
+    struct WitnessScan {
+        leaks: Vec<String>,
+        /// Methods of the `Mailbox` port trait: (name, takes the witness EXACTLY).
+        port_methods: Vec<(String, bool)>,
+        saw_port_trait: bool,
+    }
+
+    const WITNESS: &str = "MailboxAccess";
+
+    impl WitnessScan {
+        /// THE RULE, and it is a CLOSED one: the witness may not appear in ANY release-reachable
+        /// public signature, anywhere in the crate, except on the closed exemption list (the
+        /// `Mailbox` trait's own items, `impl Mailbox for _` blocks, and the cfg-gated
+        /// `MailboxAccess::for_tests`).
+        ///
+        /// Five review passes killed every version of this guard that asked WHERE the witness
+        /// appears. Text forms, then item kinds, then output-and-field positions — each framing
+        /// left a slot uninspected, and the last one left two: a generic BOUND
+        /// (`pub fn mint<T: From<MailboxAccess>>() -> T`) and a PARAMETER on a non-port item
+        /// (`pub fn with_access(f: impl FnOnce(MailboxAccess) -> R) -> R`, a scoped-capability
+        /// helper written `pub` by accident — the most plausible real mistake of the whole set).
+        /// So this asks nothing about position: the whole signature — generics, where-clause,
+        /// inputs, output, field and variant types — is one token stream, and any mention fails.
+        fn check_sig(&mut self, rel: &str, what: &str, public: bool, sig: &impl quote::ToTokens) {
+            if public && mentions(sig, WITNESS) {
+                self.leaks.push(format!("  {rel}: {what} names the witness in a public signature"));
+            }
+        }
+    }
+
+    fn is_pub(vis: &syn::Visibility) -> bool {
+        matches!(vis, syn::Visibility::Public(_))
+    }
+
+    /// Walk one module's items. `test_only` tracks whether an ancestor cfg makes everything here
+    /// invisible to dependent crates (so it cannot leak); `is_port` whether this is the port
+    /// module, the one place the witness's own declaration and impls may live.
+    fn scan_items(items: &[syn::Item], rel: &str, test_only: bool, is_port: bool, out: &mut WitnessScan) {
+        use syn::Item;
+        for item in items {
+            let item_test_only = test_only || is_test_only_cfg(item_attrs(item));
+            match item {
+                Item::Mod(m) => {
+                    let pathy = m.attrs.iter().any(|a| {
+                        a.path().is_ident("path") || {
+                            // `#[cfg_attr(<cond>, path = "..")]` is a `#[path]` in disguise, and
+                            // the condition can be arranged to fire in release. The escape hatch
+                            // needs the same scrutiny as the rule it guards.
+                            let mm = &a.meta;
+                            a.path().is_ident("cfg_attr")
+                                && quote::quote!(#mm).to_string().contains("path =")
+                        }
+                    });
+                    if pathy {
+                        out.leaks.push(format!(
+                            "  {rel}: `mod {}` carries `#[path]` — this guard walks the directory, \
+                             so a file outside `crates/actor_client/src` is invisible to it",
+                            m.ident
+                        ));
+                    }
+                    if let Some((_, inner)) = &m.content {
+                        scan_items(inner, rel, item_test_only, is_port, out);
+                    }
+                }
+
+                // THE PORT TRAIT — every method must take the witness, EXACTLY (not wrapped).
+                Item::Trait(t) if t.ident == "Mailbox" => {
+                    out.saw_port_trait = true;
+                    for ti in &t.items {
+                        match ti {
+                            syn::TraitItem::Fn(f) => out.port_methods.push((
+                                f.sig.ident.to_string(),
+                                f.sig.inputs.iter().any(|i| match i {
+                                    syn::FnArg::Typed(pt) => is_exact_witness(&pt.ty),
+                                    syn::FnArg::Receiver(_) => false,
+                                }),
+                            )),
+                            // Associated items on the port trait. Not exploitable today only
+                            // because `Mailbox` is used as `dyn` and such a const makes it
+                            // dyn-incompatible (E0038) — safety borrowed from a usage pattern
+                            // elsewhere, so it is owned here instead.
+                            syn::TraitItem::Const(c) => {
+                                out.check_sig(rel, &format!("`Mailbox::{}`", c.ident), true, &c.ty)
+                            }
+                            syn::TraitItem::Type(ty) => {
+                                let b = &ty.bounds;
+                                out.check_sig(
+                                    rel,
+                                    &format!("`Mailbox::{}` bounds", ty.ident),
+                                    true,
+                                    &quote::quote!(#b),
+                                )
+                            }
+                            // A macro INVOCATION expands to items this walk can never see.
+                            syn::TraitItem::Macro(m) => out.leaks.push(format!(
+                                "  {rel}: `Mailbox` contains a macro invocation (`{}!`) — trait \
+                                 items must be written out, or this guard cannot see them",
+                                m.mac.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default()
+                            )),
+                            _ => {}
+                        }
+                    }
+                }
+
+                // Every OTHER public trait: `Mailbox` as a supertrait (bounds OR where-clause) is
+                // an ungated door for any port holder; and each item's WHOLE signature is checked.
+                Item::Trait(t) if is_pub(&t.vis) && !item_test_only => {
+                    let st = &t.supertraits;
+                    let supers = quote::quote!(#st).to_string();
+                    let wheres = t
+                        .generics
+                        .where_clause
+                        .as_ref()
+                        .map(|w| quote::quote!(#w).to_string())
+                        .unwrap_or_default();
+                    if supers.contains("Mailbox") || wheres.contains("Mailbox") {
+                        out.leaks.push(format!(
+                            "  {rel}: `pub trait {}` has `Mailbox` as a supertrait (bound or \
+                             `where` clause) — a provided method on it reaches \
+                             `cancel_scheduled`/`by_message` with a witness it mints itself, for \
+                             any port holder",
+                            t.ident
+                        ));
+                    }
+                    for ti in &t.items {
+                        match ti {
+                            syn::TraitItem::Fn(f) => out.check_sig(
+                                rel,
+                                &format!("`{}::{}`", t.ident, f.sig.ident),
+                                true,
+                                &f.sig,
+                            ),
+                            syn::TraitItem::Const(c) => out.check_sig(
+                                rel,
+                                &format!("`{}::{}`", t.ident, c.ident),
+                                true,
+                                &c.ty,
+                            ),
+                            // An associated TYPE's bounds are a signature slot too:
+                            // `type Out: From<MailboxAccess>` hands one over.
+                            syn::TraitItem::Type(ty) => {
+                                let b = &ty.bounds;
+                                out.check_sig(
+                                    rel,
+                                    &format!("`{}::{}` bounds", t.ident, ty.ident),
+                                    true,
+                                    &quote::quote!(#b),
+                                )
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                Item::Impl(i) => {
+                    let on_witness = mentions(&i.self_ty, WITNESS);
+                    let trait_impl = i.trait_.is_some();
+                    // EXEMPTION: an `impl Mailbox for _` legitimately names the witness in every
+                    // method — that IS the port contract.
+                    let is_port_impl = i
+                        .trait_
+                        .as_ref()
+                        .and_then(|(_, p, _)| p.segments.last())
+                        .is_some_and(|s| s.ident == "Mailbox");
+                    if on_witness && trait_impl {
+                        out.leaks.push(format!(
+                            "  {rel}: a trait impl on the witness (`{}`) — `Default`, `From`, \
+                             `FromStr` and friends are all public mints",
+                            i.trait_.as_ref().map(|(_, p, _)| quote::quote!(#p).to_string()).unwrap_or_default()
+                        ));
+                    } else if on_witness && !is_port {
+                        out.leaks.push(format!(
+                            "  {rel}: an inherent impl on the witness outside the port module. \
+                             (Keep them in crates/actor_client/src/mailbox.rs — this guard does \
+                             not resolve out-of-line modules, so moving them costs the gate.)"
+                        ));
+                    }
+                    // The supertrait rule's TWIN SPELLING: `impl<T: Mailbox> Ext for T` is at
+                    // least as idiomatic as `trait Ext: Mailbox`, and reaches the port exactly the
+                    // same way. Blocking one and waving the other through is not a rule.
+                    if !is_port_impl {
+                        // BOTH slots, mirroring the trait arm: `ToTokens for Generics` emits the
+                        // `<..>` params WITHOUT the where-clause, so reading `i.generics` alone
+                        // blocks `impl<T: Mailbox>` and waves `impl<T> .. where T: Mailbox`
+                        // through — the very spelling-vs-class mistake this arm exists to fix.
+                        let g = &i.generics;
+                        let w = i
+                            .generics
+                            .where_clause
+                            .as_ref()
+                            .map(|w| quote::quote!(#w).to_string())
+                            .unwrap_or_default();
+                        if quote::quote!(#g).to_string().contains("Mailbox") || w.contains("Mailbox") {
+                            out.leaks.push(format!(
+                                "  {rel}: a blanket `impl<T: Mailbox>` — a method on it reaches \
+                                 `cancel_scheduled`/`by_message` with a witness it mints itself, \
+                                 for any port holder (same door as a `Mailbox` supertrait)"
+                            ));
+                        }
+                    }
+                    if is_port_impl {
+                        continue;
+                    }
+                    for ii in &i.items {
+                        let ii_test_only = item_test_only || is_test_only_cfg(impl_item_attrs(ii));
+                        match ii {
+                            syn::ImplItem::Fn(f) => {
+                                let public = trait_impl || is_pub(&f.vis);
+                                if on_witness && public {
+                                    // The ONE sanctioned public mint: `for_tests`, under a
+                                    // POSITIVE test-fixtures gate.
+                                    let sanctioned = is_port
+                                        && f.sig.ident == "for_tests"
+                                        && (is_fixtures_gate(&f.attrs) || fixtures_gated(rel, item_test_only));
+                                    if !sanctioned {
+                                        out.leaks.push(format!(
+                                            "  {rel}: `MailboxAccess::{}` is public outside the \
+                                             cfg-gated fixtures module",
+                                            f.sig.ident
+                                        ));
+                                    }
+                                } else if !ii_test_only {
+                                    out.check_sig(
+                                        rel,
+                                        &format!("associated fn `{}`", f.sig.ident),
+                                        public,
+                                        &f.sig,
+                                    );
+                                }
+                            }
+                            syn::ImplItem::Const(c) if !ii_test_only => out.check_sig(
+                                rel,
+                                &format!("associated const `{}`", c.ident),
+                                trait_impl || is_pub(&c.vis),
+                                &c.ty,
+                            ),
+                            syn::ImplItem::Type(t) if !ii_test_only => out.check_sig(
+                                rel,
+                                &format!("associated type `{}`", t.ident),
+                                trait_impl || is_pub(&t.vis),
+                                &t.ty,
+                            ),
+                            _ => {}
+                        }
+                    }
+                }
+
+                // Free items — the WHOLE signature, so a generic bound or a callback parameter is
+                // as visible as a return type.
+                Item::Fn(f) if !item_test_only => {
+                    out.check_sig(rel, &format!("`pub fn {}`", f.sig.ident), is_pub(&f.vis), &f.sig)
+                }
+                Item::Const(c) if !item_test_only => {
+                    out.check_sig(rel, &format!("`const {}`", c.ident), is_pub(&c.vis), &c.ty)
+                }
+                Item::Static(s) if !item_test_only => {
+                    out.check_sig(rel, &format!("`static {}`", s.ident), is_pub(&s.vis), &s.ty)
+                }
+                Item::Type(t) if mentions(&t.ty, WITNESS) => {
+                    out.leaks.push(format!(
+                        "  {rel}: `type {} = MailboxAccess` — an alias lets a later public item \
+                         yield the witness without ever naming it",
+                        t.ident
+                    ));
+                }
+
+                Item::Struct(s) => {
+                    for (n, f) in s.fields.iter().enumerate() {
+                        if s.ident == WITNESS {
+                            if is_pub(&f.vis) {
+                                out.leaks.push(format!(
+                                    "  {rel}: the witness's field is `pub` — `MailboxAccess(())` \
+                                     now compiles in every crate and the entire port surface \
+                                     re-opens"
+                                ));
+                            }
+                        } else if !item_test_only {
+                            let name = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_else(|| n.to_string());
+                            out.check_sig(
+                                rel,
+                                &format!("field `{}.{name}`", s.ident),
+                                is_pub(&s.vis) && is_pub(&f.vis),
+                                &f.ty,
+                            );
+                        }
+                    }
+                }
+                Item::Enum(e) if is_pub(&e.vis) && !item_test_only => {
+                    for v in &e.variants {
+                        for (n, f) in v.fields.iter().enumerate() {
+                            let name = f.ident.as_ref().map(|i| i.to_string()).unwrap_or_else(|| n.to_string());
+                            out.check_sig(
+                                rel,
+                                &format!("variant field `{}::{}.{name}`", e.ident, v.ident),
+                                true,
+                                &f.ty,
+                            );
+                        }
+                    }
+                }
+                Item::Union(u) if is_pub(&u.vis) && !item_test_only => {
+                    for f in &u.fields.named {
+                        out.check_sig(
+                            rel,
+                            &format!("union field `{}`", u.ident),
+                            is_pub(&f.vis),
+                            &f.ty,
+                        );
+                    }
+                }
+                Item::ForeignMod(fm) if !item_test_only => out.check_sig(
+                    rel,
+                    "an `extern` block",
+                    true,
+                    &quote::quote!(#fm),
+                ),
+
+                // EXPANSION this walk cannot follow. Matched on the path's LAST SEGMENT and on
+                // the invocation as well as the definition: `std::include!` walked past an
+                // `is_ident("include")` check, and `forge!(crate::mailbox::MailboxAccess)` forged
+                // a public mint while only the `macro_rules!` DEFINITION was being inspected.
+                Item::Macro(m) => {
+                    let name = m
+                        .mac
+                        .path
+                        .segments
+                        .last()
+                        .map(|s| s.ident.to_string())
+                        .unwrap_or_default();
+                    if name == "include" {
+                        out.leaks.push(format!(
+                            "  {rel}: `include!` splices a file this guard never walks — keep \
+                             every module a real file under `crates/actor_client/src`"
+                        ));
+                    } else if mentions(&m.mac.tokens, WITNESS) {
+                        out.leaks.push(format!(
+                            "  {rel}: an item-position macro (`{name}!`) carries the witness as a \
+                             token — expansion is invisible to this guard, so write the item out"
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `mailbox.rs`'s `fixtures` module is the sanctioned home of the public mint; an item is
+    /// inside it when an ancestor carried the positive gate.
+    fn fixtures_gated(rel: &str, ancestor_test_only: bool) -> bool {
+        rel.ends_with("mailbox.rs") && ancestor_test_only
+    }
+
+    fn item_attrs(i: &syn::Item) -> &[syn::Attribute] {
+        use syn::Item::*;
+        match i {
+            Const(x) => &x.attrs, Enum(x) => &x.attrs, ExternCrate(x) => &x.attrs, Fn(x) => &x.attrs,
+            ForeignMod(x) => &x.attrs, Impl(x) => &x.attrs, Macro(x) => &x.attrs, Mod(x) => &x.attrs,
+            Static(x) => &x.attrs, Struct(x) => &x.attrs, Trait(x) => &x.attrs, TraitAlias(x) => &x.attrs,
+            Type(x) => &x.attrs, Union(x) => &x.attrs, Use(x) => &x.attrs, _ => &[],
+        }
+    }
+
+    fn impl_item_attrs(i: &syn::ImplItem) -> &[syn::Attribute] {
+        use syn::ImplItem::*;
+        match i {
+            Const(x) => &x.attrs, Fn(x) => &x.attrs, Type(x) => &x.attrs, Macro(x) => &x.attrs, _ => &[],
+        }
+    }
+
+    /// The `Mailbox` PORT SURFACE (#304, PROP-20260802-130500 §5 directive): every method of the
+    /// port demands a `MailboxAccess` witness, so holding an `Arc<dyn Mailbox>` is not holding the
+    /// door — only `actor_client` can mint one, and the compiler refuses every call from anywhere
+    /// else.
+    ///
+    /// WHAT THE COMPILER DOES, AND WHAT THIS DOES. The compiler makes the rule unbreakable from
+    /// OUTSIDE the boundary crate: no out-of-crate caller can mint a witness, so no port method is
+    /// callable. Every remaining way to reopen the door is an edit INSIDE `actor_client`, and this
+    /// is what catches those.
+    ///
+    /// IT PARSES THE AST, and that is the whole point. Three review passes each defeated a
+    /// string-matching version of this guard, by shapes that were not clever — `pub  fn` with two
+    /// spaces, a split signature, `impl Default for MailboxAccess`, `pub const KEY: MailboxAccess`,
+    /// a type alias, an extension trait one file over. Every one of those is the SAME rule at the
+    /// AST level ("a public item that yields the witness"), so parsing replaces a patch-per-shape
+    /// treadmill with four structural rules. What it still cannot see is macro EXPANSION — so a
+    /// `macro_rules!` mentioning the witness, and a macro invocation inside the port trait, are
+    /// refused outright rather than waved through.
+    #[test]
+    fn every_mailbox_port_method_demands_the_access_witness() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = root.canonicalize().expect("repo root resolves");
+        let port_rel = "crates/actor_client/src/mailbox.rs";
+        let src_root = root.join("crates/actor_client/src");
+
+        let mut scan = WitnessScan::default();
+        let mut files = Vec::new();
+        let mut stack = vec![src_root.clone()];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).expect("actor_client sources are readable").flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    files.push(p);
+                }
+            }
+        }
+        files.sort();
+        assert!(files.len() >= 5, "found only {} actor_client sources — the walk went blind", files.len());
+
+        for p in &files {
+            let rel = p.strip_prefix(&root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(p).expect("a partially-scanned crate is a silent no-op");
+            // The GENERATED clients must reach the port only through `crate::enqueue`; naming the
+            // witness there is the line that forces PROP-20260802-130500 phase 2 to widen the mint.
+            // The one check that stays textual, because the concern is an EXPRESSION in a method
+            // body rather than an item signature — comment lines are dropped first so a generated
+            // doc comment explaining this very rule does not trip it.
+            if rel.contains("/generated/")
+                && text
+                    .lines()
+                    .filter(|l| !l.trim_start().starts_with("//"))
+                    .any(|l| l.contains(WITNESS))
+            {
+                scan.leaks.push(format!(
+                    "  {rel}: GENERATED code must never name the witness — delegate through \
+                     crate::enqueue (insert_mapped / schedule_mapped / cancel_scheduled_mapped)"
+                ));
+            }
+            // `#[path]` and `include!` are caught in the AST walk below, not by text: a doc
+            // comment mentioning either must not fail the build.
+            let file = syn::parse_file(&text)
+                .unwrap_or_else(|e| panic!("{rel} does not parse ({e}) — this guard reads the AST"));
+            let gated = is_test_only_cfg(&file.attrs);
+            scan_items(&file.items, &rel, gated, rel == port_rel, &mut scan);
+        }
+
+        assert!(scan.saw_port_trait, "no `trait Mailbox` found — renamed? move this guard with it");
+
+        // The in-crate mint stays `pub(crate)`. Widening it is how the boundary would slide from
+        // level 4 (compiler) to level 3 (manifest allowlist) — see the note below.
+        let port = std::fs::read_to_string(root.join(port_rel)).expect("the port module");
+        assert!(
+            port.contains("pub(crate) fn granted() -> Self"),
+            "the in-crate mint `MailboxAccess::granted()` is gone or widened — it must stay \
+             `pub(crate)`.\n\nNOTE for PROP-20260802-130500 phase 2 (per-actor client crates): \
+             widening this mint is how the port boundary silently slides from compiler-enforced to \
+             allowlist-enforced. If phase 2 needs it, that is a DECISION to record, not a refactor."
+        );
+
+        assert_eq!(
+            scan.port_methods.len(),
+            5,
+            "the Mailbox port has {} methods, this guard expects 5 ({:?}). If you ADDED one, \
+             confirm it takes the witness and bump this number — the bump is the act of having \
+             looked. If it DROPPED, fix the scan rather than deleting it.",
+            scan.port_methods.len(),
+            scan.port_methods.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>()
+        );
+        let naked: Vec<&str> = scan
+            .port_methods
+            .iter()
+            .filter(|(_, ok)| !ok)
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert!(
+            naked.is_empty(),
+            "these `Mailbox` port methods take no `MailboxAccess` witness: {naked:?}\n\n\
+             Fix: add a `MailboxAccess` parameter. Why: without it, any holder of an \
+             `Arc<dyn Mailbox>` can call the method directly and bypass the generated typed \
+             clients (write) and `ActorClient` (read) — the #304 hole. A method keyed only by \
+             primitives (`by_message`, `cancel_scheduled`) is the dangerous shape: the entry's \
+             private fields do NOT incidentally close it."
+        );
+        assert!(
+            scan.leaks.is_empty(),
+            "the MailboxAccess witness leaks:\n{}\n\n\
+             Fix: keep every impl and construction of the witness in `{port_rel}`, keep the only \
+             public mint `for_tests()` under the cfg-gated `fixtures` module, and reach the port \
+             through the shared delegates in `crate::enqueue`. Why: ONE public route to a witness \
+             reopens every method of the port for every crate in the workspace.",
+            scan.leaks.join("\n")
+        );
+    }
+
     /// The Cargo.toml CAPABILITY ALLOWLIST (#290 phase 1, PROP-20260802-130500 D3): `sqlx` (talk
     /// to the database) and `reqwest` (reach the network) may appear in a crate's RELEASE
     /// dependency sections only when that crate is explicitly allowlisted here WITH its reason.

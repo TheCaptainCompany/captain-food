@@ -28,6 +28,7 @@
 use std::sync::Arc;
 
 use actor_client::mailbox::{Envelope, Mailbox};
+use actor_client::{ActorClient, OperationStatusBus};
 use actor_client::generated::actor_clients::{
     CatalogClient, RestaurantAccountClient, RestaurantClient,
 };
@@ -215,19 +216,37 @@ pub trait ConnectService: Send + Sync {
 /// (derived ids, journaling, idempotent re-connect) is unit-testable in memory.
 pub struct HubRiseConnectFlow<G: HubRiseConnectGateway> {
     mailbox: Arc<dyn Mailbox>,
+    /// The D4 READ door (#304): status is read through the one generic client, never off the port
+    /// -- since #304 `Mailbox::by_message` demands a witness only `actor_client` can mint, so this
+    /// is the compiler's choice as much as ours.
+    status: ActorClient,
     restaurants: Arc<dyn RestaurantReadRepository>,
     connections: Arc<dyn HubRiseConnections>,
     gateway: G,
 }
 
 impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
+    /// `bus` is the process-wide operation-response bus, or `None` in a deployment that has no
+    /// shared one (a standalone adapter — `run_standalone_workers` publishes onto a bus of its
+    /// own that nothing here can see). Taking the BUS rather than a ready-made [`ActorClient`]
+    /// is deliberate: a caller cannot then hand us a read door built over a DIFFERENT mailbox
+    /// than the one we write through, and the pull-only posture stays visible as `None`.
+    ///
+    /// Today both arms behave identically here — this flow only ever PULLS a terminal status
+    /// (`await_message_terminal`), never `watch`. The distinction is forward-looking: it stops a
+    /// `watch` added later from hanging in the standalone topology and nowhere else.
     pub fn new(
         mailbox: Arc<dyn Mailbox>,
+        bus: Option<OperationStatusBus>,
         restaurants: Arc<dyn RestaurantReadRepository>,
         connections: Arc<dyn HubRiseConnections>,
         gateway: G,
     ) -> Self {
-        Self { mailbox, restaurants, connections, gateway }
+        let status = match bus {
+            Some(bus) => ActorClient::new(mailbox.clone(), bus),
+            None => ActorClient::pull_only(mailbox.clone()),
+        };
+        Self { mailbox, status, restaurants, connections, gateway }
     }
 
     /// The WORKER envelope for one provisioning send through a typed actor client (#284 slice 3).
@@ -282,7 +301,7 @@ impl<G: HubRiseConnectGateway> HubRiseConnectFlow<G> {
     ) -> Option<domain::generated::scalars::InboundMessageStatus> {
         use domain::generated::scalars::InboundMessageStatus as S;
         for _ in 0..40 {
-            if let Ok(Some(row)) = self.mailbox.by_message(message_id).await {
+            if let Ok(Some(row)) = self.status.get_operation_status(message_id).await {
                 if !matches!(row.status, S::RECEIVED | S::SCHEDULED) {
                     return Some(row.status);
                 }
@@ -709,6 +728,7 @@ mod tests {
         (
             HubRiseConnectFlow::new(
                 mailbox.clone(),
+                None,
                 Arc::new(CaughtUpRestaurants),
                 connections,
                 gateway,
@@ -783,6 +803,7 @@ mod tests {
         let mailbox = Arc::new(MemMailbox::instantly_delivered());
         let first = HubRiseConnectFlow::new(
             mailbox.clone(),
+            None,
             Arc::new(CaughtUpRestaurants),
             connections.clone(),
             fake_gateway("tok_1"),
@@ -796,6 +817,7 @@ mod tests {
         // AGGREGATES' job at delivery (their creation idempotency), not the mailbox key's.
         let second = HubRiseConnectFlow::new(
             mailbox.clone(),
+            None,
             Arc::new(CaughtUpRestaurants),
             connections.clone(),
             fake_gateway("tok_2"),

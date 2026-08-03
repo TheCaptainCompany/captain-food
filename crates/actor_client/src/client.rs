@@ -23,19 +23,38 @@ use std::sync::Arc;
 use domain::shared::errors::DomainError;
 use tokio::sync::broadcast;
 
-use crate::mailbox::{Mailbox, MailboxStatusRow};
+use crate::mailbox::{Mailbox, MailboxAccess, MailboxStatusRow};
 use crate::status_bus::{OperationStatusBus, OperationUpdate};
 
 /// The one generic, actor-agnostic client: holds the read capability over operation status —
 /// the durable row (pull) and the post-commit response stream (push).
 pub struct ActorClient {
     mailbox: Arc<dyn Mailbox>,
-    bus: OperationStatusBus,
+    /// `None` on a [`ActorClient::pull_only`] door — see there for why that is a real deployment
+    /// posture and not a degraded one.
+    bus: Option<OperationStatusBus>,
 }
 
 impl ActorClient {
+    /// The full door: durable row (pull) + post-commit response stream (push).
     pub fn new(mailbox: Arc<dyn Mailbox>, bus: OperationStatusBus) -> Self {
-        Self { mailbox, bus }
+        Self { mailbox, bus: Some(bus) }
+    }
+
+    /// The PULL-ONLY door, for a caller that has no response bus to share (#304 review).
+    ///
+    /// A standalone adapter is exactly that: `run_standalone_workers` builds its own local,
+    /// subscriber-less bus, so there is no process-wide bus to hand a client. Handing such a
+    /// caller `OperationStatusBus::default()` would compile and then LIE — it constructs a live
+    /// broadcast channel whose only sender is the client's own field, so a later `watch` would
+    /// await forever: never a message (nothing publishes), never `Closed` (the client holds the
+    /// sender). A hang, in one deployment topology only.
+    ///
+    /// This constructor puts that posture in the type instead: `watch` returns `None`, which the
+    /// caller must handle, and `get_operation_status` — the durable read, correct in every
+    /// topology — is unaffected.
+    pub fn pull_only(mailbox: Arc<dyn Mailbox>) -> Self {
+        Self { mailbox, bus: None }
     }
 
     /// The status of one operation by its globally-unique acceptance handle — the row behind
@@ -46,7 +65,7 @@ impl ActorClient {
         &self,
         message_id: uuid::Uuid,
     ) -> Result<Option<MailboxStatusRow>, DomainError> {
-        self.mailbox.by_message(message_id).await
+        self.mailbox.by_message(message_id, MailboxAccess::granted()).await
     }
 
     /// Subscribe to the response stream of ONE operation (§2.1 `watch`, #303): every post-commit
@@ -55,8 +74,10 @@ impl ActorClient {
     /// sees updates published after this call. The stream is notification, never truth: on
     /// [`OperationWatchEvent::Lagged`] re-read via [`ActorClient::get_operation_status`], and the
     /// OWNERSHIP decision (no existence oracle, ADR-20260720-015500) stays with the caller.
-    pub fn watch(&self, message_id: uuid::Uuid) -> OperationWatch {
-        OperationWatch { message_id, rx: self.bus.subscribe() }
+    /// `None` on a [`ActorClient::pull_only`] door, which has no response stream to offer — the
+    /// caller falls back to polling [`ActorClient::get_operation_status`].
+    pub fn watch(&self, message_id: uuid::Uuid) -> Option<OperationWatch> {
+        Some(OperationWatch { message_id, rx: self.bus.as_ref()?.subscribe() })
     }
 }
 
@@ -169,7 +190,7 @@ mod tests {
         let reader = ActorClient::new(Arc::new(MemMailbox::default()), bus.clone());
         let watched = uuid::Uuid::from_u128(0xA);
         let other = uuid::Uuid::from_u128(0xB);
-        let mut watch = reader.watch(watched);
+        let mut watch = reader.watch(watched).expect("a bus-backed door watches");
         for (id, status) in [(other, M::SUCCEEDED), (watched, M::RECEIVED), (watched, M::REJECTED)] {
             bus.publish(OperationUpdate {
                 message_id: id,
@@ -190,6 +211,21 @@ mod tests {
         assert_eq!(second.error_code.as_deref(), Some("RestaurantNotFound"));
     }
 
+    /// A pull-only door has no response stream to offer, and says so — rather than handing back
+    /// a watch that would await forever on a bus nobody publishes to (#304 review).
+    #[tokio::test]
+    async fn a_pull_only_door_offers_no_watch() {
+        let reader = ActorClient::pull_only(Arc::new(MemMailbox::default()));
+        assert!(
+            reader.watch(uuid::Uuid::from_u128(0xD)).is_none(),
+            "a door with no bus must return None, never a stream that hangs"
+        );
+        assert!(
+            reader.get_operation_status(uuid::Uuid::from_u128(0xD)).await.expect("read").is_none(),
+            "the durable read still works — it is the half a pull-only door exists for"
+        );
+    }
+
     /// A watcher that fell behind the bus's retention gets an explicit Lagged event — the cue to
     /// re-read the durable row — and the stream ends (None) when every publisher is gone.
     #[tokio::test]
@@ -200,7 +236,7 @@ mod tests {
         let bus = OperationStatusBus::new(1);
         let reader = ActorClient::new(Arc::new(MemMailbox::default()), bus.clone());
         let watched = uuid::Uuid::from_u128(0xC);
-        let mut watch = reader.watch(watched);
+        let mut watch = reader.watch(watched).expect("a bus-backed door watches");
         for status in [M::RECEIVED, M::SUCCEEDED] {
             bus.publish(OperationUpdate {
                 message_id: watched,

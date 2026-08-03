@@ -62,6 +62,12 @@ async fn main() {
             // fail-closed in http.rs.
             state.connect = Some(Arc::new(HubRiseConnectFlow::new(
                 mailbox,
+                // No shared response bus in a standalone adapter (#304): the one
+                // `run_standalone_workers` publishes onto is a separate instance nothing here can
+                // subscribe to, so fabricating a third would give this flow a `watch` that awaits
+                // forever. `None` = the PULL-ONLY door, which is all the connect flow needs -- it
+                // reads the durable `inbound_messages` row, never the stream.
+                None,
                 restaurants,
                 connections,
                 HttpHubRiseConnectGateway {
