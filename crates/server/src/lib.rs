@@ -131,13 +131,20 @@ pub fn wire() -> HealthDto {
 /// (`20260730043100`-`20260730043600`). Every flipped resolver and every adapter ACL now enqueues on
 /// `inbound_messages`, so a build without those tables cannot serve a single mutation.
 ///
-/// This constant was left at `20260728160000` while those nine migrations landed, which made the
+/// `20260802230000` = the WIDTH-5 KEYSPACE (`20260802220000` re-stamps every row's `partition`
+/// for width 5, ADR-20260802-220402) plus `attempts` (`20260802230000`, the #313 poison cap). A
+/// width-5 binary against a width-100 mailbox claims lanes 0-4 only, so rows sitting in
+/// partitions 5-99 would never drain — the gate must hold the new binary until the re-stamp runs.
+///
+/// This constant was left at `20260728160000` while nine migrations landed, which made the
 /// readiness gate INERT for exactly the failure it exists to catch: a new instance would read
 /// `applied >= required`, report `ok`, take traffic, and fail every write on
 /// `relation "inbound_messages" does not exist`. The deploy runbook (ADR-20260730-051500) explicitly
 /// relies on this gate holding the new binary at 503 until `db-migrate` lands — deploy runs FIRST and
-/// the schema follows, so the gate is the only thing covering the window between them.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260731143000;
+/// the schema follows, so the gate is the only thing covering the window between them. It went stale
+/// AGAIN the same week (`20260731143000` while the two width-5 migrations landed) — if you are adding
+/// a migration the new binary depends on, this constant moves in the SAME commit.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260802230000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
