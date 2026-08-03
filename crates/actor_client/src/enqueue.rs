@@ -10,7 +10,7 @@
 //! tripwire on this crate itself.
 
 use crate::mailbox::{
-    Envelope, Mailbox, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
+    Envelope, Mailbox, MailboxAccess, MailboxEntry, MailboxInsertOutcome, MailboxScheduleOutcome,
 };
 // Only the test-only `enqueue_worker_command` reference implementation still takes an `Actor`.
 #[cfg(test)]
@@ -288,7 +288,7 @@ pub async fn enqueue_inbound_facts(
     let entries: Vec<MailboxEntry> =
         facts.into_iter().map(inbound_entry).collect::<Result<_, _>>()?;
     let inserted: std::collections::HashSet<uuid::Uuid> =
-        mailbox.insert_many(&entries).await?.into_iter().collect();
+        mailbox.insert_many(&entries, MailboxAccess::granted()).await?.into_iter().collect();
     Ok(entries.iter().map(|e| inserted.contains(&e.message_id)).collect())
 }
 
@@ -383,7 +383,7 @@ pub(crate) async fn schedule_mapped(
     scheduled_at: chrono::DateTime<chrono::Utc>,
     payload_hash: &str,
 ) -> Result<ScheduleOutcome, DomainError> {
-    match mailbox.schedule(&entry, scheduled_at).await? {
+    match mailbox.schedule(&entry, scheduled_at, MailboxAccess::granted()).await? {
         MailboxScheduleOutcome::Scheduled => Ok(ScheduleOutcome::Scheduled),
         MailboxScheduleOutcome::Rescheduled => Ok(ScheduleOutcome::Rescheduled),
         MailboxScheduleOutcome::Duplicate { status, payload_hash: existing } => {
@@ -407,7 +407,9 @@ pub async fn cancel_reminder(
     actor_id: uuid::Uuid,
     reminder_name: &str,
 ) -> Result<bool, DomainError> {
-    mailbox.cancel_scheduled(reminder_message_id(actor_id, reminder_name)).await
+    mailbox
+        .cancel_scheduled(reminder_message_id(actor_id, reminder_name), MailboxAccess::granted())
+        .await
 }
 
 /// Insert one entry and map the port outcome onto [`EnqueueOutcome`] — shared by the free-function
@@ -417,7 +419,7 @@ pub(crate) async fn insert_mapped(
     entry: MailboxEntry,
     payload_hash: &str,
 ) -> Result<EnqueueOutcome, DomainError> {
-    match mailbox.insert(&entry).await? {
+    match mailbox.insert(&entry, MailboxAccess::granted()).await? {
         MailboxInsertOutcome::Inserted => Ok(EnqueueOutcome::Enqueued),
         MailboxInsertOutcome::Duplicate { status, payload_hash: existing } => {
             if existing == payload_hash {

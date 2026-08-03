@@ -3,6 +3,28 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-03 — [#304 "The Mailbox port surface hole: insert/by_message are pub to any port holder"](https://github.com/TheCaptainCompany/captain-food/issues/304)
+> (PROP-20260802-130500 §5 directive, [ADR-20260803-172654](adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md))**:
+> holding the `Mailbox` port is no longer holding the door. Every port method takes a
+> `MailboxAccess` witness whose only mint is `pub(crate)` to `actor_client`, so outside the
+> boundary crate **no `Mailbox` method compiles at all** — the generated typed clients (write)
+> and `ActorClient` (read) are the only paths, by compiler rather than by convention. The write
+> methods were already closed incidentally (a `MailboxEntry` cannot be built outside the crate);
+> the two keyed by a bare `Uuid` were wide open: `by_message` (the D4 read side — its own doc
+> comment claimed a convention two callers were breaking) and `cancel_scheduled`, which would
+> withdraw any scheduled reminder for anyone while `cancel_scheduling` above it is emitted only
+> for actors declaring `reminders:` (ADR-20260802-170059). Both direct readers moved onto
+> `ActorClient::get_operation_status`: the HubRise connect flow's terminal-status poll (it now
+> holds an `ActorClient`; a standalone adapter has no shared bus, and that is fine because the
+> flow only pulls the durable row) and the generated legacy-arm cross-arm duplicate check.
+> Integration tests seed through `MailboxAccess::for_tests()` on the D5 `test-fixtures` feature
+> that never reaches a release graph. `every_mailbox_port_method_demands_the_access_witness`
+> (tools/codegen-rs) keeps the rule applying to the whole surface — a sixth method without the
+> witness would compile fine and silently reopen the hole — and pins the witness's `pub(crate)`
+> field and its single public mint. §5 audit: the `Mailbox` port row moves ❌ → ✅ compiler;
+> `View_*` reads ([#305](https://github.com/TheCaptainCompany/captain-food/issues/305)) and
+> `PgEventStore` append stay open.
+
 > ✅ **2026-08-03 — [#303 "ActorClient::watch — relocate OperationStatusBus behind the actor-client boundary"](https://github.com/TheCaptainCompany/captain-food/issues/303)
 > (PROP-20260802-130500 D4 tail, PROP-20260728-152752 §2.1)**: the operation-response bus is
 > behind the boundary now. `OperationStatusBus`/`OperationUpdate` moved from

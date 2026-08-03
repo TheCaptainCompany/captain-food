@@ -636,7 +636,8 @@ async fn pm_gate_cross_arm_duplicate_replays_instead_of_reexecuting() {
             source: None,
             external_id: None,
         }
-        .into())
+        .into(),
+        actor_client::mailbox::MailboxAccess::for_tests())
         .await
         .expect("seed mailbox acceptance");
     sqlx::query("UPDATE inbound_messages SET status = 'REJECTED', error = '{\"code\":\"RefundNotPending\"}', completed_at = now() WHERE message_id = $1")

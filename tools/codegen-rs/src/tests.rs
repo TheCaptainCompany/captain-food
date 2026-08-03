@@ -1855,6 +1855,114 @@ keys:
         );
     }
 
+    /// The `Mailbox` PORT SURFACE (#304, PROP-20260802-130500 §5 directive): every method of the
+    /// port demands a `MailboxAccess` witness, so holding an `Arc<dyn Mailbox>` is not holding the
+    /// door — only `actor_client` can mint one, and the compiler refuses every call from anywhere
+    /// else.
+    ///
+    /// The compiler already enforces the RULE; this guard enforces that the rule keeps applying to
+    /// the whole surface. Adding a sixth method without the witness compiles perfectly — it just
+    /// silently reopens exactly the hole #304 closed — and nothing but this scan would notice.
+    /// Same reason the entry-construction guard survived its own compile-time promotion.
+    #[test]
+    fn every_mailbox_port_method_demands_the_access_witness() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let rel = "crates/actor_client/src/mailbox.rs";
+        let src = std::fs::read_to_string(root.join(rel)).unwrap_or_else(|e| {
+            panic!("{rel} cannot be read ({e}) — if the port moved, move this guard WITH it")
+        });
+
+        // The witness must stay un-mintable from outside: a tuple field widened to `pub`, or a
+        // `pub fn granted`, would hand every port holder the key back without touching a signature.
+        assert!(
+            src.contains("pub struct MailboxAccess(pub(crate) ());"),
+            "the MailboxAccess witness must keep its `pub(crate)` field verbatim — a `pub` field \
+             makes `MailboxAccess(())` constructible by any crate and the whole port surface \
+             re-opens with no signature changing"
+        );
+        assert!(
+            src.contains("pub(crate) fn granted() -> Self"),
+            "the in-crate mint `MailboxAccess::granted()` is gone or widened — it must stay \
+             `pub(crate)`; the ONLY public mint may be the `test-fixtures` `for_tests()`"
+        );
+        let (_, after_fixtures) = src
+            .split_once("pub mod fixtures {")
+            .expect("the D5 fixtures module is where the test-only mint lives");
+        assert!(
+            src.matches("pub fn for_tests").count() == 1
+                && after_fixtures.contains("pub fn for_tests"),
+            "the only public mint of MailboxAccess must be `for_tests()`, inside the \
+             cfg-gated `fixtures` module (kept out of release graphs by \
+             `test_fixtures_feature_never_reaches_a_release_artifact`)"
+        );
+
+        // Every `async fn` declared in the `pub trait Mailbox { .. }` block, with its full
+        // parameter list — brace/paren depth tracked so a default body cannot fool the scan.
+        let trait_start = src
+            .find("pub trait Mailbox: Send + Sync {")
+            .expect("the Mailbox port trait — renamed? move this guard with it");
+        let body = &src[trait_start..];
+        let mut depth = 0usize;
+        let mut end = body.len();
+        for (i, c) in body.char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let body = &body[..end];
+
+        let mut methods: Vec<(String, bool)> = Vec::new();
+        let mut rest = body;
+        while let Some(at) = rest.find("async fn ") {
+            let sig = &rest[at + "async fn ".len()..];
+            let name: String = sig.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            let open = sig.find('(').expect("a method signature has a parameter list");
+            let mut d = 0usize;
+            let mut close = sig.len();
+            for (i, c) in sig[open..].char_indices() {
+                match c {
+                    '(' => d += 1,
+                    ')' => {
+                        d -= 1;
+                        if d == 0 {
+                            close = open + i;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            methods.push((name, sig[open..close].contains("MailboxAccess")));
+            rest = &sig[close..];
+        }
+
+        assert!(
+            methods.len() >= 5,
+            "found only {} methods on the Mailbox port — the scan went blind (signatures \
+             reformatted or the trait renamed); fix the scan, do not delete it",
+            methods.len()
+        );
+        let naked: Vec<&str> =
+            methods.iter().filter(|(_, ok)| !ok).map(|(n, _)| n.as_str()).collect();
+        assert!(
+            naked.is_empty(),
+            "these `Mailbox` port methods take no `MailboxAccess` witness: {naked:?}\n\n\
+             Fix: add a `MailboxAccess` parameter. Why: without it, any holder of an \
+             `Arc<dyn Mailbox>` can call the method directly and bypass the generated typed \
+             clients (write) and `ActorClient` (read) — the #304 hole. A method keyed only by \
+             primitives (`by_message`, `cancel_scheduled`) is the dangerous shape: the entry's \
+             private fields do NOT incidentally close it."
+        );
+    }
+
     /// The Cargo.toml CAPABILITY ALLOWLIST (#290 phase 1, PROP-20260802-130500 D3): `sqlx` (talk
     /// to the database) and `reqwest` (reach the network) may appear in a crate's RELEASE
     /// dependency sections only when that crate is explicitly allowlisted here WITH its reason.

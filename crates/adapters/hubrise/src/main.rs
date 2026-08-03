@@ -61,7 +61,12 @@ async fn main() {
             // HUBRISE_WEBHOOK_SECRET + HUBRISE_CONNECT_REDIRECT_URL) — checked per request,
             // fail-closed in http.rs.
             state.connect = Some(Arc::new(HubRiseConnectFlow::new(
-                mailbox,
+                mailbox.clone(),
+                // The D4 read door (#304). The bus is process-local and subscriber-less in a
+                // standalone adapter -- exactly as `run_standalone_workers` builds its own -- and
+                // that is fine here: the connect flow only ever PULLS a terminal status, which
+                // reads the durable `inbound_messages` row, never the stream.
+                actor_client::ActorClient::new(mailbox, Default::default()),
                 restaurants,
                 connections,
                 HttpHubRiseConnectGateway {

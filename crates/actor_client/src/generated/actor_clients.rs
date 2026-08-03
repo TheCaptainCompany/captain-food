@@ -19,7 +19,7 @@ use crate::enqueue::{
     command_entry, declared_identity, enqueue_inbound_fact, insert_mapped, schedule_mapped,
     InboundFact,
 };
-use crate::mailbox::{Envelope, Mailbox};
+use crate::mailbox::{Envelope, Mailbox, MailboxAccess};
 use crate::{EnqueueOutcome, ScheduleOutcome};
 
 /// The privacy SEAL: `Sealed` lives in a private module, so it cannot be named — let alone
@@ -1142,7 +1142,7 @@ impl OrderClient {
     /// `message_id` like the port beneath it: the id is minted by `schedule`, so holding it IS the
     /// capability (decided over lane-scoping, #308).
     pub async fn cancel_scheduling(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
-        self.mailbox.cancel_scheduled(message_id).await
+        self.mailbox.cancel_scheduled(message_id, MailboxAccess::granted()).await
     }
     /// The addressing invariant, enforced with the SAME `declared_identity` derivation the
     /// free-function door uses: when the command declares an identity property, its value MUST

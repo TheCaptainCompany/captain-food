@@ -6,7 +6,7 @@
 - **Tracking issues**: [#290](https://github.com/TheCaptainCompany/captain-food/issues/290) (phase 1, CLOSED 2026-08-02 — product owner: "close all the phases", one issue per remaining item). Successors:
   [#302 "Lint floor (D6)"](https://github.com/TheCaptainCompany/captain-food/issues/302) (done 2026-08-03) ·
   [#303 "ActorClient::watch — relocate OperationStatusBus"](https://github.com/TheCaptainCompany/captain-food/issues/303) (done 2026-08-03) ·
-  [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304) ·
+  [#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304) (done 2026-08-03) ·
   [#305 "View_* read declarations"](https://github.com/TheCaptainCompany/captain-food/issues/305) ·
   [#306 "Isolation phase 2: one crate per actor client"](https://github.com/TheCaptainCompany/captain-food/issues/306) ·
   [#307 "Isolation phase 3: per-actor implementation crates"](https://github.com/TheCaptainCompany/captain-food/issues/307) ·
@@ -67,15 +67,15 @@ and costs review nothing once installed):
 Levels 4–5 are the only ones an agent cannot cross *silently*: the crossing itself is a loud,
 reviewable act (a `Cargo.toml` edit, a boundary-crate diff, a credential change).
 
-## 2. Current state, measured (2026-08-02)
+## 2. Current state, measured (2026-08-03)
 
 | boundary | today | level |
 |---|---|---|
 | domain purity (no outward deps) | `domain` depends on nothing | **4** ✅ |
 | what an actor receives | sealed `{Actor}Command`/`{Actor}Fact` traits ([#288](https://github.com/TheCaptainCompany/captain-food/pull/288)) | **4** ✅ |
-| the write door (who may build a mailbox row) | `pub(crate)` constructors + textual guard ([#292](https://github.com/TheCaptainCompany/captain-food/pull/292)) | 3 |
+| the write door (who may build a mailbox row) | `pub(crate)` constructors + the `MailboxAccess` witness on every port method ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)) | **4** ✅ |
 | who may address which actor | anyone depending on `infrastructure` gets all 16 clients | 1 |
-| the read door (`operationStatus`) | repo traits; nothing stops a raw SELECT | 1 |
+| the read door (`operationStatus`) | `ActorClient` + the `MailboxAccess` witness ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)); a raw SELECT still needs `sqlx`, which D3 allowlists | **4** ✅ |
 | **who may run SQL at all** | **`sqlx` in NINE crates** — server, all five adapters, actor_runtime, sirene_ingest, infrastructure | **1** |
 | who may reach the network | `reqwest` in ten crates | 1 |
 | event-store append | `PgEventStore` public; any infra-dependent code can append | 1 |
@@ -235,7 +235,7 @@ withdrawal method named `cancel_scheduling` per #308, lane-scoping declined). Th
 | SDUI screens | `resolvers`/`actions` allowlists into api.yaml | ✅ validator |
 | actor inboxes | `receives` → sealed traits | ✅ compiler |
 | client methods | `receives`/`reminders` → conditional emission | ✅ compiler (phase 1) |
-| `Mailbox` port (`insert`/`by_message` pub to any holder) | none — convention only | ❌ hole (#290 checklist) |
+| `Mailbox` port (`insert`/`by_message`/`cancel_scheduled`) | the `MailboxAccess` witness — mintable only inside `actor_client` ([ADR-20260803-172654](../adr/ADR-20260803-172654-mailbox-port-demands-a-capability-witness.md)) | ✅ compiler ([#304 "The Mailbox port surface hole"](https://github.com/TheCaptainCompany/captain-food/issues/304)) |
 | `View_*` repository read methods | none — no spec declares which surface reads what | ❌ hole (#290 checklist) |
 | `PgEventStore` append | none (level-1 row in §2) | ❌ hole (phase-3 territory) |
 | unused Rust `pub` items generally | `unreachable_pub = deny` — the mechanical form of this directive | D6, deferred by PO decision |

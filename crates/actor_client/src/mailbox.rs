@@ -111,7 +111,19 @@ impl MailboxEntry {
 /// full-destructure freeze test (e.g. `graphql_typed_send`) exhaustive by construction.
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod fixtures {
-    use super::MailboxEntry;
+    use super::{MailboxAccess, MailboxEntry};
+
+    impl MailboxAccess {
+        /// The TEST-ONLY mint of the port witness (#304, on the D5 mechanism): an integration
+        /// test that seeds or reads a mailbox row IS the thing behind the door, so it needs one.
+        /// Compiled only under `test-fixtures`, which `test_fixtures_feature_never_reaches_a_release_artifact`
+        /// keeps out of every release graph — so this is a door for tests, not a door in
+        /// production. Prefer a typed client where the test is about behaviour rather than
+        /// storage.
+        pub fn for_tests() -> Self {
+            Self(())
+        }
+    }
 
     /// The all-public mirror of [`MailboxEntry`] for tests: seed rows with
     /// `EntryFixture { .. }.into()`, freeze rows with `entry.into_fixture()` + full destructure.
@@ -291,11 +303,44 @@ pub struct MailboxStatusRow {
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// The capability WITNESS every [`Mailbox`] method demands (#304, PROP-20260802-130500 §5
+/// directive): a value only THIS crate can mint, because its single field is `pub(crate)`.
+///
+/// The hole it closes: a port whose methods are merely `pub` makes *holding the port* the same
+/// thing as *holding the door* — any `Arc<dyn Mailbox>` holder could call `by_message` or
+/// `cancel_scheduled` (both keyed by a bare `Uuid`) and walk straight past the typed clients and
+/// [`crate::ActorClient`]. The write methods were incidentally closed already, since a
+/// [`MailboxEntry`] cannot be built outside this crate; the token makes that property EXPLICIT and
+/// uniform, so a future port method taking only primitives cannot silently reopen the surface.
+///
+/// This is the same mechanic as the entry's private fields, one level up: the compiler, not
+/// convention, decides who may speak to the mailbox. Implementors outside the crate
+/// (`infrastructure::PgMailbox`) name the type in their signatures and ignore the value — naming a
+/// type is not constructing one.
+///
+/// Honest limit: an out-of-crate *implementor* is handed a token when a door calls it, so it could
+/// retain one. That is not an escalation worth chasing — implementing the port is itself a loud,
+/// reviewable act, and the D3 capability allowlist governs who may hold `sqlx` at all.
+#[derive(Debug, Clone, Copy)]
+pub struct MailboxAccess(pub(crate) ());
+
+impl MailboxAccess {
+    /// Mint the witness. `pub(crate)` IS the enforcement — every caller of a [`Mailbox`] method
+    /// therefore stands inside this crate, behind a typed client or the [`crate::ActorClient`].
+    pub(crate) fn granted() -> Self {
+        Self(())
+    }
+}
+
 #[async_trait]
 pub trait Mailbox: Send + Sync {
     /// Persist the entry as RECEIVED (immediate `position`). A `message_id` collision returns the
     /// existing row's status + hash instead of inserting.
-    async fn insert(&self, entry: &MailboxEntry) -> Result<MailboxInsertOutcome, DomainError>;
+    async fn insert(
+        &self,
+        entry: &MailboxEntry,
+        access: MailboxAccess,
+    ) -> Result<MailboxInsertOutcome, DomainError>;
 
     /// Persist MANY entries as RECEIVED in one round-trip, returning the `message_id`s that were
     /// actually inserted; the rest collided on the pk and are already on the mailbox.
@@ -315,10 +360,11 @@ pub trait Mailbox: Send + Sync {
     async fn insert_many(
         &self,
         entries: &[MailboxEntry],
+        access: MailboxAccess,
     ) -> Result<Vec<uuid::Uuid>, DomainError> {
         let mut inserted = Vec::new();
         for entry in entries {
-            if matches!(self.insert(entry).await?, MailboxInsertOutcome::Inserted) {
+            if matches!(self.insert(entry, access).await?, MailboxInsertOutcome::Inserted) {
                 inserted.push(entry.message_id);
             }
         }
@@ -326,11 +372,12 @@ pub trait Mailbox: Send + Sync {
     }
 
     /// The row behind an acceptance handle. Callers outside this crate read it through
-    /// [`crate::ActorClient::get_operation_status`] — the D4 read door — never by naming this
-    /// method on a bare pool.
+    /// [`crate::ActorClient::get_operation_status`] — the D4 read door. Since #304 that is not a
+    /// convention they may ignore: without a [`MailboxAccess`] the call does not compile.
     async fn by_message(
         &self,
         message_id: uuid::Uuid,
+        access: MailboxAccess,
     ) -> Result<Option<MailboxStatusRow>, DomainError>;
 
     /// Persist the entry as SCHEDULED (`position` NULL until the promotion pass stamps one).
@@ -341,12 +388,22 @@ pub trait Mailbox: Send + Sync {
         &self,
         entry: &MailboxEntry,
         scheduled_at: chrono::DateTime<chrono::Utc>,
+        access: MailboxAccess,
     ) -> Result<MailboxScheduleOutcome, DomainError>;
 
     /// The explicit withdrawal: `SCHEDULED → CANCELLED` (ADR-20260731-150500 §3). `false` when
     /// the row is absent or no longer SCHEDULED — a cancellation that raced promotion and lost,
     /// which is a fact for the caller, not an error.
-    async fn cancel_scheduled(&self, message_id: uuid::Uuid) -> Result<bool, DomainError>;
+    ///
+    /// Keyed by a bare `message_id`, so before #304 ANY port holder could withdraw ANY scheduled
+    /// reminder — the widest hole on this trait, since the client method above it
+    /// (`cancel_scheduling`) is emitted only for actors that DECLARE reminders
+    /// (ADR-20260802-170059). The witness restores that gate.
+    async fn cancel_scheduled(
+        &self,
+        message_id: uuid::Uuid,
+        access: MailboxAccess,
+    ) -> Result<bool, DomainError>;
 }
 
 /// In-memory double for tests (mirrors `journal::mem::MemCommandJournal`). Compiled only for this
@@ -411,7 +468,11 @@ pub mod mem {
 
     #[async_trait]
     impl Mailbox for MemMailbox {
-        async fn insert(&self, entry: &MailboxEntry) -> Result<MailboxInsertOutcome, DomainError> {
+        async fn insert(
+            &self,
+            entry: &MailboxEntry,
+            _access: MailboxAccess,
+        ) -> Result<MailboxInsertOutcome, DomainError> {
             let mut rows = self.rows.lock().expect("mem mailbox poisoned");
             if let Some(existing) = rows.get(&entry.message_id) {
                 return Ok(MailboxInsertOutcome::Duplicate {
@@ -434,6 +495,7 @@ pub mod mem {
         async fn by_message(
             &self,
             message_id: uuid::Uuid,
+            _access: MailboxAccess,
         ) -> Result<Option<MailboxStatusRow>, DomainError> {
             let rows = self.rows.lock().expect("mem mailbox poisoned");
             Ok(rows.get(&message_id).map(|r| MailboxStatusRow {
@@ -453,6 +515,7 @@ pub mod mem {
             &self,
             entry: &MailboxEntry,
             scheduled_at: chrono::DateTime<chrono::Utc>,
+            _access: MailboxAccess,
         ) -> Result<MailboxScheduleOutcome, DomainError> {
             let mut rows = self.rows.lock().expect("mem mailbox poisoned");
             match rows.get_mut(&entry.message_id) {
@@ -481,7 +544,11 @@ pub mod mem {
             }
         }
 
-        async fn cancel_scheduled(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
+        async fn cancel_scheduled(
+            &self,
+            message_id: uuid::Uuid,
+            _access: MailboxAccess,
+        ) -> Result<bool, DomainError> {
             let mut rows = self.rows.lock().expect("mem mailbox poisoned");
             match rows.get_mut(&message_id) {
                 Some(row) if row.status == InboundMessageStatus::SCHEDULED => {
@@ -530,12 +597,12 @@ mod tests {
         let t2 = t1 + chrono::Duration::hours(1);
         let first = entry(serde_json::json!({"eventType": "OrderExpired"}));
         assert_eq!(
-            mailbox.schedule(&first, t1).await.unwrap(),
+            mailbox.schedule(&first, t1, MailboxAccess::granted()).await.unwrap(),
             MailboxScheduleOutcome::Scheduled
         );
         let second = entry(serde_json::json!({"eventType": "OrderExpired", "window": "P2Y"}));
         assert_eq!(
-            mailbox.schedule(&second, t2).await.unwrap(),
+            mailbox.schedule(&second, t2, MailboxAccess::granted()).await.unwrap(),
             MailboxScheduleOutcome::Rescheduled
         );
         assert_eq!(mailbox.entries().len(), 1, "one pending occurrence per (actor, purpose)");
@@ -550,21 +617,21 @@ mod tests {
         let mailbox = MemMailbox::default();
         let e = entry(serde_json::json!({"eventType": "OrderExpired"}));
         // An immediate insert (RECEIVED) is a spent identity for any later schedule.
-        mailbox.insert(&e).await.unwrap();
-        match mailbox.schedule(&e, chrono::Utc::now()).await.unwrap() {
+        mailbox.insert(&e, MailboxAccess::granted()).await.unwrap();
+        match mailbox.schedule(&e, chrono::Utc::now(), MailboxAccess::granted()).await.unwrap() {
             MailboxScheduleOutcome::Duplicate { status, .. } => {
                 assert_eq!(status, InboundMessageStatus::RECEIVED)
             }
             other => panic!("expected Duplicate, got {other:?}"),
         }
-        assert!(!mailbox.cancel_scheduled(e.message_id).await.unwrap(), "RECEIVED is not cancellable");
+        assert!(!mailbox.cancel_scheduled(e.message_id, MailboxAccess::granted()).await.unwrap(), "RECEIVED is not cancellable");
 
         let scheduled = MailboxEntry { message_id: uuid::Uuid::from_u128(0x5EED2), ..entry(serde_json::json!({})) };
-        mailbox.schedule(&scheduled, chrono::Utc::now()).await.unwrap();
-        assert!(mailbox.cancel_scheduled(scheduled.message_id).await.unwrap());
-        assert!(!mailbox.cancel_scheduled(scheduled.message_id).await.unwrap(), "already CANCELLED");
+        mailbox.schedule(&scheduled, chrono::Utc::now(), MailboxAccess::granted()).await.unwrap();
+        assert!(mailbox.cancel_scheduled(scheduled.message_id, MailboxAccess::granted()).await.unwrap());
+        assert!(!mailbox.cancel_scheduled(scheduled.message_id, MailboxAccess::granted()).await.unwrap(), "already CANCELLED");
         assert_eq!(
-            mailbox.by_message(scheduled.message_id).await.unwrap().unwrap().status,
+            mailbox.by_message(scheduled.message_id, MailboxAccess::granted()).await.unwrap().unwrap().status,
             InboundMessageStatus::CANCELLED
         );
     }

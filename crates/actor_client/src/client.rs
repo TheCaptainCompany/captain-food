@@ -23,7 +23,7 @@ use std::sync::Arc;
 use domain::shared::errors::DomainError;
 use tokio::sync::broadcast;
 
-use crate::mailbox::{Mailbox, MailboxStatusRow};
+use crate::mailbox::{Mailbox, MailboxAccess, MailboxStatusRow};
 use crate::status_bus::{OperationStatusBus, OperationUpdate};
 
 /// The one generic, actor-agnostic client: holds the read capability over operation status —
@@ -46,7 +46,7 @@ impl ActorClient {
         &self,
         message_id: uuid::Uuid,
     ) -> Result<Option<MailboxStatusRow>, DomainError> {
-        self.mailbox.by_message(message_id).await
+        self.mailbox.by_message(message_id, MailboxAccess::granted()).await
     }
 
     /// Subscribe to the response stream of ONE operation (§2.1 `watch`, #303): every post-commit

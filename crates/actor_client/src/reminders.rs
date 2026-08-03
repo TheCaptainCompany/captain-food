@@ -10,7 +10,7 @@ use application::generated::reminders::ReminderSchedule;
 use application::reminders::{reminder_message_id, tagged_payload};
 use domain::shared::errors::DomainError;
 
-use crate::mailbox::{Mailbox, MailboxEntry, MailboxScheduleOutcome};
+use crate::mailbox::{Mailbox, MailboxAccess, MailboxEntry, MailboxScheduleOutcome};
 
 /// Re-exported for the generated behaviour tests in `application` (dev-dep cycle, D5): inside
 /// application's own test build, `crate::generated::reminders::ReminderSchedule` and the
@@ -66,5 +66,11 @@ pub async fn declare(
     scheduled_at: chrono::DateTime<chrono::Utc>,
     correlation_id: uuid::Uuid,
 ) -> Result<MailboxScheduleOutcome, DomainError> {
-    mailbox.schedule(&scheduled_entry(spec, actor_id, partition, correlation_id, None), scheduled_at).await
+    mailbox
+        .schedule(
+            &scheduled_entry(spec, actor_id, partition, correlation_id, None),
+            scheduled_at,
+            MailboxAccess::granted(),
+        )
+        .await
 }
