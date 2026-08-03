@@ -27,6 +27,7 @@ pub struct CommandDeps {
     pub payments: Arc<dyn application::generated::services::PaymentService>,
     pub pm_state: Arc<dyn application::pm_state::PaymentProcessStateStore>,
     pub refund_state: Arc<dyn application::pm_state::RefundProcessStateStore>,
+    pub mailbox_requeue: Arc<dyn application::queries::MailboxRequeue>,
 }
 
 /// The slice of the request envelope some handler calls read (placeOrder's session scope).
@@ -55,6 +56,7 @@ pub async fn dispatch_command(
     let payments = deps.payments.clone();
     let pm_state = deps.pm_state.clone();
     let refund_state = deps.refund_state.clone();
+    let mailbox_requeue = deps.mailbox_requeue.clone();
     let env = RouterEnv { session_id };
     let actor = actor_ref.clone();
     match command_type {
@@ -632,6 +634,13 @@ pub async fn dispatch_command(
             };
             Some(application::commands::attach_reclamation_evidence(store.as_ref(), cmd, &actor).await.map(|_| ()))
         }
+        "RequeueMailboxMessage" => {
+            let cmd: domain::generated::commands::RequeueMailboxMessage = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("RequeueMailboxMessage payload: {e}")))),
+            };
+            Some(application::commands::requeue_mailbox_message(store.as_ref(), mailbox_requeue.as_ref(), cmd, &actor).await.map(|_| ()))
+        }
         _ => None,
     }
 }
@@ -652,6 +661,7 @@ pub const ACTOR_ACTIVATIONS: &[(&str, bool, Option<i64>)] = &[
     ("CustomerCredit", true, None),
     ("DeliveryJob", true, None),
     ("DeliveryPartnerRegistration", true, None),
+    ("MailboxSupervision", true, None),
     ("Order", true, None),
     ("Payment", true, None),
     ("PlaceOrderProcess", true, None),

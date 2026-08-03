@@ -3,7 +3,7 @@
 - **Status**: Approved (product owner, in-session "Perfect go ahead", 2026-08-02; ADR-20260802-224532; D1–D5 as recommended, unresolved questions copied to #313)
 - **Date**: 2026-08-02
 - **Tracking issue**: [#313 "Push-driven mailbox: pg_notify on inbound_messages, idle lane gate, poison policy (PROP-20260802-223522)"](https://github.com/TheCaptainCompany/captain-food/issues/313)
-- **Realized by**: (pending)
+- **Realized by**: [PR #314 "feat(#313): push-driven mailbox — pg_notify at the door, idle lane gate, poison cap"](https://github.com/TheCaptainCompany/captain-food/pull/314); follow-ups per ADR-20260803-002712 — #316 (PR #319, backoff), #318 (PR #322, DB-persisted posture), #315 (requeue, ADR-20260803-143216), #317 (⏳ Honeycomb re-auth)
 
 ## Context
 
@@ -207,19 +207,24 @@ question below).
   emitter work in `specs/database/tables/journals.yaml` — the DSL, not just the SQL, changes.
 - More code on the most safety-critical path we have; the #270-style multi-lens review applies.
 
-## Unresolved questions
+## Open questions — ALL DECIDED ([ADR-20260803-002712](../adr/20260803-002712-mailbox-poison-follow-ups-decided.md), product owner, 2026-08-03)
 
-1. **Requeue tooling**: after an operator fixes the cause, is flipping `FAILED → RECEIVED` a new
-   admin mutation (command catalog + story step + test, per ADR-0032) or a documented SQL
-   runbook for now?
-2. **Cap value and counting**: 5 total delivery attempts, no backoff — or exponential spacing
-   between attempts (needs a `next_attempt_at` column)? Proposal starts with the simple counter.
-3. **Alerting**: does a poison `FAILED` page (Honeycomb trigger on the observability event) or
-   only surface on the supervision screen? Peak-hour stakes say page for `Payment` /
-   `PlaceOrderProcess` lanes at least.
-4. **`RUN_MAILBOX_WORKERS` adapters**: with push live, does the adapter-side worker fleet
-   (monolith-downtime insurance) stay default-off, or become the recommended posture now that
-   its idle cost is ~nil?
+1. **Requeue tooling → a first-class ADMIN mutation** (full ADR-0032 train; "operators never
+   touch SQL on the money path"). Realized by
+   [#315](https://github.com/TheCaptainCompany/captain-food/issues/315) /
+   [ADR-20260803-143216](../adr/20260803-143216-admin-requeue-rides-the-mailbox.md): the
+   `MailboxSupervision` aggregate, `requeueMailboxMessage` + `poisonedMailboxMessages`, the
+   single-statement `MailboxRequeue` arbitration.
+2. **Cap counting → exponential backoff** (`next_attempt_at`, base × 2^(N-1)). Realized by
+   [#316](https://github.com/TheCaptainCompany/captain-food/issues/316) (PR #319).
+3. **Alerting → every poison FAILED pages** (all actor types, not just money lanes). Tracked:
+   [#317](https://github.com/TheCaptainCompany/captain-food/issues/317), blocked on Honeycomb
+   re-authorization.
+4. **`RUN_MAILBOX_WORKERS` → default-off until the PM posture is DB-persisted.** The
+   precondition landed as
+   [#318](https://github.com/TheCaptainCompany/captain-food/issues/318) /
+   [ADR-20260803-104819](../adr/20260803-104819-db-persisted-pm-mailbox-delivery-posture.md)
+   (the `RuntimePosture` row); the guidance flip to on stays its own one-line ADR after smoke.
 
 ## Verification plan
 

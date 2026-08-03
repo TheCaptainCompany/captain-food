@@ -32,6 +32,7 @@ pub(crate) const BT_AGGREGATES: &[(&str, &str, bool)] = &[
     ("Conversation", "orderId", true),   // id = orderId (a conversation's identity IS its order; #129)
     ("Reclamation", "reclamationId", true),   // id = reclamationId (its own identity; MULTIPLE claims per order; #151)
     ("CustomerCredit", "customerId", true),   // id = customerId (a per-customer store-credit ledger; #158)
+    ("MailboxSupervision", "targetMessageId", true),   // id = the SUPERVISED row's messageId (#315)
 ];
 
 pub(crate) fn bt_agg(actor: &str) -> Option<(&'static str, &'static str, bool)> {
@@ -276,6 +277,11 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         // read repo.
         "ConfigureRestaurantSlug" => {
             format!("crate::commands::{}(&bed.store, &bed.slugs, cmd, &support::actor()).await", snake)
+        }
+        // The requeue consults/flips the inbound_messages row through the MailboxRequeue port (#315);
+        // the TestBed fake's sentinels drive the poisoned / settled / unknown cases.
+        "RequeueMailboxMessage" => {
+            format!("crate::commands::{}(&bed.store, &bed.mailbox_requeue, cmd, &support::actor()).await", snake)
         }
         "ClaimRestaurantListing" | "OptOutRestaurantListing" => {
             format!("crate::commands::{}(&bed.store, &bed.ownership, cmd, &support::actor()).await", snake)

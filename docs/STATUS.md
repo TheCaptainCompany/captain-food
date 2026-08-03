@@ -3,6 +3,21 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
+> ✅ **2026-08-03 — [#315 "Admin requeue mutation for poisoned mailbox rows (ADR-20260803-002712 Q1)"](https://github.com/TheCaptainCompany/captain-food/issues/315)
+> ([ADR-20260803-143216](adr/20260803-143216-admin-requeue-rides-the-mailbox.md))**: operator
+> recovery of a cap-poisoned row is a first-class ADMIN mutation riding the mailbox it
+> supervises — new `MailboxSupervision` aggregate (keyed by the SUPERVISED row's messageId, 1
+> partition; every intervention = a `MailboxMessageRequeued` audit fact), `requeueMailboxMessage`
+> mutation + `poisonedMailboxMessages` discovery query (the messageId behind
+> `MailboxLane.poisoned`'s bare count), the `MailboxRequeue` port whose Pg adapter arbitrates AND
+> flips in ONE statement (`FAILED`+`DeliveryInfrastructureError` → `RECEIVED`, attempts reset,
+> error/backoff cleared, lane `pg_notify`-nudged; already-deliverable converges, anything else
+> refuses typed), full ADR-0032 train (rule
+> `OnlyCapPoisonedMailboxRowsAreRequeueable` ⇆ 3 behaviour tests, story steps, system-screen
+> poisoned list + Requeue button, `platform` bounded context in C4 L2). E2E `mailbox_requeue`
+> proves the loop on PG through a real worker fleet. Remaining #313 follow-up: #317 (Honeycomb
+> poison alert, ⏳ blocked on Honeycomb re-authorization).
+
 > ✅ **2026-08-03 — [#302 "Lint floor (PROP-20260802-130500 D6): workspace [lints] + cargo-machete in CI"](https://github.com/TheCaptainCompany/captain-food/issues/302)**:
 > the D6 lint floor is in force. Workspace `[workspace.lints.rust]` sets `unsafe_code = "forbid"`
 > (no crate writes unsafe today; a future FFI crate opts out via its own `[lints]` table — a

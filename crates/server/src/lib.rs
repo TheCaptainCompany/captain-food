@@ -828,6 +828,13 @@ pub async fn router() -> Router {
                         refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(
                             pool.clone(),
                         )),
+                        // The poisoned-row recovery port (#315): the RequeueMailboxMessage
+                        // deliveries flip the target row through this arbiter.
+                        mailbox_requeue: Arc::new(
+                            infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(
+                                pool.clone(),
+                            ),
+                        ),
                     };
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a

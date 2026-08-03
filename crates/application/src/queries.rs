@@ -642,10 +642,68 @@ pub struct MailboxLaneRow {
     pub poisoned: i64,
 }
 
+/// One cap-poisoned mailbox row (#315): an `inbound_messages` row the delivery-attempts cap
+/// flipped to terminal FAILED with error code `DeliveryInfrastructureError` — the per-row detail
+/// behind [`MailboxLaneRow::poisoned`]'s count, carrying the id the requeue recovery needs.
+#[derive(Debug, Clone)]
+pub struct PoisonedMessageRow {
+    pub message_id: uuid::Uuid,
+    pub actor_type: String,
+    pub partition: i16,
+    pub message_type: String,
+    /// Delivery attempts consumed before the cap flipped the row (SMALLINT on the table).
+    pub attempts: i16,
+    /// `error->>'code'` — always `DeliveryInfrastructureError` for a poisoned row today, carried
+    /// anyway so the screen never has to hard-code the predicate it filters by.
+    pub error_code: Option<String>,
+    pub correlation_id: Option<uuid::Uuid>,
+    pub received_at: chrono::DateTime<chrono::Utc>,
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// Read port over the mailbox registry + backlog. Backs the ADMIN `mailboxLanes` supervision query;
 /// the adapter joins `mailbox_partitions` with per-lane counts from `inbound_messages`.
 #[async_trait]
 pub trait MailboxLaneRepository: Send + Sync {
     /// Every registered lane, `(actor_type, partition)` order — empty until a worker seeds the registry.
     async fn list(&self) -> Result<Vec<MailboxLaneRow>, DomainError>;
+    /// Every cap-poisoned row (#315), newest first, optionally filtered to one actor type;
+    /// `limit` is the resolver-clamped page size. Backs the ADMIN `poisonedMailboxMessages` query.
+    async fn poisoned(
+        &self,
+        actor_type: Option<String>,
+        limit: i64,
+    ) -> Result<Vec<PoisonedMessageRow>, DomainError>;
+}
+
+/// Outcome of a [`MailboxRequeue::requeue_if_poisoned`] arbitration (#315) — what the database
+/// said about the target row, decided and applied in ONE statement so no check-then-act window
+/// exists between "is it poisoned" and "flip it".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequeueOutcome {
+    /// The row WAS cap-poisoned and is now RECEIVED again (attempts reset, error + backoff
+    /// schedule cleared, lane nudged); carries the lane's actor type for the audit fact.
+    Requeued { actor_type: String },
+    /// The row is ALREADY deliverable (RECEIVED) — a redelivered/raced requeue converges here:
+    /// recorded as success, the row untouched.
+    AlreadyDeliverable { actor_type: String },
+    /// No row with this id (e.g. a stale supervision screen after retention swept it).
+    NotFound,
+    /// The row exists in a state that must never be requeued (a handler verdict, a scheduled
+    /// row, an already-succeeded run) — `status` names it for the error context.
+    NotRequeueable { status: String },
+}
+
+/// WRITE port over the poisoned-row recovery (#315, ADR-20260803-002712 Q1): the arbiter of
+/// "only cap-poisoned rows are requeueable" (rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).
+/// Deliberately NOT part of the read repository: the flip must be a single atomic arbitration.
+/// Like the slug-reservation port, the write happens alongside (not inside) the event append —
+/// idempotent by construction, so a retried delivery of the requeue command converges.
+#[async_trait]
+pub trait MailboxRequeue: Send + Sync {
+    /// Flip the row `FAILED → RECEIVED` iff it is cap-poisoned (error code
+    /// `DeliveryInfrastructureError`); report what the database found otherwise. Never guesses:
+    /// the predicate and the flip are one statement.
+    async fn requeue_if_poisoned(&self, message_id: uuid::Uuid)
+        -> Result<RequeueOutcome, DomainError>;
 }

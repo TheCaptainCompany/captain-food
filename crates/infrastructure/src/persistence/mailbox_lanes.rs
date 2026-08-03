@@ -5,7 +5,9 @@
 //! numbers are a monitoring snapshot, not a serialized truth (the worker's completion transaction
 //! is the authority on a lane).
 
-use application::queries::{MailboxLaneRepository, MailboxLaneRow};
+use application::queries::{
+    MailboxLaneRepository, MailboxLaneRow, MailboxRequeue, PoisonedMessageRow, RequeueOutcome,
+};
 use async_trait::async_trait;
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
@@ -73,5 +75,110 @@ impl MailboxLaneRepository for PgMailboxLaneRepository {
         .await
         .map_err(db_err)?;
         rows.iter().map(decode_lane).collect()
+    }
+
+    async fn poisoned(
+        &self,
+        actor_type: Option<String>,
+        limit: i64,
+    ) -> Result<Vec<PoisonedMessageRow>, DomainError> {
+        // Same poison predicate as the lane counter above — the detail view behind it (#315).
+        // Newest first: the row an operator is hunting is almost always the one that just paged.
+        let rows = sqlx::query(
+            "SELECT m.message_id, m.actor_type, m.partition, m.message_type, m.attempts, \
+                    m.error->>'code' AS error_code, m.correlation_id, m.received_at, m.completed_at \
+             FROM inbound_messages m \
+             WHERE m.status = 'FAILED' AND (m.error->>'code') = 'DeliveryInfrastructureError' \
+               AND ($1::text IS NULL OR m.actor_type = $1) \
+             ORDER BY m.received_at DESC \
+             LIMIT $2",
+        )
+        .bind(actor_type)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        rows.iter()
+            .map(|row| {
+                Ok(PoisonedMessageRow {
+                    message_id: row.try_get("message_id").map_err(db_err)?,
+                    actor_type: row.try_get("actor_type").map_err(db_err)?,
+                    partition: row.try_get::<i16, _>("partition").map_err(db_err)?,
+                    message_type: row.try_get("message_type").map_err(db_err)?,
+                    attempts: row.try_get::<i16, _>("attempts").map_err(db_err)?,
+                    error_code: row.try_get("error_code").map_err(db_err)?,
+                    correlation_id: row.try_get("correlation_id").map_err(db_err)?,
+                    received_at: row.try_get("received_at").map_err(db_err)?,
+                    completed_at: row.try_get("completed_at").map_err(db_err)?,
+                })
+            })
+            .collect()
+    }
+}
+
+/// Postgres adapter of the poisoned-row recovery write port (#315): predicate + flip in ONE
+/// UPDATE (no check-then-act window), the lane nudged in the same transaction-less statement
+/// via the SAME `pg_notify` channel the enqueue door uses — so the requeued row is picked up on
+/// commit, not at the next heartbeat. The fallback SELECT only runs when nothing flipped, to
+/// name WHY for the error context.
+pub struct PgMailboxRequeue {
+    pool: PgPool,
+}
+
+impl PgMailboxRequeue {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl MailboxRequeue for PgMailboxRequeue {
+    async fn requeue_if_poisoned(
+        &self,
+        message_id: uuid::Uuid,
+    ) -> Result<RequeueOutcome, DomainError> {
+        // The arbitration IS the write: rows in any other state never match the predicate, so
+        // there is nothing to race — a concurrent duplicate requeue simply finds RECEIVED below.
+        let flipped = sqlx::query(
+            "WITH flip AS ( \
+                 UPDATE inbound_messages \
+                 SET status = 'RECEIVED', attempts = 0, error = NULL, \
+                     next_attempt_at = NULL, last_attempt_at = NULL, completed_at = NULL \
+                 WHERE message_id = $1 \
+                   AND status = 'FAILED' AND (error->>'code') = 'DeliveryInfrastructureError' \
+                 RETURNING actor_type \
+             ) \
+             SELECT actor_type, pg_notify('inbound_messages', actor_type) FROM flip",
+        )
+        .bind(message_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?;
+        if let Some(row) = flipped {
+            return Ok(RequeueOutcome::Requeued {
+                actor_type: row.try_get("actor_type").map_err(db_err)?,
+            });
+        }
+        let existing = sqlx::query(
+            "SELECT actor_type, status FROM inbound_messages WHERE message_id = $1",
+        )
+        .bind(message_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?;
+        match existing {
+            None => Ok(RequeueOutcome::NotFound),
+            Some(row) => {
+                let status: String = row.try_get("status").map_err(db_err)?;
+                if status == "RECEIVED" {
+                    // Our own earlier flip (a retried delivery) or a raced twin — converged.
+                    Ok(RequeueOutcome::AlreadyDeliverable {
+                        actor_type: row.try_get("actor_type").map_err(db_err)?,
+                    })
+                } else {
+                    Ok(RequeueOutcome::NotRequeueable { status })
+                }
+            }
+        }
     }
 }

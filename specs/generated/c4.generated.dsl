@@ -28,6 +28,9 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
           a_RefundProcess = component "RefundProcess" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "ProcessManager"
           a_ReclamationProcess = component "ReclamationProcess" "Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129)." "ProcessManager"
         }
+        group "platform" {
+          a_MailboxSupervision = component "MailboxSupervision" "Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI." "Aggregate"
+        }
         group "customer" {
           a_Customer = component "Customer" "Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding." "Aggregate"
           a_CartBindingProcess = component "CartBindingProcess" "Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding." "ProcessManager"

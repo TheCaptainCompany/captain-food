@@ -301,6 +301,7 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
         refund_state: Arc::new(infrastructure::persistence::PgRefundProcessState::new(
             pool.clone(),
         )),
+        mailbox_requeue: Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(pool.clone())),
     }
 }
 

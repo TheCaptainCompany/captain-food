@@ -270,6 +270,24 @@ types:
       oldestPendingAt: { type: string, format: date-time, nullable: true }
       retryingAttempts: { type: integer }
       poisoned: { type: integer }
+  PoisonedMailboxMessage:
+    description: >
+      One cap-poisoned mailbox row (#315): an inbound_messages row the delivery-attempts cap
+      flipped to terminal FAILED with error code DeliveryInfrastructureError
+      (PROP-20260802-223522 D4). The ADMIN supervision detail behind MailboxLane.poisoned's bare
+      count — carries the messageId an operator needs to requeue it (requeueMailboxMessage)
+      after fixing the cause, plus the evidence to judge whether the cause IS fixed. NON-PROJECTED
+      (transient) — write-path infrastructure, no backing View_*.
+    properties:
+      messageId: { type: string }
+      actorType: { type: string }
+      partition: { type: integer }
+      messageType: { type: string }
+      attempts: { type: integer }
+      errorCode: { type: string, nullable: true }
+      correlationId: { type: string, nullable: true }
+      receivedAt: { type: string, format: date-time }
+      completedAt: { type: string, format: date-time, nullable: true }
   Operation:
     description: >
       Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance
@@ -478,6 +496,21 @@ queries:
       infrastructure, not a business read model).
     args: {}
     returns: { $ref: '#/types/MailboxLane', array: true }
+    roles: [ADMIN]
+    slice: V0
+
+  poisonedMailboxMessages:
+    description: >
+      Actor supervision detail (ADMIN, #315): every cap-poisoned mailbox row — terminal FAILED
+      with error code DeliveryInfrastructureError — newest first, with the messageId the
+      requeueMailboxMessage recovery needs and the error evidence to judge whether the cause is
+      fixed. The per-row detail behind MailboxLane.poisoned's count. Transient — served from
+      inbound_messages directly, no View_* (write-path infrastructure, not a business read
+      model). Server clamps the page to 200.
+    args:
+      actorType: { $ref: 'scalars.yaml#/MailboxActorType' }   # optional lane filter
+      limit: { $ref: 'scalars.yaml#/PageLimit' }
+    returns: { $ref: '#/types/PoisonedMailboxMessage', array: true }
     roles: [ADMIN]
     slice: V0
 
@@ -1126,6 +1159,12 @@ mutations:
   attachReclamationEvidence:
     command: { $ref: 'commands.yaml#/AttachReclamationEvidence' }
     roles: [CUSTOMER]
+    slice: V0
+
+  # --- Mailbox supervision (#315) ---
+  requeueMailboxMessage:
+    command: { $ref: 'commands.yaml#/RequeueMailboxMessage' }
+    roles: [ADMIN]
     slice: V0
 
 

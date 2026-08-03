@@ -78,6 +78,7 @@ scalar RatingComment
 scalar DeliveryDissatisfactionReason
 scalar TimeOfDay
 scalar ProspectionScore
+scalar MailboxActorType
 scalar DeliveryChannelKey
 scalar DeliveryPartnerRegistrationId
 scalar DeliveryPartnerName
@@ -787,6 +788,18 @@ type MailboxLane {
   poisoned: Int!
 }
 
+type PoisonedMailboxMessage {
+  messageId: String!
+  actorType: String!
+  partition: Int!
+  messageType: String!
+  attempts: Int!
+  errorCode: String
+  correlationId: String
+  receivedAt: DateTime!
+  completedAt: DateTime
+}
+
 type Operation {
   messageId: MessageId!
   correlationId: CorrelationId!
@@ -1470,6 +1483,15 @@ input AttachReclamationEvidenceInput {
   attachmentRef: AttachmentRef!
 }
 
+input RequeueMailboxMessageInput {
+  targetMessageId: MessageId!
+}
+
+input PoisonedMailboxMessagesQueryInput {
+  actorType: MailboxActorType
+  limit: PageLimit
+}
+
 input OperationStatusQueryInput {
   messageId: MessageId!
 }
@@ -1727,6 +1749,7 @@ input MetadataInput {
 type Query {
   phoneCountries: [PhoneCountry!]! @public @reads(views: ["PhoneCountry"])
   mailboxLanes: [MailboxLane!]! @auth(requires: [ADMIN])
+  poisonedMailboxMessages(input: PoisonedMailboxMessagesQueryInput): [PoisonedMailboxMessage!]! @auth(requires: [ADMIN])
   operationStatus(input: OperationStatusQueryInput!): Operation @public
   paymentStatus(input: PaymentStatusQueryInput!): PaymentIntent @auth(requires: [PUBLIC, CUSTOMER, ADMIN])
   me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["Customer"])
@@ -1846,6 +1869,7 @@ type Mutation {
   rejectReclamation(input: RejectReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "RejectReclamation")
   reopenReclamation(input: ReopenReclamationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ReopenReclamation")
   attachReclamationEvidence(input: AttachReclamationEvidenceInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "AttachReclamationEvidence")
+  requeueMailboxMessage(input: RequeueMailboxMessageInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RequeueMailboxMessage")
 }
 
 # ==============================================================================

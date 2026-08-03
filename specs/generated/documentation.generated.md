@@ -12,7 +12,7 @@ that belong to no single context. Stories and Architecture span all contexts.
 **Roles**: 🌐 PUBLIC · 🙋 CUSTOMER · 🏪 RESTAURANT_ACCOUNT · 🍽️ RESTAURANT · 🛵 RIDER · 🛠️ ADMIN · 🔌 EXTERNAL
 **Markers**: ✅ required · ⬜ optional · 🛶 V0 · 🔭 V1 · 🔒 internal · ⚠️ design hole
 
-**Contents** — [🎬 Stories](#sec-stories) · [🔲 restaurant](#sec-ctx-restaurant) · [🔲 catalog](#sec-ctx-catalog) · [🔲 order](#sec-ctx-order) · [🔲 customer](#sec-ctx-customer) · [🔲 delivery](#sec-ctx-delivery) · [🔲 cross-cutting](#sec-ctx-cross-cutting) · [📱 Screens](#sec-screens) · [🌐 Translations](#sec-translations) · [🏛️ Architecture](#sec-architecture)
+**Contents** — [🎬 Stories](#sec-stories) · [🔲 restaurant](#sec-ctx-restaurant) · [🔲 catalog](#sec-ctx-catalog) · [🔲 order](#sec-ctx-order) · [🔲 platform](#sec-ctx-platform) · [🔲 customer](#sec-ctx-customer) · [🔲 delivery](#sec-ctx-delivery) · [🔲 cross-cutting](#sec-ctx-cross-cutting) · [📱 Screens](#sec-screens) · [🌐 Translations](#sec-translations) · [🏛️ Architecture](#sec-architecture)
 
 <a id="sec-stories"></a>
 ## 🎬 Stories
@@ -186,6 +186,8 @@ A platform operator who onboards accounts and oversees the platform.
 |  | ActivateRestaurant | [✏️ `activateRestaurant`](#mutation-activaterestaurant) |
 |  | ImportCatalog | [✏️ `importCatalog`](#mutation-importcatalog) |
 | 🧭 **SuperviseActorMailbox** | ViewMailboxLanes | [🔎 `mailboxLanes`](#query-mailboxlanes) |
+|  | ReviewPoisonedMessages | [🔎 `poisonedMailboxMessages`](#query-poisonedmailboxmessages) |
+|  | RequeuePoisonedMessage | [✏️ `requeueMailboxMessage`](#mutation-requeuemailboxmessage) |
 | 🧭 **ManageListings** | BrowseListings | [🔎 `restaurants`](#query-restaurants) |
 |  | ChangeListingStatus | [✏️ `changeRestaurantListingStatus`](#mutation-changerestaurantlistingstatus) |
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
@@ -7201,8 +7203,123 @@ _criticality: **medium**_
 - **Status rules**: success ⇐ spans [`command.receive`, `command.validate`, `event.store.append`, `event.publish`]
 - **SLOs**: p95 ≤ 600ms · p99 ≤ 1500ms · error rate ≤ 2%
 
+<a id="sec-ctx-platform"></a>
+## 🔲 4. platform
+
+_Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI._
+
+### 🧰 API operations _(1)_
+
+<a id="mutation-requeuemailboxmessage"></a>
+#### ✏️ Mutation: `requeueMailboxMessage`
+
+- **Command**: [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage) → handled by [🎭 `MailboxSupervision`](#actor-mailboxsupervision)
+- **Roles**: ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+### 🎭 Actors _(1)_
+
+<a id="actor-mailboxsupervision"></a>
+#### 🎭 Actor: `MailboxSupervision`
+
+_🧩 aggregate_ — Operator supervision actions over the actor mailbox itself (#315, ADR-20260803-002712 Q1) — the write-side counterpart of the ADMIN mailboxLanes/poisonedMailboxMessages reads. Keyed by the SUPERVISED row's messageId: every operator intervention on that row accumulates on one stream (`MailboxSupervision-{targetMessageId}`), which is the audit trail SQL runbooks never leave. RequeueMailboxMessage flips a cap-poisoned FAILED row back to RECEIVED through the application MailboxRequeue port (attempts reset, error + backoff schedule cleared, lane nudged); the port write is idempotent (an already-deliverable row is a recorded no-op), so a redelivered requeue command converges instead of erroring. The command itself rides this actor's own mailbox lane like any other command — acceptance-first, pollable via operationStatus. No lifecycle: a supervision stream is a ledger of interventions, not a state machine.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage) | [⚡ `MailboxMessageRequeued`](#event-mailboxmessagerequeued) | [⛔ `MailboxMessageNotFound`](#error-mailboxmessagenotfound), [⛔ `MailboxMessageNotRequeueable`](#error-mailboxmessagenotrequeueable) |
+
+### 📩 Commands _(1)_
+
+<a id="command-requeuemailboxmessage"></a>
+#### 📩 Command: `RequeueMailboxMessage`
+
+ADMIN operator recovery of a POISONED mailbox row (#315): after fixing the cause, return an inbound_messages row that the delivery-attempts cap flipped to terminal FAILED (error code DeliveryInfrastructureError, PROP-20260802-223522 D4) to RECEIVED — attempts reset, error and backoff schedule cleared — so its lane's worker delivers it again. Only cap-poisoned rows are requeueable: handler REJECTED/FAILED verdicts are business decisions, not infrastructure casualties (errors.yaml#/MailboxMessageNotRequeueable). `targetMessageId` names the poisoned row (from the poisonedMailboxMessages supervision query) — distinct from the envelope's own messageId, which identifies THIS requeue submission.
+
+- **Dispatched by**: [✏️ `requeueMailboxMessage`](#mutation-requeuemailboxmessage) · **handled by** [🎭 `MailboxSupervision`](#actor-mailboxsupervision)
+- **Emits**: [⚡ `MailboxMessageRequeued`](#event-mailboxmessagerequeued)
+- **Throws**: [⛔ `MailboxMessageNotFound`](#error-mailboxmessagenotfound), [⛔ `MailboxMessageNotRequeueable`](#error-mailboxmessagenotrequeueable)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-requeuemailboxmessage--targetmessageid"></a>`targetMessageId` | [🔤 `MessageId`](#scalar-messageid) | ✅ |  |
+
+### ⚡ Events _(1)_
+
+<a id="event-mailboxmessagerequeued"></a>
+#### ⚡ Event: `MailboxMessageRequeued`
+
+An ADMIN operator returned a poisoned mailbox row (terminal FAILED at the delivery-attempts cap, error code DeliveryInfrastructureError) to RECEIVED for redelivery (#315) — attempts reset, error and backoff schedule cleared, the lane's worker nudged. The audit fact of the operator action: WHO requeued is the envelope's acting user (ADR-0041), never payload; `actorType` names the lane whose row was requeued so the audit trail reads without dereferencing the id. Idempotent at the port: requeueing a row that is ALREADY deliverable again records the intent without touching the row.
+
+- **Emitted by**: [🎭 `MailboxSupervision`](#actor-mailboxsupervision)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-mailboxmessagerequeued--targetmessageid"></a>`targetMessageId` | [🔤 `MessageId`](#scalar-messageid) | ✅ |  |
+| <a id="event-mailboxmessagerequeued--actortype"></a>`actorType` | [🔤 `MailboxActorType`](#scalar-mailboxactortype) | ✅ |  |
+
+### 🔤 Scalars _(3)_
+
+| Scalar | Type | Description |
+| --- | --- | --- |
+| <a id="scalar-messageid"></a>🔤 `MessageId` | string _uuid_ | Unique id of one command submission — the idempotency key of the write path (command_journal pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.  |
+| <a id="scalar-inboundmessagestatus"></a>🔤 `InboundMessageStatus` | enum (SCHEDULED \| CANCELLED \| RECEIVED \| SUCCEEDED \| REJECTED \| FAILED \| IGNORED \| DUPLICATE) | Lifecycle of a mailbox row (PROP-20260728-152752 §2/§3.4). Immediate rows are born RECEIVED; scheduled rows (reminders / scheduled operations) are born SCHEDULED with NO position and are PROMOTED to RECEIVED with a fresh position when due — or completed CANCELLED before it. Terminal outcomes merge the two legacy vocabularies: SUCCEEDED / REJECTED (business invariant, {code, context} in `error`) / FAILED (technical) from the command journal; IGNORED (the aggregate decided nothing changed) / DUPLICATE (the exact fact was already in the stream) from the inbound-events inbox.  |
+| <a id="scalar-mailboxactortype"></a>🔤 `MailboxActorType` | string | The actor type a mailbox lane belongs to — one of the actors.yaml keys with a declared `mailbox:` (e.g. 'Payment', 'Cart'), as stored in inbound_messages.actor_type / mailbox_partitions.actor_type. Carried on mailbox-supervision facts (#315) so an audit reader sees WHICH lane's row an operator requeued without dereferencing the id.  |
+
+### ⛔ Errors _(2)_
+
+| Error | Description | Message (en) | Message (fr) | Thrown by |
+| --- | --- | --- | --- | --- |
+| <a id="error-mailboxmessagenotfound"></a>⛔ `MailboxMessageNotFound` | No inbound_messages row with this id (e.g. a stale supervision screen after retention swept the row). | 🇬🇧 Mailbox message not found. | 🇫🇷 Message de boîte aux lettres introuvable. | [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage) |
+| <a id="error-mailboxmessagenotrequeueable"></a>⛔ `MailboxMessageNotRequeueable` | The row exists but is not a cap-poisoned FAILED (error code DeliveryInfrastructureError): handler REJECTED/FAILED verdicts are recorded business decisions and SUCCEEDED/IGNORED/ DUPLICATE rows already ran — requeueing any of them would re-execute something the system decided on purpose (#315, rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable).  | 🇬🇧 This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued. | 🇫🇷 Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file. | [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage) |
+
+### 📐 Business rules _(1)_
+
+<a id="rule-onlycappoisonedmailboxrowsarerequeueable"></a>
+#### 📐 Rule: `OnlyCapPoisonedMailboxRowsAreRequeueable`
+
+_An admin requeue returns a POISONED mailbox row — one the delivery-attempts cap flipped to terminal FAILED with error code DeliveryInfrastructureError (PROP-20260802-223522 D4) — to RECEIVED with attempts reset and error + backoff schedule cleared, and records the intervention as a MailboxMessageRequeued fact on the row's supervision stream. Rows in any other state are never requeued: handler REJECTED/FAILED verdicts are recorded business decisions, and SUCCEEDED/IGNORED/DUPLICATE rows already ran — re-executing either class would overturn something the system decided on purpose (#315, ADR-20260803-002712 Q1)._
+
+- **Verified by**: [🧪 `TestMailboxMessageRequeued`](#test-testmailboxmessagerequeued), [🧪 `TestRequeueOfNonPoisonedRowIsRejected`](#test-testrequeueofnonpoisonedrowisrejected), [🧪 `TestRequeueOfUnknownMessageIsRejected`](#test-testrequeueofunknownmessageisrejected)
+
+### 🧪 Tests _(1)_
+
+**[🎭 `MailboxSupervision`](#actor-mailboxsupervision)**
+
+<a id="test-testmailboxmessagerequeued"></a>
+#### 🧪 Test: `TestMailboxMessageRequeued`
+
+_Requeues a cap-poisoned mailbox row and records the intervention_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage)
+- **Then**: [⚡ `MailboxMessageRequeued`](#event-mailboxmessagerequeued)
+- **Verifies**: [📐 `OnlyCapPoisonedMailboxRowsAreRequeueable`](#rule-onlycappoisonedmailboxrowsarerequeueable)
+
+<a id="test-testrequeueofnonpoisonedrowisrejected"></a>
+#### 🧪 Test: `TestRequeueOfNonPoisonedRowIsRejected`
+
+_Refuses to requeue a row that did not fail at the delivery-attempts cap_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage)
+- **Thrown**: [⛔ `MailboxMessageNotRequeueable`](#error-mailboxmessagenotrequeueable)
+- **Verifies**: [📐 `OnlyCapPoisonedMailboxRowsAreRequeueable`](#rule-onlycappoisonedmailboxrowsarerequeueable)
+
+<a id="test-testrequeueofunknownmessageisrejected"></a>
+#### 🧪 Test: `TestRequeueOfUnknownMessageIsRejected`
+
+_Refuses to requeue a mailbox row that does not exist_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequeueMailboxMessage`](#command-requeuemailboxmessage)
+- **Thrown**: [⛔ `MailboxMessageNotFound`](#error-mailboxmessagenotfound)
+- **Verifies**: [📐 `OnlyCapPoisonedMailboxRowsAreRequeueable`](#rule-onlycappoisonedmailboxrowsarerequeueable)
+
 <a id="sec-ctx-customer"></a>
-## 🔲 4. customer
+## 🔲 5. customer
 
 _Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding._
 
@@ -8220,7 +8337,7 @@ _criticality: **high**_
 - **SLOs**: p95 ≤ 600ms · p99 ≤ 1200ms · error rate ≤ 2%
 
 <a id="sec-ctx-delivery"></a>
-## 🔲 5. delivery
+## 🔲 6. delivery
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
@@ -9867,11 +9984,11 @@ _criticality: **high**_
 - **SLOs**: p95 ≤ 800ms · p99 ≤ 2000ms · error rate ≤ 2%
 
 <a id="sec-ctx-cross-cutting"></a>
-## 🔲 6. cross-cutting
+## 🔲 7. cross-cutting
 
 _Shared vocabulary and operations that span several bounded contexts (or belong to none)._
 
-### 🧰 API operations _(7)_
+### 🧰 API operations _(8)_
 
 <a id="query-phonecountries"></a>
 #### 🔎 Query: `phoneCountries`
@@ -9890,6 +10007,16 @@ Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencin
 
 - **Input**: _(none)_
 - **Returns**: [🧩 `MailboxLane`](#type-mailboxlane) (list) · **reads** —
+- **Roles**: ADMIN · **slice** V0
+
+<a id="query-poisonedmailboxmessages"></a>
+#### 🔎 Query: `poisonedMailboxMessages`
+
+Actor supervision detail (ADMIN, #315): every cap-poisoned mailbox row — terminal FAILED with error code DeliveryInfrastructureError — newest first, with the messageId the requeueMailboxMessage recovery needs and the error evidence to judge whether the cause is fixed. The per-row detail behind MailboxLane.poisoned's count. Transient — served from inbound_messages directly, no View_* (write-path infrastructure, not a business read model). Server clamps the page to 200.
+
+
+- **Input**: 🧩 `PoisonedMailboxMessagesQueryInput` — `actorType?`: [🔤 `MailboxActorType`](#scalar-mailboxactortype), `limit?`: [🔤 `PageLimit`](#scalar-pagelimit)
+- **Returns**: [🧩 `PoisonedMailboxMessage`](#type-poisonedmailboxmessage) (list) · **reads** —
 - **Roles**: ADMIN · **slice** V0
 
 <a id="query-operationstatus"></a>
@@ -9939,7 +10066,7 @@ Live status of one journaled command, keyed by its messageId acceptance handle (
 - **Streams**: [🧩 `Operation`](#type-operation)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
-### 🧩 Output types _(12)_
+### 🧩 Output types _(13)_
 
 <a id="type-product"></a>
 #### 🧩 Type: `Product`
@@ -10077,6 +10204,26 @@ One actor-supervision lane (ADMIN; #242, PROP-20260728-152752 §6 made real): a 
 | <a id="type-mailboxlane--retryingattempts"></a>`retryingAttempts` | `integer` | ✅ |
 | <a id="type-mailboxlane--poisoned"></a>`poisoned` | `integer` | ✅ |
 
+<a id="type-poisonedmailboxmessage"></a>
+#### 🧩 Type: `PoisonedMailboxMessage`
+
+One cap-poisoned mailbox row (#315): an inbound_messages row the delivery-attempts cap flipped to terminal FAILED with error code DeliveryInfrastructureError (PROP-20260802-223522 D4). The ADMIN supervision detail behind MailboxLane.poisoned's bare count — carries the messageId an operator needs to requeue it (requeueMailboxMessage) after fixing the cause, plus the evidence to judge whether the cause IS fixed. NON-PROJECTED (transient) — write-path infrastructure, no backing View_*.
+
+
+- **Read model**: _(resolved within a parent projection)_
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-poisonedmailboxmessage--messageid"></a>`messageId` | `string` | ✅ |
+| <a id="type-poisonedmailboxmessage--actortype"></a>`actorType` | `string` | ✅ |
+| <a id="type-poisonedmailboxmessage--partition"></a>`partition` | `integer` | ✅ |
+| <a id="type-poisonedmailboxmessage--messagetype"></a>`messageType` | `string` | ✅ |
+| <a id="type-poisonedmailboxmessage--attempts"></a>`attempts` | `integer` | ✅ |
+| <a id="type-poisonedmailboxmessage--errorcode"></a>`errorCode` | `string` | ⬜ |
+| <a id="type-poisonedmailboxmessage--correlationid"></a>`correlationId` | `string` | ⬜ |
+| <a id="type-poisonedmailboxmessage--receivedat"></a>`receivedAt` | `string` _date-time_ | ✅ |
+| <a id="type-poisonedmailboxmessage--completedat"></a>`completedAt` | `string` _date-time_ | ⬜ |
+
 <a id="type-operation"></a>
 #### 🧩 Type: `Operation`
 
@@ -10194,7 +10341,7 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="entity-address--city"></a>`city` | [🔤 `CityName`](#scalar-cityname) | ✅ |  |
 | <a id="entity-address--country"></a>`country` | [🔤 `CountryCode`](#scalar-countrycode) | ✅ |  |
 
-### 🔤 Scalars _(55)_
+### 🔤 Scalars _(53)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -10206,7 +10353,6 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-customerid"></a>🔤 `CustomerId` | string _uuid_ |  |
 | <a id="scalar-correlationid"></a>🔤 `CorrelationId` | string _uuid_ | Correlates a command with the events/state it produces. Returned by every mutation payload so the client can track the outcome via the read side (matches domain_events.correlation_id).  |
 | <a id="scalar-causeid"></a>🔤 `CauseId` | string _uuid_ | Causation id: the id of the message/event that directly caused this one (matches domain_events.cause_id). Threads a cause→effect chain through the log; null for a root command.  |
-| <a id="scalar-messageid"></a>🔤 `MessageId` | string _uuid_ | Unique id of one command submission — the idempotency key of the write path (command_journal pk, ADR-20260720-015300). Client-suppliable via MetadataInput; server-generated (UUIDv7) when absent. A replayed messageId with an identical payload acknowledges against the original; the same id with a different payload is rejected (Conflict). Events emitted by the command carry it as domain_events.cause_id.  |
 | <a id="scalar-traceid"></a>🔤 `TraceId` | string `^[0-9a-f]{32}$` | W3C trace-id (from the inbound `traceparent` header, or server-started). Response-only technical tracing identifier — never client-suppliable, never a substitute for correlationId (P-02).  |
 | <a id="scalar-externalreference"></a>🔤 `ExternalReference` | string | External reference code (HubRise `ref`), unique within its scope. Used for idempotent import/sync and as a stable reference inside orders. Example: 'MARGHERITA', 'CAT-PIZZAS'.  |
 | <a id="scalar-slug"></a>🔤 `Slug` | string `^[a-z0-9]+(?:-[a-z0-9]+)*$` | URL-safe identifier for restaurants. Lowercase, dash-separated. Example: 'chez-marco', 'tokyo-sushi'.  |
@@ -10232,7 +10378,6 @@ Per-service-mode VAT, mirroring HubRise product tax_rate.
 | <a id="scalar-commandjournalstatus"></a>🔤 `CommandJournalStatus` | enum (RECEIVED \| SUCCEEDED \| REJECTED \| FAILED) | Lifecycle of a journaled command: RECEIVED (durably accepted, handler spawned), then SUCCEEDED, REJECTED (business invariant) or FAILED (technical). Maps onto the API OperationStatus (RECEIVED → PENDING). A duplicate submission is an acceptance-response attribute, not a status — the journal row keeps the original's real state.  |
 | <a id="scalar-commandchannel"></a>🔤 `CommandChannel` | enum (GRAPHQL \| WORKER \| INTERNAL) | Surface a journaled command arrived through: the GraphQL BFF dispatch, an on-app drain/enrichment worker (e.g. the HubRise enricher), or an internal trigger endpoint.  |
 | <a id="scalar-inboundmessagekind"></a>🔤 `InboundMessageKind` | enum (COMMAND \| EVENT \| MESSAGE) | What kind of thing one inbound_messages row is — the request/report split as a column (PROP-20260728-152752 §2): COMMAND = a request the actor may reject (feeds the operationStatus surface); EVENT = an adapted external fact that already happened (nothing to reject — the aggregate decides what follows); MESSAGE = a plain note, typically a reminder to self (§3.4) — neither rejectable nor a business fact.  |
-| <a id="scalar-inboundmessagestatus"></a>🔤 `InboundMessageStatus` | enum (SCHEDULED \| CANCELLED \| RECEIVED \| SUCCEEDED \| REJECTED \| FAILED \| IGNORED \| DUPLICATE) | Lifecycle of a mailbox row (PROP-20260728-152752 §2/§3.4). Immediate rows are born RECEIVED; scheduled rows (reminders / scheduled operations) are born SCHEDULED with NO position and are PROMOTED to RECEIVED with a fresh position when due — or completed CANCELLED before it. Terminal outcomes merge the two legacy vocabularies: SUCCEEDED / REJECTED (business invariant, {code, context} in `error`) / FAILED (technical) from the command journal; IGNORED (the aggregate decided nothing changed) / DUPLICATE (the exact fact was already in the stream) from the inbound-events inbox.  |
 | <a id="scalar-inboundmessagechannel"></a>🔤 `InboundMessageChannel` | enum (GRAPHQL \| WORKER \| EXTERNAL) | Surface a mailbox row arrived through: the GraphQL BFF dispatch (typed client at the edge), an on-app worker (enricher/PM emission/promotion), or an external adapter ACL (Stripe, SIRENE, HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and which gains EXTERNAL for adapted facts).  |
 | <a id="scalar-paymentprocessstatus"></a>🔤 `PaymentProcessStatus` | enum (AWAITING_PAYMENT_RESULT \| ORDER_PLACED \| FAILED) | State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart). |
 | <a id="scalar-refundprocessstatus"></a>🔤 `RefundProcessStatus` | enum (PENDING_APPROVAL \| APPROVED_AWAITING_SETTLEMENT \| DENIED \| REFUNDED) | State of one RefundProcess run (refund_process_manager row, keyed by order). Refunds are approved by the restaurant (own orders) or an admin. |
@@ -11043,6 +11188,7 @@ _Surface_ **`system.yaml`**
 ├──────────────────────────────────────────┤
 │ page_header — Actor mailbox              │
 │ section — Lanes                          │
+│ section — Poisoned rows                  │
 │ section — How to read this page          │
 └──────────────────────────────────────────┘
 ```
@@ -11050,6 +11196,8 @@ _Surface_ **`system.yaml`**
 | Kind | UI need | GraphQL operation |
 | --- | --- | --- |
 | read | `mailbox.lanes` | [🔎 `mailboxLanes`](#query-mailboxlanes) |
+| read | `mailbox.poisoned` | [🔎 `poisonedMailboxMessages`](#query-poisonedmailboxmessages) |
+| write | `requeue_mailbox_message` | [✏️ `requeueMailboxMessage`](#mutation-requeuemailboxmessage) |
 
 <a id="sec-translations"></a>
 ## 🌐 Translations
@@ -11363,6 +11511,16 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-mailbox-empty-body"></a>`mailbox.empty.body` | — | Lanes appear when a mailbox worker seeds the partition registry on startup. | Les voies apparaissent quand un worker de boîte aux lettres initialise le registre des partitions au démarrage. |
 | <a id="translation-mailbox-guide-title"></a>`mailbox.guide.title` | — | How to read this page | Comment lire cette page |
 | <a id="translation-mailbox-guide-body"></a>`mailbox.guide.body` | — | A healthy lane has a live lease and pending near zero. A growing pending count with an expired lease means no worker owns the lane; a growing count with a live lease means the owner is stuck. Ownership version increments on every takeover — it should be stable outside deployments. | Une voie saine a un bail actif et un arriéré proche de zéro. Un arriéré croissant avec un bail expiré signifie qu'aucun worker ne possède la voie ; un arriéré croissant avec un bail actif signifie que le propriétaire est bloqué. La version de propriété s'incrémente à chaque reprise — elle doit rester stable hors déploiements. |
+| <a id="translation-mailbox-poisoned-title"></a>`mailbox.poisoned.title` | — | Poisoned rows | Lignes empoisonnées |
+| <a id="translation-mailbox-poisoned-guide"></a>`mailbox.poisoned.guide` | — | Rows terminally FAILED at the delivery-attempts cap. Fix the cause first (the error code is the lead), then requeue — the row returns to RECEIVED with its attempts reset and its lane is nudged. | Lignes en échec définitif au plafond de tentatives de livraison. Corrigez d'abord la cause (le code d'erreur est la piste), puis remettez en file — la ligne repasse à RECEIVED, ses tentatives sont réinitialisées et sa voie est relancée. |
+| <a id="translation-mailbox-poisoned-message"></a>`mailbox.poisoned.message` | — | Message | Message |
+| <a id="translation-mailbox-poisoned-id"></a>`mailbox.poisoned.id` | — | Message id | Identifiant du message |
+| <a id="translation-mailbox-poisoned-attempts"></a>`mailbox.poisoned.attempts` | — | Attempts | Tentatives |
+| <a id="translation-mailbox-poisoned-error"></a>`mailbox.poisoned.error` | — | Error code | Code d'erreur |
+| <a id="translation-mailbox-poisoned-received"></a>`mailbox.poisoned.received` | — | Received at | Reçu à |
+| <a id="translation-mailbox-poisoned-requeue"></a>`mailbox.poisoned.requeue` | — | Requeue | Remettre en file |
+| <a id="translation-mailbox-poisoned-empty-title"></a>`mailbox.poisoned.empty.title` | — | No poisoned rows | Aucune ligne empoisonnée |
+| <a id="translation-mailbox-poisoned-empty-body"></a>`mailbox.poisoned.empty.body` | — | Nothing has failed at the delivery-attempts cap. This is the healthy state. | Rien n'a échoué au plafond de tentatives de livraison. C'est l'état sain. |
 | <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
 | <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
 | <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |
@@ -11392,6 +11550,7 @@ aggregates; components bind the aggregates they handle and the read models they 
 | 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
 | 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `ReclamationProcess`](#entity-reclamationprocess) |
+| 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
 | 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
 | 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
 

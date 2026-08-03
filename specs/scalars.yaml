@@ -609,6 +609,15 @@ InboundMessageChannel:
     HubRise…). Distinct from the legacy CommandChannel (whose INTERNAL becomes WORKER here and
     which gains EXTERNAL for adapted facts).
 
+MailboxActorType:
+  type: string
+  maxLength: 80
+  description: >
+    The actor type a mailbox lane belongs to — one of the actors.yaml keys with a declared
+    `mailbox:` (e.g. 'Payment', 'Cart'), as stored in inbound_messages.actor_type /
+    mailbox_partitions.actor_type. Carried on mailbox-supervision facts (#315) so an audit reader
+    sees WHICH lane's row an operator requeued without dereferencing the id.
+
 # --- Process-manager state statuses (processmanager.yaml state tables) ---
 
 PaymentProcessStatus:

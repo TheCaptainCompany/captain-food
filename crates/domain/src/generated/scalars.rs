@@ -506,6 +506,10 @@ pub enum InboundMessageChannel {
     EXTERNAL,
 }
 
+/// The actor type a mailbox lane belongs to — one of the actors.yaml keys with a declared `mailbox:` (e.g. 'Payment', 'Cart'), as stored in inbound_messages.actor_type / mailbox_partitions.actor_type. Carried on mailbox-supervision facts (#315) so an audit reader sees WHICH lane's row an operator requeued without dereferencing the id.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MailboxActorType(pub String);
+
 /// State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]

@@ -6,7 +6,7 @@
 #![allow(non_camel_case_types)]
 
 use application::projections::{CartRow, CatalogRow, CustomerCreditBalanceRow, CustomerRow, OrderConversationRow, OrderTrackingRow, ProspectionPipelineRow, RestaurantRow};
-use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, MailboxLaneRow, PricingPolicyRow, ReclamationRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
+use application::queries::{DeliveryJobRow, DeliveryPartnerAvailabilityRow, DeliverySatisfactionRow, MailboxLaneRow, PoisonedMessageRow, PricingPolicyRow, ReclamationRow, RefundRow, UberEstimationPolicyRow, UberSplitPolicyRow};
 use domain::generated::scalars as ds;
 
 use super::scalars::*;
@@ -782,6 +782,30 @@ pub struct MailboxLane {
     pub poisoned: i64,
 }
 
+/// One cap-poisoned mailbox row (#315): an inbound_messages row the delivery-attempts cap flipped to terminal FAILED with error code DeliveryInfrastructureError (PROP-20260802-223522 D4). The ADMIN supervision detail behind MailboxLane.poisoned's bare count — carries the messageId an operator needs to requeue it (requeueMailboxMessage) after fixing the cause, plus the evidence to judge whether the cause IS fixed. NON-PROJECTED (transient) — write-path infrastructure, no backing View_*.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct PoisonedMailboxMessage {
+    #[graphql(name = "messageId")]
+    pub message_id: String,
+    #[graphql(name = "actorType")]
+    pub actor_type: String,
+    #[graphql(name = "partition")]
+    pub partition: i64,
+    #[graphql(name = "messageType")]
+    pub message_type: String,
+    #[graphql(name = "attempts")]
+    pub attempts: i64,
+    #[graphql(name = "errorCode")]
+    pub error_code: Option<String>,
+    #[graphql(name = "correlationId")]
+    pub correlation_id: Option<String>,
+    #[graphql(name = "receivedAt")]
+    pub received_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "completedAt")]
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// Live status of a journaled command (ADR-20260720-015300), keyed by its `messageId` acceptance handle: polled by `operationStatus`, streamed by `operationStatusChanged`. `errorCode` is the stable errors.yaml code when the operation REJECTED/FAILED after acceptance (the async home of the P-10 rejection contract — sync validation failures still use GraphQL errors). Ownership- scoped in the resolver: the journaling actor (JWT), the journaling session (X-SESSION-ID), or ADMIN. NON-PROJECTED (transient) — served from the command_journal, no backing View_*.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -1472,6 +1496,24 @@ impl From<MailboxLaneRow> for MailboxLane {
             oldest_pending_at: row.oldest_pending_at,
             retrying_attempts: row.retrying_attempts,
             poisoned: row.poisoned,
+        }
+    }
+}
+
+/// Supervision row → API type: one cap-poisoned mailbox row (#315) — the per-row detail
+/// behind MailboxLane.poisoned's count, carrying the messageId the requeue recovery needs.
+impl From<PoisonedMessageRow> for PoisonedMailboxMessage {
+    fn from(row: PoisonedMessageRow) -> Self {
+        Self {
+            message_id: row.message_id.to_string(),
+            actor_type: row.actor_type,
+            partition: i64::from(row.partition),
+            message_type: row.message_type,
+            attempts: i64::from(row.attempts),
+            error_code: row.error_code,
+            correlation_id: row.correlation_id.map(|c| c.to_string()),
+            received_at: row.received_at,
+            completed_at: row.completed_at,
         }
     }
 }

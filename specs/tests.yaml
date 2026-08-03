@@ -564,6 +564,13 @@ fixtures:
     type: { $ref: 'events.yaml#/ReclamationEvidenceAttached' }
     data: { reclamationId: "recl-1", orderId: "order-1", attachmentRef: "attachment-ref-1" }
 
+  # --- Mailbox supervision (#315) ---
+  # "poisoned-1" is the SpecMailboxRequeue sentinel: the fake port holds it as a cap-poisoned
+  # Payment-lane row (behaviour_support.rs), which is what makes the happy path a real assertion.
+  mailboxMessageRequeued:
+    type: { $ref: 'events.yaml#/MailboxMessageRequeued' }
+    data: { targetMessageId: "poisoned-1", actorType: "Payment" }
+
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
 # =====================================================================
@@ -3595,3 +3602,40 @@ tests:
       data: { orderId: "replacement-order-1", originalOrderId: "order-1", reclamationId: "recl-1" }
     then:
       - { $ref: '#/fixtures/orderPlacedReplacement' }
+
+  # ------------- Mailbox supervision (MailboxSupervision aggregate, #315) -----------
+  # Port-state sentinels (behaviour_support::SpecMailboxRequeue): "poisoned-1" = a cap-poisoned
+  # Payment-lane row; "settled-1" = an existing row that SUCCEEDED (not poisoned); anything else
+  # is unknown to the mailbox. Same convention as SpecSlugReservations' "already-held".
+  TestMailboxMessageRequeued:
+    name: "Requeues a cap-poisoned mailbox row and records the intervention"
+    rules: [{ $ref: 'rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable' }]
+    actor: { $ref: 'actors.yaml#/MailboxSupervision' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RequeueMailboxMessage' }
+      data: { targetMessageId: "poisoned-1" }
+    then:
+      - { $ref: '#/fixtures/mailboxMessageRequeued' }
+
+  TestRequeueOfNonPoisonedRowIsRejected:
+    name: "Refuses to requeue a row that did not fail at the delivery-attempts cap"
+    rules: [{ $ref: 'rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable' }]
+    actor: { $ref: 'actors.yaml#/MailboxSupervision' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RequeueMailboxMessage' }
+      data: { targetMessageId: "settled-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/MailboxMessageNotRequeueable' }
+
+  TestRequeueOfUnknownMessageIsRejected:
+    name: "Refuses to requeue a mailbox row that does not exist"
+    rules: [{ $ref: 'rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable' }]
+    actor: { $ref: 'actors.yaml#/MailboxSupervision' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RequeueMailboxMessage' }
+      data: { targetMessageId: "missing-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/MailboxMessageNotFound' }

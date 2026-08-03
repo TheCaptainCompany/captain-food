@@ -23,3 +23,15 @@ mailbox.empty.title:    { messages: { en: "No lanes registered", fr: "Aucune voi
 mailbox.empty.body:     { messages: { en: "Lanes appear when a mailbox worker seeds the partition registry on startup.", fr: "Les voies apparaissent quand un worker de boîte aux lettres initialise le registre des partitions au démarrage." } }
 mailbox.guide.title:    { messages: { en: "How to read this page", fr: "Comment lire cette page" } }
 mailbox.guide.body:     { messages: { en: "A healthy lane has a live lease and pending near zero. A growing pending count with an expired lease means no worker owns the lane; a growing count with a live lease means the owner is stuck. Ownership version increments on every takeover — it should be stable outside deployments.", fr: "Une voie saine a un bail actif et un arriéré proche de zéro. Un arriéré croissant avec un bail expiré signifie qu'aucun worker ne possède la voie ; un arriéré croissant avec un bail actif signifie que le propriétaire est bloqué. La version de propriété s'incrémente à chaque reprise — elle doit rester stable hors déploiements." } }
+
+# ── poisoned rows + requeue (#315) ────────────────────────────────────────────
+mailbox.poisoned.title:       { messages: { en: "Poisoned rows", fr: "Lignes empoisonnées" } }
+mailbox.poisoned.guide:       { messages: { en: "Rows terminally FAILED at the delivery-attempts cap. Fix the cause first (the error code is the lead), then requeue — the row returns to RECEIVED with its attempts reset and its lane is nudged.", fr: "Lignes en échec définitif au plafond de tentatives de livraison. Corrigez d'abord la cause (le code d'erreur est la piste), puis remettez en file — la ligne repasse à RECEIVED, ses tentatives sont réinitialisées et sa voie est relancée." } }
+mailbox.poisoned.message:     { messages: { en: "Message", fr: "Message" } }
+mailbox.poisoned.id:          { messages: { en: "Message id", fr: "Identifiant du message" } }
+mailbox.poisoned.attempts:    { messages: { en: "Attempts", fr: "Tentatives" } }
+mailbox.poisoned.error:       { messages: { en: "Error code", fr: "Code d'erreur" } }
+mailbox.poisoned.received:    { messages: { en: "Received at", fr: "Reçu à" } }
+mailbox.poisoned.requeue:     { messages: { en: "Requeue", fr: "Remettre en file" } }
+mailbox.poisoned.empty.title: { messages: { en: "No poisoned rows", fr: "Aucune ligne empoisonnée" } }
+mailbox.poisoned.empty.body:  { messages: { en: "Nothing has failed at the delivery-attempts cap. This is the healthy state.", fr: "Rien n'a échoué au plafond de tentatives de livraison. C'est l'état sain." } }

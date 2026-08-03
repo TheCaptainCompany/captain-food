@@ -180,6 +180,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         payments,
         pm_state: Arc::new(crate::persistence::PgPaymentProcessState::new(pool.clone())),
         refund_state: Arc::new(crate::persistence::PgRefundProcessState::new(pool.clone())),
+        mailbox_requeue: Arc::new(crate::persistence::mailbox_lanes::PgMailboxRequeue::new(
+            pool.clone(),
+        )),
     }
 }
 

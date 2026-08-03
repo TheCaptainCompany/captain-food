@@ -1847,6 +1847,21 @@ impl From<InboundMessageChannel> for ds::InboundMessageChannel {
     }
 }
 
+/// The actor type a mailbox lane belongs to — one of the actors.yaml keys with a declared `mailbox:` (e.g. 'Payment', 'Cart'), as stored in inbound_messages.actor_type / mailbox_partitions.actor_type. Carried on mailbox-supervision facts (#315) so an audit reader sees WHICH lane's row an operator requeued without dereferencing the id.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct MailboxActorType(pub String);
+async_graphql::scalar!(MailboxActorType, "MailboxActorType", "The actor type a mailbox lane belongs to — one of the actors.yaml keys with a declared `mailbox:` (e.g. 'Payment', 'Cart'), as stored in inbound_messages.actor_type / mailbox_partitions.actor_type. Carried on mailbox-supervision facts (#315) so an audit reader sees WHICH lane's row an operator requeued without dereferencing the id.");
+impl From<ds::MailboxActorType> for MailboxActorType {
+    fn from(v: ds::MailboxActorType) -> Self {
+        Self(v.0)
+    }
+}
+impl From<MailboxActorType> for ds::MailboxActorType {
+    fn from(v: MailboxActorType) -> Self {
+        Self(v.0)
+    }
+}
+
 /// State of one PlaceOrderProcess checkout run (payment_process_manager row, keyed by cart).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum PaymentProcessStatus {

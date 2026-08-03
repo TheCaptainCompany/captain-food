@@ -226,6 +226,13 @@ impl application::queries::MailboxLaneRepository for Empty {
     async fn list(&self) -> Result<Vec<application::queries::MailboxLaneRow>, DomainError> {
         Ok(vec![])
     }
+    async fn poisoned(
+        &self,
+        _actor_type: Option<String>,
+        _limit: i64,
+    ) -> Result<Vec<application::queries::PoisonedMessageRow>, DomainError> {
+        Ok(vec![])
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

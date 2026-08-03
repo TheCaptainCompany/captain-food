@@ -11,8 +11,8 @@
 
 use crate::generated::events::DomainEvent;
 use crate::generated::scalars::{
-    CartId, CatalogId, CustomerId, DeliveryJobId, DeliveryPartnerRegistrationId, OrderId,
-    ReclamationId, RestaurantAccountId, RestaurantId, RiderId,
+    CartId, CatalogId, CustomerId, DeliveryJobId, DeliveryPartnerRegistrationId, MessageId,
+    OrderId, ReclamationId, RestaurantAccountId, RestaurantId, RiderId,
 };
 // A Conversation is keyed by the OrderId (its identity IS its order, #129) — same id type as Order, distinct stream.
 
@@ -75,6 +75,8 @@ impl_aggregate!(crate::conversation::ConversationState, OrderId, "Conversation",
 impl_aggregate!(crate::reclamation::ReclamationState, ReclamationId, "Reclamation", crate::reclamation::fold);
 // A CustomerCredit ledger is keyed by the customer it belongs to (#158) — same id type as Customer, distinct stream.
 impl_aggregate!(crate::customer_credit::CustomerCreditState, CustomerId, "CustomerCredit", crate::customer_credit::fold);
+// MailboxSupervision is keyed by the SUPERVISED row's messageId (#315) — the write-path envelope id, distinct stream.
+impl_aggregate!(crate::mailbox_supervision::MailboxSupervisionState, MessageId, "MailboxSupervision", crate::mailbox_supervision::fold);
 
 #[cfg(test)]
 mod tests {

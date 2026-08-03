@@ -2153,6 +2153,55 @@ pub async fn attach_reclamation_evidence(
 }
 
 // ================================================================================================
+// MailboxSupervision (actors.yaml#/MailboxSupervision) — operator actions over the mailbox (#315).
+// ================================================================================================
+
+/// Handle `commands.yaml#/RequeueMailboxMessage` → emit `events.yaml#/MailboxMessageRequeued` on
+/// the supervised row's stream (#315, ADR-20260803-002712 Q1,
+/// rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable). The `MailboxRequeue` port arbitrates
+/// AND applies the flip in one statement (no check-then-act window); only a row the
+/// delivery-attempts cap poisoned (`DeliveryInfrastructureError`) flips — anything else rejects
+/// (`errors.yaml#/MailboxMessageNotFound` / `errors.yaml#/MailboxMessageNotRequeueable`). Like
+/// the slug-reservation port, the row write lands alongside (not inside) the event append: the
+/// port is idempotent (an already-deliverable row converges as recorded success), so a retried
+/// delivery of this command never errors on its own earlier effect.
+pub async fn requeue_mailbox_message(
+    store: &dyn EventStore,
+    requeue: &dyn crate::queries::MailboxRequeue,
+    cmd: domain::generated::commands::RequeueMailboxMessage,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    use crate::queries::RequeueOutcome;
+    let actor_type = match requeue.requeue_if_poisoned(cmd.target_message_id.0).await? {
+        RequeueOutcome::Requeued { actor_type }
+        | RequeueOutcome::AlreadyDeliverable { actor_type } => actor_type,
+        RequeueOutcome::NotFound => {
+            return Err(reject(
+                "MailboxMessageNotFound",
+                json!({ "targetMessageId": cmd.target_message_id }),
+            ));
+        }
+        RequeueOutcome::NotRequeueable { status } => {
+            return Err(reject(
+                "MailboxMessageNotRequeueable",
+                json!({ "targetMessageId": cmd.target_message_id, "status": status }),
+            ));
+        }
+    };
+    let (_ledger, version) = Repository::new(store)
+        .load::<domain::mailbox_supervision::MailboxSupervisionState>(cmd.target_message_id)
+        .await?;
+    let event = DomainEvent::MailboxMessageRequeued(
+        domain::generated::events::MailboxMessageRequeued {
+            target_message_id: cmd.target_message_id,
+            actor_type: domain::generated::scalars::MailboxActorType(actor_type),
+        },
+    );
+    let stream = format!("MailboxSupervision-{}", cmd.target_message_id.0);
+    Repository::new(store).save(&stream, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
 // CustomerCredit (actors.yaml#/CustomerCredit) — the per-customer store-credit ledger (#158).
 // Both commands are saga-/checkout-driven (no public GraphQL mutation). The available balance is a
 // fold over the grant/consume facts; grants are idempotent per reclamationId; a debit never drives
