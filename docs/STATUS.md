@@ -3,7 +3,7 @@
 > Hand-maintained snapshot (NOT generated, outside `specs/` so it never affects the DSL).
 > Last updated: 2026-08-03. Legend: ✅ done & verified · 🚧 in progress · ⏳ blocked/waiting · 📋 planned.
 
-> ✅ **2026-08-03 — [#329 "Close the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)
+> ✅ **2026-08-03 — [#329 "Narrow the #304 residual class: every public mailbox door must be declared"](https://github.com/TheCaptainCompany/captain-food/issues/329)
 > ([ADR-20260803-203455](adr/ADR-20260803-203455-mailbox-doors-are-declared-by-reachability.md))**:
 > the class [#304](https://github.com/TheCaptainCompany/captain-food/issues/304)'s witness guard
 > could not see — a public in-crate item that MINTS internally and hands the capability out through

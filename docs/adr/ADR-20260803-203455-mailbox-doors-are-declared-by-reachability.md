@@ -94,8 +94,11 @@ so the deferral is visible in the prioritised backlog rather than living only in
   (`pub(crate)`) whose real remedy was rewording a log line.
 - **`unsafe_code = "forbid"` stays load-bearing.** `mem::zeroed::<MailboxAccess>()` would defeat both
   guards identically, so the threat model remains safe Rust.
-- **`const`, `static` and associated-const INITIALIZERS are scanned too.** Skipping them was a
-  traversal gap, not a scope limit: `const HELD: MailboxAccess = MailboxAccess(());` — the ordinary
+- **All FOUR const positions are scanned**: free `const`, `static`, inherent/trait-impl associated
+  consts, and trait-DECLARED associated consts with a default. The fourth was missed on the first
+  attempt at this bullet and stayed exploitable behind a PRIVATE trait — which the signature guard
+  also skips, since that arm only inspects `pub trait`, so the two gaps lined up. Skipping them was
+  a traversal gap, not a scope limit: `const HELD: MailboxAccess = MailboxAccess(());` — the ordinary
   way to stop calling the mint in three places — is a construction the AST recognises, and a public
   `cancel_any` using `HELD` was invisible to BOTH guards. The initializer is scanned like a body and
   the item's ident joins the fixpoint, so nothing about that shape needed type resolution.
@@ -103,8 +106,13 @@ so the deferral is visible in the prioritised backlog rather than living only in
   `Item::Impl`, so `#[derive(Default)]` on `MailboxAccess` handed every crate in the workspace a
   public mint via `Default::default()` — proven from `server`, which holds only the port. Derives
   are now allowlisted (`Debug`/`Clone`/`Copy`/`PartialEq`/`Eq`/`Hash`/`PartialOrd`/`Ord`) and
-  anything else refused as a class, which is the rule sessions.md §8b already states: ban a class,
-  not a spelling.
+  anything else refused — in the `derive` spelling AND the `cfg_attr(<cond>, derive(..))` one. The
+  first version banned only the former, which is banning a spelling rather than a class, the exact
+  thing sessions.md §8b says not to do, and with a precedent already in the same file
+  (`cfg_attr(.., path = ..)` was long treated as a `#[path]`). It matters beyond neatness:
+  `#[cfg_attr(feature = "serde", derive(serde::Deserialize))]` is the ordinary idiom for optional
+  serde support, so the hole was reachable from an honest diff. A genuinely test-only
+  `#[cfg_attr(test, derive(Default))]` is still allowed, inversion refused as everywhere else.
 - **The anti-blindness assertion names `granted` specifically.** A bare "something is tainted" check
   is satisfied by the test-only `for_tests`, so the PRODUCTION mint could go dark unnoticed.
 - What remains outside both guards: any construction or call edge the syntactic scan cannot see (see

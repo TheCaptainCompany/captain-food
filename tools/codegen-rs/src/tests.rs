@@ -2192,20 +2192,51 @@ keys:
                         // that cannot construct one; refuse the rest as a class.
                         const HARMLESS: &[&str] =
                             &["Debug", "Clone", "Copy", "PartialEq", "Eq", "Hash", "PartialOrd", "Ord"];
+                        let mut derived: Vec<String> = Vec::new();
                         for a in &s.attrs {
-                            if !a.path().is_ident("derive") {
-                                continue;
-                            }
-                            let m = &a.meta;
-                            for tok in ident_tokens(quote::quote!(#m)) {
-                                if tok != "derive" && !HARMLESS.contains(&tok.as_str()) {
-                                    out.leaks.push(format!(
-                                        "  {rel}: `#[derive({tok})]` on the witness — a derive is a \
-                                         trait impl in one word, and anything that can construct \
-                                         `Self` (`Default`, `From`, `FromStr`, `Deserialize`, …) is \
-                                         a public mint for every crate in the workspace"
-                                    ));
+                            if a.path().is_ident("derive") {
+                                let m = &a.meta;
+                                derived.extend(ident_tokens(quote::quote!(#m)));
+                            } else if a.path().is_ident("cfg_attr") {
+                                // `#[cfg_attr(<cond>, derive(Default))]` is a derive in disguise,
+                                // and `#[cfg_attr(feature = "serde", derive(Deserialize))]` is the
+                                // ORDINARY idiom for optional serde — so this is an honest-diff
+                                // hole, not an adversarial one. The same file already treats
+                                // `cfg_attr(.., path = ..)` as a `#[path]`; this arm was written
+                                // without that precedent, which is banning a spelling rather than
+                                // a class.
+                                let Ok(nested) = a.parse_args_with(
+                                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                                ) else {
+                                    continue;
+                                };
+                                let mut it = nested.iter();
+                                let cond = it.next().map(|c| quote::quote!(#c).to_string()).unwrap_or_default();
+                                // A genuinely test-only `#[cfg_attr(test, derive(Default))]` never
+                                // reaches a dependent, so it is allowed — the same rule the rest of
+                                // this guard uses, inversion refused.
+                                let test_only = cfg_tokens(&cond)
+                                    .iter()
+                                    .any(|t| *t == "test" || *t == "test-fixtures")
+                                    && !cond.contains("not (");
+                                if test_only {
+                                    continue;
                                 }
+                                for m in it {
+                                    if m.path().is_ident("derive") {
+                                        derived.extend(ident_tokens(quote::quote!(#m)));
+                                    }
+                                }
+                            }
+                        }
+                        for tok in derived {
+                            if tok != "derive" && !HARMLESS.contains(&tok.as_str()) {
+                                out.leaks.push(format!(
+                                    "  {rel}: `derive({tok})` on the witness — a derive is a trait \
+                                     impl in one word, and anything that can construct `Self` \
+                                     (`Default`, `From`, `FromStr`, `Deserialize`, …) is a public \
+                                     mint for every crate in the workspace"
+                                ));
                             }
                         }
                     }
@@ -2638,6 +2669,23 @@ keys:
                 }
                 Item::Trait(tr) => {
                     for ti in &tr.items {
+                        // A trait-declared associated const with a DEFAULT is the fourth const
+                        // position, and the one the first pass at this missed. A PRIVATE trait
+                        // carrying it is invisible to the signature guard too (that arm only
+                        // inspects `pub trait`), so the two together left the class open.
+                        if let syn::TraitItem::Const(c) = ti {
+                            if let Some((_, expr)) = &c.default {
+                                let (mints, refs) = scan_init(expr, false);
+                                out.push(FnNode {
+                                    rel: rel.into(),
+                                    name: c.ident.to_string(),
+                                    public: is_pub(&tr.vis),
+                                    test_only: t,
+                                    mints,
+                                    refs,
+                                });
+                            }
+                        }
                         if let syn::TraitItem::Fn(f) = ti {
                             // Only PROVIDED methods have a body that could mint.
                             if let Some(block) = &f.default {
