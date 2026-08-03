@@ -142,9 +142,12 @@ pub fn wire() -> HealthDto {
 /// `relation "inbound_messages" does not exist`. The deploy runbook (ADR-20260730-051500) explicitly
 /// relies on this gate holding the new binary at 503 until `db-migrate` lands — deploy runs FIRST and
 /// the schema follows, so the gate is the only thing covering the window between them. It went stale
-/// AGAIN the same week (`20260731143000` while the two width-5 migrations landed) — if you are adding
-/// a migration the new binary depends on, this constant moves in the SAME commit.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260802230000;
+/// AGAIN the same week (`20260731143000` while the two width-5 migrations landed), and a THIRD time
+/// within the hour (`20260802230000` while `20260803004500` added `next_attempt_at`, which the #316
+/// backoff scheduler reads on every retry) — so the rule is now EXECUTABLE: the codegen guard
+/// `required_schema_version_matches_the_latest_migration` fails the build whenever this constant
+/// is not the newest migration timestamp. It moves in the SAME commit as the migration, period.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260803004500;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see

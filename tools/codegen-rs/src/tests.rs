@@ -1640,6 +1640,60 @@ keys:
         }
     }
 
+    /// The `/health` readiness gate moves in the SAME commit as any migration the binary depends
+    /// on. Prose failed three times in one week (#279 nine migrations stale; then twice on
+    /// 2026-08-02/03, each within hours of a fix whose doc says exactly this) — so the rule is now
+    /// executable: the constant must equal the NEWEST migration timestamp, always. Deploy runs
+    /// BEFORE db-migrate (ADR-20260730-051500), and this gate holding the new binary at 503 is the
+    /// only thing covering that window; stale = inert for precisely the failure it exists to catch.
+    #[test]
+    fn required_schema_version_matches_the_latest_migration() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let migrations_dir = root.join("migrations");
+        let mut latest: i64 = 0;
+        let mut counted = 0usize;
+        for entry in std::fs::read_dir(&migrations_dir).unwrap_or_else(|e| {
+            panic!(
+                "cannot read {} ({e}) — if the migrations moved, fix this path; do NOT let this \
+                 guard silently pass",
+                migrations_dir.display()
+            )
+        }) {
+            let name = entry.expect("dirent").file_name().to_string_lossy().into_owned();
+            let Some((prefix, _)) = name.split_once('_') else { continue };
+            if let Ok(ts) = prefix.parse::<i64>() {
+                latest = latest.max(ts);
+                counted += 1;
+            }
+        }
+        assert!(
+            counted > 0,
+            "no timestamped migrations found under {} — the guard would be vacuous",
+            migrations_dir.display()
+        );
+        let lib_path = root.join("crates/server/src/lib.rs");
+        let lib = std::fs::read_to_string(&lib_path)
+            .unwrap_or_else(|e| panic!("cannot read {} ({e})", lib_path.display()));
+        let declared: i64 = lib
+            .lines()
+            .find_map(|l| {
+                l.trim()
+                    .strip_prefix("pub const REQUIRED_SCHEMA_VERSION: i64 = ")
+                    .and_then(|rest| rest.trim_end_matches(';').trim().parse().ok())
+            })
+            .expect(
+                "REQUIRED_SCHEMA_VERSION not found in crates/server/src/lib.rs — if the constant \
+                 was renamed or moved, update this guard in the same commit",
+            );
+        assert_eq!(
+            declared, latest,
+            "REQUIRED_SCHEMA_VERSION ({declared}) != newest migration ({latest}): the /health \
+             readiness gate is STALE. It must be bumped in the SAME commit as the migration — a \
+             new binary that needs the migration would otherwise report ok and take traffic \
+             through the deploy-then-migrate window."
+        );
+    }
+
     // NOTE (#284 slice 3): this fn had LOST its `#[test]` attribute — a stray duplicate sat on
     // `generated_config_patterns_match_the_spec_byte_for_byte` above, so the guard silently never
     // ran (rustc accepts a duplicate `#[test]`, and dead test-module fns only warn). Restored.
